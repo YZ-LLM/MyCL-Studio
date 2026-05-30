@@ -1,0 +1,29 @@
+{
+  "stack_id": "swift",
+  "commands": {
+    "install": "swift package resolve",
+    "dev": "swift run",
+    "build": "swift build",
+    "test": "swift test",
+    "lint": "swiftlint",
+    "lint_fix": "swiftlint --fix",
+    "simplify": null,
+    "perf": null,
+    "security": null,
+    "integration": "swift test --filter Integration"
+  },
+  "e2e_by_project_type": {
+    "web": null,
+    "api": null,
+    "cli": null,
+    "library": null,
+    "mobile": "xcodebuild test -scheme UITests",
+    "desktop": "xcodebuild test -scheme UITests",
+    "default": null
+  },
+  "load_by_project_type": {
+    "default": null
+  },
+  "default_port": 8080,
+  "manifest_files": ["Package.swift"]
+}

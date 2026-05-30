@@ -1,0 +1,34 @@
+{
+  "stack_id": "node-npm",
+  "commands": {
+    "install": "npm install",
+    "dev": "npm run dev",
+    "build": "npm run build",
+    "test": "npm test",
+    "lint": "npm run lint",
+    "lint_fix": "npm run lint -- --fix",
+    "simplify": "npx --no-install ts-prune --error",
+    "perf": "npm run perf",
+    "security": "npm audit --omit=dev --audit-level=high",
+    "integration": "npm run --silent test:integration"
+  },
+  "e2e_by_project_type": {
+    "web": "npx --no-install playwright test --headed",
+    "api": null,
+    "cli": null,
+    "library": null,
+    "mobile": "npx --no-install detox test",
+    "desktop": "npx --no-install playwright test --headed",
+    "ml": null,
+    "game": null,
+    "default": "npm run test:e2e"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 5173,
+  "manifest_files": ["package.json"],
+  "build_tool": "vite"
+}

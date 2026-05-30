@@ -1,0 +1,33 @@
+{
+  "stack_id": "node-yarn",
+  "commands": {
+    "install": "yarn install",
+    "dev": "yarn dev",
+    "build": "yarn build",
+    "test": "yarn test",
+    "lint": "yarn lint",
+    "lint_fix": "yarn lint --fix",
+    "simplify": "npx --no-install ts-prune --error",
+    "perf": "yarn perf",
+    "security": "yarn npm audit",
+    "integration": "yarn test:integration"
+  },
+  "e2e_by_project_type": {
+    "web": "yarn playwright test --headed",
+    "api": null,
+    "cli": null,
+    "library": null,
+    "mobile": "yarn detox test",
+    "desktop": "yarn playwright test --headed",
+    "ml": null,
+    "game": null,
+    "default": "yarn test:e2e"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 5173,
+  "manifest_files": ["package.json", "yarn.lock"]
+}

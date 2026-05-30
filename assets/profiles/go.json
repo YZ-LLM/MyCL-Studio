@@ -1,0 +1,29 @@
+{
+  "stack_id": "go",
+  "commands": {
+    "install": "go mod download",
+    "dev": "go run .",
+    "build": "go build ./...",
+    "test": "go test ./...",
+    "lint": "golangci-lint run",
+    "lint_fix": "golangci-lint run --fix",
+    "simplify": null,
+    "perf": "go test -bench=. ./...",
+    "security": "govulncheck ./...",
+    "integration": "go test -tags=integration ./..."
+  },
+  "e2e_by_project_type": {
+    "web": null,
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "default": null
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 8080,
+  "manifest_files": ["go.mod", "go.sum"]
+}

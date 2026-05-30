@@ -1,0 +1,29 @@
+{
+  "stack_id": "ruby",
+  "commands": {
+    "install": "bundle install",
+    "dev": "bundle exec rackup",
+    "build": null,
+    "test": "bundle exec rspec",
+    "lint": "bundle exec rubocop",
+    "lint_fix": "bundle exec rubocop --autocorrect",
+    "simplify": null,
+    "perf": null,
+    "security": "bundle exec bundler-audit check --update",
+    "integration": "bundle exec rspec spec/integration/"
+  },
+  "e2e_by_project_type": {
+    "web": "bundle exec rspec spec/system/",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "default": "bundle exec rspec spec/e2e/"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 3000,
+  "manifest_files": ["Gemfile", "Gemfile.lock"]
+}

@@ -1,0 +1,30 @@
+{
+  "stack_id": "python-poetry",
+  "commands": {
+    "install": "poetry install",
+    "dev": "poetry run uvicorn main:app --reload",
+    "build": null,
+    "test": "poetry run pytest",
+    "lint": "poetry run ruff check .",
+    "lint_fix": "poetry run ruff check . --fix",
+    "simplify": null,
+    "perf": null,
+    "security": "poetry run pip-audit",
+    "integration": "poetry run pytest tests/integration/"
+  },
+  "e2e_by_project_type": {
+    "web": "poetry run pytest --headed",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "ml": null,
+    "default": "poetry run pytest tests/e2e/"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "poetry run locust -f loadtest.py --headless -u 100 -r 10 -t 1m",
+    "default": null
+  },
+  "default_port": 8000,
+  "manifest_files": ["pyproject.toml", "poetry.lock"]
+}

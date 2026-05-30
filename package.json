@@ -1,0 +1,44 @@
+{
+  "name": "mycl-v14",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:all": "npm --prefix orchestrator run build && npm run build",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:fast": "bash scripts/deploy.sh --skip-tests",
+    "deploy:rollback": "bash scripts/deploy.sh --restore",
+    "mycl:screenshot": "bash scripts/mycl-test/screenshot.sh",
+    "mycl:smoke": "bash scripts/mycl-test/smoke.sh",
+    "mycl:compose": "bash scripts/mycl-test/compose.sh",
+    "mycl:logs": "bash scripts/mycl-test/logs.sh",
+    "mycl:cleanup": "bash scripts/mycl-test/cleanup.sh",
+    "mycl:uc1": "bash scripts/mycl-test/uc1-new-project.sh",
+    "mycl:uc2": "bash scripts/mycl-test/uc2-develop.sh",
+    "mycl:uc3": "bash scripts/mycl-test/uc3-debug.sh",
+    "mycl:uc-all": "bash scripts/mycl-test/uc-all.sh",
+    "qa:smoke": "bash scripts/qa/qa-all.sh",
+    "qa:q1": "bash scripts/qa/q1-fresh-project.sh",
+    "qa:q2": "bash scripts/qa/q2-develop-smoke.sh",
+    "qa:q3": "bash scripts/qa/q3-debug-bug-pattern.sh",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
+  }
+}

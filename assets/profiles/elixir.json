@@ -1,0 +1,29 @@
+{
+  "stack_id": "elixir",
+  "commands": {
+    "install": "mix deps.get",
+    "dev": "mix phx.server",
+    "build": "mix compile",
+    "test": "mix test",
+    "lint": "mix credo --strict",
+    "lint_fix": null,
+    "simplify": null,
+    "perf": null,
+    "security": "mix deps.audit",
+    "integration": "mix test --only integration"
+  },
+  "e2e_by_project_type": {
+    "web": "mix test --only e2e",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "default": null
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 4000,
+  "manifest_files": ["mix.exs", "mix.lock"]
+}

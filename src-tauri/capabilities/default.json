@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Tüm pencere capability seti — MyCL Studio v14/15. Multi-window pencereleri 'mycl-<uuid>' label'ıyla açılır (v15.2.2 open_new_window komutu); `*` wildcard ile tüm pencereler aynı permission set'e dahil. v15.4'te 'mycl-*' glob denendi ama Tauri 2.11 ACL resolver'da match etmedi → daha geniş wildcard'a düşürüldü. Tauri'nin capability dosyasında ek pencere yok (sadece bu app); '*' bu app dışına çıkmaz.",
+  "windows": ["*"],
+  "permissions": [
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:webview:default",
+    "core:app:default",
+    "core:path:default",
+    "core:resources:default",
+    "opener:default",
+    "dialog:default"
+  ]
+}

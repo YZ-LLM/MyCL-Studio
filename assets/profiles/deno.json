@@ -1,0 +1,29 @@
+{
+  "stack_id": "deno",
+  "commands": {
+    "install": "deno cache --reload deno.json",
+    "dev": "deno task dev",
+    "build": "deno task build",
+    "test": "deno test",
+    "lint": "deno lint",
+    "lint_fix": "deno lint --fix",
+    "simplify": null,
+    "perf": null,
+    "security": null,
+    "integration": "deno test --allow-all tests/integration/"
+  },
+  "e2e_by_project_type": {
+    "web": "deno test --allow-all tests/e2e/",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "default": "deno test --allow-all tests/e2e/"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 8000,
+  "manifest_files": ["deno.json", "deno.jsonc"]
+}

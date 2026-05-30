@@ -1,0 +1,29 @@
+{
+  "stack_id": "maven",
+  "commands": {
+    "install": "mvn install -DskipTests",
+    "dev": "mvn spring-boot:run",
+    "build": "mvn package",
+    "test": "mvn test",
+    "lint": "mvn checkstyle:check",
+    "lint_fix": null,
+    "simplify": null,
+    "perf": null,
+    "security": "mvn org.owasp:dependency-check-maven:check",
+    "integration": "mvn verify"
+  },
+  "e2e_by_project_type": {
+    "web": "mvn test -Dtest='*E2ETest'",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "default": null
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 8080,
+  "manifest_files": ["pom.xml"]
+}

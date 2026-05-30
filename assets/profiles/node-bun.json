@@ -1,0 +1,33 @@
+{
+  "stack_id": "node-bun",
+  "commands": {
+    "install": "bun install",
+    "dev": "bun run dev",
+    "build": "bun run build",
+    "test": "bun test",
+    "lint": "bun run lint",
+    "lint_fix": "bun run lint --fix",
+    "simplify": "bunx ts-prune --error",
+    "perf": "bun run perf",
+    "security": "bun pm audit",
+    "integration": "bun run test:integration"
+  },
+  "e2e_by_project_type": {
+    "web": "bunx playwright test --headed",
+    "api": null,
+    "cli": null,
+    "library": null,
+    "mobile": null,
+    "desktop": "bunx playwright test --headed",
+    "ml": null,
+    "game": null,
+    "default": "bun run test:e2e"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 3000,
+  "manifest_files": ["package.json", "bun.lockb"]
+}

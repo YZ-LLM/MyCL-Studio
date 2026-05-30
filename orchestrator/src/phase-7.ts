@@ -1,0 +1,286 @@
+// phase-7 — Database Design (production-schema, has_database koşullu).
+//
+// v15.7 (2026-05-27): Dosya header rot düzeltildi (eski "phase-8" yazıyordu).
+// Phase7Controller → Phase 7 = DB tasarımı.
+
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { appendAudit } from "./audit.js";
+import { ProductionSchemaBaseController } from "./base/production-schema-controller.js";
+import type { ToolDef } from "./claude-api.js";
+import type { MyclConfig } from "./config.js";
+import { emitError } from "./ipc.js";
+import { log } from "./logger.js";
+import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
+import { substitute } from "./template-engine.js";
+import {
+  buildConversationContext,
+  renderConversationSection,
+} from "./conversation-context.js";
+import type { PhaseDeps } from "./phase-deps.js";
+import type { PhaseSpec, State } from "./types.js";
+
+const TOOL_WRITE_DB: ToolDef = {
+  name: "write_db_schema",
+  description: "Persist the database schema + migration plan.",
+  input_schema: {
+    type: "object",
+    required: ["title", "tables", "migrations"],
+    properties: {
+      title: { type: "string" },
+      tables: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["name", "fields"],
+          properties: {
+            name: { type: "string" },
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["name", "type"],
+                properties: {
+                  name: { type: "string" },
+                  type: { type: "string" },
+                  nullable: { type: "boolean" },
+                  pk: { type: "boolean" },
+                  fk: { type: "string" },
+                },
+              },
+            },
+            indexes: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+      migrations: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["order", "description", "sql"],
+          properties: {
+            order: { type: "integer", description: "Migration sırası (1, 2, 3...)." },
+            description: {
+              type: "string",
+              description: "Kısa İngilizce açıklama (örn. 'create users table'). Dosya adında kebab-case karşılığı kullanılır.",
+            },
+            sql: {
+              type: "string",
+              description:
+                "v15.7 (2026-05-27) ZORUNLU. Gerçek, çalıştırılabilir DDL/DML SQL. Şablon/sözde değil. Hedef veritabanı (Postgres/SQLite/MySQL) için VALID syntax. CREATE TABLE, ALTER, INSERT, CREATE INDEX vb. Orkestratör bu SQL'i `.mycl/migrations/NNN-<description>.sql` dosyasına yazar; Phase 8 migration apply komutu ile uygular. Down/rollback için ayrı entry; UP-only migration yeterli değilse iki entry oluştur (örn. 1: create, 2: drop_old).",
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const TOOL_APPROVAL: ToolDef = {
+  name: "request_db_approval",
+  description: "After schema is saved, 2-3 sentence pitch + approval ask.",
+  input_schema: {
+    type: "object",
+    required: ["pitch"],
+    properties: { pitch: { type: "string" } },
+  },
+};
+
+interface DbField {
+  name: string;
+  type: string;
+  nullable?: boolean;
+  pk?: boolean;
+  fk?: string;
+}
+interface DbTable {
+  name: string;
+  fields: DbField[];
+  indexes?: string[];
+}
+interface DbMigration {
+  order: number;
+  description: string;
+  /** v15.7 (2026-05-27): Zorunlu — gerçek DDL/DML. */
+  sql: string;
+  /** Legacy field — bazı eski state'lerde sql_sketch olabilir. Backward compat. */
+  sql_sketch?: string;
+}
+interface DbSchemaData {
+  title: string;
+  tables: DbTable[];
+  migrations: DbMigration[];
+}
+
+function schemaToMarkdown(s: DbSchemaData): string {
+  const tables = s.tables
+    .map((t) => {
+      const rows = t.fields
+        .map((f) => {
+          const flags: string[] = [];
+          if (f.pk) flags.push("PK");
+          if (f.fk) flags.push(`FK→${f.fk}`);
+          if (f.nullable) flags.push("nullable");
+          return `| ${f.name} | ${f.type} | ${flags.join(", ")} |`;
+        })
+        .join("\n");
+      const idx = (t.indexes ?? []).map((i) => `- ${i}`).join("\n");
+      return `### ${t.name}\n\n| Field | Type | Flags |\n|---|---|---|\n${rows}\n\n${idx ? `**Indexes:**\n${idx}\n` : ""}`;
+    })
+    .join("\n\n");
+  const migs = s.migrations
+    .sort((a, b) => a.order - b.order)
+    .map((m) => {
+      const sql = m.sql ?? m.sql_sketch ?? "";
+      return `**${m.order}. ${m.description}**${sql ? `\n\n\`\`\`sql\n${sql}\n\`\`\`` : ""}`;
+    })
+    .join("\n\n");
+  return `# ${s.title}
+
+## Tables
+
+${tables}
+
+## Migration Plan
+
+${migs}
+`;
+}
+
+export class Phase7Controller {
+  private base: ProductionSchemaBaseController | null = null;
+  /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
+  public lastFailReason?: string;
+  public statePatch: Partial<State> = {};
+
+  private readonly state: State;
+  private readonly config: MyclConfig;
+  private readonly spec: PhaseSpec;
+  constructor(deps: PhaseDeps) {
+    this.state = deps.state;
+    this.config = deps.config;
+    this.spec = deps.spec;
+  }
+
+  submitAskqAnswer(askqId: string, selected_tr: string): void {
+    this.base?.submitAskqAnswer(askqId, selected_tr);
+  }
+
+  abort(): void {
+    this.base?.abort();
+  }
+
+  async run(): Promise<"complete" | "fail"> {
+    log.info("phase-7", "run start");
+
+    if (!this.state.intent_summary) {
+      emitError("phase-8: intent_summary missing", null);
+      this.lastFailReason = "intent_summary missing (Phase 1 incomplete)";
+      return "fail";
+    }
+    if (!this.spec.production_config) {
+      emitError("phase-8 production_config missing", null);
+      this.lastFailReason = "production_config missing in spec";
+      return "fail";
+    }
+
+    // Brief.md artık relevance engine ile section-bazlı filter ediliyor.
+    // Phase 3 skip edildiyse "(no relevant brief sections found)" sentinel.
+    const engineeringBrief = await buildRelevantEngineeringBrief(
+      this.config,
+      this.state,
+      this.state.intent_summary,
+    );
+
+    let systemPrompt: string;
+    try {
+      const tmpl = await readFile(this.spec.prompt_template_path!, "utf-8");
+      const convSection = await buildConversationContext(this.config, this.state)
+        .then(renderConversationSection)
+        .catch(() => "");
+      systemPrompt = substitute(tmpl, {
+        INTENT_SUMMARY: this.state.intent_summary,
+        ENGINEERING_BRIEF: engineeringBrief,
+        CONVERSATION_CONTEXT: convSection,
+      });
+    } catch (err) {
+      log.error("phase-7", "template load failed", err);
+      emitError("template load failed", String(err));
+      this.lastFailReason = `template load failed: ${String(err)}`;
+      return "fail";
+    }
+
+    const role = this.spec.model_role!;
+    this.base = new ProductionSchemaBaseController({
+      tag: "phase-7",
+      phaseId: 7,
+      state: this.state,
+      config: this.config,
+      systemPrompt,
+      modelId: this.config.selected_models[role],
+      apiKey: this.config.api_keys.main,
+      initialUserMessage: "Begin Phase 7: design the database schema and migration plan.",
+      tools: [TOOL_WRITE_DB, TOOL_APPROVAL],
+      production: this.spec.production_config,
+      betas: this.config.claude_code_flags.betas,
+      artifactRenderer: (input) => schemaToMarkdown(input as unknown as DbSchemaData),
+    });
+
+    const outcome = await this.base.run();
+    if (outcome.kind !== "approved") {
+      const o = outcome as { kind: string; reason?: string };
+      this.lastFailReason =
+        o.kind === "failed" ? o.reason ?? "unknown reason" : `outcome kind=${o.kind}`;
+      return "fail";
+    }
+
+    // v15.7 (2026-05-27): Batch A1 — onaylanan schema'nın migration array'inden
+    // gerçek SQL dosyaları yaz. Phase 8 başlangıcı bunları apply edecek.
+    // Dosya formatı: <project>/.mycl/migrations/NNN-<description>.sql
+    // NNN: 3 haneli zero-padded order; description kebab-case slugify.
+    try {
+      const schema = outcome.writeInput as unknown as DbSchemaData | undefined;
+      if (schema?.migrations && Array.isArray(schema.migrations)) {
+        const migrationDir = `${this.state.project_root}/.mycl/migrations`;
+        await mkdir(migrationDir, { recursive: true });
+        const writtenPaths: string[] = [];
+        for (const m of schema.migrations) {
+          const sql = m.sql ?? m.sql_sketch;
+          if (!sql || sql.trim().length === 0) {
+            log.warn("phase-7", "migration missing SQL — skip", { order: m.order, description: m.description });
+            continue;
+          }
+          const order = String(m.order).padStart(3, "0");
+          const slug = m.description
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 60);
+          const filename = `${order}-${slug || "migration"}.sql`;
+          const fullPath = `${migrationDir}/${filename}`;
+          await writeFile(fullPath, sql + "\n", "utf-8");
+          writtenPaths.push(`.mycl/migrations/${filename}`);
+        }
+        this.statePatch = { ...this.statePatch, pending_migrations: writtenPaths };
+        log.info("phase-7", "migrations written", { count: writtenPaths.length });
+      }
+    } catch (err) {
+      log.warn("phase-7", "migration file write failed (non-blocking)", err);
+    }
+
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 7,
+      event: "phase-7-db-approve",
+      caller: "user",
+      detail: `sha256=${outcome.artifact_hash}`,
+    });
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 7,
+      event: "phase-7-complete",
+      caller: "mycl-orchestrator",
+    });
+    log.info("phase-7", "complete");
+    return "complete";
+  }
+}

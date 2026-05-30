@@ -1,0 +1,29 @@
+{
+  "stack_id": "gradle",
+  "commands": {
+    "install": "./gradlew dependencies",
+    "dev": "./gradlew bootRun",
+    "build": "./gradlew build -x test",
+    "test": "./gradlew test",
+    "lint": "./gradlew check",
+    "lint_fix": null,
+    "simplify": null,
+    "perf": null,
+    "security": "./gradlew dependencyCheckAnalyze",
+    "integration": "./gradlew integrationTest"
+  },
+  "e2e_by_project_type": {
+    "web": "./gradlew e2eTest",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "default": null
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 8080,
+  "manifest_files": ["build.gradle", "build.gradle.kts", "settings.gradle"]
+}

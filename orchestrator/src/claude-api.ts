@@ -1,0 +1,368 @@
+// claude-api — Anthropic SDK doğrudan API. Subprocess YOK.
+//
+// Neden subprocess kaldırıldı?
+// API key kullandığımız için `claude` CLI'ya ihtiyaç yok. SDK direkt:
+//   - 1M context beta `betas: [...]` parameter ile (CLI'da warning veriyordu)
+//   - AskUserQuestion'a benzer custom tool'lar tool_use definitions ile
+//   - Multi-turn conversation in-process — bridge management yok
+//   - Streaming via client.messages.stream(), full control
+//
+// Spec §5.3 yerine: bu modül conversation runner. Phase 1, 4, 9 hepsi
+// kendi tool set'i, system prompt'u, gate logic'iyle bu wrapper'ı çağırır.
+
+import Anthropic from "@anthropic-ai/sdk";
+import type { MyclConfig } from "./config.js";
+import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "./ipc.js";
+import { log } from "./logger.js";
+
+/**
+ * Anthropic API error'ını kullanıcıya gösterilecek **Türkçe + anlamlı** mesaja
+ * çevirir. SDK error body'sini parse eder; tanımlı error tiplerini özel mesaja,
+ * tanımsız olanları ham mesaja düşürür. request_id varsa ekler.
+ *
+ * Tipik error body:
+ *   {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_..."}
+ */
+export function humanizeAnthropicError(err: unknown): string {
+  const raw = String(err);
+
+  // request_id'yi çıkar (debug için kullanıcıya gösterilir)
+  const reqIdMatch = raw.match(/"request_id":"(req_[^"]+)"/);
+  const reqId = reqIdMatch ? ` (request_id=${reqIdMatch[1].trim()})` : "";
+
+  // error type'ı çıkar
+  const typeMatch = raw.match(/"error":\{[^}]*?"type":"([^"]+)"/);
+  const errorType = typeMatch?.[1];
+
+  switch (errorType) {
+    case "overloaded_error":
+      return `Anthropic API geçici olarak aşırı yüklü (overloaded_error). Birkaç dakika sonra tekrar deneyin.${reqId}`;
+    case "rate_limit_error":
+      return `Anthropic API rate limit aşıldı. Bir süre bekleyip tekrar deneyin.${reqId}`;
+    case "authentication_error":
+      return `Anthropic API anahtarı geçersiz veya yetersiz. Ayarlar → API Keys'i kontrol edin.${reqId}`;
+    case "permission_error":
+      return `Anthropic API anahtarınız bu modele veya beta'ya erişim izni vermiyor.${reqId}`;
+    case "not_found_error":
+      return `Anthropic API: istek hedefi bulunamadı (yanlış model id?).${reqId}`;
+    case "invalid_request_error": {
+      const msgMatch = raw.match(/"error":\{[^}]*?"message":"([^"]+)"/);
+      return `Anthropic API isteği geçersiz: ${msgMatch?.[1] ?? "(detay yok)"}${reqId}`;
+    }
+    case "api_error":
+      return `Anthropic API sunucu hatası.${reqId}`;
+    case undefined:
+      // Anthropic dışı: network, timeout, vs.
+      return `Claude API çağrısı başarısız: ${raw.slice(0, 200)}`;
+    default:
+      return `Anthropic API hatası (${errorType}).${reqId}`;
+  }
+}
+
+/**
+ * Hatanın geçici (transient) olup olmadığını döndürür. Transient hatalar
+ * exponential backoff ile retry edilir; kalıcı hatalar (auth, permission,
+ * invalid_request) anında bubble up eder. Translator pattern'ı (translator.ts)
+ * ile tutarlı; orada da overloaded + rate_limit + 5xx retry'lı.
+ */
+function isTransientError(err: unknown): boolean {
+  const raw = String(err);
+  const typeMatch = raw.match(/"error":\{[^}]*?"type":"([^"]+)"/);
+  const type = typeMatch?.[1];
+  if (
+    type === "overloaded_error" ||
+    type === "rate_limit_error" ||
+    type === "api_error"
+  ) {
+    return true;
+  }
+  // Anthropic SDK'nın bazen "error" payload'ı olmadan network/timeout hatası
+  // fırlatması mümkün — string match ile yakala (defensive).
+  if (
+    /ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed/i.test(raw)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+// Anthropic API "Overloaded" (529) yoğun günlerde sık görülüyor. Phase 6 fix
+// turn'leri uzun + paralel kullanım yüksek → daha sabırlı retry kullanıcı için
+// daha az "API geçici yoğun" mesajı görür. 1s, 3s, 9s, 18s, 36s ≈ 67s toplam.
+const MAX_RETRY_ATTEMPTS = 5;
+const RETRY_BASE_MS = 1000;
+const RETRY_DELAYS_MS = [1000, 3000, 9000, 18000, 36000];
+
+export type Role = "user" | "assistant";
+
+export interface ApiMessage {
+  role: Role;
+  content: Anthropic.MessageParam["content"];
+}
+
+/**
+ * Tool definition — Claude API'nin tool format'ı.
+ * `input_schema` JSON Schema; model bunu doldurarak tool_use yayar.
+ */
+export interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+/**
+ * Stream event handler — runner her event'te çağırır.
+ * Tip-discriminated:
+ *   - text: incremental assistant text
+ *   - tool_use: model'in tool çağrısı (input parsed JSON)
+ *   - message_start / message_end: mesaj sınırları
+ *   - finalize: turn tamamen bitti (stop_reason ile)
+ */
+export type StreamHandlerEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "message_start" }
+  | { type: "message_end"; stop_reason?: string };
+
+export type StreamHandler = (ev: StreamHandlerEvent) => void | Promise<void>;
+
+export interface RunTurnOptions {
+  /** Tüm önceki + şimdiki user message'lar conversation history. */
+  messages: ApiMessage[];
+  /**
+   * String verirsen runTurn otomatik olarak tek bir text block'a sarar ve
+   * `cache_control: ephemeral` ekler → prompt caching aktif. Detaylı kontrol
+   * gerekirse direkt TextBlockParam[] de geçilebilir (advanced).
+   */
+  system: string | Array<Anthropic.TextBlockParam>;
+  model: string;
+  max_tokens?: number;
+  temperature?: number;
+  tools?: ToolDef[];
+  /**
+   * Tool seçim zorlaması. Default `auto` (model serbest karar verir).
+   * - `{type:"any"}`: model herhangi bir tool çağırmak ZORUNDA (düz metin yok)
+   * - `{type:"tool", name:"X"}`: spesifik tool X çağırmak ZORUNDA
+   * Strict JSON output gereken classifier/extractor call'ları için kritik;
+   * tool_choice set edilmezse küçük modeller (Haiku) end_turn'le düz metin
+   * dönerek tool_use yaymayabilir.
+   */
+  tool_choice?: { type: "auto" | "any" } | { type: "tool"; name: string };
+  betas?: string[];
+  /** Tool result vermeden conversation finalize ediliyorsa stop_reason burada. */
+  stopOnToolUse?: boolean;
+}
+
+export interface TurnUsage {
+  input_tokens: number;
+  output_tokens: number;
+  /** Prompt caching aktifse: bu turda cache'e yazılan token miktarı (ilk turn). */
+  cache_creation_input_tokens?: number;
+  /** Prompt caching aktifse: bu turda cache'ten okunan token miktarı (turn 2+). */
+  cache_read_input_tokens?: number;
+}
+
+export interface TurnResult {
+  /** Tam assistant mesaj content (tool_use bloklar dahil). History'ye eklenmek için. */
+  assistantContent: Anthropic.MessageParam["content"];
+  stop_reason: string | null;
+  usage: TurnUsage;
+  /** Bu turda yayılan tool_use'lar — caller'in tool_result yazması için. */
+  toolUses: Array<{ id: string; name: string; input: unknown }>;
+}
+
+export class ClaudeApiError extends Error {
+  override readonly name = "ClaudeApiError";
+}
+
+/**
+ * Tek bir API turunu stream eder. Tool_use yayılırsa caller tool_result
+ * yazıp aynı conversation history ile tekrar çağırarak multi-turn devam eder.
+ */
+export async function runTurn(
+  _config: MyclConfig,
+  apiKey: string,
+  opts: RunTurnOptions,
+  onEvent: StreamHandler,
+): Promise<TurnResult> {
+  const client = new Anthropic({
+    apiKey,
+    defaultHeaders: opts.betas && opts.betas.length > 0
+      ? { "anthropic-beta": opts.betas.join(",") }
+      : undefined,
+  });
+
+  log.info("claude-api", "runTurn", {
+    model: opts.model,
+    messages_count: opts.messages.length,
+    has_tools: !!opts.tools?.length,
+    betas: opts.betas,
+  });
+
+  const startTs = Date.now();
+
+  // Prompt caching: caller string verirse otomatik tek text block'a sarıp
+  // cache_control:ephemeral ekle. Sonraki turn'lerde aynı system → cache hit.
+  // Bu hesaplamalar attempt'lere bağımlı değil, dış scope'ta bir kez.
+  const systemParam: Array<Anthropic.TextBlockParam> = typeof opts.system === "string"
+    ? [
+        {
+          type: "text" as const,
+          text: opts.system,
+          cache_control: { type: "ephemeral" as const },
+        },
+      ]
+    : opts.system;
+
+  // Tools cache_control: Anthropic kuralı — son tool'a cache_control koyunca
+  // tüm tools listesi tek block olarak cache'lenir. Tools listesi faz boyunca
+  // sabit olduğu için cache invalidate olmaz; system'le birlikte refresh.
+  const toolsParam: Anthropic.Tool[] | undefined = opts.tools && opts.tools.length > 0
+    ? (opts.tools.map((t, i) =>
+        i === opts.tools!.length - 1
+          ? { ...t, cache_control: { type: "ephemeral" as const } }
+          : t,
+      ) as unknown as Anthropic.Tool[])
+    : undefined;
+
+  // Retry loop: transient hatalar (overloaded, rate_limit, api_error, network)
+  // exponential backoff ile yeniden denenir. Translator pattern'ı (translator.ts
+  // attempts:1 log'da görünür) ile tutarlı. Relevance call'ları için kritik:
+  // "MyCL unutmaz" iddiası fail-safe sentinel'e düşürülmemeli.
+  for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+    // State her attempt'te temiz başlar — önceki attempt'in kısmi sonuçları
+    // taşınmaz (stream yarıda kesilmiş olabilir).
+    const toolUses: TurnResult["toolUses"] = [];
+    let stop_reason: string | null = null;
+    let usage: TurnUsage = { input_tokens: 0, output_tokens: 0 };
+
+    try {
+      const stream = client.messages.stream({
+        model: opts.model,
+        max_tokens: opts.max_tokens ?? 4096,
+        temperature: opts.temperature,
+        system: systemParam,
+        messages: opts.messages,
+        tools: toolsParam,
+        tool_choice: opts.tool_choice as
+          | Anthropic.MessageCreateParams["tool_choice"]
+          | undefined,
+      });
+
+      // Stream event'lerini handler'a feed et.
+      stream.on("text", (delta: string) => {
+        void Promise.resolve(onEvent({ type: "text_delta", text: delta })).catch(
+          (err) => log.error("claude-api", "handler text threw", err),
+        );
+      });
+
+      stream.on("message", (_msg: Anthropic.Message) => {
+        void Promise.resolve(onEvent({ type: "message_start" })).catch(() => {});
+      });
+
+      stream.on("inputJson", (_partial, snapshot) => {
+        // Her tool_use input chunk'ında — biz final mesajdan alacağız.
+        void snapshot; // unused
+      });
+
+      const finalMessage = await stream.finalMessage();
+      stop_reason = finalMessage.stop_reason ?? null;
+      // SDK usage shape: prompt-caching beta aktifken cache_creation_input_tokens
+      // ve cache_read_input_tokens da gelir. SDK tipi henüz expose etmiyor olabilir
+      // → bilinçli `as` ile okuyoruz; yoksa undefined.
+      const rawUsage = finalMessage.usage as Anthropic.Usage & {
+        cache_creation_input_tokens?: number | null;
+        cache_read_input_tokens?: number | null;
+      };
+      usage = {
+        input_tokens: rawUsage.input_tokens,
+        output_tokens: rawUsage.output_tokens,
+        cache_creation_input_tokens: rawUsage.cache_creation_input_tokens ?? undefined,
+        cache_read_input_tokens: rawUsage.cache_read_input_tokens ?? undefined,
+      };
+      // UI banner'ına token usage gönder — cumulative toplamı App.tsx tutuyor.
+      emitClaudeStream({
+        sub: "token_usage",
+        usage: {
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
+          cache_creation_input_tokens: usage.cache_creation_input_tokens,
+          cache_read_input_tokens: usage.cache_read_input_tokens,
+        },
+        model: opts.model,
+      });
+      // v15.7 (2026-05-26): Session-wide token totals accumulator (madde 13).
+      recordTokenUsage(usage);
+
+      // Tool_use blocklarını topla.
+      for (const block of finalMessage.content) {
+        if (block.type === "tool_use") {
+          toolUses.push({
+            id: block.id,
+            name: block.name,
+            input: block.input,
+          });
+          await Promise.resolve(
+            onEvent({
+              type: "tool_use",
+              id: block.id,
+              name: block.name,
+              input: block.input,
+            }),
+          ).catch((err) =>
+            log.error("claude-api", "handler tool_use threw", err),
+          );
+        }
+      }
+
+      await Promise.resolve(
+        onEvent({ type: "message_end", stop_reason: stop_reason ?? undefined }),
+      ).catch(() => {});
+
+      log.info("claude-api", "turn done", {
+        stop_reason,
+        tool_uses: toolUses.length,
+        elapsed_ms: Date.now() - startTs,
+        attempt,
+        usage,
+      });
+
+      return {
+        assistantContent: finalMessage.content as Anthropic.MessageParam["content"],
+        stop_reason,
+        usage,
+        toolUses,
+      };
+    } catch (err) {
+      log.warn("claude-api", `attempt ${attempt}/${MAX_RETRY_ATTEMPTS} failed`, err);
+
+      // Kalıcı hata (auth, permission, invalid_request) veya son attempt → fail.
+      if (!isTransientError(err) || attempt === MAX_RETRY_ATTEMPTS) {
+        log.error("claude-api", "turn failed (final)", err);
+        const userMsg = humanizeAnthropicError(err);
+        emitChatMessage("error", userMsg);
+        throw new ClaudeApiError(userMsg);
+      }
+
+      // Transient → custom backoff curve (1s, 3s, 9s, 18s, 36s) ile retry.
+      // RETRY_BASE_MS legacy fallback (RETRY_DELAYS_MS index out of bounds).
+      const backoffMs =
+        RETRY_DELAYS_MS[attempt - 1] ??
+        RETRY_BASE_MS * Math.pow(2, attempt - 1);
+      log.info("claude-api", "transient error — retrying", {
+        attempt,
+        next_attempt: attempt + 1,
+        backoff_ms: backoffMs,
+      });
+      emitClaudeStream({
+        sub: "retry",
+        text: `Anthropic geçici hata (attempt ${attempt}/${MAX_RETRY_ATTEMPTS}); ${backoffMs / 1000}sn sonra tekrar deneniyor…`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  // For loop her path'ten ya return ya throw eder; bu satıra ulaşılmaz.
+  // TS exhaustive narrow için defensive throw.
+  throw new ClaudeApiError("runTurn retry loop exhausted unexpectedly");
+}

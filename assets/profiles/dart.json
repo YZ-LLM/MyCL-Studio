@@ -1,0 +1,28 @@
+{
+  "stack_id": "dart",
+  "commands": {
+    "install": "dart pub get",
+    "dev": "dart run",
+    "build": "dart compile exe bin/main.dart",
+    "test": "dart test",
+    "lint": "dart analyze",
+    "lint_fix": "dart fix --apply",
+    "simplify": null,
+    "perf": null,
+    "security": null,
+    "integration": "dart test test/integration/"
+  },
+  "e2e_by_project_type": {
+    "web": "flutter test integration_test",
+    "api": null,
+    "cli": null,
+    "library": null,
+    "mobile": "flutter test integration_test",
+    "default": null
+  },
+  "load_by_project_type": {
+    "default": null
+  },
+  "default_port": 8080,
+  "manifest_files": ["pubspec.yaml", "pubspec.lock"]
+}

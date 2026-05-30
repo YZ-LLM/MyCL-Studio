@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MyCL Studio",
+  "version": "0.1.0",
+  "identifier": "com.umitduman.myclv14",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:all",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "MyCL Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 768,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "nsis", "deb", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../orchestrator/dist/**/*",
+      "../orchestrator/package.json",
+      "../orchestrator/node_modules/**/*",
+      "../assets/templates/**/*",
+      "../assets/i18n/**/*",
+      "../assets/scripts/**/*",
+      "../assets/agent-prompts/**/*",
+      "../assets/profiles/**/*",
+      "../assets/gates/**/*",
+      "../assets/schemas/**/*",
+      "../assets/mycl-schema.md"
+    ]
+  }
+}

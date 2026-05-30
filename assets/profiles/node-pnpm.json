@@ -1,0 +1,33 @@
+{
+  "stack_id": "node-pnpm",
+  "commands": {
+    "install": "pnpm install",
+    "dev": "pnpm dev",
+    "build": "pnpm build",
+    "test": "pnpm test",
+    "lint": "pnpm lint",
+    "lint_fix": "pnpm lint --fix",
+    "simplify": "pnpm dlx ts-prune --error",
+    "perf": "pnpm perf",
+    "security": "pnpm audit --prod --audit-level=high",
+    "integration": "pnpm test:integration"
+  },
+  "e2e_by_project_type": {
+    "web": "pnpm exec playwright test --headed",
+    "api": null,
+    "cli": null,
+    "library": null,
+    "mobile": "pnpm exec detox test",
+    "desktop": "pnpm exec playwright test --headed",
+    "ml": null,
+    "game": null,
+    "default": "pnpm test:e2e"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 5173,
+  "manifest_files": ["package.json", "pnpm-lock.yaml"]
+}

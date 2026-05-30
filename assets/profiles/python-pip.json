@@ -1,0 +1,30 @@
+{
+  "stack_id": "python-pip",
+  "commands": {
+    "install": "pip install -r requirements.txt",
+    "dev": "python -m uvicorn main:app --reload",
+    "build": null,
+    "test": "pytest",
+    "lint": "ruff check .",
+    "lint_fix": "ruff check . --fix",
+    "simplify": null,
+    "perf": null,
+    "security": "pip-audit",
+    "integration": "pytest tests/integration/"
+  },
+  "e2e_by_project_type": {
+    "web": "pytest --headed",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "ml": null,
+    "default": "pytest tests/e2e/"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "locust -f loadtest.py --headless -u 100 -r 10 -t 1m",
+    "default": null
+  },
+  "default_port": 8000,
+  "manifest_files": ["requirements.txt", "pyproject.toml"]
+}

@@ -1,0 +1,31 @@
+{
+  "stack_id": "rust",
+  "commands": {
+    "install": "cargo fetch",
+    "dev": "cargo run",
+    "build": "cargo build --release",
+    "test": "cargo test",
+    "lint": "cargo clippy -- -D warnings",
+    "lint_fix": "cargo clippy --fix --allow-dirty",
+    "simplify": null,
+    "perf": "cargo bench",
+    "security": "cargo audit",
+    "integration": "cargo test --test '*'"
+  },
+  "e2e_by_project_type": {
+    "web": null,
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "desktop": null,
+    "game": null,
+    "default": null
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 8080,
+  "manifest_files": ["Cargo.toml", "Cargo.lock"]
+}

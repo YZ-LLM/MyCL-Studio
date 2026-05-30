@@ -1,0 +1,37 @@
+[package]
+name = "mycl-v14"
+version = "0.1.0"
+description = "MyCL Studio v14 — TR↔EN translator + 20-phase pipeline desktop app"
+authors = ["Ümit Duman"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "mycl_v14_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2.7.1"
+# v15.2.1: aynı binary ikinci kez exec edildiğinde, ikinci process ilk
+# instance'a relay yapar (argv aktarımı). v15.2.2'de bu argv'den yeni pencere
+# açma logic'i devreye girecek. Şu an sadece plugin init + log; davranış
+# değişikliği yok (default tek-pencere kullanım korunur).
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+# v15.2.3 QC borç: uuid_v4_simple (nanos+pid xor) collision teorisi karşı
+# crypto-random UUID v4. Multi-window label kollizyon sıfır.
+uuid = { version = "1", features = ["v4"] }
+# tokio kullanılmıyor — orchestrator.rs `std::thread::spawn` + `std::process` ile
+# çalışıyor. Tauri 2 kendi async runtime'ını yönetir (proc-macro level).
+

@@ -1,0 +1,271 @@
+// orchestrator-agent — main conversational shell agent (v15.5).
+//
+// User talebi: "MyCL paneli daha akıllı yapmak için orkestrator bir ajan
+// kullanmak gerekiyor. Görevi, kullanıcı ile MyCL Studio arasında doğru
+// iletişimi kurmak ve kullanıcının MyCL Studio'dan aldığı verimi artırmak.
+// Ana modelde ne seçili ise onu kullansın."
+//
+// Mimari: handleUserMessage agent'ı ÖNCE dener; agent error/timeout/
+// fallback_to_classifier → klasik Haiku classifier devreye girer. Bu sayede:
+//   - Agent'ı pasifize etmek için sadece orchestrator API key boş bırakmak
+//     yeterli.
+//   - Production'da agent fail ederse user kesintisiz çalışmaya devam eder.
+//
+// Tool loop: max 8 turn (Read/Grep/Bash safe-list ile araştır → decide_action
+// ile son karar). Tool_choice="any" ile model her turda en az bir tool çağırır;
+// decide_action çağrıldığında loop sonlanır.
+
+import { promises as fs } from "node:fs";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import type Anthropic from "@anthropic-ai/sdk";
+import { runTurn, type ApiMessage } from "../claude-api.js";
+import {
+  orchestratorApiKey,
+  orchestratorModelId,
+  type MyclConfig,
+} from "../config.js";
+import { emitAgentEvent } from "../ipc.js";
+import { log } from "../logger.js";
+import type { State } from "../types.js";
+import { buildAgentSystemPrompt } from "./context-builder.js";
+import {
+  parseAgentDecision,
+  type AgentDecision,
+} from "./decision.js";
+import { AGENT_TOOLS, validateBashCommand } from "./tools.js";
+import { detectRecurringTopic } from "../agent-memory/dedup.js";
+import { realpathWithinRoot, validatePathForAgent } from "./path-sandbox.js";
+
+const execAsync = promisify(exec);
+const MAX_TOOL_TURNS = 8;
+const BASH_TIMEOUT_MS = 5_000;
+
+export class OrchestratorAgentError extends Error {
+  override readonly name = "OrchestratorAgentError";
+}
+
+export interface OrchestratorAgentDeps {
+  config: MyclConfig;
+  state: State;
+}
+
+export class OrchestratorAgent {
+  constructor(private readonly deps: OrchestratorAgentDeps) {}
+
+  /**
+   * User mesajını ele al, agent karar versin. Tool loop sırasında Read/Grep/
+   * Bash çağrıları yapabilir. Sonunda `decide_action` ile AgentDecision döner.
+   *
+   * Throw: API hatası, tool execution hatası, MAX_TOOL_TURNS aşımı,
+   * decide_action çağrılmadan biten conversation.
+   */
+  async respond(userText: string): Promise<AgentDecision> {
+    emitAgentEvent({ sub: "started" });
+    try {
+      return await this.respondInner(userText);
+    } finally {
+      emitAgentEvent({ sub: "completed" });
+    }
+  }
+
+  private async respondInner(userText: string): Promise<AgentDecision> {
+    const apiKey = orchestratorApiKey(this.deps.config.api_keys);
+    const modelId = orchestratorModelId(this.deps.config.selected_models);
+
+    // v15.6: Pre-call recurring topic detection. agent-decisions.jsonl
+    // semantic karşılaştırma → 2. confirmation tetikleyici notu sistem
+    // prompt'una eklenir. Agent isterse save_memory_proposal action seçer.
+    const recurring = await detectRecurringTopic(
+      this.deps.config,
+      this.deps.state.project_root,
+      userText,
+    );
+
+    let systemPrompt = await buildAgentSystemPrompt(
+      this.deps.state,
+      this.deps.config,
+    );
+    if (recurring.recurring) {
+      systemPrompt +=
+        `\n\n---\n\n## BU KONU TEKRAR EDİYOR (v15.6 dedup)\n\n` +
+        `Current user mesajı geçmiş bir agent kararıyla semantic olarak ` +
+        `benzer (score=${recurring.similarity_score}/10).\n` +
+        `- Geçmiş topic_slug: \`${recurring.previous_topic_slug}\`\n` +
+        `- Geçmiş user_text: "${(recurring.previous_user_text ?? "").slice(0, 200)}"\n\n` +
+        `**Karar**: \`save_memory_proposal\` action'ını DÜŞÜN. ` +
+        `memory_proposal alanını topic_slug = \`${recurring.previous_topic_slug}\` ` +
+        `kullanarak doldur. Hafıza kaydı onaylanırsa SONRASINDA kullanıcının ` +
+        `asıl niyetini execute edersin (bir sonraki agent turn'unda).`;
+    }
+
+    log.info("orchestrator-agent", "respond start", {
+      model: modelId,
+      user_text_len: userText.length,
+      current_phase: this.deps.state.current_phase,
+      recurring: recurring.recurring,
+    });
+
+    const messages: ApiMessage[] = [
+      { role: "user", content: userText },
+    ];
+
+    for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+      const result = await runTurn(
+        this.deps.config,
+        apiKey,
+        {
+          messages,
+          system: systemPrompt,
+          model: modelId,
+          tools: AGENT_TOOLS,
+          tool_choice: { type: "any" },
+          max_tokens: 4096,
+          betas: this.deps.config.claude_code_flags.betas,
+        },
+        () => {
+          // Stream event'leri agent için emit edilmez (UI'da sessiz çalışsın).
+          // İleride debug panel için açılabilir.
+        },
+      );
+
+      // Agent assistant mesajını history'ye ekle
+      messages.push({ role: "assistant", content: result.assistantContent });
+
+      if (result.toolUses.length === 0) {
+        // Tool çağrılmadan end_turn → ya stop_sequence ya end_turn
+        throw new OrchestratorAgentError(
+          `agent ended without decide_action (turn ${turn}, stop=${result.stop_reason})`,
+        );
+      }
+
+      // decide_action çağrısını kontrol et — varsa loop'tan çık
+      const decideCall = result.toolUses.find((t) => t.name === "decide_action");
+      if (decideCall) {
+        log.info("orchestrator-agent", "decide_action received", {
+          turn,
+          tool_calls_count: result.toolUses.length,
+        });
+        const decision = parseAgentDecision(decideCall.input);
+        // v15.6: frontend "🧠 Orkestrator" modalında görünmesi için decision emit.
+        emitAgentEvent({
+          sub: "decision",
+          turn,
+          decision: decision as unknown as Record<string, unknown>,
+        });
+        return decision;
+      }
+
+      // Tool_result block'larını oluştur ve user mesajı olarak history'ye ekle
+      const toolResults: Anthropic.MessageParam["content"] = [];
+      for (const tu of result.toolUses) {
+        // v15.6: her tool_use için event emit — modal'da agent thinking görünür
+        emitAgentEvent({
+          sub: "tool_use",
+          turn,
+          tool_name: tu.name,
+          tool_input: (tu.input ?? {}) as Record<string, unknown>,
+        });
+        const resultText = await this.executeTool(tu.name, tu.input);
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: resultText.slice(0, 8000), // 8KB hard cap
+          is_error: resultText.startsWith("ERROR:"),
+        });
+      }
+      messages.push({ role: "user", content: toolResults });
+    }
+
+    emitAgentEvent({
+      sub: "error",
+      error: `MAX_TOOL_TURNS (${MAX_TOOL_TURNS}) aşıldı — decide_action eksik`,
+    });
+    throw new OrchestratorAgentError(
+      `agent reached MAX_TOOL_TURNS (${MAX_TOOL_TURNS}) without decide_action`,
+    );
+  }
+
+  /**
+   * Tool dispatch — Read, Grep, Bash (safe-list). decide_action burada
+   * çalışmaz; respond() ana loop'unda yakalanır.
+   */
+  private async executeTool(
+    name: string,
+    input: unknown,
+  ): Promise<string> {
+    try {
+      const obj = (input ?? {}) as Record<string, unknown>;
+      switch (name) {
+        case "Read": {
+          const path = String(obj.file_path ?? "");
+          if (!path) return "ERROR: file_path missing";
+          // v15.6 (2026-05-24): proje izolasyonu — agent başka projeyi okuyamaz
+          const v = validatePathForAgent(this.deps.state.project_root, path);
+          if (!v.ok) {
+            return (
+              `ERROR: Read denied — path outside project root ` +
+              `(project=${this.deps.state.project_root}, requested=${path}, reason=${v.reason})`
+            );
+          }
+          const content = await fs.readFile(v.resolved, "utf-8");
+          // Symlink escape post-check
+          if (!(await realpathWithinRoot(this.deps.state.project_root, v.resolved))) {
+            return (
+              `ERROR: Read denied — symlink target outside project root ` +
+              `(project=${this.deps.state.project_root}, requested=${path})`
+            );
+          }
+          return content;
+        }
+        case "Grep": {
+          const pattern = String(obj.pattern ?? "");
+          const path = String(obj.path ?? "");
+          if (!pattern || !path) return "ERROR: pattern or path missing";
+          // v15.6: proje izolasyonu — Grep recursive olduğu için absolute path
+          // sandbox dışını taraması kritik risk
+          const v = validatePathForAgent(this.deps.state.project_root, path);
+          if (!v.ok) {
+            return (
+              `ERROR: Grep denied — path outside project root ` +
+              `(project=${this.deps.state.project_root}, requested=${path}, reason=${v.reason})`
+            );
+          }
+          // -E extended regex, -n line number, -r recursive (-d skip warning)
+          const { stdout, stderr } = await execAsync(
+            `grep -rEn ${shellEscape(pattern)} ${shellEscape(v.resolved)}`,
+            { timeout: BASH_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
+          );
+          return stdout || `(no matches)${stderr ? `\nstderr: ${stderr}` : ""}`;
+        }
+        case "Bash": {
+          const cmd = String(obj.command ?? "");
+          // v15.6: proje izolasyonu — projectRoot ile path argüman sandbox
+          const validation = validateBashCommand(cmd, this.deps.state.project_root);
+          if (!validation.ok) {
+            return `ERROR: Bash safe-list reject: ${validation.reason}`;
+          }
+          const { stdout, stderr } = await execAsync(cmd, {
+            timeout: BASH_TIMEOUT_MS,
+            maxBuffer: 1024 * 1024,
+            cwd: this.deps.state.project_root,
+          });
+          return stdout + (stderr ? `\nstderr: ${stderr}` : "");
+        }
+        default:
+          return `ERROR: unknown tool: ${name}`;
+      }
+    } catch (err) {
+      return `ERROR: ${String(err)}`;
+    }
+  }
+}
+
+/**
+ * Single-quote shell escape — pattern içindeki ' karakterlerini güvenli hale
+ * getirir. execAsync command string'i shell tarafından yorumlandığı için
+ * pattern injection riski var; bu fonksiyon onu engeller.
+ */
+function shellEscape(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}

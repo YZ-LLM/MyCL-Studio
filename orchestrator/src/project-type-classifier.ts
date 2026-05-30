@@ -1,0 +1,157 @@
+// project-type-classifier — Phase 2 sonu spec özetinden proje tipini
+// (web/api/cli/library/mobile/desktop/ml/game) sınıflandırır.
+//
+// Haiku (translator role) ile tool_use yapısal output → ProjectType döner.
+// Faz 16 (E2E) ve Faz 17 (Load) runner seçimi + Faz 5/7 skip kararı için
+// state'e yazılır.
+//
+// Hata case'i: API fail veya model "unknown" derse → "unknown" dönülür,
+// pipeline durmaz. v15.1 confirm askq ile kullanıcı override edebilir.
+
+import Anthropic from "@anthropic-ai/sdk";
+import type { MyclConfig } from "./config.js";
+import { log } from "./logger.js";
+import type { ProjectType } from "./types.js";
+
+const VALID_TYPES: readonly ProjectType[] = [
+  "web",
+  "api",
+  "cli",
+  "library",
+  "mobile",
+  "desktop",
+  "ml",
+  "game",
+  "unknown",
+] as const;
+
+const SYSTEM_PROMPT = `You are a project type classifier.
+Read the user's intent / enriched spec summary and decide:
+1. The project type (one of the categories below)
+2. Whether the project needs a persistent database (SQLite/Postgres/Mongo/etc)
+
+Categories (pick exactly one for project_type):
+- web: browser UI application (React/Vue/Svelte/Angular/Next/etc)
+- api: backend REST/GraphQL service (Express/FastAPI/Actix/Gin/etc) — no end-user UI
+- cli: command-line tool (npm/pip/cargo binary)
+- library: SDK / package consumed by other code — no UI, no service
+- mobile: iOS/Android app (React Native/Flutter/native)
+- desktop: Electron/Tauri/Qt — local UI app
+- ml: ML model / training pipeline / inference service
+- game: game (Unity/Godot/browser game)
+- unknown: cannot determine
+
+has_database guidance:
+- true: project stores persistent state (DB schema, migrations, ORM/query layer)
+- false: stateless (pure compute, in-memory cache, no migrations, e.g. simple CLI or static SPA)
+- If uncertain, lean true (Faz 7 zaten skip-on-missing-spec'i destekler).
+
+Call classify_project_type with both fields. Do not output any other text.`;
+
+const TOOL_DEF = {
+  name: "classify_project_type",
+  description: "Submit the project type + database requirement classification.",
+  input_schema: {
+    type: "object",
+    required: ["project_type", "has_database"],
+    properties: {
+      project_type: {
+        type: "string",
+        enum: [...VALID_TYPES],
+      },
+      has_database: {
+        type: "boolean",
+      },
+    },
+  },
+};
+
+export class ProjectTypeClassifyError extends Error {
+  override readonly name = "ProjectTypeClassifyError";
+}
+
+/**
+ * Classifier sonucu. v15.2.3 borç: has_database eklendi — Faz 7 (Veritabanı
+ * Tasarımı) gate'i için yapısal sinyal. undefined ise heuristic fallback.
+ */
+export interface ProjectClassification {
+  project_type: ProjectType;
+  /** undefined olabilir — API fail durumunda fallback'a düşülür. */
+  has_database?: boolean;
+}
+
+/**
+ * Spec özetinden project_type sınıflandırır. Haiku tool_use'tan döndürdüğü
+ * değeri valide eder, geçersizse "unknown" döner (fail-soft).
+ */
+export async function classifyProjectType(
+  config: MyclConfig,
+  summary: string,
+): Promise<ProjectClassification> {
+  if (!summary || summary.trim().length < 5) {
+    log.warn("project-type-classifier", "summary too short — unknown");
+    return { project_type: "unknown" };
+  }
+
+  const client = new Anthropic({ apiKey: config.api_keys.main });
+  const model = config.selected_models.translator;
+  const startTs = Date.now();
+
+  log.info("project-type-classifier", "request", {
+    model,
+    summary_len: summary.length,
+  });
+
+  try {
+    const response = await client.messages.create({
+      model,
+      max_tokens: 256,
+      system: SYSTEM_PROMPT,
+      tools: [TOOL_DEF] as Anthropic.Messages.Tool[],
+      tool_choice: { type: "tool", name: "classify_project_type" },
+      messages: [{ role: "user", content: summary }],
+    });
+
+    for (const block of response.content) {
+      if (block.type === "tool_use" && block.name === "classify_project_type") {
+        const input = block.input as {
+          project_type?: string;
+          has_database?: boolean;
+        };
+        const raw = input.project_type;
+        const hasDb =
+          typeof input.has_database === "boolean" ? input.has_database : undefined;
+        if (typeof raw === "string" && (VALID_TYPES as readonly string[]).includes(raw)) {
+          log.info("project-type-classifier", "classified", {
+            project_type: raw,
+            has_database: hasDb,
+            elapsed_ms: Date.now() - startTs,
+          });
+          return { project_type: raw as ProjectType, has_database: hasDb };
+        }
+        log.warn("project-type-classifier", "invalid output", { raw });
+        return { project_type: "unknown", has_database: hasDb };
+      }
+    }
+    log.warn("project-type-classifier", "no tool_use in response");
+    return { project_type: "unknown" };
+  } catch (err) {
+    log.error("project-type-classifier", "api failed (fail-soft)", err);
+    return { project_type: "unknown" };
+  }
+}
+
+/**
+ * `project_type`'a göre Faz 5 (UI Yapımı) + Faz 6 (UI İnceleme) skip edilmeli
+ * mi karar verir. UI'sı olmayan projeler (library/cli/api/ml/game/server-only)
+ * için Faz 5/7 atlanır; pipeline Faz 5 → Faz 7'e geçer.
+ */
+export function shouldSkipUiPhases(projectType: ProjectType): boolean {
+  return (
+    projectType === "library" ||
+    projectType === "cli" ||
+    projectType === "api" ||
+    projectType === "ml" ||
+    projectType === "game"
+  );
+}

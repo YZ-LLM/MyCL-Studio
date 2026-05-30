@@ -1,0 +1,61 @@
+{
+  "askq": {
+    "options": {
+      "approve": "Approve",
+      "revise": "Revise",
+      "cancel": "Cancel",
+      "skip": "Skip",
+      "fix": "Fix",
+      "rule": "Rule",
+      "yes": "Yes",
+      "no": "No",
+      "continue": "Continue",
+      "stop": "Stop"
+    },
+    "approval_suffix": {
+      "intent": "\n\nApprove this intent?",
+      "spec": "\n\nApprove this spec?",
+      "generic": "\n\nApprove?"
+    }
+  },
+  "phase": {
+    "0":  { "name": "Debug Triage" },
+    "1":  { "name": "Intent Gathering" },
+    "2":  { "name": "Precision Audit" },
+    "3":  { "name": "Engineering Brief" },
+    "4":  { "name": "Spec Writing" },
+    "5": { "name": "UI Build" },
+    "6": { "name": "UI Review" },
+    "7": { "name": "Database Design" },
+    "8": { "name": "TDD Implementation" },
+    "9": { "name": "Risk Review" },
+    "10": { "name": "Lint" },
+    "11": { "name": "Simplification" },
+    "12": { "name": "Performance" },
+    "13": { "name": "Security" },
+    "14": { "name": "Unit Tests" },
+    "15": { "name": "Integration Tests" },
+    "16": { "name": "E2E Tests" },
+    "17": { "name": "Load Tests" }
+  },
+  "chat": {
+    "system": {
+      "translated_to_claude": "→ To Claude: {value}",
+      "spec_saved": "📄 Spec saved: {path} (sha256: {hash}…, {ac_count} AC)",
+      "phase_complete": "Phase {n} complete — {name}",
+      "phase_start": "Phase {n} start — {name}",
+      "phase_skipped": "Phase {n} skipped — {reason}"
+    },
+    "error": {
+      "translator_failed_intent": "Translator failed (intent)",
+      "translator_failed_askq": "Translator failed (askq)",
+      "template_load_failed": "Template load failed",
+      "claude_api_failed": "Claude API failed",
+      "intent_summary_missing": "intent_summary missing — Phase 1 must complete first",
+      "spec_md_required": "Phase 8 requires .mycl/spec.md (Phase 4 output)",
+      "stale_askq_answer": "Stale askq answer",
+      "unknown_tool": "Unknown tool",
+      "approve_before_spec_saved": "Approve called before spec was saved — state inconsistent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "stack_id": "dotnet",
+  "commands": {
+    "install": "dotnet restore",
+    "dev": "dotnet run",
+    "build": "dotnet build --configuration Release",
+    "test": "dotnet test",
+    "lint": "dotnet format --verify-no-changes",
+    "lint_fix": "dotnet format",
+    "simplify": null,
+    "perf": null,
+    "security": "dotnet list package --vulnerable --include-transitive",
+    "integration": "dotnet test --filter Category=Integration"
+  },
+  "e2e_by_project_type": {
+    "web": "dotnet test --filter Category=E2E",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "desktop": null,
+    "default": null
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 5000,
+  "manifest_files": ["*.csproj", "*.sln", "*.fsproj"]
+}

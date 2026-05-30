@@ -1,0 +1,29 @@
+{
+  "stack_id": "php",
+  "commands": {
+    "install": "composer install",
+    "dev": "php -S localhost:8000 -t public",
+    "build": null,
+    "test": "vendor/bin/phpunit",
+    "lint": "vendor/bin/phpstan analyse",
+    "lint_fix": "vendor/bin/php-cs-fixer fix",
+    "simplify": null,
+    "perf": null,
+    "security": "composer audit",
+    "integration": "vendor/bin/phpunit --testsuite=integration"
+  },
+  "e2e_by_project_type": {
+    "web": "vendor/bin/codecept run acceptance",
+    "api": "hurl --test tests/e2e/*.hurl",
+    "cli": null,
+    "library": null,
+    "default": "vendor/bin/codecept run"
+  },
+  "load_by_project_type": {
+    "web": "k6 run loadtest.js",
+    "api": "k6 run loadtest.js",
+    "default": null
+  },
+  "default_port": 8000,
+  "manifest_files": ["composer.json", "composer.lock"]
+}

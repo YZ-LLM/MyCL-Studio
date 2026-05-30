@@ -1,0 +1,61 @@
+{
+  "askq": {
+    "options": {
+      "approve": "Onayla",
+      "revise": "Revize",
+      "cancel": "İptal",
+      "skip": "Atla",
+      "fix": "Düzelt",
+      "rule": "Kural",
+      "yes": "Evet",
+      "no": "Hayır",
+      "continue": "Devam",
+      "stop": "Durdur"
+    },
+    "approval_suffix": {
+      "intent": "\n\nBu niyeti onaylıyor musunuz?",
+      "spec": "\n\nBu spec'i onaylıyor musunuz?",
+      "generic": "\n\nOnaylıyor musunuz?"
+    }
+  },
+  "phase": {
+    "0":  { "name": "Hata Ayıklama" },
+    "1":  { "name": "Niyet Toplama" },
+    "2":  { "name": "Hassasiyet Denetimi" },
+    "3":  { "name": "Mühendislik Brifingi" },
+    "4":  { "name": "Spec Yazımı" },
+    "5": { "name": "UI Yapımı" },
+    "6": { "name": "UI İnceleme" },
+    "7": { "name": "Veritabanı Tasarımı" },
+    "8": { "name": "TDD Uygulama" },
+    "9": { "name": "Risk İncelemesi" },
+    "10": { "name": "Lint" },
+    "11": { "name": "Sadeleştirme" },
+    "12": { "name": "Performans" },
+    "13": { "name": "Güvenlik" },
+    "14": { "name": "Birim Testler" },
+    "15": { "name": "Entegrasyon Testleri" },
+    "16": { "name": "E2E Testler" },
+    "17": { "name": "Yük Testi" }
+  },
+  "chat": {
+    "system": {
+      "translated_to_claude": "→ Claude'a: {value}",
+      "spec_saved": "📄 Spec yazıldı: {path} (sha256: {hash}…, {ac_count} AC)",
+      "phase_complete": "Faz {n} tamamlandı — {name}",
+      "phase_start": "Faz {n} başladı — {name}",
+      "phase_skipped": "Faz {n} atlandı — {reason}"
+    },
+    "error": {
+      "translator_failed_intent": "Çeviri başarısız (niyet)",
+      "translator_failed_askq": "Çeviri başarısız (askq)",
+      "template_load_failed": "Şablon yüklenemedi",
+      "claude_api_failed": "Claude API başarısız",
+      "intent_summary_missing": "intent_summary eksik — önce Faz 1 tamamlanmalı",
+      "spec_md_required": "Faz 8, .mycl/spec.md gerektirir (Faz 4 çıktısı)",
+      "stale_askq_answer": "Eski askq cevabı",
+      "unknown_tool": "Bilinmeyen araç",
+      "approve_before_spec_saved": "Onay, spec yazılmadan önce çağrıldı — state tutarsız"
+    }
+  }
+}
