@@ -72,6 +72,28 @@ Kod üreten fazlar iki şekilde çalışabilir:
   `claude` bulunmazsa sessizce SDK'ya dönülür. `~/.mycl/agent-skills` dizini
   varsa CLI'a `--plugin-dir` ile bağlanır.
 
+## Stack profilleri
+
+Proje tek bir dile bağlı değil. Manifest dosyalarından (`package.json`,
+`pyproject.toml`, `Cargo.toml`, `go.mod` vb.) projenin stack'i tespit edilir ve
+[assets/profiles/](assets/profiles/) altındaki eşleşen profil seçilir. Bir profil,
+stack'i komutlara (lint / test / build / performans), dev-server portuna ve
+manifest dosyalarına eşler — mekanik fazlar (10–17) bu stack-özel komutları
+çalıştırır.
+
+Mevcut **18 stack profili**: Node (npm, yarn, pnpm, bun), Python (pip, poetry, uv),
+Rust, Go, Ruby, PHP, .NET, Dart, Elixir, Swift, Maven, Gradle, Deno. Ayrıca proje
+**tipi** (web / cli / library / api / ml / game / desktop / mobile) sınıflandırılır;
+bu, hangi test fazlarının (E2E, yük) uygulanacağını belirler.
+
+## Hata kataloğu
+
+MyCL'in geliştirdiği her proje bir SQLite `errors.db` ile gelir. Çalışma
+zamanındaki hatalar (backend hata middleware'i + frontend `ErrorBoundary` / fetch
+sarmalayıcısı) kod, konum ve Türkçe açıklamayla kaydedilir; proje içinde bir
+"Hata Kodları" sayfası bunları listeler. Faz 0 (Hata Ayıklama) araştırmaya
+başlarken bu `errors.db`'yi okuyarak kök nedene daha hızlı ulaşır.
+
 ## Güvenlik sınırları
 
 - **bash-guard** — yıkıcı komutlar (`rm -rf`, `sudo`, force push vb.) reddedilir.
@@ -135,12 +157,15 @@ orchestrator/
     tool-handlers.ts  # Read/Write/Edit/Bash/Glob/Grep yürütücüleri
     bash-guard.ts     # yıkıcı komut denylist
     safe-env.ts       # alt process env allowlist
+    profile-loader.ts # stack profili yükleme + tespit
+    errors-db.ts      # proje hata kataloğu (errors.db)
     config.ts         # ~/.mycl/secrets.json + seçili modeller + bayraklar
     ...
   test/               # vitest dosyaları
 assets/
   templates/          # faz başına İngilizce system prompt şablonları
   agent-prompts/      # orchestrator system prompt
+  profiles/           # 18 stack profili (komut + port + manifest eşlemesi)
   i18n/               # tr.json + en.json
   security-rules/     # güvenlik kuralları
 ```
