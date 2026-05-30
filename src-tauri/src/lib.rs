@@ -1,4 +1,4 @@
-// MyCL Studio v14 — Tauri shell entry.
+// MyCL Studio — Tauri shell entry.
 //
 // Mimari (2-katmanlı — Claude Code CLI yok, v14 ADR-001):
 //   Tauri (Rust shell, bu modül)

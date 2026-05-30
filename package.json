@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:all": "npm --prefix orchestrator run build && npm run build",
+    "check": "bash scripts/check.sh",
     "deploy": "bash scripts/deploy.sh",
     "deploy:fast": "bash scripts/deploy.sh --skip-tests",
     "deploy:rollback": "bash scripts/deploy.sh --restore",

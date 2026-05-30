@@ -1,0 +1,30 @@
+name: check
+
+# Yayın gate'i: her push/PR'de `npm run check` sunucuda koşulsuz çalışır.
+# Yereldeki hiçbir şeye (hook, commit disiplini, hatırlama) bağlı değildir —
+# bellek-bağımsız tek garanti katı budur.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (root)
+        run: npm ci
+
+      - name: Install (orchestrator)
+        run: npm --prefix orchestrator ci
+
+      - name: Run gate
+        run: npm run check

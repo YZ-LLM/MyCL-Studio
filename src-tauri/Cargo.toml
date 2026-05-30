@@ -1,7 +1,7 @@
 [package]
 name = "mycl-v14"
 version = "0.1.0"
-description = "MyCL Studio v14 — TR↔EN translator + 20-phase pipeline desktop app"
+description = "MyCL Studio — AI-assisted software development pipeline (desktop)"
 authors = ["Ümit Duman"]
 edition = "2021"
 
