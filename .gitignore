@@ -42,3 +42,7 @@ auth.json
 
 # Local-only docs & archives — no code impact, kept out of git (see nogit/README)
 /nogit/
+
+# Local-only dev process (auto-loaded by Claude Code; mutates per development)
+/CLAUDE.md
+/dev.md
