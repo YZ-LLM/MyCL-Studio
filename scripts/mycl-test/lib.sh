@@ -2,7 +2,7 @@
 # scripts/mycl-test/lib.sh — Ortak helper'lar.
 # v15.7 (2026-05-26): macOS native automation, sıfır npm dep.
 
-PROJECT_ROOT="${PROJECT_ROOT:-/Users/umitduman/adminpanel}"
+PROJECT_ROOT="${PROJECT_ROOT:-$HOME/adminpanel}"
 APP_NAME="MyCL Studio"
 PROCESS_NAME="mycl-v14"  # macOS binary adı (System Events processName)
 TRACE_LOG="$PROJECT_ROOT/.mycl/trace.log"
