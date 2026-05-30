@@ -40,11 +40,5 @@ auth.json
 *.dmg
 *.app
 
-# Internal design & QC docs — kept local, not published (see push plan)
-/ARCHITECTURE.md
-/MyCL_Pseudocode.md
-/QC_CHECKLIST.md
-/big_QC.md
-/docs/
-/kalite_kontrol/
-/dev-archive.md
+# Local-only docs & archives — no code impact, kept out of git (see nogit/README)
+/nogit/
