@@ -2,9 +2,9 @@
 
 Yapay zeka destekli yazılım geliştirme için masaüstü uygulaması. Kullanıcının
 Türkçe niyetini alır, çok fazlı bir pipeline üzerinden çalıştırır ve Claude
-modellerini Anthropic API üzerinden kullanarak kod üretir, test eder ve kalite
-kapılarından geçirir. Arayüz Türkçedir; modellere giden tüm istekler İngilizceye
-çevrilir.
+modellerini Anthropic API üzerinden — opsiyonel olarak Claude Code CLI ile —
+kullanarak kod üretir, test eder ve kalite kapılarından geçirir. Arayüz
+Türkçedir; modellere giden tüm istekler İngilizceye çevrilir.
 
 ## Bileşenler
 
