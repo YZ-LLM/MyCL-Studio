@@ -31,6 +31,10 @@ stale routes, broken navigation.
 - ❌ FORBIDDEN: Writing `SurveyCreatePage.jsx` when `SurveysPage.jsx` already
   exists. ❌ FORBIDDEN: Adding `/surveys/create` route when `/anketler/new`
   already routes to a similar page. Consolidate, don't fork.
+- **Supersession (deprecation)**: when this iteration REPLACES prior behavior,
+  remove or replace the superseded page/component/route — don't leave the old
+  one alongside the new (a stale route/page is debt too, the duplicate problem
+  in reverse). Migrate references, then delete the dead version.
 
 **Iteration awareness**: If `git log` shows commits from previous MyCL
 iterations (look for files like `.mycl/audit.log` changes or earlier
@@ -163,6 +167,7 @@ Implementation requirements:
 | "Build passes, so the UI works." | Compiling ≠ meeting the spec. Build green only means it typechecks. Verify the spec's user-facing requirements and required scripts are actually present. |
 | "package.json already has a `dev` script, good enough." | Phase 10-17 need `lint`/`test`/`perf`/`test:integration` too. Missing scripts = silently skipped phases = incomplete coverage. |
 | "Tweak mode — let me also tidy these other files." | No. Tweak mode = ONLY the requested change, minimal file set. |
+| "I'll wire this component/endpoint the way I remember the API." | Memory invents props and routes. Ground component props, fetch URLs, and endpoint shapes in the real files you discovered; verify against existing code, don't invent. |
 
 ## Red flags — STOP and course-correct if you notice these
 
@@ -186,6 +191,20 @@ Before stopping (no further tool_use), confirm with evidence, not assumption:
   mandatory pipeline scripts (`lint`/`test`/`perf`/`test:integration`) exist.
 - **Build green**: `npm run build` actually passed — you ran it and saw success,
   you did not assume it.
+- **Assumptions flagged**: if you had to assume a non-obvious contract (endpoint
+  shape, prop name, route path) the spec/code didn't pin down, state that
+  assumption in your final summary so it can be checked.
+- **Clean supersession (iteration > 1)**: superseded pages/routes were removed or
+  replaced, not left beside the new ones.
+
+## Escalation — `AskUserQuestion` (rare)
+
+You may call `AskUserQuestion` to ask the user, but ONLY when ALL THREE hold:
+(1) the decision is non-trivial, (2) it is hard to reverse later, and (3) neither
+the spec, the existing code, nor a reasonable default resolves it. Routine choices
+(component naming, file layout, an obvious default) are NOT escalation-worthy —
+pick the sensible default and flag it in your summary. Asking for routine choices
+is itself a failure mode. (Escalation surfaces on the SDK backend only.)
 
 ## Hard constraints
 

@@ -94,6 +94,11 @@ export class Phase8Controller {
     this.base?.abort();
   }
 
+  /** doubt-driven eskalasyon cevabını codegen backend'e iletir (index.ts routing). */
+  submitAskqAnswer(askqId: string, selected_tr: string): void {
+    this.base?.submitAskqAnswer?.(askqId, selected_tr);
+  }
+
   async run(): Promise<"complete" | "fail"> {
     log.info("phase-8", "run start");
 

@@ -14,9 +14,10 @@ import { promises as fs } from "node:fs";
 import { open as openSync } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { enrichRecord } from "./record-context.js";
-import type { AuditEvent } from "./types.js";
+import type { AuditEvent, DecisionRecord } from "./types.js";
 
 const AUDIT_FILE = "audit.log";
+const DECISIONS_FILE = "decisions.jsonl";
 const MYCL_DIR = ".mycl";
 
 const ASCII_RE = /^[\x20-\x7E]+$/;
@@ -72,6 +73,50 @@ export async function appendAudit(
   } finally {
     await fh.close();
   }
+}
+
+/**
+ * ADR karar kaydı append eder (`.mycl/decisions.jsonl`). appendAudit ile aynı
+ * atomic O_APPEND deseni; enrichRecord YOK (ADR kendi sabit şemasını taşır).
+ * Karar veren fazlar (Brief/Spec/DB) onay anında çağırır.
+ */
+export async function appendDecision(
+  projectRoot: string,
+  rec: DecisionRecord,
+): Promise<void> {
+  const line = JSON.stringify(rec) + "\n";
+  const p = join(projectRoot, MYCL_DIR, DECISIONS_FILE);
+  await fs.mkdir(dirname(p), { recursive: true });
+  const fh = await openSync(p, "a");
+  try {
+    await fh.write(line);
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+
+/** decisions.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
+export async function readDecisions(
+  projectRoot: string,
+): Promise<DecisionRecord[]> {
+  const p = join(projectRoot, MYCL_DIR, DECISIONS_FILE);
+  let raw: string;
+  try {
+    raw = await fs.readFile(p, "utf-8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new AuditError(`decisions read failed: ${String(err)}`);
+  }
+  const out: DecisionRecord[] = [];
+  for (const line of raw.split("\n").filter((l) => l.trim())) {
+    try {
+      out.push(JSON.parse(line) as DecisionRecord);
+    } catch (err) {
+      console.error(`[decisions] bad line skipped: ${line.slice(0, 100)} (${err})`);
+    }
+  }
+  return out;
 }
 
 /**

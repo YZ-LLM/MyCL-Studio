@@ -2491,7 +2491,8 @@ async function handleAskqAnswer(
     emitError("no active controller", { id });
     return;
   }
-  // Phase 8 askq desteklemez (codegen). Yalnızca P1/P4 controller'larında var.
+  // submitAskqAnswer'ı olan her controller cevabı kabul eder: qa (P1/P2/P9),
+  // production (P3/P4/P7) ve v15.8'den beri codegen (P5/P8 doubt-driven eskalasyon).
   if ("submitAskqAnswer" in runtime.controller) {
     runtime.controller.submitAskqAnswer(id, selectedText);
   } else {

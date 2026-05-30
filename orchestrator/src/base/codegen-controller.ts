@@ -16,9 +16,11 @@ import {
   loadHistory,
   saveHistoryStep,
 } from "../history.js";
-import { emitChatMessage, emitClaudeStream } from "../ipc.js";
+import { randomUUID } from "node:crypto";
+import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import { executeTool, type ToolContext } from "../tool-handlers.js";
+import { translate } from "../translator.js";
 import type { PhaseId, State } from "../types.js";
 
 export interface CodegenObserverContext {
@@ -145,20 +147,53 @@ export type CodegenOutcome =
   | { kind: "aborted"; turns: number }
   | { kind: "failed"; reason: string };
 
+/** Eskalasyon (AskUserQuestion) askq'sının abort sinyali. */
+const ABORT_SENTINEL = Symbol("codegen-aborted");
+
+interface PendingAskq {
+  options_en: string[];
+  options_tr: string[];
+}
+
 export class CodegenBaseController {
   private aborted = false;
+  // v15.8 (2026-05-31): doubt-driven eskalasyon — codegen (Faz 5/8) kritik,
+  // geri-dönüşsüz, net cevabı olmayan kararlarda kullanıcıya sorabilsin.
+  // Mevcut askq tesisatı (emitAskq + submitAskqAnswer) yeniden kullanılır.
+  private pendingAskq: PendingAskq | null = null;
+  private pendingResolver: ((selected_tr: string) => void) | null = null;
+  private pendingRejecter: ((reason: unknown) => void) | null = null;
+  private currentAskqId: string | null = null;
 
   constructor(private readonly opts: CodegenRunOpts) {}
+
+  /** index.ts askq routing buraya yönlendirir (qa/production ile aynı imza). */
+  submitAskqAnswer(askqId: string, selected_tr: string): void {
+    if (!this.pendingAskq || this.currentAskqId !== askqId) {
+      emitError("stale askq answer", { askqId });
+      return;
+    }
+    const resolver = this.pendingResolver;
+    this.pendingResolver = null;
+    this.pendingRejecter = null;
+    if (resolver) resolver(selected_tr);
+  }
 
   /**
    * Codegen base abort — turn boundary'de yakalanır. SDK çağrısı orta yerden
    * kesilemez (Anthropic SDK signal yok); bir turn tamamlanır, sonra abort
-   * outcome döner.
+   * outcome döner. Bekleyen bir eskalasyon askq'sı varsa onu da reject eder.
    */
   abort(): void {
     if (this.aborted) return;
     this.aborted = true;
     log.info(this.opts.tag, "abort requested");
+    const rejecter = this.pendingRejecter;
+    this.pendingResolver = null;
+    this.pendingRejecter = null;
+    this.pendingAskq = null;
+    this.currentAskqId = null;
+    if (rejecter) rejecter(ABORT_SENTINEL);
   }
 
   async run(): Promise<CodegenOutcome> {
@@ -309,6 +344,23 @@ export class CodegenBaseController {
       const toolResults: Anthropic.MessageParam["content"] = [];
       for (const tu of turnResult.toolUses) {
         const input = tu.input as Record<string, unknown>;
+        // doubt-driven eskalasyon: AskUserQuestion executeTool'a (dosya-op) gitmez
+        // — mevcut askq tesisatıyla kullanıcıya sorulur, cevap tool_result olur.
+        if (tu.name === "AskUserQuestion") {
+          let answer: string;
+          try {
+            answer = await this.askUser(input);
+          } catch (err) {
+            if (err === ABORT_SENTINEL) {
+              log.info(opts.tag, "aborted during escalation", { turn });
+              return { kind: "aborted", turns: turn };
+            }
+            answer =
+              "ERROR: escalation unavailable; proceed with your best judgment and state the assumption explicitly in your output.";
+          }
+          toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: answer });
+          continue;
+        }
         const result = await executeTool(tu.name, input, opts.toolContext);
         // v15.7 (2026-05-25): tool_result content cap — Bash test output'ları
         // ve büyük Read sonuçları her turn history'e ham eklenirse token
@@ -358,6 +410,56 @@ export class CodegenBaseController {
       // Faz fail/abort olursa resume tam buradan devam edebilir.
       await saveHistoryStep(opts.state.project_root, opts.phaseId, userMsg);
     }
+  }
+
+  /**
+   * Eskalasyon: codegen ajanı AskUserQuestion çağırınca kullanıcıya sorar,
+   * EN cevabı döner (ajan EN konuşur). EN→TR (göster) + seçilen TR→EN (geri besle).
+   * production-schema askApproval ile aynı askq tesisatı; abort → ABORT_SENTINEL.
+   */
+  private async askUser(input: Record<string, unknown>): Promise<string> {
+    const question_en = String(input.question ?? "A decision is needed to proceed.");
+    const rawOpts = Array.isArray(input.options) ? input.options.map(String) : [];
+    const options_en = rawOpts.length > 0 ? rawOpts : ["Proceed", "Stop"];
+    const context_en = typeof input.context === "string" ? input.context : "";
+
+    // EN → TR (ajan EN, kullanıcı TR görür). Translate fail → throw (fallback yok).
+    const fullQ_en = context_en ? `${question_en}\n\n${context_en}` : question_en;
+    const question_tr = (await translate(this.opts.config, fullQ_en, "en-to-tr")).text;
+    const options_tr = await Promise.all(
+      options_en.map((o) =>
+        translate(this.opts.config, o, "en-to-tr").then((r) => r.text || o),
+      ),
+    );
+
+    const askqId = randomUUID();
+    this.currentAskqId = askqId;
+    this.pendingAskq = { options_en, options_tr };
+    emitAskq({
+      id: askqId,
+      question: question_tr,
+      options: options_tr,
+      allow_other: true,
+    });
+
+    const selected_tr = await new Promise<string>((resolve, reject) => {
+      this.pendingResolver = resolve;
+      this.pendingRejecter = reject;
+    });
+    this.pendingAskq = null;
+    this.currentAskqId = null;
+
+    const idx = options_tr.indexOf(selected_tr);
+    let selected_en: string;
+    if (idx >= 0) {
+      selected_en = options_en[idx]!;
+    } else {
+      // "Diğer" — kullanıcı serbest TR yazdı; ajana EN besle.
+      selected_en =
+        (await translate(this.opts.config, selected_tr, "tr-to-en")).text || selected_tr;
+    }
+    emitChatMessage("system", `→ Claude'a: ${selected_en}`);
+    return selected_en;
   }
 
   private async handleStreamEvent(

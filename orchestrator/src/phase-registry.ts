@@ -142,7 +142,9 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     type: "codegen",
     name_i18n_key: "phase.5.name",
     model_role: "main",
-    allowed_tools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+    // AskUserQuestion = doubt-driven eskalasyon (SDK backend; nadir). CLI backend
+    // yüzeye çıkaramaz — flag opt-in + eskalasyon nadir olduğu için kabul edilir.
+    allowed_tools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "AskUserQuestion"],
     // v15.7 (2026-05-27): Backend yol yaygın konvansiyonları genişletildi —
     // adminpanel gibi root-level `backend/` kullanan projelerde Phase 5 UI
     // build backend dosyası yazmasın diye. `src/api/`, `src/server/` modern
@@ -204,7 +206,8 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     type: "codegen",
     name_i18n_key: "phase.8.name",
     model_role: "main",
-    allowed_tools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+    // AskUserQuestion = doubt-driven eskalasyon (Faz 8 her zaman SDK backend).
+    allowed_tools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "AskUserQuestion"],
     prompt_template_path: templatePath("phase-08-tdd.md"),
     gate_module_path: gatePath("phase-08.ts"),
     required_audits: ["tdd-test-write", "tdd-prod-write", "tdd-green"],

@@ -4,7 +4,7 @@
 // Phase7Controller → Phase 7 = DB tasarımı.
 
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { appendAudit } from "./audit.js";
+import { appendAudit, appendDecision } from "./audit.js";
 import { ProductionSchemaBaseController } from "./base/production-schema-controller.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
@@ -280,6 +280,26 @@ export class Phase7Controller {
       event: "phase-7-complete",
       caller: "mycl-orchestrator",
     });
+    // ADR: şema/migration kararı (otomatik, non-blocking).
+    try {
+      const wi = outcome.writeInput as unknown as DbSchemaData | undefined;
+      const tableCount = Array.isArray(wi?.tables) ? wi!.tables.length : 0;
+      const migCount = Array.isArray(wi?.migrations) ? wi!.migrations.length : 0;
+      await appendDecision(this.state.project_root, {
+        ts: Date.now(),
+        phase: 7,
+        iteration: this.state.iteration_count ?? 1,
+        title: String(wi?.title ?? "Database schema"),
+        context: `${tableCount} tables, ${migCount} migrations`,
+        alternatives_considered: [],
+        chosen: String(wi?.title ?? "Database schema"),
+        reason: Array.isArray(wi?.migrations)
+          ? wi!.migrations.map((m) => m.description ?? "").filter(Boolean).join("; ").slice(0, 280)
+          : "",
+      });
+    } catch (err) {
+      log.warn("phase-7", "decision record write failed (non-blocking)", err);
+    }
     log.info("phase-7", "complete");
     return "complete";
   }

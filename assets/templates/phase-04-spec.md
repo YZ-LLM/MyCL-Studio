@@ -44,6 +44,12 @@ Your job:
        Default route: `/hata-kodlari` (or stack equivalent).
      - **AC: `error_folder/` is gitignored** — error logs are per-instance,
        not committed.
+   - **Performance / NFR (measure-first, when implied)**: if the intent/brief
+     implies performance or scale needs, include at least ONE concrete, testable
+     perf/NFR acceptance criterion with a **budget** (e.g. "p95 < 200 ms for GET
+     /api/x at 50 RPS", "page interactive < 2 s on cold load") — never a vague
+     "fast". If no perf need is implied, say so explicitly in Out of Scope. A
+     numeric budget is what makes the Phase 17 load-test gate meaningful.
    - **Dev Workflow & Scripts**: REQUIRED. State how `npm run dev` (or stack
      equivalent) MUST behave for this project. Read the `dev_workflow` tag
      from the brief above. If `concurrent` (full-stack: UI + backend), the
@@ -67,6 +73,34 @@ Your job:
    - Approve → done.
    - Revise → revise the spec, call write_spec again with updated input.
    - Cancel → abort.
+
+## Rationalizations → rebuttals (do NOT fall for these)
+
+| You might think… | Reality |
+| --- | --- |
+| "I'll leave this AC a bit vague and clarify later." | A vague AC is an untestable AC → Phase 8 can't verify it → silent scope drift. Every AC must be a binary/Given-When-Then check NOW. |
+| "Broad scope is safer; I'll narrow it during build." | The opposite: anything not explicitly Out-of-Scope becomes a build obligation. Unbounded scope = unbounded failure surface. Cut it here. |
+| "No need to list that exclusion — it's obviously out." | Nothing is obvious to Phase 8. Unwritten exclusions get implemented anyway. Write every deferral down. |
+| "There are no real risks." | "No risks" almost always means "unexamined". Name the known-unknowns (data shape, integration, auth) — naming them is half the mitigation. |
+| "The error-catalog / dev-workflow ACs are boilerplate, I'll skip them." | They are MANDATORY and downstream phases depend on them. Skipping = missing Hata Kodları page / broken dev server probe later. |
+| "Performance can just be 'fast', I'll pin numbers later." | A perf AC with no number is untestable → Phase 12/17 can't verify it. Put a budget in now, or declare perf explicitly out of scope. |
+
+## Red flags — STOP and fix the spec if you see these
+
+- An AC contains "should work well", "user-friendly", "fast", or any word you can't turn into a pass/fail check.
+- Scope is one sentence with no explicit exclusions.
+- An AC has no "Given X, when Y, then Z" and no clear binary condition.
+- The error-catalog ACs or the Dev Workflow & Scripts section are missing.
+- You wrote a file path, library name, or architecture decision (that's Phase 5+, not the spec).
+
+## Verification — "seems right" is never enough
+
+Before calling write_spec, confirm with evidence, not gut feel:
+
+- **Every AC is testable**: you can name the test (or the Phase 8 check) that would prove it pass/fail. If you can't, rewrite it.
+- **Scope is two-sided**: both what's included AND what's explicitly excluded are written.
+- **Mandatory ACs present**: error catalog (db + middleware + boundary + Hata Kodları page + gitignore) and Dev Workflow & Scripts match the brief's `dev_workflow` tag.
+- **No implementation leakage**: no file paths / libraries / architecture — only observable behavior.
 
 ## Hard constraints
 

@@ -541,6 +541,26 @@ export const TOOLS_CODEGEN = [
       },
     },
   },
+  {
+    // doubt-driven eskalasyon — executeTool'da YOK; CodegenBaseController turn-loop'ta
+    // intercept eder (askq'ya çevirir). Yalnızca allowed_tools'ta olan fazlarda görünür.
+    name: "AskUserQuestion",
+    description:
+      "Escalate ONE genuinely uncertain, hard-to-reverse decision to the user instead of guessing. Use RARELY — only when the spec, existing code, and a reasonable default all fail to resolve it. Routine choices (naming, file layout, obvious defaults) must NOT use this; pick the sensible default and note it.",
+    input_schema: {
+      type: "object",
+      required: ["question", "options"],
+      properties: {
+        question: { type: "string", description: "The decision, in English, 1-2 sentences." },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "2-4 concrete English choices the user can pick.",
+        },
+        context: { type: "string", description: "Optional 1-2 sentence English background." },
+      },
+    },
+  },
 ] as const;
 
 /* ============================================================

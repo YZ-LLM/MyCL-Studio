@@ -22,6 +22,11 @@ import { log } from "../logger.js";
 export interface CodegenBackend {
   run(): Promise<CodegenOutcome>;
   abort(): void;
+  /**
+   * doubt-driven eskalasyon cevabını controller'a iletir (SDK backend uygular;
+   * CLI backend non-interactive olduğu için sağlamaz — opsiyonel).
+   */
+  submitAskqAnswer?(askqId: string, selected_tr: string): void;
 }
 
 /**

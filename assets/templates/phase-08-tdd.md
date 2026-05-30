@@ -195,6 +195,10 @@ Treat these as ACs and TDD them just like the spec's own ACs.
 | "I'll write the implementation first, then a test that matches it." | That is not TDD and tends to encode the bug. RED first: write the test, watch it fail for the right reason, then implement. |
 | "Let me add tests for every getter/constructor to be safe." | Trivial tests are noise + maintenance cost (see forbidden list). Test business logic, contracts, edge cases — not the framework. |
 | "I'll leave a TODO and fix it later." | Zero-technical-debt is enforced; TODO/FIXME/HACK in production paths fails the phase. Write it right now or defer the AC explicitly. |
+| "This input is probably trusted, skip validation." | Untrusted until proven. Validate/normalize inputs, parametrize every query (no string-concat SQL), enforce authz on each handler, never inline secrets (env vars only). OWASP basics are ACs, not polish. |
+| "This will be slow, let me optimize it now." | No measurement = speculation. Implement the simple correct version; optimize only against an observed number (a failing perf AC or a profiled hotspot), never a hunch. |
+| "I'll call the library/framework API the way I remember it." | Memory invents signatures. Ground every API call in code you Read in this repo or an existing pattern; verify the signature before relying on it. |
+| "This code looks unused, I'll delete it in REFACTOR." | Understand WHY it exists first (callers, tests, git history). Remove only once you can state what it did and why it is now safe (Chesterton's Fence). |
 
 ## Red flags — STOP and course-correct if you notice these
 
@@ -205,6 +209,10 @@ Treat these as ACs and TDD them just like the spec's own ACs.
 - You wrote production code before its test existed.
 - The final full suite was not run, or you are declaring done off a partial run.
 - A `tdd-tech-debt-detected` event fired and you are ignoring it.
+- You are optimizing code with no measurement showing it is a bottleneck.
+- You wrote an API/library call from memory without confirming its signature in-repo.
+- You added a hardcoded secret, an unparametrized query, or skipped an authz check.
+- You are deleting/rewriting code in REFACTOR without knowing why it was there.
 
 ## Verification — "seems right" is never enough
 
@@ -218,6 +226,22 @@ Before declaring done, confirm with evidence you actually observed:
   pass — you did not assume it from per-group runs.
 - **Zero debt**: no TODO/mock-in-production/skip/empty-catch remains; no
   `tdd-tech-debt-detected` event is outstanding.
+- **Security basics**: inputs validated, queries parametrized, authz enforced,
+  no inlined secrets — for every handler this iteration touched.
+- **Clean supersession (iteration > 1)**: when this iteration replaces prior
+  behavior, the superseded code is removed or migrated — no dead duplicate of
+  the thing you just replaced remains (it would trip the zero-tech-debt scan).
+
+## Escalation — `AskUserQuestion` (rare)
+
+You may call `AskUserQuestion` to ask the user, but ONLY when ALL THREE hold:
+(1) the decision is non-trivial, (2) it is hard to reverse later, and (3) neither
+the spec, the existing code, nor a reasonable default resolves it. Routine choices
+(naming, file layout, which test to write, an obvious default) are NOT
+escalation-worthy — pick the sensible default and note it in your output. If you
+can proceed by flagging the assumption, do that instead of asking. Asking for
+routine choices is itself a failure mode. (Escalation surfaces on the SDK backend
+only; if it is unavailable you'll be told to proceed with your best judgment.)
 
 ## Hard constraints
 

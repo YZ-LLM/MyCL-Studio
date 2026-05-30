@@ -4,15 +4,18 @@ import { join } from "node:path";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import {
   appendAudit,
+  appendDecision,
   AuditError,
   extractSpecSection,
   readAuditLog,
   readAuditLogTail,
+  readDecisions,
   SpecMissingError,
   SpecSectionMissingError,
   summarizeAuditForPhase,
   wasPipelineCompleted,
 } from "../src/audit.js";
+import type { DecisionRecord } from "../src/types.js";
 
 describe("audit", () => {
   let projectRoot: string;
@@ -293,6 +296,43 @@ describe("audit", () => {
       const tail7 = await readAuditLogTail(projectRoot, 7);
       expect(tail3).toHaveLength(3);
       expect(tail7).toHaveLength(7);
+    });
+  });
+
+  describe("decisions (ADR)", () => {
+    it("appendDecision + readDecisions roundtrip preserves all fields", async () => {
+      const rec: DecisionRecord = {
+        ts: 1717000000000,
+        phase: 4,
+        iteration: 2,
+        title: "Survey CRUD spec",
+        context: "In: create/list/respond. Out: analytics dashboard.",
+        alternatives_considered: ["full analytics", "realtime sync"],
+        chosen: "Survey CRUD spec",
+        reason: "Analytics deferred to a later iteration per brief.",
+      };
+      await appendDecision(projectRoot, rec);
+      const back = await readDecisions(projectRoot);
+      expect(back).toHaveLength(1);
+      expect(back[0]).toEqual(rec);
+    });
+
+    it("appendDecision is append-only across multiple records", async () => {
+      await appendDecision(projectRoot, {
+        ts: 1, phase: 3, iteration: 1, title: "Brief",
+        context: "scope", alternatives_considered: [], chosen: "phases [4,8,9]",
+        reason: "no UI implied",
+      });
+      await appendDecision(projectRoot, {
+        ts: 2, phase: 7, iteration: 1, title: "DB schema",
+        context: "3 tables", alternatives_considered: [], chosen: "DB schema", reason: "",
+      });
+      const back = await readDecisions(projectRoot);
+      expect(back.map((d) => d.phase)).toEqual([3, 7]);
+    });
+
+    it("readDecisions returns [] when no file exists", async () => {
+      expect(await readDecisions(projectRoot)).toEqual([]);
     });
   });
 });

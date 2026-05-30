@@ -4,7 +4,7 @@
 // yapısına dökerek `.mycl/brief.md` üretir ve onaylatır.
 
 import { readFile } from "node:fs/promises";
-import { appendAudit } from "./audit.js";
+import { appendAudit, appendDecision } from "./audit.js";
 import { ProductionSchemaBaseController } from "./base/production-schema-controller.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
@@ -245,6 +245,22 @@ export class Phase3Controller {
         event: "phase-3-complete",
         caller: "mycl-orchestrator",
       });
+      // ADR: bu iterasyonun kapsam kararı + gerekçesi (otomatik, non-blocking).
+      try {
+        const skipped = [5, 6, 7, 8].filter((p) => !proposed.includes(p));
+        await appendDecision(this.state.project_root, {
+          ts: Date.now(),
+          phase: 3,
+          iteration: this.state.iteration_count ?? 1,
+          title: String(outcome.writeInput.title ?? "Engineering brief"),
+          context: String(outcome.writeInput.summary ?? "").slice(0, 280),
+          alternatives_considered: skipped.map((p) => OPTIONAL_PHASE_LABELS[p]),
+          chosen: `phases [${proposed.join(",")}]`,
+          reason: String(outcome.writeInput.needed_optional_phases_reason ?? ""),
+        });
+      } catch (err) {
+        log.warn("phase-3", "decision record write failed (non-blocking)", err);
+      }
       log.info("phase-3", "complete");
       return "complete";
     }

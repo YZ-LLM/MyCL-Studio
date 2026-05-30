@@ -379,6 +379,23 @@ export interface AuditEvent {
   detail?: string;
 }
 
+/**
+ * ADR (Architecture Decision Record) — dayanıklı, append-only "neden" kaydı.
+ * Yer: <project_root>/.mycl/decisions.jsonl (audit.log'un kardeşi). Karar veren
+ * fazlar (Brief/Spec/DB) onay anında OTOMATİK yazar; bellek/agent bağımlılığı yok.
+ * audit.log "ne oldu" (event) tutar; bu "neden öyle karar verildi" tutar.
+ */
+export interface DecisionRecord {
+  ts: number;
+  phase: PhaseId;
+  iteration: number;                  // state.iteration_count ?? 1
+  title: string;                      // brief/spec/schema başlığı
+  context: string;                    // 1-2 cümle (scope / özet)
+  alternatives_considered: string[];  // atlanan fazlar / out-of-scope / [] yoksa
+  chosen: string;                     // verilen karar
+  reason: string;                     // gerekçe (needed_optional_phases_reason / risk özeti / "")
+}
+
 // Saf gate fonksiyonu — yan etki yok, sadece karar.
 export type GateResult = "complete" | "incomplete" | "fail";
 export type GateFunction = (state: State, audit: AuditEvent[]) => GateResult;

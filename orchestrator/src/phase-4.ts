@@ -5,7 +5,7 @@
 // approve geldiğinde state.spec_approved + spec_hash patch'i yapılır.
 
 import { readFile } from "node:fs/promises";
-import { appendAudit } from "./audit.js";
+import { appendAudit, appendDecision } from "./audit.js";
 import { ProductionSchemaBaseController } from "./base/production-schema-controller.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
@@ -217,6 +217,27 @@ export class Phase4Controller {
         event: "phase-4-complete",
         caller: "mycl-orchestrator",
       });
+      // ADR: spec kapsamı + named riskler (otomatik, non-blocking).
+      try {
+        const wi = outcome.writeInput as {
+          title?: string; scope?: string;
+          out_of_scope?: string[]; risks?: Array<{ title?: string }>;
+        };
+        await appendDecision(this.state.project_root, {
+          ts: Date.now(),
+          phase: 4,
+          iteration: this.state.iteration_count ?? 1,
+          title: String(wi.title ?? "Engineering spec"),
+          context: String(wi.scope ?? "").slice(0, 280),
+          alternatives_considered: Array.isArray(wi.out_of_scope) ? wi.out_of_scope : [],
+          chosen: String(wi.title ?? "Engineering spec"),
+          reason: Array.isArray(wi.risks)
+            ? wi.risks.map((r) => r.title ?? "").filter(Boolean).join("; ")
+            : "",
+        });
+      } catch (err) {
+        log.warn("phase-4", "decision record write failed (non-blocking)", err);
+      }
       this.statePatch = {
         spec_approved: true,
         spec_hash: outcome.artifact_hash,
