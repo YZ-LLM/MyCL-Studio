@@ -10,7 +10,7 @@
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { readAuditLogTail } from "../audit.js";
+import { readAuditLogTail, readDecisions } from "../audit.js";
 import {
   readProjectMemory,
   readGeneralMemory,
@@ -22,7 +22,7 @@ import {
   renderConversationSection,
 } from "../conversation-context.js";
 import { getActiveAskq, type ActiveAskqSnapshot } from "../ipc.js";
-import type { State } from "../types.js";
+import type { DecisionRecord, State } from "../types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,6 +86,8 @@ export interface AgentContextSnapshot {
   tdd_compliance_score: number | null;
   /** Son N audit event (chronological). */
   recent_audit: Array<{ ts: number; phase: number; event: string; caller: string }>;
+  /** v15.8: Son N ADR kararı — "neden böyle karar verildi" (decisions.jsonl). */
+  recent_decisions: DecisionRecord[];
   /** Pipeline en az bir kez Faz 17'yi tamamladı mı (yeni iterasyon tetikleyici). */
   was_pipeline_completed: boolean;
   /** v15.6: Projeye özel son N hafıza girişi. */
@@ -147,6 +149,9 @@ export async function buildAgentContext(
     readProjectMemory(state.project_root, 10).catch(() => []),
     readGeneralMemory(5, state.stack).catch(() => []),
   ]);
+  const recentDecisions = (
+    await readDecisions(state.project_root).catch(() => [])
+  ).slice(-3);
   return {
     current_phase: state.current_phase ?? 0,
     iteration_count: state.iteration_count ?? 1,
@@ -159,6 +164,7 @@ export async function buildAgentContext(
     dev_server_pid: state.dev_server_pid ?? null,
     tdd_compliance_score: state.tdd_compliance_score ?? null,
     recent_audit: recent,
+    recent_decisions: recentDecisions,
     was_pipeline_completed: wasCompleted,
     project_memory: projectMemory,
     general_memory: generalMemory,
@@ -188,6 +194,17 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
   } else {
     for (const e of ctx.recent_audit) {
       lines.push(`- phase=${e.phase} event=${e.event} caller=${e.caller}`);
+    }
+  }
+  // v15.8: Son kararlar (ADR) — agent yeni isteğin önceki kararla çelişip
+  // çelişmediğini görür ("zaten X'e karar vermiştik").
+  lines.push("", "### Recent decisions (ADR, last 3)", "");
+  if (ctx.recent_decisions.length === 0) {
+    lines.push("(no decisions)");
+  } else {
+    for (const d of ctx.recent_decisions) {
+      const reason = d.reason ? ` — ${d.reason.slice(0, 80)}` : "";
+      lines.push(`- Phase ${d.phase} (iter ${d.iteration}): ${d.chosen}${reason}`);
     }
   }
   // v15.6: Hafıza bölümü — agent karar verirken geçmiş kararları referans alır

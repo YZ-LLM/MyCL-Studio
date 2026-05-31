@@ -14,7 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { appendAudit } from "./audit.js";
+import { appendAudit, formatDecisions, readDecisions } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
@@ -238,6 +238,15 @@ export class Phase0Controller {
       log.warn("phase-0", "context fetch failed", err);
     }
 
+    // ADR tüketimi: geçmiş kararları (son 5) debug ajanına ver — "şu neden böyle
+    // yapılmıştı"ı bilsin (decisions.jsonl, Brief/Spec/DB fazlarınca yazılır).
+    let pastDecisions = "(no prior decisions recorded)";
+    try {
+      pastDecisions = formatDecisions((await readDecisions(this.state.project_root)).slice(-5));
+    } catch (err) {
+      log.warn("phase-0", "decisions read failed (non-blocking)", err);
+    }
+
     let systemPrompt: string;
     try {
       const tmpl = await readFile(this.spec.prompt_template_path!, "utf-8");
@@ -245,6 +254,7 @@ export class Phase0Controller {
         PROJECT_ROOT: this.state.project_root,
         USER_BUG_REPORT: bugReportEn,
         PROJECT_CONTEXT: projectCtx,
+        PAST_DECISIONS: pastDecisions,
       });
     } catch (err) {
       log.error("phase-0", "template load failed", err);

@@ -45,6 +45,16 @@ teşhis, fix uygulamak Faz 5'in işi).
 {{PROJECT_CONTEXT}}
 ---
 
+## Past decisions (ADR — why earlier choices were made)
+
+These are recorded design decisions from prior Brief/Spec/DB phases. Use them to
+understand WHY the code is the way it is before proposing a fix — a "bug" may be a
+deliberate decision. Do NOT blindly undo a documented choice.
+
+---
+{{PAST_DECISIONS}}
+---
+
 ## D1 method — 5-STEP TRIAGE, BE SURGICAL (v15.8, 2026-05-30)
 
 Work the bug as a disciplined triage, NOT an open-ended exploration. Five

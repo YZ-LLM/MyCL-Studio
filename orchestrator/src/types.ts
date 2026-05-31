@@ -396,6 +396,23 @@ export interface DecisionRecord {
   reason: string;                     // gerekçe (needed_optional_phases_reason / risk özeti / "")
 }
 
+/**
+ * Per-faz token gözlemi — `.mycl/cost.jsonl` (append-only, audit/decisions kardeşi).
+ * Faz tamamlanınca o fazın tüm turn'lerinin token toplamı yazılır. Maliyet
+ * regresyonu (örn. Faz 0'ın 185k→90k optimizasyonu) bu kayıttan görünür. $ değil
+ * TOKEN tutulur (deterministik; fiyat tablosu yok, fiyat zamanla kayar).
+ */
+export interface CostRecord {
+  ts: number;
+  phase: PhaseId;
+  iteration: number;
+  turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
 // Saf gate fonksiyonu — yan etki yok, sadece karar.
 export type GateResult = "complete" | "incomplete" | "fail";
 export type GateFunction = (state: State, audit: AuditEvent[]) => GateResult;

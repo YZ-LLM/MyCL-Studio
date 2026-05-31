@@ -14,10 +14,11 @@ import { promises as fs } from "node:fs";
 import { open as openSync } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { enrichRecord } from "./record-context.js";
-import type { AuditEvent, DecisionRecord } from "./types.js";
+import type { AuditEvent, CostRecord, DecisionRecord } from "./types.js";
 
 const AUDIT_FILE = "audit.log";
 const DECISIONS_FILE = "decisions.jsonl";
+const COST_FILE = "cost.jsonl";
 const MYCL_DIR = ".mycl";
 
 const ASCII_RE = /^[\x20-\x7E]+$/;
@@ -114,6 +115,61 @@ export async function readDecisions(
       out.push(JSON.parse(line) as DecisionRecord);
     } catch (err) {
       console.error(`[decisions] bad line skipped: ${line.slice(0, 100)} (${err})`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Per-faz token kaydı append eder (`.mycl/cost.jsonl`). appendDecision deseni.
+ * index.ts her faz tamamlanınca (kova boş değilse) çağırır.
+ */
+export async function appendCost(
+  projectRoot: string,
+  rec: CostRecord,
+): Promise<void> {
+  const line = JSON.stringify(rec) + "\n";
+  const p = join(projectRoot, MYCL_DIR, COST_FILE);
+  await fs.mkdir(dirname(p), { recursive: true });
+  const fh = await openSync(p, "a");
+  try {
+    await fh.write(line);
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * ADR kayıtlarını kompakt, token-hafif metne çevirir (Faz 0 + orkestratör
+ * context enjeksiyonu için). Boşsa açık bir "(no prior decisions)" döner.
+ */
+export function formatDecisions(decisions: DecisionRecord[]): string {
+  if (decisions.length === 0) return "(no prior decisions recorded)";
+  return decisions
+    .map((d) => {
+      const reason = d.reason ? ` — ${d.reason.slice(0, 80)}` : "";
+      return `- Phase ${d.phase} (iter ${d.iteration}): ${d.chosen}${reason}`;
+    })
+    .join("\n");
+}
+
+/** cost.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
+export async function readCosts(projectRoot: string): Promise<CostRecord[]> {
+  const p = join(projectRoot, MYCL_DIR, COST_FILE);
+  let raw: string;
+  try {
+    raw = await fs.readFile(p, "utf-8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new AuditError(`cost read failed: ${String(err)}`);
+  }
+  const out: CostRecord[] = [];
+  for (const line of raw.split("\n").filter((l) => l.trim())) {
+    try {
+      out.push(JSON.parse(line) as CostRecord);
+    } catch (err) {
+      console.error(`[cost] bad line skipped: ${line.slice(0, 100)} (${err})`);
     }
   }
   return out;

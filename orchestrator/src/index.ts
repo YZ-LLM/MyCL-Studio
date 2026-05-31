@@ -25,6 +25,8 @@ import { clearHistory } from "./history.js";
 import { appendAbandonedIntent } from "./abandoned-intents.js";
 import {
   appendAudit as appendAuditModule,
+  appendCost,
+  readCosts,
   extractSpecSection,
   readAuditLogTail,
   wasPipelineCompleted,
@@ -37,6 +39,7 @@ import {
 } from "./task-queue/store.js";
 import type { TaskQueueItem } from "./task-queue/types.js";
 import {
+  beginPhaseCost,
   clearActiveAskq,
   emit,
   emitAskq,
@@ -46,6 +49,7 @@ import {
   emitPhaseChanged,
   getActiveAskq,
   setHistoryRoot,
+  takePhaseCost,
 } from "./ipc.js";
 import {
   appendHistory,
@@ -156,6 +160,21 @@ const runtime: OrchestratorRuntime = {
   pendingMemoryProposal: null,
   pendingPhaseScope: null,
 };
+
+/**
+ * TEST-ONLY seam (v15.8): runtime.state/config'i set eder + history root bağlar,
+ * handleOpenProject'in boot/agent yan etkilerini ATLAYARAK. Yalnızca
+ * pipeline-e2e integration testi `advanceToNextPhase(0)`'ı sürebilsin diye.
+ * Production akışı bunu ÇAĞIRMAZ (IPC handler'ları handleOpenProject kullanır).
+ */
+export function __initRuntimeForTest(state: State, config: MyclConfig): void {
+  runtime.state = state;
+  runtime.config = config;
+  runtime.controller = null;
+  runtime.pendingPhaseScope = null;
+  setHistoryRoot(state.project_root);
+  setRecordContext({ phase: state.current_phase ?? 0 });
+}
 
 // v15.7 (2026-05-25): INTENT_TR_LABEL kaldırıldı (classifier confirm askq yok).
 type AnyPhaseController =
@@ -1506,7 +1525,7 @@ function isPhaseSkippedByScope(state: State, phaseId: number): boolean {
   return !state.needed_phases.includes(phaseId);
 }
 
-async function advanceToNextPhase(from: PhaseId): Promise<void> {
+export async function advanceToNextPhase(from: PhaseId): Promise<void> {
   if (!runtime.state || !runtime.config) return;
   // Narrowing — döngü içinde runtime.state assignments TS'in null-check'ini bozar.
   let state: State = runtime.state;
@@ -1518,6 +1537,23 @@ async function advanceToNextPhase(from: PhaseId): Promise<void> {
   // tüm fazları sırayla ziyaret eder. Bu kural deterministik.
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    // v15.8 (2026-05-31): Önceki fazın token kovasını yaz (LLM turn'ü olduysa).
+    // Faz başlangıcında beginPhaseCost set edildi; burada flush + cost.jsonl.
+    // Mekanik/atlanan fazlar token üretmez → kova boş → yazılmaz.
+    const prevCost = takePhaseCost();
+    if (prevCost && (prevCost.turns > 0 || prevCost.input_tokens > 0)) {
+      await appendCost(state.project_root, {
+        ts: Date.now(),
+        phase: prevCost.phase as PhaseId,
+        iteration: prevCost.iteration,
+        turns: prevCost.turns,
+        input_tokens: prevCost.input_tokens,
+        output_tokens: prevCost.output_tokens,
+        cache_read_input_tokens: prevCost.cache_read_input_tokens,
+        cache_creation_input_tokens: prevCost.cache_creation_input_tokens,
+      }).catch((err) => log.warn("orchestrator", "cost write failed (non-blocking)", err));
+    }
+
     const next = PHASE_TRANSITIONS[cur];
     if (next === null || next === undefined) {
       // v15.8 (2026-05-30): Akış sonu DÜRÜST özet — istenen vs gerçekte
@@ -1581,7 +1617,9 @@ async function advanceToNextPhase(from: PhaseId): Promise<void> {
       continue;
     }
 
-    // Spec var — controller başlat.
+    // Spec var — controller başlat. Token kovasını bu faz için aç (turn'ler
+    // recordTokenUsage üzerinden buraya akar; bir sonraki loop başında flush).
+    beginPhaseCost(next, state.iteration_count ?? 1);
     if (next === 2) {
       const p2 = new Phase2Controller({ state, config: cfg, spec });
       runtime.controller = p2;
@@ -2115,7 +2153,7 @@ function handleListPhases(): void {
   log.info("orchestrator", "phases listed", { count: phases.length });
 }
 
-async function handleAskqAnswer(
+export async function handleAskqAnswer(
   id: string,
   selected: string | string[],
 ): Promise<void> {
@@ -3076,6 +3114,27 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
       );
     } else {
       lines.push("• Sonuç: Akış tamamlandı.");
+    }
+    // v15.8 (2026-05-31): token gözlemi — toplam + per-faz döküm (regresyon görünür).
+    try {
+      const costs = await readCosts(state.project_root);
+      if (costs.length > 0) {
+        const inTok = costs.reduce((s, c) => s + c.input_tokens, 0);
+        const outTok = costs.reduce((s, c) => s + c.output_tokens, 0);
+        const cacheRead = costs.reduce((s, c) => s + c.cache_read_input_tokens, 0);
+        const turns = costs.reduce((s, c) => s + c.turns, 0);
+        const k = (n: number) => `${Math.round(n / 1000)}k`;
+        lines.push(
+          `• 🧮 Token: ${k(inTok)} giriş / ${k(outTok)} çıkış · ${turns} tur · cache okuma ${k(cacheRead)}`,
+        );
+        const perPhase = costs
+          .filter((c) => c.input_tokens + c.output_tokens > 0)
+          .map((c) => `Faz ${c.phase}=${k(c.input_tokens + c.output_tokens)}`)
+          .join(", ");
+        if (perPhase) lines.push(`   ${perPhase}`);
+      }
+    } catch (err) {
+      log.warn("orchestrator", "cost summary failed (non-blocking)", err);
     }
     emitChatMessage("system", lines.join("\n"));
   } catch (err) {

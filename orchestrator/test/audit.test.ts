@@ -4,18 +4,21 @@ import { join } from "node:path";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import {
   appendAudit,
+  appendCost,
   appendDecision,
   AuditError,
+  formatDecisions,
   extractSpecSection,
   readAuditLog,
   readAuditLogTail,
+  readCosts,
   readDecisions,
   SpecMissingError,
   SpecSectionMissingError,
   summarizeAuditForPhase,
   wasPipelineCompleted,
 } from "../src/audit.js";
-import type { DecisionRecord } from "../src/types.js";
+import type { CostRecord, DecisionRecord } from "../src/types.js";
 
 describe("audit", () => {
   let projectRoot: string;
@@ -333,6 +336,51 @@ describe("audit", () => {
 
     it("readDecisions returns [] when no file exists", async () => {
       expect(await readDecisions(projectRoot)).toEqual([]);
+    });
+
+    it("formatDecisions: empty → explicit sentinel; populated → compact lines", () => {
+      expect(formatDecisions([])).toMatch(/no prior decisions/i);
+      const out = formatDecisions([
+        { ts: 1, phase: 3, iteration: 2, title: "Brief", context: "c",
+          alternatives_considered: [], chosen: "phases [4,8]", reason: "no UI implied" },
+      ]);
+      expect(out).toContain("Phase 3 (iter 2)");
+      expect(out).toContain("phases [4,8]");
+      expect(out).toContain("no UI implied");
+    });
+  });
+
+  describe("costs (per-phase tokens)", () => {
+    it("appendCost + readCosts roundtrip preserves fields", async () => {
+      const rec: CostRecord = {
+        ts: 1717000000000,
+        phase: 8,
+        iteration: 1,
+        turns: 12,
+        input_tokens: 90000,
+        output_tokens: 4000,
+        cache_read_input_tokens: 60000,
+        cache_creation_input_tokens: 8000,
+      };
+      await appendCost(projectRoot, rec);
+      const back = await readCosts(projectRoot);
+      expect(back).toEqual([rec]);
+    });
+
+    it("appendCost is append-only; readCosts returns [] when absent", async () => {
+      expect(await readCosts(projectRoot)).toEqual([]);
+      await appendCost(projectRoot, {
+        ts: 1, phase: 1, iteration: 1, turns: 2,
+        input_tokens: 100, output_tokens: 50,
+        cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+      });
+      await appendCost(projectRoot, {
+        ts: 2, phase: 4, iteration: 1, turns: 3,
+        input_tokens: 200, output_tokens: 80,
+        cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+      });
+      const back = await readCosts(projectRoot);
+      expect(back.map((c) => c.phase)).toEqual([1, 4]);
     });
   });
 });
