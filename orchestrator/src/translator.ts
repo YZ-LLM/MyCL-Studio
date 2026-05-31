@@ -11,6 +11,9 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { MyclConfig } from "./config.js";
+import { backendForRole } from "./config.js";
+import { runClaudeCli } from "./cli-run.js";
+import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { emitTranslation } from "./ipc.js";
 import { log } from "./logger.js";
 import type { TranslationDir } from "./types.js";
@@ -150,6 +153,34 @@ async function callApi(
   }
 }
 
+// v15.8: translator rolü "cli" backend'inde — `claude -p` ile çeviri (abonelik,
+// API faturası YOK). Tool YOK (düz metin in/out); strict translate prompt + tag
+// sarmalı SDK yoluyla birebir aynı. cwd read-only (dosya erişimi gerekmez) →
+// process.cwd() zararsız. Spawn cold-start için timeout ≥60s. !ok → throw, dış
+// withExpBackoff retry'lar (SDK ile aynı hata yolu).
+async function callCli(
+  model: string,
+  text: string,
+  timeoutMs: number,
+  dir: TranslationDir,
+): Promise<string> {
+  const res = await runClaudeCli({
+    systemPrompt: buildSystemPrompt(dir),
+    userMessage: `<text_to_translate>\n${text}\n</text_to_translate>`,
+    modelId: model,
+    cwd: process.cwd(),
+    timeoutMs: Math.max(timeoutMs, 60_000),
+  });
+  if (!res.ok) {
+    throw new Error(res.error ?? "claude CLI translate failed");
+  }
+  return res.text
+    .trim()
+    .replace(/^<text_to_translate>\s*/i, "")
+    .replace(/\s*<\/text_to_translate>\s*$/i, "")
+    .trim();
+}
+
 async function withExpBackoff<T>(
   attempts: number,
   fn: (attempt: number) => Promise<T>,
@@ -176,13 +207,23 @@ export async function translate(
   dir: TranslationDir,
 ): Promise<TranslateResult> {
   const startTs = Date.now();
-  const client = new Anthropic({ apiKey: config.api_keys.translator });
   const model = config.selected_models.translator;
   const chunks = splitForChunking(text);
+
+  // v15.8: rol "cli" ise `claude -p` (abonelik, API faturası yok); `claude` yoksa
+  // SDK'ya dürüst fallback (akış kırılmaz). "api" (default) → bugünkü SDK yolu.
+  const wantCli = backendForRole(config, "translator") === "cli";
+  const useCli = wantCli && isClaudeAvailable();
+  if (wantCli && !useCli) {
+    log.warn("translator", "CLI seçili ama `claude` bulunamadı — SDK fallback", { model });
+  }
+  // SDK client yalnızca API yolunda gerekir (CLI'da API key kullanılmaz).
+  const client = useCli ? null : new Anthropic({ apiKey: config.api_keys.translator });
 
   log.info("translator", "request", {
     dir,
     model,
+    backend: useCli ? "cli" : "api",
     text_len: text.length,
     chunks: chunks.length,
   });
@@ -201,7 +242,9 @@ export async function translate(
         if (attempt > 0) {
           log.warn("translator", "retry", { attempt: attempt + 1, model });
         }
-        return callApi(client, model, chunk, config.timeouts_ms.translator, dir);
+        return useCli
+          ? callCli(model, chunk, config.timeouts_ms.translator, dir)
+          : callApi(client!, model, chunk, config.timeouts_ms.translator, dir);
       });
       translatedChunks.push(result);
     }

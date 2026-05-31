@@ -16,6 +16,7 @@ import {
   type CodegenRunOpts,
 } from "../base/codegen-controller.js";
 import { CliCodegenBackend, isClaudeAvailable } from "./cli-backend.js";
+import { backendForRole } from "../config.js";
 import { emitChatMessage } from "../ipc.js";
 import { log } from "../logger.js";
 
@@ -40,14 +41,14 @@ const CLI_ELIGIBLE_TAGS = new Set(["phase-5", "verify-feature"]);
  * Aktif config'e göre codegen backend'i seç.
  *
  * CLI koşulları (HEPSİ gerekli):
- *   - `features.claude_code_cli_enabled` true
+ *   - main rolü backend'i "cli" (Settings → Modeller → main = Claude Code Aboneliği)
  *   - faz CLI kapsamında (phase-5 / verify-feature)
  *   - `claude` binary erişilebilir
- * Aksi halde SDK (dürüst fallback). `claude` yoksa flag açık olsa bile SDK +
+ * Aksi halde SDK (dürüst fallback). `claude` yoksa "cli" seçili olsa bile SDK +
  * tek seferlik uyarı.
  */
 export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
-  const flagOn = opts.config.features.claude_code_cli_enabled === true;
+  const flagOn = backendForRole(opts.config, "main") === "cli";
   const eligible = CLI_ELIGIBLE_TAGS.has(opts.tag);
   if (flagOn && eligible) {
     if (isClaudeAvailable()) {

@@ -11,11 +11,14 @@ import {
   ModelSelectionMissingError,
   loadConfig,
   persistApiKeys,
+  persistAgentBackends,
   persistFeatures,
   persistSelectedModels,
+  readAgentBackends,
   readClaudeCodeFlags,
   readFeatures,
   readSelectedModels,
+  type AgentBackends,
   type ApiKeys,
   type ClaudeCodeFlags,
   type SelectedModels,
@@ -73,7 +76,7 @@ import { Phase9Controller } from "./phase-9.js";
 import { getSpec, PHASE_SPECS, PHASE_TRANSITIONS } from "./phase-registry.js";
 import { type DispatchOutcome } from "./intent-router/router.js";
 import type { IntentKind } from "./intent-router/types.js";
-import { OrchestratorAgent } from "./orchestrator-agent/agent.js";
+import { respondAsOrchestrator } from "./orchestrator-agent/respond.js";
 import { getAgentACL, phaseIdToAgentId } from "./agent-acl.js";
 import type { AgentDecision, MemoryProposal } from "./orchestrator-agent/decision.js";
 import {
@@ -413,8 +416,9 @@ async function runBootStatusCheck(
   st: State,
 ): Promise<void> {
   try {
-    const agent = new OrchestratorAgent({ config: cfg, state: st });
-    const decision = await agent.respond(
+    const decision = await respondAsOrchestrator(
+      cfg,
+      st,
       "[BOOT_CHECK] Kullanıcı projeyi yeni açtı, henüz bir mesaj yazmadı. " +
         "TÜM gerekli bilgi YUKARIDAKİ `## CURRENT CONTEXT (live snapshot)` " +
         "bölümünde — current_phase, pending_ui_tweak, dev_server_pid, " +
@@ -688,7 +692,7 @@ async function handleSaveApiKeys(keys: ApiKeys): Promise<void> {
 }
 
 async function handleSaveSelectedModels(
-  payload: SelectedModels & { effort?: string },
+  payload: SelectedModels & { effort?: string; backends?: Partial<AgentBackends> },
 ): Promise<void> {
   log.info("orchestrator", "save_selected_models", payload);
   if (!payload || !payload.translator || !payload.main) {
@@ -696,7 +700,7 @@ async function handleSaveSelectedModels(
     return;
   }
   try {
-    const { effort, ...sel } = payload;
+    const { effort, backends, ...sel } = payload;
     await persistSelectedModels(sel as SelectedModels);
     // v15.8 (2026-05-30): Efor seçici Modeller sekmesinde — modellerle birlikte
     // kaydedilir. CLI backend aktifse `--effort` olarak kullanılır.
@@ -704,6 +708,18 @@ async function handleSaveSelectedModels(
     if (effort && validEfforts.includes(effort)) {
       const { persistClaudeCodeFlags } = await import("./config.js");
       await persistClaudeCodeFlags({ effort: effort as ClaudeCodeFlags["effort"] });
+    }
+    // v15.8: rol başına backend (API/Abonelik) — Modeller sekmesinde modellerle
+    // birlikte kaydedilir. Geçerli değerler "api"|"cli"; gerisi yok sayılır.
+    if (backends) {
+      const clean: Partial<AgentBackends> = {};
+      for (const role of ["orchestrator", "translator", "main"] as const) {
+        const v = backends[role];
+        if (v === "api" || v === "cli") clean[role] = v;
+      }
+      if (Object.keys(clean).length > 0) {
+        await persistAgentBackends(clean);
+      }
     }
     runtime.config = null;
     await emitConfigStatus();
@@ -801,7 +817,14 @@ async function handleReadSelectedModels(): Promise<void> {
     // v15.8 (2026-05-30): Efor da gönderilir — Settings Modeller sekmesindeki
     // efor seçici mevcut değeri göstersin.
     const flags = await readClaudeCodeFlags();
-    emit("selected_models", { selected: sel ?? null, effort: flags.effort ?? "max" });
+    // v15.8: rol-backend'leri (API/Abonelik) — Modeller sekmesindeki seçiciler
+    // mevcut değeri göstersin (migration uygulanmış halde).
+    const backends = await readAgentBackends();
+    emit("selected_models", {
+      selected: sel ?? null,
+      effort: flags.effort ?? "max",
+      backends,
+    });
   } catch (err) {
     log.error("orchestrator", "read_selected_models failed", err);
     emitError("read_selected_models failed", String(err));
@@ -906,11 +929,11 @@ async function handleUserMessage(text: string): Promise<void> {
   // of truth prensibi: agent dosyalardan okuyor (state.json, audit, brief,
   // spec, memory), runtime-only intent state (pendingIntent) artık yok.
   try {
-    const agent = new OrchestratorAgent({
-      config: runtime.config,
-      state: runtime.state,
-    });
-    const decision = await agent.respond(text);
+    const decision = await respondAsOrchestrator(
+      runtime.config,
+      runtime.state,
+      text,
+    );
     log.info("orchestrator", "agent decision", {
       action: decision.action,
       reason: decision.reason.slice(0, 100),
@@ -2350,11 +2373,11 @@ export async function handleAskqAnswer(
       // Agent'a "tekrar düşün" demek — fresh respond() çağrısı.
       emitChatMessage("system", "🔄 Tekrar düşünüyorum...");
       try {
-        const agent = new OrchestratorAgent({
-          config: runtime.config,
-          state: runtime.state,
-        });
-        const newDecision = await agent.respond(cached.text);
+        const newDecision = await respondAsOrchestrator(
+          runtime.config,
+          runtime.state,
+          cached.text,
+        );
         if (newDecision.action === "fallback_to_classifier") {
           emitChatMessage(
             "system",
@@ -3196,7 +3219,9 @@ ipcRouter.register("list_models", async (data: unknown) => {
   );
 });
 ipcRouter.register("save_settings", async (data: unknown) => {
-  await handleSaveSelectedModels(data as SelectedModels);
+  await handleSaveSelectedModels(
+    data as SelectedModels & { effort?: string; backends?: Partial<AgentBackends> },
+  );
 });
 ipcRouter.register("read_selected_models", async () => {
   await handleReadSelectedModels();

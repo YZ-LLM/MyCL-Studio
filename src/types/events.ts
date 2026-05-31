@@ -130,11 +130,21 @@ export interface ModelsListEvent {
   };
 }
 
+/** v15.8: rol başına backend — "api" (Anthropic SDK) | "cli" (Claude Code Aboneliği). */
+export type AgentBackend = "api" | "cli";
+export interface AgentBackends {
+  orchestrator: AgentBackend;
+  translator: AgentBackend;
+  main: AgentBackend;
+}
+
 export interface SelectedModelsEvent {
   kind: "selected_models";
   data: {
     selected: { translator?: string; main?: string; orchestrator?: string } | null;
     effort?: string;
+    /** v15.8: rol-backend'leri — Modeller sekmesindeki seçiciler için. */
+    backends?: AgentBackends;
   };
 }
 
@@ -325,7 +335,17 @@ export type OrchestratorCommand =
     }
   | { kind: "save_api_keys"; data: { translator: string; main: string; orchestrator?: string } }
   | { kind: "list_models"; data: { which: "translator" | "main"; force?: boolean } }
-  | { kind: "save_settings"; data: { translator: string; main: string; orchestrator?: string; effort?: string } }
+  | {
+      kind: "save_settings";
+      data: {
+        translator: string;
+        main: string;
+        orchestrator?: string;
+        effort?: string;
+        /** v15.8: rol başına backend (api/cli) — modellerle birlikte kaydedilir. */
+        backends?: Partial<AgentBackends>;
+      };
+    }
   | { kind: "read_selected_models" }
   | { kind: "list_phases" }
   | { kind: "check_config" }

@@ -16,6 +16,7 @@ import { TranslatorPanel, type TranslationEntry } from "./components/TranslatorP
 import { ClaudeSimulator, type CCEvent } from "./components/ClaudeSimulator";
 import { useOrchestrator } from "./hooks/useOrchestrator";
 import type {
+  AgentBackends,
   ModelInfo,
   OrchestratorEvent,
   PhaseId,
@@ -499,6 +500,8 @@ function App() {
   });
   // v15.8 (2026-05-30): Main model efor seçimi (CLI backend için). selected_models event'inden gelir.
   const [currentEffort, setCurrentEffort] = useState<string>("max");
+  // v15.8: rol başına backend (api/cli). selected_models event'inden gelir.
+  const [currentBackends, setCurrentBackends] = useState<AgentBackends | undefined>(undefined);
   const [phasesList, setPhasesList] = useState<PhaseSummary[]>([]);
   const [modelsTranslator, setModelsTranslator] = useState<ModelsList>(EMPTY_LIST);
   const [modelsMain, setModelsMain] = useState<ModelsList>(EMPTY_LIST);
@@ -569,6 +572,7 @@ function App() {
       } else if (ev.kind === "selected_models") {
         setCurrentSelected(ev.data.selected ?? null);
         if (ev.data.effort) setCurrentEffort(ev.data.effort);
+        if (ev.data.backends) setCurrentBackends(ev.data.backends);
       } else if (ev.kind === "phases_list") {
         setPhasesList(ev.data.phases);
       } else if (ev.kind === "features_value") {
@@ -616,9 +620,11 @@ function App() {
     main: string,
     orchestrator?: string,
     effort?: string,
+    backends?: AgentBackends,
   ) => {
     setSavingModels(true);
     if (effort) setCurrentEffort(effort);
+    if (backends) setCurrentBackends(backends);
     void orch.send({
       kind: "save_settings",
       data: {
@@ -626,6 +632,7 @@ function App() {
         main,
         ...(orchestrator ? { orchestrator } : {}),
         ...(effort ? { effort } : {}),
+        ...(backends ? { backends } : {}),
       },
     });
     // config_status sonrası modal kapanır
@@ -916,6 +923,7 @@ function App() {
           configStatus.reason === "api_keys_missing")
       }
       currentSelected={currentSelected}
+      currentBackends={currentBackends}
       modelsTranslator={modelsTranslator}
       modelsMain={modelsMain}
       onFetchModels={handleFetchModels}

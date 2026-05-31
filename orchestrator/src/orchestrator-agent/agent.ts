@@ -45,6 +45,40 @@ export class OrchestratorAgentError extends Error {
   override readonly name = "OrchestratorAgentError";
 }
 
+/**
+ * Orkestratör system prompt'unu kur: base agent prompt + (v15.6) recurring-topic
+ * dedup notu. SDK (decide_action tool) ve CLI (text-JSON karar) yolları AYNI
+ * prompt'u kullanır — tek kaynak, davranış paritesi. (CLI yolu sonuna ayrıca
+ * "kararı JSON yaz" override'ı ekler — bkz. cli-orchestrator.ts.)
+ */
+export async function buildOrchestratorSystemPrompt(
+  config: MyclConfig,
+  state: State,
+  userText: string,
+): Promise<string> {
+  // v15.6: Pre-call recurring topic detection. agent-decisions.jsonl semantic
+  // karşılaştırma → 2. confirmation tetikleyici notu sistem prompt'una eklenir.
+  const recurring = await detectRecurringTopic(config, state.project_root, userText);
+  let systemPrompt = await buildAgentSystemPrompt(state, config);
+  if (recurring.recurring) {
+    systemPrompt +=
+      `\n\n---\n\n## BU KONU TEKRAR EDİYOR (v15.6 dedup)\n\n` +
+      `Current user mesajı geçmiş bir agent kararıyla semantic olarak ` +
+      `benzer (score=${recurring.similarity_score}/10).\n` +
+      `- Geçmiş topic_slug: \`${recurring.previous_topic_slug}\`\n` +
+      `- Geçmiş user_text: "${(recurring.previous_user_text ?? "").slice(0, 200)}"\n\n` +
+      `**Karar**: \`save_memory_proposal\` action'ını DÜŞÜN. ` +
+      `memory_proposal alanını topic_slug = \`${recurring.previous_topic_slug}\` ` +
+      `kullanarak doldur. Hafıza kaydı onaylanırsa SONRASINDA kullanıcının ` +
+      `asıl niyetini execute edersin (bir sonraki agent turn'unda).`;
+  }
+  log.info("orchestrator-agent", "system prompt built", {
+    recurring: recurring.recurring,
+    user_text_len: userText.length,
+  });
+  return systemPrompt;
+}
+
 export interface OrchestratorAgentDeps {
   config: MyclConfig;
   state: State;
@@ -73,37 +107,16 @@ export class OrchestratorAgent {
     const apiKey = orchestratorApiKey(this.deps.config.api_keys);
     const modelId = orchestratorModelId(this.deps.config.selected_models);
 
-    // v15.6: Pre-call recurring topic detection. agent-decisions.jsonl
-    // semantic karşılaştırma → 2. confirmation tetikleyici notu sistem
-    // prompt'una eklenir. Agent isterse save_memory_proposal action seçer.
-    const recurring = await detectRecurringTopic(
+    const systemPrompt = await buildOrchestratorSystemPrompt(
       this.deps.config,
-      this.deps.state.project_root,
+      this.deps.state,
       userText,
     );
-
-    let systemPrompt = await buildAgentSystemPrompt(
-      this.deps.state,
-      this.deps.config,
-    );
-    if (recurring.recurring) {
-      systemPrompt +=
-        `\n\n---\n\n## BU KONU TEKRAR EDİYOR (v15.6 dedup)\n\n` +
-        `Current user mesajı geçmiş bir agent kararıyla semantic olarak ` +
-        `benzer (score=${recurring.similarity_score}/10).\n` +
-        `- Geçmiş topic_slug: \`${recurring.previous_topic_slug}\`\n` +
-        `- Geçmiş user_text: "${(recurring.previous_user_text ?? "").slice(0, 200)}"\n\n` +
-        `**Karar**: \`save_memory_proposal\` action'ını DÜŞÜN. ` +
-        `memory_proposal alanını topic_slug = \`${recurring.previous_topic_slug}\` ` +
-        `kullanarak doldur. Hafıza kaydı onaylanırsa SONRASINDA kullanıcının ` +
-        `asıl niyetini execute edersin (bir sonraki agent turn'unda).`;
-    }
 
     log.info("orchestrator-agent", "respond start", {
       model: modelId,
       user_text_len: userText.length,
       current_phase: this.deps.state.current_phase,
-      recurring: recurring.recurring,
     });
 
     const messages: ApiMessage[] = [

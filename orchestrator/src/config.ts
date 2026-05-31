@@ -93,11 +93,33 @@ const DEFAULT_FEATURES: FeatureFlags = {
   claude_code_cli_enabled: false,
 };
 
+/**
+ * v15.8 (2026-05-31): Her ajan rolü ayrı ayrı API (Anthropic SDK) veya CLI
+ * (Claude Code aboneliği — `claude` subprocess, oauthAccount auth, API faturası
+ * YOK) ile koşabilir. "api" = mevcut SDK yolu (default, davranış korunur). "cli"
+ * = `claude` CLI (abonelik). Eski `features.claude_code_cli_enabled:true` →
+ * `main:"cli"` migration'ı resolveAgentBackends'te yapılır.
+ */
+export type AgentBackend = "api" | "cli";
+export type AgentRole = "orchestrator" | "translator" | "main";
+export interface AgentBackends {
+  orchestrator: AgentBackend;
+  translator: AgentBackend;
+  main: AgentBackend;
+}
+const DEFAULT_BACKENDS: AgentBackends = {
+  orchestrator: "api",
+  translator: "api",
+  main: "api",
+};
+
 export interface MyclConfig {
   api_keys: ApiKeys;
   selected_models: SelectedModels;
   /** Claude Code SDK çağrılarında effort/betas — main model için. */
   claude_code_flags: ClaudeCodeFlags;
+  /** v15.8: rol başına backend (api/cli). selected_models'e paralel. */
+  agent_backends: AgentBackends;
   /** v15.7: opsiyonel özellikler (kullanıcı ayarlanabilir). */
   features: FeatureFlags;
   timeouts_ms: {
@@ -149,6 +171,7 @@ function secretsPath(): string {
 interface ConfigFile {
   selected_models?: Partial<SelectedModels>;
   claude_code_flags?: ClaudeCodeFlags;
+  agent_backends?: Partial<AgentBackends>;
   features?: Partial<FeatureFlags>;
   timeouts_ms?: Partial<MyclConfig["timeouts_ms"]>;
 }
@@ -261,6 +284,29 @@ function resolveSelectedModels(file: ConfigFile): SelectedModels {
 }
 
 /**
+ * Rol başına backend'i çözer. Default hepsi "api". Migration: eski
+ * `features.claude_code_cli_enabled:true` + main backend'i explicit set değilse
+ * → main:"cli" (geriye uyum; eski kullanıcının main-CLI tercihi korunur).
+ */
+function resolveAgentBackends(file: ConfigFile): AgentBackends {
+  const ab = file.agent_backends ?? {};
+  const merged: AgentBackends = { ...DEFAULT_BACKENDS, ...ab };
+  if (ab.main === undefined && file.features?.claude_code_cli_enabled === true) {
+    merged.main = "cli";
+  }
+  return merged;
+}
+
+/**
+ * Bir rol için aktif backend ("api" | "cli"). loadConfig her zaman agent_backends'i
+ * doldurur; yine de partial/cast config'lere karşı savunmacı — eksikse "api"
+ * (DEFAULT_BACKENDS güvenli default'u, bugünkü SDK davranışı).
+ */
+export function backendForRole(config: MyclConfig, role: AgentRole): AgentBackend {
+  return config.agent_backends?.[role] ?? "api";
+}
+
+/**
  * Tüm config'i yükler. API key veya model seçimi eksikse spesifik hata fırlatır;
  * UI bu hata türlerine göre ayarlar ekranının ilgili tab'ını açar.
  */
@@ -275,6 +321,7 @@ export async function loadConfig(): Promise<MyclConfig> {
     api_keys,
     selected_models,
     claude_code_flags: { ...DEFAULT_FLAGS, ...(fileConfig.claude_code_flags ?? {}) },
+    agent_backends: resolveAgentBackends(fileConfig),
     features: { ...DEFAULT_FEATURES, ...(fileConfig.features ?? {}) },
     timeouts_ms: { ...DEFAULT_TIMEOUTS, ...(fileConfig.timeouts_ms ?? {}) },
   };
@@ -359,4 +406,26 @@ export async function persistFeatures(
 export async function readFeatures(): Promise<FeatureFlags> {
   const file = await loadConfigFile();
   return { ...DEFAULT_FEATURES, ...(file.features ?? {}) };
+}
+
+/**
+ * v15.8: rol başına backend'i config.json'a yazar (merge). Settings → Modeller'den
+ * her ajan için API/Abonelik seçimi kaydedilir.
+ */
+export async function persistAgentBackends(
+  backends: Partial<AgentBackends>,
+): Promise<void> {
+  await fs.mkdir(configDir(), { recursive: true, mode: 0o700 });
+  const existing = await loadConfigFile();
+  const next: ConfigFile = {
+    ...existing,
+    agent_backends: { ...DEFAULT_BACKENDS, ...(existing.agent_backends ?? {}), ...backends },
+  };
+  const raw = JSON.stringify(next, null, 2) + "\n";
+  await fs.writeFile(configPath(), raw, { encoding: "utf-8", mode: 0o600 });
+}
+
+/** Mevcut rol-backend'lerini okur (migration uygulanmış). Settings'te göstermek için. */
+export async function readAgentBackends(): Promise<AgentBackends> {
+  return resolveAgentBackends(await loadConfigFile());
 }

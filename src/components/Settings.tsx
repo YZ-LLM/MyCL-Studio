@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { t as i18nT } from "../i18n";
-import type { ModelInfo } from "../types/events";
+import type { ModelInfo, AgentBackend, AgentBackends } from "../types/events";
 import { isAutoUpdateOnBootEnabled } from "./UpdateButton";
 
 /**
@@ -56,7 +56,10 @@ interface Props {
     main: string,
     orchestrator?: string,
     effort?: string,
+    backends?: AgentBackends,
   ) => void;
+  /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
+  currentBackends?: AgentBackends;
   onSaveApiKeys: (translator: string, main: string, orchestrator?: string) => void;
   onClose: () => void;
   savingModels: boolean;
@@ -134,6 +137,51 @@ function ModelDropdown({
   );
 }
 
+/**
+ * v15.8: Rol başına backend seçici — API (Anthropic SDK, faturalı) vs Claude Code
+ * Aboneliği (`claude` CLI, abonelikle çalışır, API faturası yok). Her ajan ayrı.
+ */
+function BackendSelector({
+  value,
+  onChange,
+}: {
+  value: AgentBackend;
+  onChange: (v: AgentBackend) => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+      {(["api", "cli"] as const).map((b) => {
+        const active = value === b;
+        return (
+          <button
+            key={b}
+            type="button"
+            onClick={() => onChange(b)}
+            style={{
+              flex: 1,
+              fontSize: 11,
+              padding: "4px 8px",
+              borderRadius: 5,
+              cursor: "pointer",
+              border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+              background: active ? "var(--accent-dim, rgba(80,160,255,0.15))" : "transparent",
+              color: active ? "var(--fg)" : "var(--fg-dim)",
+              fontWeight: active ? 600 : 400,
+            }}
+            title={
+              b === "api"
+                ? "Anthropic API (API key gerekir, çağrı başına faturalı)"
+                : "Claude Code Aboneliği — `claude` CLI ile çalışır, API faturası yok (abonelik kullanılır)"
+            }
+          >
+            {b === "api" ? "API" : "Claude Code Aboneliği"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Settings({
   open,
   initialTab = "models",
@@ -151,6 +199,7 @@ export function Settings({
   features,
   onSaveFeatures,
   effort,
+  currentBackends,
 }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [translatorSel, setTranslatorSel] = useState<string>(
@@ -163,6 +212,17 @@ export function Settings({
   );
   // v15.8 (2026-05-30): Main model efor seçimi (CLI backend için).
   const [effortSel, setEffortSel] = useState<string>(effort ?? "max");
+  // v15.8: rol başına backend (api/cli). Default hepsi "api" (bugünkü SDK).
+  const DEFAULT_BACKENDS: AgentBackends = {
+    orchestrator: "api",
+    translator: "api",
+    main: "api",
+  };
+  const [backends, setBackends] = useState<AgentBackends>(
+    currentBackends ?? DEFAULT_BACKENDS,
+  );
+  const setBackend = (role: keyof AgentBackends, v: AgentBackend) =>
+    setBackends((prev) => ({ ...prev, [role]: v }));
 
   // API Keys form state
   const [apiKeyTranslator, setApiKeyTranslator] = useState("");
@@ -196,6 +256,10 @@ export function Settings({
   useEffect(() => {
     if (effort) setEffortSel(effort);
   }, [effort]);
+  // v15.8: rol-backend'leri prop'u (config'ten) değişince senkronize et.
+  useEffect(() => {
+    if (currentBackends) setBackends(currentBackends);
+  }, [currentBackends]);
 
   const modelsValid = translatorSel && mainSel;
   const apiKeysValid =
@@ -295,35 +359,57 @@ export function Settings({
                 Translator: Phase 1 (askq) + TR↔EN çeviri için kullanılır. Main: Phase 4/9
                 (production, codegen) için kullanılır. Liste Anthropic API'den çekilir.
               </p>
-              <ModelDropdown
-                label="Translator Modeli"
-                selected={translatorSel}
-                models={modelsTranslator.models}
-                loading={modelsTranslator.loading}
-                onChange={setTranslatorSel}
-                onRefresh={() => onFetchModels("translator", true)}
-              />
-              <ModelDropdown
-                label="Main Modeli"
-                selected={mainSel}
-                models={modelsMain.models}
-                loading={modelsMain.loading}
-                onChange={setMainSel}
-                onRefresh={() => onFetchModels("main", true)}
-              />
+              <div>
+                <ModelDropdown
+                  label="Translator Modeli"
+                  selected={translatorSel}
+                  models={modelsTranslator.models}
+                  loading={modelsTranslator.loading}
+                  onChange={setTranslatorSel}
+                  onRefresh={() => onFetchModels("translator", true)}
+                />
+                <BackendSelector
+                  value={backends.translator}
+                  onChange={(v) => setBackend("translator", v)}
+                />
+              </div>
+              <div>
+                <ModelDropdown
+                  label="Main Modeli"
+                  selected={mainSel}
+                  models={modelsMain.models}
+                  loading={modelsMain.loading}
+                  onChange={setMainSel}
+                  onRefresh={() => onFetchModels("main", true)}
+                />
+                <BackendSelector
+                  value={backends.main}
+                  onChange={(v) => setBackend("main", v)}
+                />
+              </div>
               {/* v15.5 Orkestrator Agent Model — opsiyonel. Main model
                   fallback olduğundan boş bırakılabilir. */}
-              <ModelDropdown
-                label="Orkestrator Ajan Model (opsiyonel)"
-                selected={orchestratorSel || undefined}
-                models={modelsMain.models}
-                loading={modelsMain.loading}
-                onChange={setOrchestratorSel}
-                onRefresh={() => onFetchModels("main", true)}
-              />
+              <div>
+                <ModelDropdown
+                  label="Orkestrator Ajan Model (opsiyonel)"
+                  selected={orchestratorSel || undefined}
+                  models={modelsMain.models}
+                  loading={modelsMain.loading}
+                  onChange={setOrchestratorSel}
+                  onRefresh={() => onFetchModels("main", true)}
+                />
+                <BackendSelector
+                  value={backends.orchestrator}
+                  onChange={(v) => setBackend("orchestrator", v)}
+                />
+              </div>
               <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: 0 }}>
                 Boş bırakırsan main model kullanılır. Agent kullanıcı niyetini
                 doğru anlamak için daha güçlü model seçilebilir (örn. Opus).
+                <br />
+                <strong>Backend</strong>: API = Anthropic (çağrı başına faturalı);
+                Claude Code Aboneliği = `claude` CLI ile çalışır, API faturası yok
+                (abonelik kullanılır). Her ajan ayrı ayarlanır.
               </p>
               {/* v15.8 (2026-05-30): Main model efor seçimi — Claude Code CLI
                   backend aktifse `--effort` olarak kullanılır. */}
@@ -352,7 +438,7 @@ export function Settings({
                   ))}
                 </select>
                 <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "4px 0 0" }}>
-                  Sadece Claude Code CLI backend açıkken etkili (Özellikler sekmesi).
+                  Sadece Main backend "Claude Code Aboneliği" seçiliyken etkili.
                   Yüksek efor = daha derin akıl yürütme, daha çok token.
                   <strong> ultracode</strong> = xhigh + dinamik iş akışları; yalnızca Opus 4.7/4.8.
                 </p>
@@ -367,6 +453,7 @@ export function Settings({
                     mainSel,
                     orchestratorSel.trim() || undefined,
                     effortSel,
+                    backends,
                   )
                 }
               >
@@ -501,44 +588,13 @@ export function Settings({
                 </div>
               </label>
 
-              {/* v15.8 (2026-05-30): Claude Code CLI backend */}
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: 12,
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={features?.claude_code_cli_enabled ?? false}
-                  onChange={(e) =>
-                    onSaveFeatures?.({ claude_code_cli_enabled: e.target.checked })
-                  }
-                  style={{ width: 18, height: 18 }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, color: "var(--fg-bright)" }}>
-                    🤖 Claude Code CLI (Main Codegen)
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--fg-dim)",
-                      marginTop: 2,
-                    }}
-                  >
-                    Açık: main codegen (Faz 5 + özellik testi) `claude` CLI ile
-                    çalışır; Modeller sekmesindeki efor kullanılır; main panel
-                    salt-okunur CLI akışı gösterir. Kapalı: dahili SDK döngüsü.
-                    `claude` kurulu değilse otomatik SDK'ya döner.
-                  </div>
-                </div>
-              </label>
+              {/* v15.8: Claude Code CLI backend artık Modeller sekmesinde rol
+                  başına seçilir (her ajan için API / Claude Code Aboneliği).
+                  Eski tek-checkbox kaldırıldı — main backend seçici devraldı. */}
+              <p style={{ fontSize: 11, color: "var(--fg-dim)", margin: 0 }}>
+                🤖 Backend seçimi (API / Claude Code Aboneliği) artık her ajan için
+                ayrı ayrı <strong>Modeller</strong> sekmesinde yapılır.
+              </p>
             </div>
           )}
 

@@ -136,7 +136,9 @@ export class CliCodegenBackend implements CodegenBackend {
     return new Promise<CodegenOutcome>((resolve) => {
       const child = spawn("claude", args, {
         cwd: opts.state.project_root,
-        env: { ...safeEnv(), ANTHROPIC_API_KEY: opts.apiKey, LC_ALL: "C" },
+        // v15.8: API key ENJEKTE EDİLMEZ → `claude` kurulu abonelikle (oauthAccount)
+        // koşar, API faturası YOK. (Eski: ANTHROPIC_API_KEY: opts.apiKey — aboneliği eziyordu.)
+        env: { ...safeEnv(), LC_ALL: "C" },
         stdio: ["ignore", "pipe", "pipe"],
       });
       this.child = child;

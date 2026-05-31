@@ -170,8 +170,13 @@ function dispatch(turnOpts: { tools?: Array<{ name: string }>; system?: string }
 
 describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
   let projectRoot: string;
+  // Fire-and-forget advanceToNextPhase promise'i — teardown'dan ÖNCE settle
+  // edilir ki trailing yazımlar (cost flush / pipeline-end summary) `rm` ile
+  // yarışıp ENOTEMPTY vermesin.
+  let advancePromise: Promise<unknown> | null = null;
 
   beforeEach(async () => {
+    advancePromise = null;
     projectRoot = await mkdtemp(join(tmpdir(), "mycl-e2e-"));
     await writeFile(
       join(projectRoot, "package.json"),
@@ -188,7 +193,12 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
   });
 
   afterEach(async () => {
-    await rm(projectRoot, { recursive: true, force: true });
+    // Arka plan pipeline'ın trailing yazımları bitsin (bounded) — yarış → ENOTEMPTY önlenir.
+    if (advancePromise) {
+      await Promise.race([advancePromise, new Promise((r) => setTimeout(r, 3000))]);
+    }
+    // maxRetries: kalan transient yazım/handle için defansif retry.
+    await rm(projectRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   });
 
   // Faz 1'i (intent) tamamlanmış varsayıp Faz 2'den gerçek motoru sürer; askq'ları
@@ -204,12 +214,14 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
       selected_models: { translator: "m", main: "m", orchestrator: "m", relevance: "m" },
       api_keys: { translator: "k", main: "k", orchestrator: "k", relevance: "k" },
       claude_code_flags: { betas: [], effort: "high" },
+      agent_backends: { orchestrator: "api", translator: "api", main: "api" },
       features: { claude_code_cli_enabled: false },
     } as unknown as MyclConfig;
 
     __initRuntimeForTest(state, config);
     // Gerçek-zaman pump (fsync'li yazımlar setImmediate'tan yavaş; setTimeout + deadline).
-    advanceToNextPhase(1).catch((e) => console.error("ADVANCE(1) REJECT:", e));
+    // Promise yakalanır → afterEach trailing yazımları settle eder (teardown yarışı yok).
+    advancePromise = advanceToNextPhase(1).catch((e) => console.error("ADVANCE(1) REJECT:", e));
     let reached17 = false;
     const deadline = Date.now() + 35_000;
     while (!reached17 && Date.now() < deadline) {
@@ -222,6 +234,9 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
       await new Promise((r) => setTimeout(r, 5));
       reached17 = (await readAuditLog(projectRoot)).some((e) => e.event === "phase-17-complete");
     }
+    // Trailing yazımlar (cost flush / pipeline-end summary) tamamlansın ki
+    // decisions/cost assertion'ları tam veri görsün (bounded — hang yok).
+    await Promise.race([advancePromise, new Promise((r) => setTimeout(r, 3000))]);
     return readAuditLog(projectRoot);
   }
 
