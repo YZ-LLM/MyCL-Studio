@@ -66,7 +66,7 @@ export class Phase5Controller {
     try {
       await stat(specPath);
     } catch {
-      emitError("phase-6 requires spec.md", { specPath });
+      emitError("phase-5 requires spec.md", { specPath });
       this.lastFailReason = "spec.md missing (Phase 4 incomplete)";
       return "fail";
     }
@@ -222,12 +222,12 @@ export class Phase5Controller {
     if (isTweakMode) {
       const tweakWrites = audit.filter(
         (e) =>
-          e.phase === 6 &&
+          e.phase === 5 &&
           e.event === "ui-tweak-applied" &&
           (e.ts > (this.state.updated_at ?? 0)), // sadece bu turun event'leri
       );
       if (tweakWrites.length === 0) {
-        emitError("phase-6 tweak: no ui-tweak-applied events — Claude yazmadı", null);
+        emitError("phase-5 tweak: no ui-tweak-applied events — Claude yazmadı", null);
         this.lastFailReason = "tweak mode: no ui-tweak-applied events";
         return "fail";
       }
@@ -239,26 +239,26 @@ export class Phase5Controller {
         detail: `tweak verified: ${tweakWrites.length} file(s) changed — "${tweakDesc.slice(0, 80)}"`,
       });
     } else {
-      const p6Writes = audit.filter(
-        (e) => e.phase === 6 && e.event === "ui-file-write",
+      const uiWrites = audit.filter(
+        (e) => e.phase === 5 && e.event === "ui-file-write",
       );
-      if (p6Writes.length === 0) {
-        emitError("phase-6: no ui-file-write events — Claude yazmadı", null);
+      if (uiWrites.length === 0) {
+        emitError("phase-5: no ui-file-write events — Claude yazmadı", null);
         this.lastFailReason = "no ui-file-write events";
         return "fail";
       }
       try {
         await stat(join(this.state.project_root, "package.json"));
       } catch {
-        emitError("phase-6: package.json not present after Claude run", null);
+        emitError("phase-5: package.json not present after Claude run", null);
         this.lastFailReason = "package.json missing after codegen";
         return "fail";
       }
 
-      // NOT: `phase-6-complete` audit'i dev server READY olduktan sonra yazılır
+      // NOT: `phase-5-complete` audit'i dev server READY olduktan sonra yazılır
       // (aşağıda). Kullanıcı kuralı (feedback-faz-fail-propagation):
       // dev server fail → Faz 5 fail → Faz 6'ye geçilmez.
-      // Bu sayede audit'te `phase-6-complete` yoksa resume akışı current_phase=6
+      // Bu sayede audit'te `phase-5-complete` yoksa resume akışı current_phase=5
       // kalır ve Faz 5 yeniden çalıştırılır.
     }
 
@@ -388,8 +388,8 @@ export class Phase5Controller {
     );
     openBrowser(`http://localhost:${handle.port}`);
 
-    // SUCCESS path — burada `phase-6-complete` audit yazılır. Audit'te yoksa
-    // resume akışı Phase 5'yı yeniden çalıştırır.
+    // SUCCESS path — burada `phase-5-complete` audit yazılır. Audit'te yoksa
+    // resume akışı Phase 5'i yeniden çalıştırır.
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 5,

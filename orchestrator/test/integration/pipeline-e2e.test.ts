@@ -50,6 +50,26 @@ vi.mock("node:child_process", async (orig) => ({
   },
 }));
 
+// Phase 5 dev-server zinciri (codegen-dahil test için) — gerçek server/watcher/browser yerine sahte.
+vi.mock("../../src/dev-server-launcher.js", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  tryDevServerChain: vi.fn(async () => ({
+    ok: true,
+    cmd: "npm run dev",
+    handle: { pid: 99999, port: 5173, stdout: null, stderr: null },
+    attempts: [],
+  })),
+  openBrowser: vi.fn(),
+}));
+vi.mock("../../src/runtime-error-watcher.js", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  replaceActiveWatcher: vi.fn(),
+}));
+vi.mock("../../src/vite-runtime-injector.js", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  ensureViteRuntimeInjection: vi.fn(async () => {}),
+}));
+
 // ipc: emitAskq dışında GERÇEK (beginPhaseCost/takePhaseCost/recordTokenUsage gerçek kalmalı).
 const askqQueue: Array<{ id: string; options: string[] }> = [];
 vi.mock("../../src/ipc.js", async (orig) => {
@@ -71,10 +91,14 @@ import { loadOrInit, save as saveState } from "../../src/state.js";
 import { appendAudit, readAuditLog, readDecisions, readCosts } from "../../src/audit.js";
 import { recordTokenUsage } from "../../src/ipc.js";
 import type { MyclConfig } from "../../src/config.js";
+import type { AuditEvent } from "../../src/types.js";
 
 const usage = { input_tokens: 120, output_tokens: 60 };
 let turnSeq = 0;
 const written = new Set<string>();
+let neededForTest: number[] = []; // write_brief'in önereceği opsiyonel fazlar
+let p5Step = 0; // Phase 5 codegen turn sayacı
+let p8Step = 0; // Phase 8 codegen turn sayacı
 
 function toolTurn(name: string, input: Record<string, unknown>) {
   const id = `tu_${name}_${turnSeq++}`;
@@ -94,8 +118,9 @@ function endTurn() {
   };
 }
 
-function dispatch(turnOpts: { tools?: Array<{ name: string }> }) {
+function dispatch(turnOpts: { tools?: Array<{ name: string }>; system?: string }) {
   const names = (turnOpts.tools ?? []).map((t) => t.name);
+  const sys = String(turnOpts.system ?? "");
   let res: ReturnType<typeof toolTurn> | ReturnType<typeof endTurn>;
   if (names.includes("request_intent_approval")) {
     res = toolTurn("request_intent_approval", { summary: "Build a small backend utility." });
@@ -106,22 +131,36 @@ function dispatch(turnOpts: { tools?: Array<{ name: string }> }) {
     res = toolTurn("write_brief", {
       title: "Backend utility", summary: "A small backend logic change.",
       tags: [], stakeholders: [], constraints: [],
-      needed_optional_phases: [], // 5/6/7/8 scope-skip
-      needed_optional_phases_reason: "Backend-only logic; no UI/DB this iteration.",
+      needed_optional_phases: neededForTest, // [] → 5-8 skip; [5,8] → codegen koşar
+      needed_optional_phases_reason: "Test scope.",
     });
   } else if (names.includes("request_brief_approval")) {
     res = toolTurn("request_brief_approval", { pitch: "Brief ready." });
   } else if (names.includes("write_spec") && !written.has("spec")) {
     written.add("spec");
     res = toolTurn("write_spec", {
-      title: "Backend utility spec", scope: "Backend logic only; no UI.",
+      title: "Backend utility spec", scope: "Backend logic with a small UI.",
       acceptance_criteria: [{ id: "AC1", statement: "Function returns the computed value." }],
-      out_of_scope: ["UI"], risks: [{ title: "edge cases", detail: "empty input" }],
+      out_of_scope: ["analytics"], risks: [{ title: "edge cases", detail: "empty input" }],
     });
   } else if (names.includes("request_spec_approval")) {
     res = toolTurn("request_spec_approval", { pitch: "Spec ready." });
   } else if (names.includes("complete_risk_review")) {
     res = toolTurn("complete_risk_review", { summary: "No blocking risks.", decisions: [] });
+  } else if (names.includes("Write")) {
+    // Faz 5 (UI Build) ile Faz 8 (TDD) ayrımı: "UI Build" yalnızca phase-05'te var
+    // ("TDD" her iki prompt'ta da geçiyor — güvenilmez).
+    if (sys.includes("UI Build")) {
+      // Phase 5 (UI codegen): bir UI dosyası yaz → bitir.
+      if (p5Step < 1) { p5Step++; res = toolTurn("Write", { file_path: "src/App.tsx", content: "export default function App(){return null}" }); }
+      else res = endTurn();
+    } else {
+      // Phase 8 (TDD codegen): test yaz → prod yaz (temiz) → 3× bash test (green) → bitir.
+      if (p8Step < 1) { p8Step++; res = toolTurn("Write", { file_path: "src/foo.test.ts", content: "// test stub" }); }
+      else if (p8Step < 2) { p8Step++; res = toolTurn("Write", { file_path: "src/foo.ts", content: "export const foo = () => 1;\n" }); }
+      else if (p8Step < 5) { p8Step++; res = toolTurn("Bash", { command: "npm test" }); }
+      else res = endTurn();
+    }
   } else {
     res = endTurn();
   }
@@ -136,12 +175,15 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     projectRoot = await mkdtemp(join(tmpdir(), "mycl-e2e-"));
     await writeFile(
       join(projectRoot, "package.json"),
-      JSON.stringify({ name: "tmp", scripts: { test: "exit 0", lint: "exit 0" } }),
+      JSON.stringify({ name: "tmp", scripts: { dev: "vite", test: "exit 0", lint: "exit 0" } }),
     );
     runTurnMock.mockReset();
     runTurnMock.mockImplementation(async (_c, _k, turnOpts) => dispatch(turnOpts));
     askqQueue.length = 0;
     turnSeq = 0;
+    neededForTest = [];
+    p5Step = 0;
+    p8Step = 0;
     written.clear();
   });
 
@@ -149,9 +191,10 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
-  it("drives the real advanceToNextPhase engine through 2→17 with auto-answered askq", async () => {
+  // Faz 1'i (intent) tamamlanmış varsayıp Faz 2'den gerçek motoru sürer; askq'ları
+  // (scope-confirm + onaylar) options[0] ile oto-cevaplar. phase-17-complete'e kadar pompala.
+  async function driveFromPhase1(): Promise<AuditEvent[]> {
     const state = await loadOrInit(projectRoot);
-    // Faz 1 (intent) ayrı yoldan girer; testte tamamlanmış varsay.
     state.current_phase = 1;
     state.intent_summary = "Build a small backend utility function.";
     await saveState(state);
@@ -165,14 +208,10 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     } as unknown as MyclConfig;
 
     __initRuntimeForTest(state, config);
-
-    // Faz 2'den sür; askq'ları (scope-confirm + onaylar) options[0] ile oto-cevapla.
-    // Gerçek-zaman pump: pipeline fsync'li yazımlar yapar, setImmediate'tan hızlı
-    // tüketip yarıda kesmemek için setTimeout + wall-clock deadline kullan.
+    // Gerçek-zaman pump (fsync'li yazımlar setImmediate'tan yavaş; setTimeout + deadline).
     advanceToNextPhase(1).catch((e) => console.error("ADVANCE(1) REJECT:", e));
-
     let reached17 = false;
-    const deadline = Date.now() + 25_000;
+    const deadline = Date.now() + 35_000;
     while (!reached17 && Date.now() < deadline) {
       while (askqQueue.length) {
         const a = askqQueue.shift()!;
@@ -181,31 +220,50 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
         );
       }
       await new Promise((r) => setTimeout(r, 5));
-      const events = await readAuditLog(projectRoot);
-      reached17 = events.some((e) => e.event === "phase-17-complete");
+      reached17 = (await readAuditLog(projectRoot)).some((e) => e.event === "phase-17-complete");
     }
+    return readAuditLog(projectRoot);
+  }
 
-    const events = await readAuditLog(projectRoot);
-    const has = (ev: string) => events.some((e) => e.event === ev);
-    // Bazı fazlar sıfır-padded yazar (örn. "phase-09-complete"); ikisini de kabul et.
-    const hasComplete = (n: number) =>
-      has(`phase-${n}-complete`) || has(`phase-0${n}-complete`);
+  const hasIn = (events: AuditEvent[], ev: string) => events.some((e) => e.event === ev);
+  const hasComplete = (events: AuditEvent[], n: number) =>
+    hasIn(events, `phase-${n}-complete`) || hasIn(events, `phase-0${n}-complete`);
 
-    // Tam geçiş zinciri 2→17 (her faz phase-N-complete yazar).
+  it("spine: 2→17 tam geçiş, 5/6/7/8 scope-skip, decisions + cost yazıldı", async () => {
+    neededForTest = []; // opsiyonel fazlar atlanır
+    const events = await driveFromPhase1();
+
     for (let n = 2; n <= 17; n++) {
-      expect(hasComplete(n), `phase-${n}-complete bekleniyor`).toBe(true);
+      expect(hasComplete(events, n), `phase-${n}-complete bekleniyor`).toBe(true);
     }
-    // Opsiyonel fazlar (5/6/7/8) scope ile atlandı.
     for (const n of [5, 6, 7, 8]) {
-      expect(has(`phase-${n}-skipped-by-scope`), `phase-${n}-skipped-by-scope bekleniyor`).toBe(true);
+      expect(hasIn(events, `phase-${n}-skipped-by-scope`), `phase-${n}-skipped-by-scope`).toBe(true);
     }
-    // Part B: kararlar yazıldı (Faz 3 brief + Faz 4 spec).
     const decisions = await readDecisions(projectRoot);
     expect(decisions.length).toBeGreaterThanOrEqual(2);
     expect(decisions.some((d) => d.phase === 4)).toBe(true);
-    // Part A: per-faz token kayıtları yazıldı (LLM fazları 2/3/4/9).
     const costs = await readCosts(projectRoot);
     expect(costs.length).toBeGreaterThanOrEqual(1);
     expect(costs.every((c) => c.input_tokens > 0)).toBe(true);
-  }, 30_000);
+  }, 40_000);
+
+  it("codegen-dahil: Faz 5 (UI) + Faz 8 (TDD) gerçekten koşar (Phase 5 fix doğrulanır)", async () => {
+    neededForTest = [5, 8]; // UI build + TDD koşar; 6/7 scope-skip
+    const events = await driveFromPhase1();
+
+    for (let n = 2; n <= 17; n++) {
+      expect(hasComplete(events, n), `phase-${n}-complete bekleniyor`).toBe(true);
+    }
+    // Phase 5 KOŞTU (skip değil) + ui-file-write doğrulaması geçti (bug fix kanıtı).
+    expect(hasIn(events, "ui-file-write"), "ui-file-write (Phase 5 yazdı)").toBe(true);
+    expect(hasComplete(events, 5), "phase-5-complete (fix sonrası geçer)").toBe(true);
+    // Phase 8 (TDD codegen) KOŞTU: ≥3 tdd-green.
+    const greens = events.filter((e) => e.event === "tdd-green").length;
+    expect(greens, "≥3 tdd-green").toBeGreaterThanOrEqual(3);
+    expect(hasComplete(events, 8), "phase-8-complete").toBe(true);
+    // 6/7 scope ile atlandı.
+    for (const n of [6, 7]) {
+      expect(hasIn(events, `phase-${n}-skipped-by-scope`), `phase-${n}-skipped-by-scope`).toBe(true);
+    }
+  }, 45_000);
 });
