@@ -90,22 +90,14 @@ Bu sefer SADECE tek bir \`\`\`json ... \`\`\` bloğu yaz (action + reason zorunl
 hiçbir metin yazma. Geçerli JSON olduğundan emin ol.`;
 
 /**
- * Serbest metinden karar JSON'unu çıkar. Önce \`\`\`json fenced blok (sonuncuyu al);
- * yoksa dengeli { … } tarayarak son top-level JSON nesnesini al. Parse edilemezse null.
+ * Serbest metinden karar JSON'unu çıkar: dengeli { … } tarayarak "action" taşıyan
+ * son top-level JSON nesnesini al (regex yok — fenced bloklar da yakalanır).
+ * Parse edilemezse / "action" yoksa null.
  */
 export function extractDecisionJson(text: string): unknown | null {
-  // 1) Fenced blok(lar): ```json … ``` veya ``` … ``` — sonuncuyu dene.
-  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
-  const fences: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = fenceRe.exec(text)) !== null) {
-    if (m[1].trim()) fences.push(m[1].trim());
-  }
-  for (let i = fences.length - 1; i >= 0; i--) {
-    const parsed = tryParse(fences[i]);
-    if (parsed !== null) return parsed;
-  }
-  // 2) Fence yok/parse olmadı — dengeli brace taraması (son geçerli nesneyi al).
+  // String-aware dengeli { … } tarayıcı → "action" taşıyan SON nesneyi al
+  // (prompt "JSON en sonda" der). Regex YOK: ```json fence'leri de düz { … }
+  // olarak yakalanır, ayrı bir fence-eşleştirici gerekmez (tek/minimal yol).
   const candidates = scanBalancedObjects(text);
   for (let i = candidates.length - 1; i >= 0; i--) {
     const parsed = tryParse(candidates[i]);
