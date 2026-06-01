@@ -493,10 +493,8 @@ function App() {
   // v15.7 (2026-05-25): Feature flags (Playwright vb.). Backend read_features → features_value event ile dolur.
   const [features, setFeatures] = useState<{
     playwright_enabled: boolean;
-    claude_code_cli_enabled: boolean;
   }>({
     playwright_enabled: true,
-    claude_code_cli_enabled: false,
   });
   // v15.8 (2026-05-30): Main model efor seçimi (CLI backend için). selected_models event'inden gelir.
   const [currentEffort, setCurrentEffort] = useState<string>("max");
@@ -578,7 +576,6 @@ function App() {
       } else if (ev.kind === "features_value") {
         setFeatures({
           playwright_enabled: ev.data.features.playwright_enabled,
-          claude_code_cli_enabled: ev.data.features.claude_code_cli_enabled ?? false,
         });
       }
     }

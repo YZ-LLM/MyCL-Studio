@@ -96,7 +96,7 @@ export interface TaskQueueChangedEvent {
 /** v15.7 (2026-05-25): Feature flags backend'den frontend'e push event. */
 export interface FeaturesValueEvent {
   kind: "features_value";
-  data: { features: { playwright_enabled: boolean; claude_code_cli_enabled?: boolean } };
+  data: { features: { playwright_enabled: boolean } };
 }
 
 export interface ConfigStatusEvent {
@@ -357,5 +357,5 @@ export type OrchestratorCommand =
   | { kind: "shutdown" }
   | { kind: "task_queue_add"; data: { text: string } }
   | { kind: "task_queue_remove"; data: { id: string } }
-  | { kind: "save_features"; data: { playwright_enabled?: boolean; claude_code_cli_enabled?: boolean } }
+  | { kind: "save_features"; data: { playwright_enabled?: boolean } }
   | { kind: "read_features" };

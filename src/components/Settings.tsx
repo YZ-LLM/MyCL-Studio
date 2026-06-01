@@ -66,11 +66,8 @@ interface Props {
   savingKeys: boolean;
   errorDetail?: string;
   /** v15.7 (2026-05-25): Feature flags */
-  features?: { playwright_enabled: boolean; claude_code_cli_enabled?: boolean };
-  onSaveFeatures?: (features: {
-    playwright_enabled?: boolean;
-    claude_code_cli_enabled?: boolean;
-  }) => void;
+  features?: { playwright_enabled: boolean };
+  onSaveFeatures?: (features: { playwright_enabled?: boolean }) => void;
   /** v15.8 (2026-05-30): Main model efor seçimi (CLI backend için). */
   effort?: string;
 }
