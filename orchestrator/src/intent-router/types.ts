@@ -61,4 +61,28 @@ export interface IntentClassification {
   chat_topic?: string;
 }
 
+/**
+ * Caller'a dispatch sonucunu söyleyen outcome. v15.7 öncesi router.ts içinde
+ * dispatchByIntent tarafından üretilirdi; v15.8'de legacy router.ts kaldırıldı
+ * (chat/question handler'ları da ölüydü, silindi) — artık bu tipi yalnızca
+ * executeAgentDecision (index.ts) `fakeOutcome` olarak construct ediyor.
+ *
+ * `handled: true` = yan-eylem yapıldı (command handler); caller başka iş yapmaz.
+ * `handled: false` = caller develop/resume/debug/approve_ui/revise_ui/
+ * cancel_pipeline akışını çalıştırmalı.
+ */
+export type DispatchOutcome =
+  | { handled: true; intent: IntentClassification }
+  | {
+      handled: false;
+      intent: IntentClassification;
+      action:
+        | "develop_new_or_iter"
+        | "resume_pipeline"
+        | "debug_triage"
+        | "approve_ui"
+        | "revise_ui"
+        | "cancel_pipeline";
+    };
+
 // v15.7 (2026-05-25): IntentClassifierError kaldırıldı — classifier.ts silindi.
