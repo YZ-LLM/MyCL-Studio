@@ -17,6 +17,7 @@
 // yıkıcı Bash kalıpları (rm/sudo/push/commit/chmod/publish/curl/wget) reddedilir.
 
 import { runClaudeCli } from "../cli-run.js";
+import { extractLastJsonObject } from "../cli-json.js";
 import { orchestratorModelId, type MyclConfig } from "../config.js";
 import { emitAgentEvent } from "../ipc.js";
 import { log } from "../logger.js";
@@ -90,63 +91,11 @@ Bu sefer SADECE tek bir \`\`\`json ... \`\`\` bloğu yaz (action + reason zorunl
 hiçbir metin yazma. Geçerli JSON olduğundan emin ol.`;
 
 /**
- * Serbest metinden karar JSON'unu çıkar: dengeli { … } tarayarak "action" taşıyan
- * son top-level JSON nesnesini al (regex yok — fenced bloklar da yakalanır).
- * Parse edilemezse / "action" yoksa null.
+ * Serbest metinden karar JSON'unu çıkar: "action" taşıyan son top-level nesne
+ * (paylaşımlı cli-json.extractLastJsonObject; davranış öncekiyle birebir).
  */
 export function extractDecisionJson(text: string): unknown | null {
-  // String-aware dengeli { … } tarayıcı → "action" taşıyan SON nesneyi al
-  // (prompt "JSON en sonda" der). Regex YOK: ```json fence'leri de düz { … }
-  // olarak yakalanır, ayrı bir fence-eşleştirici gerekmez (tek/minimal yol).
-  const candidates = scanBalancedObjects(text);
-  for (let i = candidates.length - 1; i >= 0; i--) {
-    const parsed = tryParse(candidates[i]);
-    if (parsed !== null && typeof parsed === "object" && "action" in (parsed as object)) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-function tryParse(s: string): unknown | null {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
-/** String içindeki tüm top-level dengeli { … } parçalarını döndürür (string-aware). */
-function scanBalancedObjects(text: string): string[] {
-  const out: string[] = [];
-  let depth = 0;
-  let start = -1;
-  let inStr = false;
-  let esc = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (ch === "\\") esc = true;
-      else if (ch === '"') inStr = false;
-      continue;
-    }
-    if (ch === '"') {
-      inStr = true;
-    } else if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}") {
-      if (depth > 0) {
-        depth--;
-        if (depth === 0 && start >= 0) {
-          out.push(text.slice(start, i + 1));
-          start = -1;
-        }
-      }
-    }
-  }
-  return out;
+  return extractLastJsonObject(text, (obj) => "action" in obj);
 }
 
 export class CliOrchestratorBackend {
