@@ -65,8 +65,15 @@ jobs:
       - name: Install (root)
         run: npm ci
 
-      - name: Build frontend (dist/ — generate_context için)
-        run: npm run build
+      - name: Install (orchestrator)
+        run: npm --prefix orchestrator ci
+
+      # build:all = orchestrator (tsc → orchestrator/dist) + frontend (→ dist).
+      # tauri.conf resources orchestrator/dist + node_modules'ı gömdüğü ve
+      # generate_context! frontendDist'i okuduğu için ikisi de gerekli (gerçek
+      # beforeBuildCommand ile birebir aynı).
+      - name: Build orchestrator + frontend
+        run: npm run build:all
 
       - name: cargo check (Tauri host)
         run: cargo check --manifest-path src-tauri/Cargo.toml
