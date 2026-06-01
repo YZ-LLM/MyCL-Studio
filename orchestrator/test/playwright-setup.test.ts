@@ -156,6 +156,26 @@ describe("playwright-setup · ensurePlaywrightScaffold", () => {
     expect(refreshed).not.toContain("9999");
   });
 
+  it("eski sürüm imzalı (v15.7) smoke → sürüm-agnostik tespit + refresh (adminpanel bug'ı)", async () => {
+    // adminpanel'deki gerçek bug: smoke.spec.ts "// MyCL scaffold v15.7" marker'lı;
+    // exact-v15.8 araması onu user-written sanıp refresh ATLIYORDU. Sürüm-agnostik
+    // isMyclScaffolded ile eski imzalı dosya da güncel (auth-aware) şablona yenilenmeli.
+    await ensurePlaywrightScaffold(projectRoot, 5173);
+    const fs = await import("node:fs/promises");
+    const specPath = join(projectRoot, "tests", "smoke.spec.ts");
+    const cur = await fs.readFile(specPath, "utf-8");
+    expect(cur).toContain("// MyCL scaffold v15.8"); // önkoşul: güncel imza yazıldı
+    // Marker'ı eski sürüme düşür → güncel şablondan farklı, imza hâlâ MyCL.
+    await fs.writeFile(specPath, cur.replace("v15.8", "v15.7"), "utf-8");
+
+    const r2 = await ensurePlaywrightScaffold(projectRoot, 5173);
+    // Fix öncesi: isMyclScaffolded false → "already" (refresh atlanırdı). Fix sonrası: refresh.
+    expect(r2.action).toBe("scaffolded");
+    const refreshed = await fs.readFile(specPath, "utf-8");
+    expect(refreshed).toContain("// MyCL scaffold v15.8");
+    expect(refreshed).not.toContain("v15.7");
+  });
+
   it("Line ending farkı (CRLF↔LF) refresh tetiklemez (normalize)", async () => {
     await ensurePlaywrightScaffold(projectRoot, 5173);
     const fs = await import("node:fs/promises");

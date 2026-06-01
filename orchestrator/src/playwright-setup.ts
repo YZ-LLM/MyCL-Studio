@@ -347,7 +347,15 @@ export async function checkPlaywrightScaffold(
 // dosyayı MyCL "kendi yazdığı" olarak görür → refresh tarafından üzerine
 // yazılabilir. Kullanıcı manuel düzenlerse imzayı kaldırır → MyCL bir daha
 // dokunmaz.
+//
+// MYCL_SCAFFOLD_MARKER = ŞU ANKİ sürümün markeri (YAZARKEN kullanılır).
+// MYCL_MARKER_ANY = HERHANGİ MyCL sürümünü tanıyan regex (TESPİT ederken
+//   kullanılır). v15.8 (2026-06-01): isMyclScaffolded sürüm-agnostik olmalı —
+//   eski (örn. v15.7) imzalı scaffold da MyCL-sahipli sayılıp güncel şablona
+//   refresh edilsin. Sadece exact-v15.8 ararsak eski imzalı dosya "user-written"
+//   sanılıp güncellenmiyordu (auth-aware smoke yenilenmiyordu).
 const MYCL_SCAFFOLD_MARKER = "// MyCL scaffold v15.8";
+const MYCL_MARKER_ANY = /\/\/ MyCL scaffold v\d+\.\d+/;
 
 function renderPlaywrightConfig(defaultPort: number): string {
   return `${MYCL_SCAFFOLD_MARKER} — bu dosya MyCL Studio tarafından oluşturuldu.
@@ -527,7 +535,9 @@ test('smoke: app loads (auth-aware) with content and no console errors', async (
 async function isMyclScaffolded(path: string): Promise<boolean> {
   try {
     const raw = await readFile(path, "utf-8");
-    return raw.slice(0, 400).includes(MYCL_SCAFFOLD_MARKER);
+    // Sürüm-agnostik: herhangi `// MyCL scaffold vX.Y` markeri MyCL-sahipli sayılır
+    // → eski sürümler de güncel şablona refresh edilir (exact v15.8 DEĞİL).
+    return MYCL_MARKER_ANY.test(raw.slice(0, 400));
   } catch {
     return false;
   }
@@ -844,8 +854,7 @@ async function ensureMyclGitignore(projectRoot: string): Promise<void> {
 // (`@playwright/test` imzası). Vitest `.test.js` dosyaları yanlışlıkla
 // "gerçek e2e testi" sayılmaz (eski memory kuralı).
 // ---------------------------------------------------------------------------
-
-const MYCL_MARKER_ANY = /\/\/ MyCL scaffold v/;
+// (MYCL_MARKER_ANY yukarıda MYCL_SCAFFOLD_MARKER ile birlikte tanımlı.)
 
 export type SmokeKind = "placeholder" | "real" | "none";
 export type AuthStatus = "configured" | "placeholder" | "none";
