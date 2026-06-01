@@ -6,7 +6,8 @@
 
 import { readFile } from "node:fs/promises";
 import { appendAudit } from "./audit.js";
-import { QaAskqBaseController } from "./base/qa-askq-controller.js";
+import type { QaAskqBackend } from "./base/qa-askq-controller.js";
+import { createQaAskqBackend } from "./base/qa-askq-cli-backend.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { emitChatMessage, emitError } from "./ipc.js";
@@ -114,7 +115,7 @@ interface AuditDimension {
 }
 
 export class Phase2Controller {
-  private base: QaAskqBaseController | null = null;
+  private base: QaAskqBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
   public statePatch: Partial<State> = {};
@@ -195,7 +196,7 @@ export class Phase2Controller {
     }
 
     const role = this.spec.model_role!;
-    this.base = new QaAskqBaseController({
+    this.base = createQaAskqBackend({
       tag: "phase-2",
       state: this.state,
       config: this.config,

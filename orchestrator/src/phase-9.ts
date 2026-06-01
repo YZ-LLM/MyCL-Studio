@@ -9,7 +9,8 @@ import {
   buildRelevantPhase9Audit,
   getSpecSectionMarkdown,
 } from "./relevance/injectors.js";
-import { QaAskqBaseController } from "./base/qa-askq-controller.js";
+import type { QaAskqBackend } from "./base/qa-askq-controller.js";
+import { createQaAskqBackend } from "./base/qa-askq-cli-backend.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { emitError } from "./ipc.js";
@@ -74,7 +75,7 @@ interface RiskDecision {
 }
 
 export class Phase9Controller {
-  private base: QaAskqBaseController | null = null;
+  private base: QaAskqBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
   public statePatch: Partial<State> = {};
@@ -143,7 +144,7 @@ export class Phase9Controller {
     }
 
     const role = this.spec.model_role!;
-    this.base = new QaAskqBaseController({
+    this.base = createQaAskqBackend({
       tag: "phase-9",
       state: this.state,
       config: this.config,

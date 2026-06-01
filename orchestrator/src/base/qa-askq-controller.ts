@@ -67,22 +67,30 @@ export type QaAskqOutcome =
   | { kind: "aborted" }
   | { kind: "failed"; reason: string };
 
+/**
+ * SDK ve CLI backend'lerinin ortak arayüzü — qa-askq faz controller'ları (Faz
+ * 1/2/9) bu tipe karşı çalışır, factory hangisini döndürdüğünü bilmez.
+ */
+export interface QaAskqBackend {
+  run(): Promise<QaAskqOutcome>;
+  abort(): void;
+  submitAskqAnswer(askqId: string, selected_tr: string): void;
+}
+
 /** abort() çağrısı askq pendingResolver'ı bu instance ile reject eder. */
 const ABORT_SENTINEL = Symbol("askq-aborted");
 
 /**
- * Faz 19 (Impact Review) bilinen classification token'ları için kullanıcı
- * dostu TR çevirileri. LLM `safe-rollout | needs-migration | breaking-change`
- * döndürür; translator bunları "güvenli dağıtım / taşıma-gerekli / kırılan
- * değişiklik" olarak literal çevirmişti — kullanıcı (2026-05-23) doğal
- * Türkçe aksiyon cümleleri istedi. Backend semantiği (selected_en mapping,
- * audit) değişmez; sadece UI label override.
+ * Faz 9 (Risk) impact classification token'ları için doğal TR override (CLI
+ * backend ile paylaşılır). LLM safe-rollout|needs-migration|breaking-change döner.
  */
-const IMPACT_OPTION_TR: Record<string, string> = {
+export const IMPACT_OPTION_TR_MAP: Record<string, string> = {
   "safe-rollout": "Sakın kodu değiştirme",
   "needs-migration": "Kodu düzelt, sorun çıkmaz.",
   "breaking-change": "Mutlaka düzelt.",
 };
+
+// Impact override için paylaşımlı IMPACT_OPTION_TR_MAP kullanılır (yukarıda).
 
 interface PendingAskq {
   tool_use_id: string;
@@ -91,7 +99,7 @@ interface PendingAskq {
   is_approval: boolean;
 }
 
-export class QaAskqBaseController {
+export class QaAskqBaseController implements QaAskqBackend {
   private pendingAskq: PendingAskq | null = null;
   private pendingResolver: ((selected_tr: string) => void) | null = null;
   private pendingRejecter: ((reason: unknown) => void) | null = null;
@@ -495,7 +503,7 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
       translate(this.opts.config, question_en, "en-to-tr"),
       ...options_en.map((o) => {
         const norm = o.trim().toLowerCase().replace(/\s+/g, "-");
-        const override = IMPACT_OPTION_TR[norm];
+        const override = IMPACT_OPTION_TR_MAP[norm];
         if (override !== undefined) return Promise.resolve({ text: override });
         return translate(this.opts.config, o, "en-to-tr");
       }),

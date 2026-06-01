@@ -6,7 +6,8 @@
 
 import { readFile } from "node:fs/promises";
 import { appendAudit } from "./audit.js";
-import { QaAskqBaseController } from "./base/qa-askq-controller.js";
+import type { QaAskqBackend } from "./base/qa-askq-controller.js";
+import { createQaAskqBackend } from "./base/qa-askq-cli-backend.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { emitError } from "./ipc.js";
@@ -68,7 +69,7 @@ const TOOL_APPROVE_INTENT: ToolDef = {
 };
 
 export class Phase1Controller {
-  private base: QaAskqBaseController | null = null;
+  private base: QaAskqBackend | null = null;
   /** Approve sırasında modelin verdiği niyet özeti (EN) — Phase 4 input olur. */
   public approvedSummary: string | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
@@ -157,7 +158,7 @@ export class Phase1Controller {
     }
 
     const role = this.spec.model_role!;
-    this.base = new QaAskqBaseController({
+    this.base = createQaAskqBackend({
       tag: "phase-1",
       state: this.state,
       config: this.config,
