@@ -278,6 +278,11 @@ export class CliCodegenBackend implements CodegenBackend {
         const b = block as Record<string, unknown>;
         if (b.type === "text" && typeof b.text === "string") {
           emitClaudeStream({ sub: "text", text: b.text });
+          if (this.opts.onTestResult) {
+            for (const r of parseTestResultMarkers(b.text)) {
+              this.opts.onTestResult(r.green, r.detail);
+            }
+          }
         } else if (b.type === "tool_use") {
           const name = String(b.name ?? "");
           const input = (b.input as Record<string, unknown>) ?? {};
@@ -355,4 +360,25 @@ export class CliCodegenBackend implements CodegenBackend {
     }
     return args;
   }
+}
+
+/**
+ * v15.8: Ajan metnindeki `MYCL_TEST_RESULT: green|red[: <neden>]` marker'larını
+ * çıkar (Faz 8 TDD self-report; CLI stream-json tool_result.is_error taşımaz).
+ * REGEX YOK — düz substring satır taraması (kullanıcı kuralı). Saf + test edilebilir.
+ */
+export function parseTestResultMarkers(
+  text: string,
+): Array<{ green: boolean; detail: string }> {
+  const MARKER = "MYCL_TEST_RESULT:";
+  const out: Array<{ green: boolean; detail: string }> = [];
+  for (const line of text.split("\n")) {
+    const idx = line.indexOf(MARKER);
+    if (idx < 0) continue;
+    const rest = line.slice(idx + MARKER.length).trim();
+    const lower = rest.toLowerCase();
+    if (lower.startsWith("green")) out.push({ green: true, detail: rest });
+    else if (lower.startsWith("red")) out.push({ green: false, detail: rest });
+  }
+  return out;
 }

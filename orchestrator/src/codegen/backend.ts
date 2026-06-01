@@ -31,11 +31,13 @@ export interface CodegenBackend {
 }
 
 /**
- * CLI backend kapsamındaki codegen fazları (Aşama 4'te genişletilebilir).
- * Phase 8 (TDD tool_result kapısı) + Phase 0 (report_root_cause custom tool)
- * v1'de SDK kalır — stream-json bu ihtiyaçları temiz karşılamıyor.
+ * CLI backend kapsamındaki codegen fazları (v15.8, abonelik pipeline).
+ * phase-5 (UI) + verify-feature + phase-8 (TDD — red/green stream-json
+ * tool_result.is_error taşımadığı için MYCL_TEST_RESULT marker self-report'u +
+ * phase-8'in MyCL-koşulu deterministik anchor'ı ile çözülür). Faz 0 (report_root_cause)
+ * CLI'da phase-0.ts içinde ayrı text-JSON yoluyla ele alınır (createCodegenBackend değil).
  */
-const CLI_ELIGIBLE_TAGS = new Set(["phase-5", "verify-feature"]);
+const CLI_ELIGIBLE_TAGS = new Set(["phase-5", "verify-feature", "phase-8"]);
 
 /**
  * Aktif config'e göre codegen backend'i seç.

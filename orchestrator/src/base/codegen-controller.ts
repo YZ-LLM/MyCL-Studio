@@ -122,6 +122,12 @@ export interface CodegenRunOpts {
   /** Her tool execution sonrası audit yazmak için hook. */
   observer?: CodegenObserver;
   /**
+   * v15.8: CLI backend'e özel — ajanın metin akışındaki `MYCL_TEST_RESULT: green|red`
+   * marker'ı parse edilince çağrılır (CLI stream-json tool_result.is_error taşımadığı
+   * için Faz 8 TDD red/green ayrımı bununla yapılır). SDK backend KULLANMAZ. Faz 8 bağlar.
+   */
+  onTestResult?: (green: boolean, detail: string) => void;
+  /**
    * PhaseSpec.allowed_tools allowlist'i. Verilirse `tools` bu set ile süzülür
    * (SDK'ya yalnız izinli tool tanımları gönderilir). undefined → tüm tools
    * geçer (legacy davranış).

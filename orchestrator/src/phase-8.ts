@@ -7,11 +7,16 @@
 // v15.7 (2026-05-27): Dosya header rot düzeltildi (eski "phase-9" yazıyordu).
 // Phase8Controller → Phase 8 = TDD.
 
+import { exec } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { appendAudit, readAuditLogTail } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
-import type { MyclConfig } from "./config.js";
+import { isClaudeAvailable } from "./codegen/cli-backend.js";
+import { backendForRole, type MyclConfig } from "./config.js";
+
+const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
@@ -74,6 +79,12 @@ export function isTestCommand(cmd: string): boolean {
 export class Phase8Controller {
   public statePatch: Partial<State> = {};
   private base: CodegenBackend | null = null;
+  /** v15.8: main='Claude Code Aboneliği' → CLI backend (TDD red/green self-report + anchor). */
+  private cliMode = false;
+  /** CLI'da ajanın çalıştırdığı son test komutu — MyCL anchor re-run için. */
+  private lastTestCmd: string | null = null;
+  /** Marker self-report audit yazımları — anchor'dan ÖNCE settle edilir (sıra/yarış). */
+  private testResultWrites: Promise<void>[] = [];
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
   /** v15.7 (2026-05-27): Faz 7'den gelen pending migration not — initialMessage'a eklenir. */
@@ -194,6 +205,31 @@ export class Phase8Controller {
       return "fail";
     }
 
+    // v15.8: main='Claude Code Aboneliği' → CLI. CLI stream-json test exit-code
+    // taşımadığı için TDD red/green ajanın MYCL_TEST_RESULT marker'ından gelir;
+    // MyCL ayrıca son testi kendi koşup gate'i deterministik çapayla doğrular.
+    this.cliMode = backendForRole(this.config, "main") === "cli";
+    if (this.cliMode && !isClaudeAvailable()) {
+      const m =
+        "Main 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı — " +
+        "Faz 8 (TDD) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da " +
+        "Ayarlar → Modeller'den main'i 'API' yap.";
+      emitError("phase-8: claude bulunamadı (CLI)", m);
+      emitChatMessage("system", `🔴 ${m}`);
+      this.lastFailReason = "claude not found (CLI backend)";
+      return "fail";
+    }
+    if (this.cliMode) {
+      systemPrompt +=
+        "\n\n---\n\n## CLI MODU — TEST SONUCU RAPORLAMA (ZORUNLU)\n" +
+        "Araçların çıktısı MyCL'e test exit-code'unu taşımaz. Bu yüzden HER test " +
+        "koşumundan (`npm test` vb.) SONRA, gördüğün gerçek çıktıya göre TEK satır yaz:\n" +
+        "- Testler GEÇTİYSE (exit 0, PASS): `MYCL_TEST_RESULT: green`\n" +
+        "- Testler BAŞARISIZSA: `MYCL_TEST_RESULT: red: <kısa neden>`\n" +
+        "Test çıktısında PASS görmeden ASLA green deme. MyCL son testi KENDİ de koşup " +
+        "doğrular — yanlış green gate'i geçirmez, sadece teknik borç gizler.";
+    }
+
     const role = this.spec.model_role!;
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
@@ -236,6 +272,13 @@ export class Phase8Controller {
       toolContext: toolCtx,
       betas: this.config.claude_code_flags.betas,
       observer: (ctx) => this.observeTool(ctx),
+      // CLI: ajanın MYCL_TEST_RESULT marker'ı → tdd-green/red audit (per-AC).
+      onTestResult: this.cliMode
+        ? (green, detail) => {
+            // Sırayı koru: yazımı izle, anchor'dan önce settle edilecek.
+            this.testResultWrites.push(this.recordTestResult(green, detail));
+          }
+        : undefined,
     });
 
     const outcome = await this.base.run();
@@ -255,6 +298,12 @@ export class Phase8Controller {
       this.lastFailReason = outcome.reason;
       return "fail";
     }
+
+    // v15.8 BÜTÜNLÜK ÇAPASI (CLI): ajanın self-report'una körü körüne güvenme —
+    // ajanın koştuğu son test komutunu MyCL KENDİ koşar (deterministik exit code).
+    // Otoriter SON tdd event'i bu olur → yanlış-green gate'i geçemez (sessiz teknik
+    // borç önlenir). API yolunda observer'ın gerçek is_error'u zaten var → anchor yok.
+    await this.runIntegrityAnchor();
 
     // Gate evaluation (v15.2.4 "ASLA TEKNİK BORÇ BIRAKMA" enforcement):
     //   1. AC sayısı kadar tdd-green (spec'in her AC'si yeşil olmalı)
@@ -378,6 +427,65 @@ export class Phase8Controller {
     return "fail";
   }
 
+  /**
+   * CLI: ajanın MYCL_TEST_RESULT marker'ından gelen test sonucunu tdd-green/red
+   * audit'ine yaz (gate'in per-AC green sayımı için). caller=mycl-bridge.
+   */
+  private async recordTestResult(green: boolean, detail: string): Promise<void> {
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 8,
+      event: green ? "tdd-green" : "tdd-red",
+      caller: "mycl-bridge",
+      detail: detail.slice(0, 100),
+    });
+    log.info("phase-8", "cli test self-report", { green, detail: detail.slice(0, 60) });
+  }
+
+  /**
+   * CLI bütünlük çapası: ajanın koştuğu son test komutunu MyCL deterministik koşar
+   * (gerçek exit code) → otoriter SON tdd event. Geçerse tdd-green, başarısızsa
+   * tdd-red → gate'in `lastEvent === "tdd-green"` koşulu yanlış-green'i eler.
+   * Hiç test koşulmadıysa (lastTestCmd yok) çapa yok — gate zaten greens<minGreens ile fail eder.
+   */
+  private async runIntegrityAnchor(): Promise<void> {
+    if (!this.cliMode) return;
+    // Tüm marker self-report yazımları bitsin (anchor SON event olmalı → lastEvent doğru).
+    await Promise.allSettled(this.testResultWrites);
+    if (!this.lastTestCmd) return; // hiç test koşulmadı → gate greens<minGreens ile fail eder
+    const cmd = this.lastTestCmd;
+    emitChatMessage("system", `🔬 Faz 8 final doğrulama — MyCL testi kendi koşuyor: \`${cmd.slice(0, 80)}\``);
+    let pass: boolean;
+    let detail: string;
+    try {
+      await execAsync(cmd, {
+        cwd: this.state.project_root,
+        timeout: 300_000,
+        maxBuffer: 8 * 1024 * 1024,
+        env: process.env,
+      });
+      pass = true;
+      detail = "final suite (MyCL anchor): pass";
+    } catch (err) {
+      pass = false;
+      const msg = err instanceof Error ? err.message : String(err);
+      detail = `final suite (MyCL anchor): FAIL — ${msg.slice(0, 80)}`;
+    }
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 8,
+      event: pass ? "tdd-green" : "tdd-red",
+      caller: "mycl-orchestrator",
+      detail,
+    });
+    emitChatMessage(
+      "system",
+      pass
+        ? "✅ Faz 8 final test (MyCL doğrulaması): GEÇTİ."
+        : "🔴 Faz 8 final test (MyCL doğrulaması): BAŞARISIZ — gate fail (sessiz teknik borç önlendi).",
+    );
+  }
+
   private async observeTool(ctx: {
     tool_use: { name: string; input: Record<string, unknown> };
     result: { is_error: boolean };
@@ -416,10 +524,17 @@ export class Phase8Controller {
     } else if (name === "Bash") {
       const cmd = String(input.command ?? "");
       if (isTestCommand(cmd)) {
-        audits.push({
-          event: is_error ? "tdd-red" : "tdd-green",
-          detail: cmd.slice(0, 100),
-        });
+        if (this.cliMode) {
+          // CLI: is_error güvenilmez (stream-json hep false). tdd-green/red
+          // MYCL_TEST_RESULT marker'ından (recordTestResult) gelir; burada sadece
+          // komutu sakla — MyCL anchor'da bu komutu KENDİ koşar (otoriter final).
+          this.lastTestCmd = cmd;
+        } else {
+          audits.push({
+            event: is_error ? "tdd-red" : "tdd-green",
+            detail: cmd.slice(0, 100),
+          });
+        }
       }
     }
     for (const a of audits) {

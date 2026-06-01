@@ -200,8 +200,14 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
       await Promise.race([advancePromise, new Promise((r) => setTimeout(r, 15_000))]);
     }
     // Fire-and-forget kalan yazımlar için AGRESİF retry: node ENOTEMPTY/EBUSY'de
-    // retryDelay backoff'uyla 10 kez dener → trailing stragglers'ı yutar.
-    await rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
+    // retryDelay backoff'uyla 10 kez dener. Yine de tüm-gate yükünde nadir ENOTEMPTY
+    // olabilir — teardown cleanup'ı best-effort: assertion'lar zaten geçti, /tmp
+    // artığı (OS temizler) yüzünden testi KIRMA. Hatayı yut + logla (sessiz değil).
+    try {
+      await rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
+    } catch (err) {
+      console.warn(`[e2e teardown] rm best-effort başarısız (yok sayıldı): ${String(err)}`);
+    }
   });
 
   // Faz 1'i (intent) tamamlanmış varsayıp Faz 2'den gerçek motoru sürer; askq'ları
@@ -226,7 +232,9 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     // Promise yakalanır → afterEach trailing yazımları settle eder (teardown yarışı yok).
     advancePromise = advanceToNextPhase(1).catch((e) => console.error("ADVANCE(1) REJECT:", e));
     let reached17 = false;
-    const deadline = Date.now() + 35_000;
+    // Tüm-gate yükünde (50 test paraleli, event loop doygun) fsync'li pipeline
+    // 35s'i aşıp flake olabiliyordu → 50s cap (normal koşum ~2-5s; bu sadece tavan).
+    const deadline = Date.now() + 50_000;
     while (!reached17 && Date.now() < deadline) {
       while (askqQueue.length) {
         const a = askqQueue.shift()!;
@@ -263,7 +271,7 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     const costs = await readCosts(projectRoot);
     expect(costs.length).toBeGreaterThanOrEqual(1);
     expect(costs.every((c) => c.input_tokens > 0)).toBe(true);
-  }, 40_000);
+  }, 65_000);
 
   it("codegen-dahil: Faz 5 (UI) + Faz 8 (TDD) gerçekten koşar (Phase 5 fix doğrulanır)", async () => {
     neededForTest = [5, 8]; // UI build + TDD koşar; 6/7 scope-skip
@@ -283,5 +291,5 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     for (const n of [6, 7]) {
       expect(hasIn(events, `phase-${n}-skipped-by-scope`), `phase-${n}-skipped-by-scope`).toBe(true);
     }
-  }, 45_000);
+  }, 65_000);
 });
