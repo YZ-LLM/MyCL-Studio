@@ -22,7 +22,8 @@
 
 import { spawn, execSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
 import type { CodegenBackend } from "./backend.js";
@@ -48,18 +49,75 @@ const ALLOWED_TOOLS = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"];
 /** Maliyet sınırı (USD) — kullanıcı maliyet-duyarlı; runaway koruması. */
 const DEFAULT_MAX_BUDGET_USD = 2.0;
 
-let claudeAvailableCache: boolean | null = null;
+// undefined = henüz çözülmedi; null = bulunamadı; string = mutlak yol.
+let claudePathCache: string | null | undefined;
 
-/** `claude` CLI sistemde var mı? Sync + cache (factory sync olduğu için). */
-export function isClaudeAvailable(): boolean {
-  if (claudeAvailableCache !== null) return claudeAvailableCache;
-  try {
-    execSync("command -v claude", { stdio: "ignore", timeout: 3000 });
-    claudeAvailableCache = true;
-  } catch {
-    claudeAvailableCache = false;
+/**
+ * `claude` CLI'ın MUTLAK yolunu çöz. Paketlenmiş .app Finder'dan açılınca PATH
+ * minimaldir (`/usr/bin:/bin`...) ve `claude` standart kurulumda `~/.local/bin`'de
+ * → düz `command -v claude` (minimal PATH) onu BULAMAZ. Bilinen konumlar + login
+ * shell fallback ile sağlam çöz. Sonuç process boyunca cache'lenir.
+ */
+export function resolveClaudePath(): string | null {
+  if (claudePathCache !== undefined) return claudePathCache;
+  const home = homedir();
+  const candidates = [
+    join(home, ".local", "bin", "claude"), // resmi installer (claude.ai/install.sh)
+    join(home, ".claude", "local", "claude"),
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+    "/usr/bin/claude",
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) {
+      claudePathCache = c;
+      return c;
+    }
   }
-  return claudeAvailableCache;
+  // Login shell fallback — kullanıcı profili (nvm/asdf/özel PATH) yüklensin.
+  for (const shell of ["/bin/zsh", "/bin/bash", "/bin/sh"]) {
+    if (!existsSync(shell)) continue;
+    try {
+      const out = execSync(`${shell} -lc 'command -v claude'`, {
+        timeout: 3000,
+        encoding: "utf-8",
+      }).trim();
+      if (out && existsSync(out)) {
+        claudePathCache = out;
+        return out;
+      }
+    } catch {
+      /* bu shell başarısız — sıradakini dene */
+    }
+  }
+  claudePathCache = null;
+  return null;
+}
+
+/** `claude` CLI erişilebilir mi? (resolveClaudePath != null) */
+export function isClaudeAvailable(): boolean {
+  return resolveClaudePath() !== null;
+}
+
+/**
+ * `claude` spawn'ı için env: safeEnv() + claude'un bulunduğu dizin ve bilinen bin
+ * konumları PATH'in başına eklenir → claude kendi alt-process'lerini (node, rg)
+ * ve kendini bulabilsin. API key ENJEKTE EDİLMEZ → abonelik (oauthAccount).
+ */
+export function claudeSpawnEnv(): NodeJS.ProcessEnv {
+  const base = safeEnv();
+  const home = homedir();
+  const resolved = resolveClaudePath();
+  const extras = [
+    resolved ? dirname(resolved) : "",
+    join(home, ".local", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+  ].filter(Boolean);
+  const prev = base.PATH ?? "";
+  return { ...base, PATH: [...extras, prev].filter(Boolean).join(":"), LC_ALL: "C" };
 }
 
 /**
@@ -134,11 +192,13 @@ export class CliCodegenBackend implements CodegenBackend {
     );
 
     return new Promise<CodegenOutcome>((resolve) => {
-      const child = spawn("claude", args, {
+      // Mutlak yol — minimal PATH'te bare "claude" ENOENT verir (paketlenmiş .app).
+      const claudeBin = resolveClaudePath() ?? "claude";
+      const child = spawn(claudeBin, args, {
         cwd: opts.state.project_root,
-        // v15.8: API key ENJEKTE EDİLMEZ → `claude` kurulu abonelikle (oauthAccount)
-        // koşar, API faturası YOK. (Eski: ANTHROPIC_API_KEY: opts.apiKey — aboneliği eziyordu.)
-        env: { ...safeEnv(), LC_ALL: "C" },
+        // v15.8: API key ENJEKTE EDİLMEZ → abonelik (oauthAccount); PATH zenginleştirilir
+        // (claudeSpawnEnv) ki claude kendi alt-process'lerini bulsun.
+        env: claudeSpawnEnv(),
         stdio: ["ignore", "pipe", "pipe"],
       });
       this.child = child;

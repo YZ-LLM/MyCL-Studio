@@ -14,7 +14,7 @@ import type { MyclConfig } from "./config.js";
 import { backendForRole } from "./config.js";
 import { runClaudeCli } from "./cli-run.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
-import { emitTranslation } from "./ipc.js";
+import { emitChatMessage, emitError, emitTranslation } from "./ipc.js";
 import { log } from "./logger.js";
 import type { TranslationDir } from "./types.js";
 
@@ -210,12 +210,21 @@ export async function translate(
   const model = config.selected_models.translator;
   const chunks = splitForChunking(text);
 
-  // v15.8: rol "cli" ise `claude -p` (abonelik, API faturası yok); `claude` yoksa
-  // SDK'ya dürüst fallback (akış kırılmaz). "api" (default) → bugünkü SDK yolu.
+  // v15.8: rol "cli" ise `claude -p` (abonelik). Kullanıcı kuralı: HİÇBİR ŞEY
+  // SESSİZCE çalışmasın — CLI seçili ama `claude` bulunamıyorsa API'ye SESSİZCE
+  // DÜŞME (abonelik kullanıcısında API kredisi yok → kafa karıştırıcı fatura
+  // hatası). Görünür hata ver + dur. API isteniyorsa Ayarlar'dan "API" seçilir.
   const wantCli = backendForRole(config, "translator") === "cli";
-  const useCli = wantCli && isClaudeAvailable();
-  if (wantCli && !useCli) {
-    log.warn("translator", "CLI seçili ama `claude` bulunamadı — SDK fallback", { model });
+  const useCli = wantCli; // claude erişilebilirliği aşağıda zorlanır
+  if (wantCli && !isClaudeAvailable()) {
+    const m =
+      "Translator 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı " +
+      "(`~/.local/bin/claude`). Abonelik backend'i kullanılamıyor — `claude` kurulu " +
+      "değil/PATH'te değil. API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da Ayarlar → " +
+      "Modeller'den translator'ı 'API' yap.";
+    emitError("translator: claude bulunamadı (CLI backend)", m);
+    emitChatMessage("system", `🔴 ${m}`);
+    throw new Error("translator CLI backend kullanılamıyor: claude bulunamadı");
   }
   // SDK client yalnızca API yolunda gerekir (CLI'da API key kullanılmaz).
   const client = useCli ? null : new Anthropic({ apiKey: config.api_keys.translator });

@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { safeEnv } from "./safe-env.js";
+import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import { log } from "./logger.js";
 
 export interface CliRunOpts {
@@ -90,9 +90,11 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     let resultSeen = false;
     let stderrTail = "";
 
-    const child = spawn("claude", args, {
+    // Mutlak yol + zenginleştirilmiş PATH — minimal PATH'te bare "claude" ENOENT.
+    const claudeBin = resolveClaudePath() ?? "claude";
+    const child = spawn(claudeBin, args, {
       cwd: opts.cwd,
-      env: { ...safeEnv(), LC_ALL: "C" }, // API key YOK → abonelik
+      env: claudeSpawnEnv(), // API key YOK → abonelik; PATH zenginleştirilir
       stdio: ["ignore", "pipe", "pipe"],
     });
 

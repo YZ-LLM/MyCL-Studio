@@ -25,7 +25,11 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-vi.mock("../src/ipc.js", () => ({ emitTranslation: vi.fn() }));
+vi.mock("../src/ipc.js", () => ({
+  emitTranslation: vi.fn(),
+  emitChatMessage: vi.fn(),
+  emitError: vi.fn(),
+}));
 vi.mock("../src/logger.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -85,14 +89,13 @@ describe("translate — backend yönlendirme", () => {
     expect(opts.allowedTools).toBeUndefined();
   });
 
-  it("translator='cli' ama claude YOK → SDK fallback (akış kırılmaz)", async () => {
+  it("translator='cli' ama claude YOK → görünür hata + THROW (sessiz API YOK)", async () => {
     claudeAvailable = false;
     sdkCreateMock.mockResolvedValue(sdkText("Merhaba"));
 
-    const res = await translate(makeConfig("cli"), "Hello", "en-to-tr");
-
-    expect(res.text).toBe("Merhaba");
-    expect(sdkCreateMock).toHaveBeenCalledTimes(1);
+    await expect(translate(makeConfig("cli"), "Hello", "en-to-tr")).rejects.toThrow();
+    // Sessizce API'ye düşmedi: SDK de CLI de çağrılmadı.
+    expect(sdkCreateMock).not.toHaveBeenCalled();
     expect(runClaudeCliMock).not.toHaveBeenCalled();
   });
 

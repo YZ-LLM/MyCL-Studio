@@ -31,6 +31,10 @@ let claudeAvail = true;
 vi.mock("../../src/codegen/cli-backend.js", () => ({
   isClaudeAvailable: () => claudeAvail,
 }));
+vi.mock("../../src/ipc.js", () => ({
+  emitChatMessage: vi.fn(),
+  emitError: vi.fn(),
+}));
 vi.mock("../../src/logger.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -83,12 +87,12 @@ describe("respondAsOrchestrator", () => {
     expect(sdkRespond).toHaveBeenCalledTimes(1);
   });
 
-  it("orchestrator='cli' ama claude YOK → doğrudan SDK", async () => {
+  it("orchestrator='cli' ama claude YOK → görünür hata + THROW (sessiz SDK YOK)", async () => {
     claudeAvail = false;
     sdkRespond.mockResolvedValue(chatDecision);
-    const dec = await respondAsOrchestrator(makeConfig("cli"), state, "selam");
-    expect(dec).toBe(chatDecision);
+    await expect(respondAsOrchestrator(makeConfig("cli"), state, "selam")).rejects.toThrow();
+    // Sessizce SDK'ya düşmedi.
     expect(cliRespond).not.toHaveBeenCalled();
-    expect(sdkRespond).toHaveBeenCalledTimes(1);
+    expect(sdkRespond).not.toHaveBeenCalled();
   });
 });

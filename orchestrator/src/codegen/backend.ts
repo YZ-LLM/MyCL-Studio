@@ -17,7 +17,7 @@ import {
 } from "../base/codegen-controller.js";
 import { CliCodegenBackend, isClaudeAvailable } from "./cli-backend.js";
 import { backendForRole } from "../config.js";
-import { emitChatMessage } from "../ipc.js";
+import { emitChatMessage, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 
 export interface CodegenBackend {
@@ -55,13 +55,22 @@ export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
       log.info("codegen-backend", "using CLI backend", { tag: opts.tag });
       return new CliCodegenBackend(opts);
     }
-    log.warn("codegen-backend", "CLI flag on but `claude` not found — SDK fallback", {
-      tag: opts.tag,
-    });
-    emitChatMessage(
-      "system",
-      "ℹ️ Claude Code CLI seçili ama `claude` komutu bulunamadı — dahili SDK'ya dönüldü. (CLI için `claude` kurulu olmalı.)",
-    );
+    // Kullanıcı kuralı: HİÇBİR ŞEY SESSİZCE çalışmasın. Main 'CLI' seçili ama
+    // `claude` yoksa SDK'ya (API'ye) SESSİZCE DÜŞME — abonelik kullanıcısında
+    // sürpriz fatura/hata olur. Görünür hata ver + fazı fail et.
+    const m =
+      `Main 'Claude Code Aboneliği' (CLI) seçili ama \`claude\` bulunamadı ` +
+      `(\`~/.local/bin/claude\`) — Faz ${opts.tag} çalıştırılamadı. API'ye SESSİZCE ` +
+      `DÜŞÜLMEDİ. \`claude\` kur ya da Ayarlar → Modeller'den main'i 'API' yap.`;
+    log.warn("codegen-backend", "CLI seçili ama claude yok — görünür fail", { tag: opts.tag });
+    return {
+      run: async (): Promise<CodegenOutcome> => {
+        emitError("codegen: claude bulunamadı (CLI backend)", m);
+        emitChatMessage("system", `🔴 ${m}`);
+        return { kind: "failed", reason: m };
+      },
+      abort: () => {},
+    };
   }
   return new CodegenBaseController(opts);
 }

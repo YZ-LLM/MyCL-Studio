@@ -11,6 +11,7 @@
 
 import { backendForRole, type MyclConfig } from "../config.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
+import { emitChatMessage, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import type { State } from "../types.js";
 import { OrchestratorAgent } from "./agent.js";
@@ -29,18 +30,32 @@ export async function respondAsOrchestrator(
   userText: string,
 ): Promise<AgentDecision> {
   const wantCli = backendForRole(config, "orchestrator") === "cli";
-  if (wantCli && isClaudeAvailable()) {
+
+  // Kullanıcı kuralı: HİÇBİR ŞEY SESSİZCE çalışmasın. CLI seçili ama `claude`
+  // bulunamıyorsa API'ye SESSİZCE DÜŞME → görünür hata ver + dur.
+  if (wantCli && !isClaudeAvailable()) {
+    const m =
+      "Orkestratör 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı " +
+      "(`~/.local/bin/claude`). API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da " +
+      "Ayarlar → Modeller'den orkestratörü 'API' yap.";
+    emitError("orchestrator: claude bulunamadı (CLI backend)", m);
+    emitChatMessage("system", `🔴 ${m}`);
+    throw new Error("orchestrator CLI backend kullanılamıyor: claude bulunamadı");
+  }
+
+  if (wantCli) {
+    // claude var → CLI dene. CLI çalıştı ama karar veremezse (parse/runtime
+    // hatası) güvenlik ağı SDK'dır — ama GÖRÜNÜR (sessiz değil): kullanıcı
+    // hangi backend'e düşüldüğünü görür.
     try {
       return await new CliOrchestratorBackend(config, state).respond(userText);
     } catch (err) {
-      // Güvenlik ağı: CLI karar veremedi → SDK (decide_action tool). Sessiz
-      // değil ama akış kırılmaz — log + SDK devam.
-      log.warn("orchestrator", "CLI backend başarısız — SDK fallback", {
+      const m = `CLI orkestratör karar veremedi (${String(err).slice(0, 160)}) — bu sefer SDK'ya düşülüyor.`;
+      log.warn("orchestrator", "CLI backend başarısız — SDK fallback (görünür)", {
         error: String(err).slice(0, 200),
       });
+      emitChatMessage("system", `⚠️ ${m}`);
     }
-  } else if (wantCli && !isClaudeAvailable()) {
-    log.warn("orchestrator", "CLI seçili ama `claude` bulunamadı — SDK", {});
   }
   return new OrchestratorAgent({ config, state }).respond(userText);
 }
