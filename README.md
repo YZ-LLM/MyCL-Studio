@@ -130,7 +130,7 @@ npm run tauri build    # masaüstü uygulama paketi
 ### Test
 
 ```bash
-npm --prefix orchestrator test    # vitest — 492 test
+npm --prefix orchestrator test    # vitest (500+ test)
 npm --prefix orchestrator run build   # tsc, hata yok
 npx tsc --noEmit                  # frontend tip kontrolü
 ```
