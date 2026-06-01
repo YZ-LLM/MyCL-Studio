@@ -28,9 +28,9 @@ ayrıca efor seviyesi ve özellik bayrakları yapılandırılır.
 - **Main (codegen)** — fazların asıl işini İngilizce yapar; yalnızca o anki
   görevi bilir.
 
-Her role ayrı API anahtarı atanabilir. Anahtarlar proje dışında,
-`~/.mycl/secrets.json` içinde saklanır (izinler `0600`); depoya hiçbir anahtar
-girmez.
+Her role ayrı API anahtarı atanabilir. Anahtarlar proje dışında, platforma özel
+config dizinindeki `secrets.json` içinde saklanır (izinler `0600`; konumlar için
+[Çalıştır](#çalıştır) bölümüne bakın); depoya hiçbir anahtar girmez.
 
 ## Pipeline
 
@@ -104,6 +104,17 @@ başlarken bu `errors.db`'yi okuyarak kök nedene daha hızlı ulaşır.
 
 ## Geliştirme
 
+### Önkoşullar
+
+- **Node ≥ 22** ve npm (CI Node 24 ile koşar).
+- **Rust toolchain** (stable, `rustup`) — Tauri host'u derler.
+- **Tauri platform bağımlılıkları** ([tauri.app prereqs](https://tauri.app/start/prerequisites/)):
+  - macOS: Xcode Command Line Tools (`xcode-select --install`).
+  - Linux: `webkit2gtk-4.1`, `libgtk-3`, `librsvg2`, `libayatana-appindicator3` vb.
+  - Windows: MSVC Build Tools + WebView2 Runtime.
+- **`node` PATH'te erişilebilir olmalı** — paketlenmiş uygulama bile orchestrator'ı
+  sistemdeki `node` ile çalıştırır (Node gömülü değildir).
+
 ### Kurulum
 
 ```bash
@@ -117,8 +128,17 @@ npm --prefix orchestrator install
 npm run tauri dev
 ```
 
-İlk açılışta API anahtarları (`~/.mycl/secrets.json`) ve Ayarlar'dan model
-seçimi istenir. Sonra bir proje klasörü seçilerek pipeline başlatılır.
+`beforeDevCommand` önce orchestrator'ı derler (`orchestrator/dist`), sonra Vite dev
+sunucusunu başlatır — taze klonda ek adım gerekmez.
+
+İlk açılışta Ayarlar otomatik açılır: API anahtarları ve model seçimi istenir.
+Anahtarlar platforma göre şu dosyada saklanır (izinler `0600`):
+
+- macOS: `~/.mycl/secrets.json`
+- Linux: `$XDG_CONFIG_HOME/mycl/secrets.json` (varsayılan `~/.config/mycl/`)
+- Windows: `%APPDATA%\MyCL\secrets.json`
+
+Sonra bir proje klasörü seçilerek pipeline başlatılır.
 
 ### Build
 

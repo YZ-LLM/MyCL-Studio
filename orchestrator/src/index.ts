@@ -364,7 +364,10 @@ async function handleOpenProject(path: string): Promise<void> {
         "system",
         `Niyet toplama yarıda kalmıştı — devam ediyorum (niyet: "${interrupted.intentText.slice(0, 100)}").\n\nBirkaç soru tekrar gelebilir; cevaplarsın, Faz 2'ye geçilir.`,
       );
-      void restartPhase1WithIntent(interrupted.intentText);
+      void restartPhase1WithIntent(interrupted.intentText).catch((e) => {
+        log.error("orchestrator", "boot-resume restartPhase1WithIntent failed", e);
+        emitError("boot resume failed", String(e));
+      });
       return; // boot check skip — Phase 1 zaten başladı
     }
     // v15.7 (2026-05-26): Phase 2-9 boot-resume (production readiness madde 08).
@@ -378,7 +381,10 @@ async function handleOpenProject(path: string): Promise<void> {
         "system",
         `📍 Faz ${phaseId} yarıda kalmıştı — kaldığı yerden devam ediyorum.`,
       );
-      void advanceToNextPhase((phaseId - 1) as PhaseId);
+      void advanceToNextPhase((phaseId - 1) as PhaseId).catch((e) => {
+        log.error("orchestrator", "boot-resume advanceToNextPhase failed", e);
+        emitError("boot resume failed", String(e));
+      });
       return; // boot check skip — phase zaten başladı
     }
 

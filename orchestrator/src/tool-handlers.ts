@@ -309,6 +309,16 @@ export async function handleBash(
     child.stderr.on("data", (d) => {
       stderr += d.toString("utf-8");
     });
+    // v15.8: spawn hatası (ENOENT/EMFILE/PATH'te shell yok vb.) — error listener
+    // YOKSA Node bunu uncaught exception olarak fırlatır → process ölür + Promise
+    // sonsuza dek asılı kalır. Hatayı tool sonucuna çevir (is_error), akış kırılmasın.
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({
+        content: `exit_code=-1 (spawn failed)\n--- error ---\n${String(err)}`,
+        is_error: true,
+      });
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       // Test runner çıktısı tipik olarak SON satırlarda özet/fail detayı tutar.

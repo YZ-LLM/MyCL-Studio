@@ -553,9 +553,11 @@ function App() {
             reason: ev.data.reason,
             detail: ev.data.detail,
           });
-          if (ev.data.reason === "model_selection_missing") {
-            setSettingsOpen(true);
-          }
+          // v15.8: İlk açılış onboarding — config eksik OLAN HER durumda Settings'i
+          // otomatik aç. Önceden yalnız model_selection_missing açıyordu; ama boot'ta
+          // ÖNCE api_keys_missing emit ediliyor (index.ts) → yeni kullanıcı boş ekranda
+          // kalıyordu. Settings render `initialTab`'ı reason'a göre seçer (api_keys vb.).
+          setSettingsOpen(true);
         }
         setSavingKeys(false);
         setSavingModels(false);

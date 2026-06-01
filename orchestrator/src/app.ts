@@ -44,6 +44,29 @@ export class App {
    */
   async start(): Promise<void> {
     await log.setSinkHome();
+
+    // v15.8: Global güvenlik ağı. Yakalanmamış reject/exception Node'da default
+    // olarak process'i ÖLDÜRÜR → orkestratör sessizce ölür, UI "ready" beklerken
+    // donar. Burada logla + UI'a bildir, ama ayakta kal: bir sonraki stdin komutu
+    // yine işlenebilsin. (Fire-and-forget boot-resume akışları da burada yakalanır;
+    // çağrı yerlerinde ayrıca .catch var — çift güvence.)
+    process.on("unhandledRejection", (reason) => {
+      log.error("orchestrator", "unhandledRejection (process ayakta tutuldu)", reason);
+      try {
+        emitError("unhandledRejection", String(reason));
+      } catch {
+        /* emit bile patlarsa yut — process'i öldürme */
+      }
+    });
+    process.on("uncaughtException", (err) => {
+      log.error("orchestrator", "uncaughtException (process ayakta tutuldu)", err);
+      try {
+        emitError("uncaughtException", String(err));
+      } catch {
+        /* yut */
+      }
+    });
+
     log.info("orchestrator", "boot", {
       pid: process.pid,
       node: process.version,
