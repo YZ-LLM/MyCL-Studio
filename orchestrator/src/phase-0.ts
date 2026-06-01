@@ -15,10 +15,13 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { appendAudit, formatDecisions, readDecisions } from "./audit.js";
+import { extractKindBlock } from "./cli-json.js";
+import { runClaudeCli } from "./cli-run.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
+import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
-import type { MyclConfig } from "./config.js";
+import { backendForRole, type MyclConfig } from "./config.js";
 import { ensureErrorCatalog } from "./errors-db.js";
 import { clearHistory } from "./history.js";
 // v15.7 (2026-05-26): runtime-error-watcher / vite-runtime-injector /
@@ -282,7 +285,29 @@ export class Phase0Controller {
       TOOL_REPORT_ROOT_CAUSE,
     ];
 
+    // v15.8: main='Claude Code Aboneliği' → D1'i CLI ile koş. report_root_cause
+    // custom tool'u `claude -p`'de yok → text-JSON {kind:"root_cause"} ile sonuçlandır.
+    // D1 dosya yazmaz (sadece Read/Grep/Bash araştırma) → single-shot runClaudeCli.
+    const wantCli = backendForRole(this.config, "main") === "cli";
+    if (wantCli && !isClaudeAvailable()) {
+      const m =
+        "Main 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı — " +
+        "Faz 0 (Hata Ayıklama) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. " +
+        "`claude` kur ya da Ayarlar → Modeller'den main'i 'API' yap.";
+      emitError("phase-0: claude bulunamadı (CLI)", m);
+      emitChatMessage("system", `🔴 ${m}`);
+      this.lastOutcome = { kind: "failed", reason: "claude not found (CLI backend)" };
+      return "fail";
+    }
+
     let reportTool: { name: string; input: Record<string, unknown> } | null = null;
+    if (wantCli) {
+      reportTool = await this.runD1Cli(
+        systemPrompt,
+        (this.config.selected_models[role] ?? this.config.selected_models.main) as string,
+        probeOutput,
+      );
+    } else {
     this.base = createCodegenBackend({
       tag: "phase-0-d1",
       phaseId: 0,
@@ -335,6 +360,8 @@ export class Phase0Controller {
       return "fail";
     }
 
+    } // else — SDK (createCodegenBackend) yolu
+
     let finalTool = reportTool as
       | { name: string; input: Record<string, unknown> }
       | null;
@@ -344,7 +371,7 @@ export class Phase0Controller {
     // dene. Önceki araştırma context'i Claude'da yok ama bug raporu + project
     // context system prompt'ta hala mevcut → "best guess" rapor üretilir;
     // boşa harcanan token'ları telafi eder.
-    if (!finalTool) {
+    if (!finalTool && !wantCli) {
       log.warn("phase-0", "no tool call after codegen loop — force retry");
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
@@ -524,4 +551,48 @@ export class Phase0Controller {
     return "complete";
   }
 
+  /**
+   * D1'i CLI (abonelik) ile koş — tek-atış araştırma + text-JSON root_cause.
+   * report_root_cause custom tool'u `claude -p`'de yok → {kind:"root_cause",...}
+   * bloğu parse edilir (alanlar TOOL_REPORT_ROOT_CAUSE şemasıyla aynı). Bulunamazsa
+   * görünür hata + null döner (caller fail eder; API force-retry YOK — abonelik).
+   */
+  private async runD1Cli(
+    systemPrompt: string,
+    modelId: string,
+    probeOutput: string | null,
+  ): Promise<{ name: string; input: Record<string, unknown> } | null> {
+    const schema = JSON.stringify(TOOL_REPORT_ROOT_CAUSE.input_schema);
+    const sys = `${systemPrompt}
+
+---
+
+## ÇIKTI FORMATI — CLI modu (tool YOK, text-JSON)
+\`report_root_cause\` TOOL'U YOKTUR. Read/Grep/Bash ile araştır (DOSYAYA YAZMA), sonra
+CEVABININ TAMAMI tek bir JSON bloğu olsun (blok DIŞINDA düz metin YAZMA): {"kind":"root_cause", ...}.
+Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
+    const res = await runClaudeCli({
+      systemPrompt: sys,
+      userMessage:
+        'D1 — investigate with Read/Grep/Bash, then conclude by emitting the {"kind":"root_cause",...} JSON block (root_cause_en + 2-4 fix_options).' +
+        (probeOutput ? `\n\n${probeOutput}` : ""),
+      modelId,
+      cwd: this.state.project_root,
+      allowedTools: ["Read", "Grep", "Glob", "Bash"],
+      disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+      effort: this.config.claude_code_flags.effort,
+    });
+    if (!res.ok) {
+      emitChatMessage("error", `❌ Faz 0 D1 (CLI) başarısız: ${res.error ?? "bilinmeyen"}`);
+      return null;
+    }
+    const block = extractKindBlock(res.text, ["root_cause"]);
+    if (!block) {
+      emitChatMessage("error", "❌ Faz 0 D1 (CLI): `root_cause` JSON bloğu üretilmedi.");
+      return null;
+    }
+    const input: Record<string, unknown> = { ...block };
+    delete input.kind;
+    return { name: "report_root_cause", input };
+  }
 }
