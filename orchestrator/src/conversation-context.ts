@@ -16,6 +16,7 @@
 import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MyclConfig } from "./config.js";
+import { isSubscriptionMode } from "./subscription-mode.js";
 import { loadMessages } from "./history-loader.js";
 import { log } from "./logger.js";
 import type { State } from "./types.js";
@@ -100,7 +101,9 @@ export async function buildConversationContext(
   const olderMessages = userMessages.slice(0, -RECENT_LIMIT);
 
   let summary: string | null = null;
-  if (total >= SUMMARY_TRIGGER && olderMessages.length > 0) {
+  // v15.8: saf abonelik modunda özet (translator SDK çağrısı) atlanır → null
+  // (caller recent_messages ile devam eder; özet best-effort bağlam zenginleştirme).
+  if (total >= SUMMARY_TRIGGER && olderMessages.length > 0 && !isSubscriptionMode(config)) {
     const key = hashMessages(olderMessages);
     const cached = summaryCache.get(key);
     if (cached) {

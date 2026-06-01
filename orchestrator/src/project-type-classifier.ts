@@ -10,6 +10,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { MyclConfig } from "./config.js";
+import { isSubscriptionMode, noteSubscriptionSkipOnce } from "./subscription-mode.js";
 import { log } from "./logger.js";
 import type { ProjectType } from "./types.js";
 
@@ -90,6 +91,12 @@ export async function classifyProjectType(
 ): Promise<ProjectClassification> {
   if (!summary || summary.trim().length < 5) {
     log.warn("project-type-classifier", "summary too short — unknown");
+    return { project_type: "unknown" };
+  }
+  // v15.8: saf abonelik modunda API'ye sokulmaz (zorlanmış-tool, CLI yok) → "unknown"
+  // fail-soft (kullanıcı sonraki fazlarda override edebilir).
+  if (isSubscriptionMode(config)) {
+    noteSubscriptionSkipOnce();
     return { project_type: "unknown" };
   }
 

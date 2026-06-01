@@ -11,6 +11,7 @@
 // devam eder. Faz çökmez; relevance opsiyonel yan-yarar.
 
 import { relevanceApiKey, relevanceModelId, type MyclConfig } from "../config.js";
+import { isSubscriptionMode, noteSubscriptionSkipOnce } from "../subscription-mode.js";
 import { emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import type { State } from "../types.js";
@@ -128,6 +129,12 @@ export async function getRelevantChunks(
   state: State,
   options: RelevanceQueryOptions,
 ): Promise<ScoredChunk[]> {
+  // v15.8: saf abonelik modunda relevance API'ye sokulmaz (zorlanmış-tool, CLI yok;
+  // best-effort) → boş sentinel (caller "no relevant ... found" ile devam eder).
+  if (isSubscriptionMode(config)) {
+    noteSubscriptionSkipOnce();
+    return [];
+  }
   const maxChunks = options.max_chunks ?? 5;
   const minScore = options.min_score ?? 6;
   const topK = options.keyword_top_k ?? 20;
