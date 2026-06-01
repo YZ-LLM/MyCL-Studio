@@ -56,8 +56,8 @@ Gerekirse Read/Grep/Glob/Bash ile araştır (DOSYAYA YAZMA — dosyayı MyCL yaz
 2) "Kaydedildi" onayını aldıktan SONRA: \`{"kind":"approval","pitch_en":"2-3 cümle İngilizce özet"}\` yaz.
 3) Kullanıcı revizyon isterse güncellenmiş yeni bir \`{"kind":"write",...}\` yaz.
 
-KURALLAR: mesaj başına SADECE TEK JSON bloğu; geçerli JSON (çift tırnak, trailing comma yok);
-blok mesajın EN SONUNDA.`;
+KURALLAR: CEVABININ TAMAMI tek bir JSON bloğu olmalı — blok DIŞINDA düz metin YAZMA (ne öncesinde
+ne sonrasında); geçerli JSON (çift tırnak, trailing comma yok).`;
 }
 
 interface PendingAskq {
