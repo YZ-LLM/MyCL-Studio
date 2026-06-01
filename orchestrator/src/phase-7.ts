@@ -5,7 +5,8 @@
 
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { appendAudit, appendDecision } from "./audit.js";
-import { ProductionSchemaBaseController } from "./base/production-schema-controller.js";
+import type { ProductionBackend } from "./base/production-schema-controller.js";
+import { createProductionSchemaBackend } from "./base/production-schema-cli-backend.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { emitError } from "./ipc.js";
@@ -147,7 +148,7 @@ ${migs}
 }
 
 export class Phase7Controller {
-  private base: ProductionSchemaBaseController | null = null;
+  private base: ProductionBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
   public statePatch: Partial<State> = {};
@@ -210,7 +211,7 @@ export class Phase7Controller {
     }
 
     const role = this.spec.model_role!;
-    this.base = new ProductionSchemaBaseController({
+    this.base = createProductionSchemaBackend({
       tag: "phase-7",
       phaseId: 7,
       state: this.state,

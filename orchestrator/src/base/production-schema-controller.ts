@@ -53,6 +53,16 @@ export type ProductionOutcome =
   | { kind: "aborted" }
   | { kind: "failed"; reason: string };
 
+/**
+ * SDK ve CLI backend'lerinin ortak arayüzü — faz controller'ları (Faz 3/4/7) bu
+ * tipe karşı çalışır, factory hangisini döndürdüğünü bilmez.
+ */
+export interface ProductionBackend {
+  run(): Promise<ProductionOutcome>;
+  abort(): void;
+  submitAskqAnswer(askqId: string, selected_tr: string): void;
+}
+
 const ABORT_SENTINEL = Symbol("production-aborted");
 
 interface PendingAskq {
@@ -64,7 +74,7 @@ function sha256(s: string): string {
   return createHash("sha256").update(s, "utf-8").digest("hex");
 }
 
-export class ProductionSchemaBaseController {
+export class ProductionSchemaBaseController implements ProductionBackend {
   private pendingAskq: PendingAskq | null = null;
   private pendingResolver: ((selected_tr: string) => void) | null = null;
   private pendingRejecter: ((reason: unknown) => void) | null = null;
