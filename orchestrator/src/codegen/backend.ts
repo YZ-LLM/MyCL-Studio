@@ -72,5 +72,16 @@ export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
       abort: () => {},
     };
   }
+  // Kullanıcı kuralı: sessiz olma. Main 'CLI' seçili ama bu faz custom tool
+  // gerektiriyor (Faz 0 report_root_cause / Faz 8 TDD tool-gate) → `claude -p`
+  // bunları desteklemediği için SDK (API) ile çalışır. Kullanıcı, aboneliğin bu
+  // fazda DEVREDE OLMADIĞINI görsün (sürpriz API kullanımı/faturası olmasın).
+  if (flagOn && !eligible) {
+    emitChatMessage(
+      "system",
+      `ℹ️ Faz "${opts.tag}" custom tool gerektirdiği için Claude Code CLI ile çalışamaz — ` +
+        `dahili SDK (Anthropic API) kullanılıyor. Bu faz abonelik kapsamı dışında (API anahtarı + kredi gerekir).`,
+    );
+  }
   return new CodegenBaseController(opts);
 }
