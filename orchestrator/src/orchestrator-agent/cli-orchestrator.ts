@@ -7,9 +7,14 @@
 // edilir. Parse başarısızsa 1 sıkı-nudge retry; yine olmazsa caller (respond.ts)
 // SDK'ya düşer (güvenlik ağı — akış kırılmaz).
 //
-// Read-only: --allowedTools Read/Grep/Glob/Bash + --disallowedTools Write/Edit +
-// yıkıcı Bash. SDK orkestratörünün strict Bash safe-list'i CLI'da YAKLAŞIK
-// (--disallowedTools birebir değil — dürüst not). Karar dosya yazamaz.
+// Araçlar: --allowedTools Read/Grep/Glob/Bash. Orkestratör araştırma için TAM
+// Bash yetkisine sahip (SDK yolundaki strict safe-list'ten daha geniş — bilinçli:
+// tek-kullanıcılı yerel araçta orkestratörün bash'i kullanıcının kendi bash'iyle
+// eşdeğer, gerçek tehdit değil). DÜRÜST NOT: headless `claude -p`'de --allowedTools
+// kısıtlamaz, --permission-mode de Bash yazımını engellemez (ampirik doğrulandı) —
+// tek güvenilir kaldıraç --disallowedTools. Bu yüzden orkestratör STRICT READ-ONLY
+// DEĞİL: Bash redirect ile dosya yazabilir. Yalnız kaza-koruması var: Write/Edit +
+// yıkıcı Bash kalıpları (rm/sudo/push/commit/chmod/publish/curl/wget) reddedilir.
 
 import { runClaudeCli } from "../cli-run.js";
 import { orchestratorModelId, type MyclConfig } from "../config.js";
@@ -19,10 +24,10 @@ import type { State } from "../types.js";
 import { buildOrchestratorSystemPrompt } from "./agent.js";
 import { parseAgentDecision, type AgentDecision } from "./decision.js";
 
-/** Orkestratör read-only araştırma araçları (auto-approve). */
+/** Orkestratör araştırma araçları (auto-approve). Bash dahil — tam araştırma yetkisi. */
 const ORCH_ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash"];
 
-/** Write/Edit + yıkıcı Bash reddi (orkestratör dosya YAZAMAZ + tehlikeli komut yok). */
+/** Kaza-koruması: Write/Edit + yıkıcı Bash kalıpları reddi (read-only DEĞİL — bkz. başlık notu). */
 const ORCH_DISALLOWED_TOOLS = [
   "Write",
   "Edit",
