@@ -8,14 +8,16 @@
 //   -p / --print, --model, --effort (low/medium/high/xhigh/max),
 //   --settings '{"ultracode":true}' (ultracode efor seviyesi DEĞİL — ayrı ayar),
 //   --output-format stream-json --verbose, --permission-mode, --add-dir,
-//   --allowedTools/--disallowedTools, --bare, --no-session-persistence,
+//   --allowedTools/--disallowedTools, --no-session-persistence,
 //   --max-budget-usd (maliyet sınırı; bu sürümde --max-turns YOK),
 //   --append-system-prompt.
 //
 // Güvenlik (SDK bash-guard/path-sandbox paritesi KISMİ): cwd=project_root +
 // --add-dir <project_root> ile dosya erişimi sınırlı; --disallowedTools ile
-// tehlikeli bash reddedilir; env safeEnv() + explicit ANTHROPIC_API_KEY (--bare
-// keychain okumaz). İnce write-deny (.mycl/ vb.) tam birebir değil — not.
+// tehlikeli bash reddedilir; env safeEnv() (API key ENJEKTE EDİLMEZ → abonelik
+// OAuth/keychain). --bare KULLANILMAZ: claude --help'e göre "OAuth and keychain
+// are never read" — aboneliği kırardı (kullanıcı API key'siz CLI kullanıyor).
+// İnce write-deny (.mycl/ vb.) tam birebir değil — not.
 //
 // UYARI: stream-json olay şeması + permission-mode davranışı CANLI doğrulama
 // ister (gerçek `claude -p` koşumu, LLM maliyeti). Parser defansif yazıldı.
@@ -123,8 +125,8 @@ export function claudeSpawnEnv(): NodeJS.ProcessEnv {
 /**
  * agent-skills dizini opt-in tespiti (`<config>/agent-skills`).
  *
- * `--bare` plugin-sync'i atladığı için skills'i AÇIKÇA bağlamak gerek
- * (claude --help: "Skills still resolve via /skill-name … --plugin-dir").
+ * Skills'i AÇIKÇA --plugin-dir ile bağlarız: kullanıcının global plugin
+ * setine bağımlı olmadan MyCL'in agent-skills'ini deterministik yükler.
  * Auto-clone YAPILMAZ (runtime network/supply-chain riski) — kullanıcı bir kez
  * `git clone https://github.com/addyosmani/agent-skills ~/.mycl/agent-skills`.
  */
@@ -342,12 +344,11 @@ export class CliCodegenBackend implements CodegenBackend {
       DISALLOWED_TOOLS.join(" "),
       "--add-dir",
       opts.state.project_root,
-      "--bare",
       "--no-session-persistence",
       "--max-budget-usd",
       String(DEFAULT_MAX_BUDGET_USD),
     ];
-    // agent-skills opt-in: dizin varsa --plugin-dir ile bağla (--bare sync'i atlar).
+    // agent-skills opt-in: dizin varsa --plugin-dir ile açıkça bağla.
     const skillsDir = resolveSkillsDir();
     if (skillsDir) {
       args.push("--plugin-dir", skillsDir);
