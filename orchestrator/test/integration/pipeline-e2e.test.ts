@@ -193,12 +193,15 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
   });
 
   afterEach(async () => {
-    // Arka plan pipeline'ın trailing yazımları bitsin (bounded) — yarış → ENOTEMPTY önlenir.
+    // Arka plan pipeline TAM bitsin (trailing cost/audit/decisions yazımları) →
+    // `rm` ile yarışmasın. Tüm-gate yükünde (45 test paraleli, event loop doygun)
+    // settle GEÇ olabilir → cömert cap (15s; pipeline phase-17'de zaten biter).
     if (advancePromise) {
-      await Promise.race([advancePromise, new Promise((r) => setTimeout(r, 3000))]);
+      await Promise.race([advancePromise, new Promise((r) => setTimeout(r, 15_000))]);
     }
-    // maxRetries: kalan transient yazım/handle için defansif retry.
-    await rm(projectRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    // Fire-and-forget kalan yazımlar için AGRESİF retry: node ENOTEMPTY/EBUSY'de
+    // retryDelay backoff'uyla 10 kez dener → trailing stragglers'ı yutar.
+    await rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
   });
 
   // Faz 1'i (intent) tamamlanmış varsayıp Faz 2'den gerçek motoru sürer; askq'ları

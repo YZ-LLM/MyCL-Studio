@@ -162,6 +162,16 @@ select:focus {
   color: var(--fg-bright);
 }
 
+/* Build zaman damgası — başlığın yanında küçük/soluk/mono. Hangi build'in
+   çalıştığını gösterir (eski/yanlış build'i çalıştırmayı önler). */
+.app-version {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-dim);
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
 .app-project-path {
   display: flex;
   align-items: center;

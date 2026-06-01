@@ -66,6 +66,13 @@ export function AppHeader({
   return (
     <header className="app-header" data-tauri-drag-region>
       <span className="app-title" data-tauri-drag-region>MyCL Studio</span>
+      <span
+        className="app-version"
+        data-tauri-drag-region
+        title="Çalışan build'in zamanı (yerel). Eski/yanlış build'i çalıştırıp çalıştırmadığını buradan anla."
+      >
+        {__BUILD_TIME__}
+      </span>
       <span className="app-project-path" data-tauri-drag-region>
         <span data-tauri-drag-region>📁</span>
         <span data-tauri-drag-region>{projectPath}</span>

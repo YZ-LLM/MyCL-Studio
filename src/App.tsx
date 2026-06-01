@@ -953,6 +953,9 @@ function App() {
       <div className="app">
         <header className="app-header" data-tauri-drag-region>
           <span className="app-title" data-tauri-drag-region>MyCL Studio</span>
+          <span className="app-version" data-tauri-drag-region title="Çalışan build zamanı (yerel)">
+            {__BUILD_TIME__}
+          </span>
           <span className="app-phase-indicator" data-tauri-drag-region>kurulum</span>
         </header>
         {settingsView}
@@ -965,6 +968,9 @@ function App() {
       <div className="app">
         <header className="app-header" data-tauri-drag-region>
           <span className="app-title" data-tauri-drag-region>MyCL Studio</span>
+          <span className="app-version" data-tauri-drag-region title="Çalışan build zamanı (yerel)">
+            {__BUILD_TIME__}
+          </span>
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
