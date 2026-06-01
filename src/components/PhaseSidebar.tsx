@@ -36,6 +36,31 @@ export function PhaseSidebar({
     <aside className="phase-sidebar">
       <div className="phase-sidebar-header">Fazlar</div>
       <div className="phase-sidebar-list">
+        {/* Faz 0 — Hata Ayıklama (Debug Triage). Pipeline DIŞI/standalone; en üstte,
+            ayrı 🐛 rozetiyle. Tek başına "çalıştır" akışı yok — tıklanınca kullanıcıya
+            hatayı chat'e yazması söylenir (orchestrator otomatik debug_triage'a yönlendirir). */}
+        {(() => {
+          const p0 = byId.get(0 as PhaseId);
+          const p0Name = p0?.name_tr ?? p0?.name_en ?? "Hata Ayıklama";
+          const isCurrent0 = currentPhase === (0 as PhaseId);
+          return (
+            <button
+              type="button"
+              className={`phase-item standalone${isCurrent0 ? " current" : ""}`}
+              disabled={disabled}
+              onClick={() => onPhaseClick(0 as PhaseId)}
+              title="Faz 0 — Hata Ayıklama (Debug Triage). Pipeline dışı, standalone. Yaşadığın hatayı chat'e yaz; debug akışı otomatik başlar."
+            >
+              <span className="phase-badge" aria-hidden>
+                {isCurrent0 ? "🔵" : "🐛"}
+              </span>
+              <div className="phase-text">
+                <div className="phase-label">Faz 0</div>
+                <div className="phase-name">{p0Name}</div>
+              </div>
+            </button>
+          );
+        })()}
         {VISIBLE_PHASES.map((id) => {
           const p = byId.get(id);
           const badge =

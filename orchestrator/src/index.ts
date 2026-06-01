@@ -2599,7 +2599,8 @@ async function emitPhaseRunAskq(phaseId: number): Promise<void> {
   if (phaseId === 0) {
     emitChatMessage(
       "system",
-      "Faz 0 Debug Triage burada başlatılamaz. Hata için composer altındaki '🐛 Hata Ayıkla' seçeneğini kullan veya chat'e bug mesajı yaz.",
+      "🐛 Faz 0 (Hata Ayıklama) standalone'dur — tek başına 'çalıştır' ile başlamaz. " +
+        "Yaşadığın hatayı/sorunu chat'e yaz; orkestratör otomatik olarak Debug Triage'ı başlatır.",
     );
     return;
   }

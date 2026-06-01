@@ -725,6 +725,13 @@ select:focus {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Faz 0 (Hata Ayıklama) — pipeline DIŞI standalone; kalın ayraçla pipeline'dan ayrılır. */
+.phase-item.standalone {
+  border-bottom: 2px solid rgba(255, 255, 255, 0.12);
+}
+.phase-item.standalone .phase-name {
+  color: var(--fg-dim);
+}
 .phase-badge {
   font-size: 14px;
   flex-shrink: 0;
