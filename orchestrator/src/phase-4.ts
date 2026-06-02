@@ -5,6 +5,7 @@
 // approve geldiğinde state.spec_approved + spec_hash patch'i yapılır.
 
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { appendAudit, appendDecision } from "./audit.js";
 import type { ProductionBackend } from "./base/production-schema-controller.js";
 import { createProductionSchemaBackend } from "./base/production-schema-cli-backend.js";
@@ -182,6 +183,33 @@ export class Phase4Controller {
       return "fail";
     }
 
+    // v15.9 INCREMENTAL SPEC: mevcut spec.md varsa baştan yazma — KORU + yeni
+    // AC ekle (Ümit: spec biriktirilsin). Model mevcut spec'i görüp full merged
+    // spec üretir; AC numaralandırma mevcut max'tan devam eder. spec.md yoksa
+    // (ilk spec / greenfield) varsayılan mesaj.
+    let initialUserMessage = "Begin Phase 4: write the engineering spec.";
+    try {
+      const existingSpec = await readFile(
+        join(this.state.project_root, ".mycl", "spec.md"),
+        "utf-8",
+      );
+      if (existingSpec.trim().length > 0) {
+        initialUserMessage =
+          "Begin Phase 4 — INCREMENTAL spec update (this project ALREADY has a spec).\n\n" +
+          "## EXISTING spec.md (PRESERVE — do NOT drop prior scope, acceptance criteria, or risks)\n" +
+          "```markdown\n" +
+          existingSpec.slice(0, 8000) +
+          "\n```\n\n" +
+          "For THIS iteration: KEEP all existing content and ADD only what the current intent " +
+          "requires. Continue acceptance-criteria numbering AFTER the highest existing number — do " +
+          "NOT renumber or remove existing ACs. Your write_spec output MUST be the FULL merged spec " +
+          "(existing + new), not just the delta.";
+        log.info("phase-4", "incremental spec mode (mevcut spec.md korunuyor)");
+      }
+    } catch {
+      // spec.md yok → ilk spec; varsayılan mesaj kalır.
+    }
+
     const role = this.spec.model_role!;
     this.base = createProductionSchemaBackend({
       tag: "phase-4",
@@ -191,7 +219,7 @@ export class Phase4Controller {
       systemPrompt,
       modelId: this.config.selected_models[role],
       apiKey: this.config.api_keys.main,
-      initialUserMessage: "Begin Phase 4: write the engineering spec.",
+      initialUserMessage,
       tools: [TOOL_WRITE_SPEC, TOOL_REQUEST_APPROVAL],
       production: this.spec.production_config,
       betas: this.config.claude_code_flags.betas,
