@@ -88,6 +88,11 @@ import { handleCommandIntent } from "./intent-router/handlers/command.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
 import {
+  computeChangedScope,
+  shouldComputeScope,
+  SCOPED_SKIP_PHASES,
+} from "./fix/scope.js";
+import {
   assessPhase16Verification,
   ensureAuthTemplate,
   ensurePlaywrightInstalled,
@@ -1560,6 +1565,9 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
   let state: State = runtime.state;
   const cfg: MyclConfig = runtime.config;
   let cur: PhaseId = from;
+  // v15.9: değişen-kapsam bir kez hesaplanır (ilk mekanik fazda); scoped-touch
+  // modunda scope'lanamayan sistem-gate'leri atlanır.
+  let scopeComputed = false;
 
   // ARDIŞIK akış: N → N+1, atlamasız. Controller'ı olmayan fazlar skip stub
   // ile geçer (audit phase-N-skipped + phase-N-complete) ama state.current_phase
@@ -1588,6 +1596,13 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // v15.8 (2026-05-30): Akış sonu DÜRÜST özet — istenen vs gerçekte
       // doğrulanan. Yanlış "her şey tamam" hissini önler.
       await emitPipelineEndSummary(state);
+      // v15.9: scoped kapsam + fix checkpoint ref tüketildi — temizle (sonraki
+      // iterasyonda stale scope yanlış daraltma yapmasın).
+      if (state.changed_scope || state.fix_checkpoint_ref) {
+        state = { ...state, changed_scope: undefined, fix_checkpoint_ref: undefined };
+        runtime.state = state;
+        await saveState(state);
+      }
       // v15.7 (2026-05-25) BUG FIX: Akış son fazda (örn. Faz 17) bittiğinde
       // son emitPhaseChanged hâlâ "running" idi → sidebar mavi (running)
       // kalıyordu. Loop break öncesi son fazı "complete" işaretle.
@@ -2017,6 +2032,61 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = next;
         continue;
       }
+      // v15.9 SCOPED MEKANİK GATE — ilk mekanik fazda değişen kapsamı bir kez
+      // hesapla (fix/development; greenfield ilk build değilse). Scope'lanabilir
+      // gate'ler (lint/güvenlik) değişen dosyalara daralır; scope'lanamayan
+      // sistem-gate'leri (11/12/15/17) bu hızlı koşuda atlanıp tam taramaya bırakılır.
+      if (!scopeComputed && shouldComputeScope(state)) {
+        scopeComputed = true;
+        try {
+          const sc = await computeChangedScope(state.project_root, state.fix_checkpoint_ref);
+          if (sc.available && sc.files.length > 0) {
+            state = {
+              ...state,
+              changed_scope: { files: sc.files, since: sc.since, computed_at: Date.now() },
+              fix_checkpoint_ref: undefined,
+            };
+            runtime.state = state;
+            await saveState(state);
+            emitChatMessage(
+              "system",
+              `🎯 Scoped kalite: değişen ${sc.files.length} dosya + bağımlıları taranıyor; sistem-gate'leri (sadeleştirme/perf/entegrasyon/load) tam taramaya bırakıldı.`,
+            );
+          } else if (state.fix_checkpoint_ref) {
+            state = { ...state, fix_checkpoint_ref: undefined };
+            runtime.state = state;
+          }
+        } catch (err) {
+          log.warn("orchestrator", "değişen kapsam hesaplanamadı (full mod)", err);
+        }
+      }
+      // Scope'lanamayan sistem-gate'leri scoped-touch modunda atla (tam taramada koşar).
+      if (
+        state.changed_scope &&
+        state.changed_scope.files.length > 0 &&
+        SCOPED_SKIP_PHASES.has(next)
+      ) {
+        await appendAuditModule(state.project_root, {
+          ts: Date.now(),
+          phase: next,
+          event: `phase-${next}-skipped`,
+          caller: "mycl-orchestrator",
+          detail: "scoped_run: tüm-sistem gate, tam taramada koşar",
+        });
+        await appendAuditModule(state.project_root, {
+          ts: Date.now(),
+          phase: next,
+          event: `phase-${next}-complete`,
+          caller: "mycl-orchestrator",
+        });
+        emitChatMessage(
+          "system",
+          `⏭ Faz ${next} (${phaseLabelTR(next, spec)}) bu scoped koşuda atlandı — tüm-sistem taraması büyük taramada koşar.`,
+        );
+        cur = next;
+        continue;
+      }
+
       // v15.7 (2026-05-25): Faz 16 (E2E) için Playwright feature toggle.
       // Settings → Özellikler → "Playwright" kapalıysa fazı atla.
       if (next === 16 && runtime.config?.features.playwright_enabled === false) {
@@ -2103,6 +2173,8 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         mechanical: spec.mechanical_config,
         pass_event: passEvent,
         fail_event: failEvent,
+        // v15.9: scoped-touch modunda değişen dosyalara daralt (boş → tüm-proje).
+        changedScope: state.changed_scope?.files,
       });
       const outcome = await runner.run();
       log.info("orchestrator", `phase ${next} mechanical end`, {
@@ -2968,6 +3040,8 @@ async function runPhaseOnce(
           mechanical: spec.mechanical_config,
           pass_event: passEvent,
           fail_event: failEvent,
+          // v15.9: scoped kapsam set ise değişen dosyalara daralt.
+          changedScope: state.changed_scope?.files,
         });
         try {
           const outcome = await runner.run();

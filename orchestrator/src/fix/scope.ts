@@ -25,6 +25,26 @@ export interface ChangedScope {
 const BLAST_RADIUS_DEPTH = 2;
 
 /**
+ * Scope'lanamayan sistem-seviye mekanik fazlar — scoped-touch modunda atlanır
+ * (tam taramada/büyük milestone'da koşar). Sadeleştirme(11)/Perf(12)/
+ * Entegrasyon(15)/Load(17): doğası gereği tüm-graf/tüm-sistem. Lint(10)/
+ * Güvenlik(13)/Birim(14) scoped veya tüm-proje koşmaya devam eder.
+ */
+export const SCOPED_SKIP_PHASES: ReadonlySet<number> = new Set([11, 12, 15, 17]);
+
+/**
+ * Scoped-touch modu mu (değişen kapsama daralt) yoksa full mod mu (greenfield/
+ * ilk build → tüm gate'ler tüm-proje)? İterasyon > 1 veya fix checkpoint'i
+ * varsa scoped. İlk iterasyon + fix yok → full (büyük milestone).
+ */
+export function shouldComputeScope(state: {
+  iteration_count?: number;
+  fix_checkpoint_ref?: string;
+}): boolean {
+  return (state.iteration_count ?? 1) > 1 || Boolean(state.fix_checkpoint_ref);
+}
+
+/**
  * Değişen kapsamı hesapla. `since` (checkpoint ref) verilirse o commit'ten bu
  * yana; yoksa HEAD'den. Kaynak-dışı (package.json, README) ve silinmiş dosyalar
  * elenir; kalan değişenler + onları import edenler (blast-radius) birleşir.

@@ -457,7 +457,14 @@ export class Phase8Controller {
       const acCoverage = greens / Math.max(1, minGreens);
       const baseScore = Math.min(100, Math.round(acCoverage * 100));
       const score = Math.max(0, baseScore - techDebtCount * 5);
-      this.statePatch = { tdd_compliance_score: score };
+      // v15.9: önceki patch'i koru (pending_backend_fix:undefined kaybolmasın) +
+      // fix checkpoint ref'ini köprüle (advanceToNextPhase scoped kapsamı bu
+      // commit'ten itibaren hesaplar = tam fix diff'i). Checkpoint yoksa undefined.
+      this.statePatch = {
+        ...this.statePatch,
+        tdd_compliance_score: score,
+        fix_checkpoint_ref: this.checkpointRef ?? undefined,
+      };
       return "complete";
     }
     // Fail nedenini kullanıcıya görünür yap
