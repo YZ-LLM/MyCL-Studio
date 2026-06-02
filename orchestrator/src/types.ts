@@ -152,7 +152,17 @@ export interface ProductionConfig {
  */
 export type MechanicalCommandSpec =
   | string
-  | { type: "profile_key"; key: string }
+  | {
+      type: "profile_key";
+      key: string;
+      /**
+       * v15.9: Scoped varyant profil anahtarı (örn. "lint_scoped"). Değişen
+       * kapsam (changedScope) doluysa + profilde bu key + `{files}` şablonu
+       * varsa, komut yalnız değişen dosyalara daraltılır. Yoksa `key`
+       * (tüm-proje) fallback. Sadece scope'lanabilir gate'lerde (lint/test).
+       */
+      scoped_key?: string;
+    }
   | { type: "project_type"; which: "e2e" | "load" };
 
 /** mechanical faz konfigü — lokal komut. */
@@ -181,6 +191,12 @@ export interface MechanicalConfig {
     cmd: string;
     /** Project root'ta bu dosya yoksa scan skipped (missing_file). */
     require_file?: string;
+    /**
+     * v15.9: Scoped şablon (örn. "semgrep --config auto {files} --error").
+     * changedScope doluysa `{files}` değişen dosyalarla genişler; yoksa `cmd`
+     * (tüm-proje) fallback.
+     */
+    scoped_cmd_template?: string;
   }>;
 }
 

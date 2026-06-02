@@ -48,6 +48,12 @@ export interface MechanicalRunOpts {
   fail_event?: string;
   /** Komutlar için timeout (ms). default 120000. */
   timeout_ms?: number;
+  /**
+   * v15.9: Değişen kapsam (projectRoot-relative dosyalar). Doluysa scope'lanabilir
+   * gate'ler (scoped_key/scoped_cmd_template taşıyan) yalnız bu dosyalara daralır;
+   * boş/undefined → tüm-proje (mevcut davranış).
+   */
+  changedScope?: string[];
 }
 
 export type MechanicalOutcome =
@@ -66,9 +72,20 @@ const DEFAULT_TIMEOUT = 120_000;
  *   - profile_key: `state.stack` profilinden komut alır.
  *   - project_type: Faz 16/18 için stack + project_type kombinasyonu.
  */
+/** Shell tek-tırnak quote (regex yok): tek tırnakları '\'' ile escape. */
+export function shellQuote(p: string): string {
+  return `'${p.split("'").join("'\\''")}'`;
+}
+
+/** `{files}` placeholder'ını shell-safe scope yollarıyla genişlet. */
+export function expandFilesPlaceholder(template: string, files: string[]): string {
+  return template.split("{files}").join(files.map(shellQuote).join(" "));
+}
+
 export async function resolveMechanicalCmd(
   spec: MechanicalCommandSpec,
   state: State,
+  changedScope?: string[],
 ): Promise<string | null> {
   if (typeof spec === "string") return spec;
   // QC A: union exhaustiveness — yeni `type` eklenirse TS `never` branch'inde
@@ -77,6 +94,14 @@ export async function resolveMechanicalCmd(
     case "profile_key": {
       if (!state.stack) return null;
       const profile = await loadProfile(state.stack);
+      // v15.9 scoped: scoped_key tanımlı + scope dolu + profilde {files} şablonu
+      // varsa → değişen dosyalara daralt. Aksi → tüm-proje key fallback.
+      if (spec.scoped_key && changedScope && changedScope.length > 0) {
+        const scopedTmpl = resolveCommand(profile, spec.scoped_key as ProfileCommandKey);
+        if (scopedTmpl && scopedTmpl.includes("{files}")) {
+          return expandFilesPlaceholder(scopedTmpl, changedScope);
+        }
+      }
       return resolveCommand(profile, spec.key as ProfileCommandKey);
     }
     case "project_type": {
@@ -217,10 +242,19 @@ export class MechanicalRunnerBase {
       }
     }
 
-    const result = await this.execCmd(extra.cmd, timeout_ms);
+    // v15.9 scoped: scoped_cmd_template + scope dolu → değişen dosyalara daralt;
+    // aksi → cmd (tüm-proje) fallback.
+    const effectiveCmd =
+      extra.scoped_cmd_template &&
+      opts.changedScope &&
+      opts.changedScope.length > 0 &&
+      extra.scoped_cmd_template.includes("{files}")
+        ? expandFilesPlaceholder(extra.scoped_cmd_template, opts.changedScope)
+        : extra.cmd;
+    const result = await this.execCmd(effectiveCmd, timeout_ms);
     log.info(opts.tag, "extra scan", {
       name: extra.name,
-      cmd: extra.cmd,
+      cmd: effectiveCmd,
       code: result.code,
     });
 
@@ -277,7 +311,11 @@ export class MechanicalRunnerBase {
     // v15.0 Batch A: scan_cmd ve fix_cmd artık literal string olabilir veya
     // profile_key/project_type resolver spec'i. Resolve sonucu null ise (profile
     // yok, key tanımsız) → phase-N-skipped (subprocess spawn denemesi yok).
-    const scanCmd = await resolveMechanicalCmd(opts.mechanical.scan_cmd, opts.state);
+    const scanCmd = await resolveMechanicalCmd(
+      opts.mechanical.scan_cmd,
+      opts.state,
+      opts.changedScope,
+    );
     if (scanCmd === null) {
       log.info(opts.tag, "scan cmd unresolved — skipping phase", {
         spec: opts.mechanical.scan_cmd,
@@ -305,7 +343,7 @@ export class MechanicalRunnerBase {
       return { kind: "skipped", reason: "profile_resolve_null" };
     }
     const fixCmd = opts.mechanical.fix_cmd
-      ? await resolveMechanicalCmd(opts.mechanical.fix_cmd, opts.state)
+      ? await resolveMechanicalCmd(opts.mechanical.fix_cmd, opts.state, opts.changedScope)
       : null;
     // QC C: scan_cmd resolve oldu ama fix_cmd verildiği halde resolve null —
     // profil'de scan tanımlı, fix tanımsız (örn. python-uv `lint` var,

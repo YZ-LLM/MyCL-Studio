@@ -28,7 +28,12 @@ export type ProfileCommandKey =
   | "perf"
   | "security"
   | "simplify"
-  | "integration";
+  | "integration"
+  // v15.9: scoped varyantlar — `{files}` şablonu taşır (değişen dosyalara
+  // daralma). Profilde tanımlı değilse mekanik runner tüm-proje key'ine düşer.
+  | "lint_scoped"
+  | "lint_fix_scoped"
+  | "test_scoped";
 
 /**
  * project_type-aware komut anahtarları — Faz 16 (E2E) + Faz 17 (Load) gibi

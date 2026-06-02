@@ -238,8 +238,10 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     mechanical_config: {
       // v15.0: stack profilinden resolve. node-npm → "npm run lint", python-uv
       // → "uv run ruff check .", vb. Profilde lint yoksa phase skip.
-      scan_cmd: { type: "profile_key", key: "lint" },
-      fix_cmd: { type: "profile_key", key: "lint_fix" },
+      // v15.9: scoped varyant — değişen dosyalara daralma (profilde lint_scoped
+      // varsa). Yoksa lint (tüm-proje) fallback.
+      scan_cmd: { type: "profile_key", key: "lint", scoped_key: "lint_scoped" },
+      fix_cmd: { type: "profile_key", key: "lint_fix", scoped_key: "lint_fix_scoped" },
       max_rescans: 1,
       skip_unless: "always",
     },
@@ -288,18 +290,23 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
       // (semgrep registry'den OWASP-grade kural seti). `--config auto` ile birlikte
       // toplam coverage artar. assets/security-rules/ klasörü local custom rules için
       // rezerv; ileride mechanical runner runtime substitution ile entegre edilecek.
+      // v15.9: scoped_cmd_template — changedScope doluysa semgrep yalnız değişen
+      // dosyalara koşar (semgrep dosya/path listesi kabul eder); aksi → src/ (tüm).
       extra_scans: [
         {
           name: "semgrep",
           cmd: "semgrep --config auto src/ --error --quiet",
+          scoped_cmd_template: "semgrep --config auto {files} --error --quiet",
         },
         {
           name: "semgrep-security-audit",
           cmd: "semgrep --config p/security-audit src/ --error --quiet",
+          scoped_cmd_template: "semgrep --config p/security-audit {files} --error --quiet",
         },
         {
           name: "semgrep-owasp-top-ten",
           cmd: "semgrep --config p/owasp-top-ten src/ --error --quiet",
+          scoped_cmd_template: "semgrep --config p/owasp-top-ten {files} --error --quiet",
         },
       ],
     },
@@ -311,7 +318,9 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     gate_module_path: gatePath("phase-14.ts"),
     required_audits: ["unit-pass", "unit-fail"],
     mechanical_config: {
-      scan_cmd: { type: "profile_key", key: "test" },
+      // v15.9: scoped varyant — değişen dosyalarla ilgili testler (profilde
+      // test_scoped varsa, örn. vitest related / jest --findRelatedTests).
+      scan_cmd: { type: "profile_key", key: "test", scoped_key: "test_scoped" },
       max_rescans: 0,
       skip_unless: "always",
     },

@@ -7,6 +7,8 @@
     "test": "yarn test",
     "lint": "yarn lint",
     "lint_fix": "yarn lint --fix",
+    "lint_scoped": "npx --no-install eslint {files}",
+    "lint_fix_scoped": "npx --no-install eslint --fix {files}",
     "simplify": "npx --no-install ts-prune --error",
     "perf": "yarn perf",
     "security": "yarn npm audit",

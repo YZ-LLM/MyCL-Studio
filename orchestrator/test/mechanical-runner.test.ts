@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MechanicalRunnerBase,
+  expandFilesPlaceholder,
   resolveMechanicalCmd,
+  shellQuote,
 } from "../src/base/mechanical-runner.js";
 import { _clearProfileCache } from "../src/profile-loader.js";
 import type { State } from "../src/types.js";
@@ -473,5 +475,87 @@ describe("MechanicalRunnerBase profile_key integration (v15.0 Batch A)", () => {
     // önemli olan: skipped (profile_resolve_null DEĞİL — komut resolve oldu, çalıştı, eksik
     // yapılandırma nedeniyle skip oldu — Faz 11 atlandı)
     expect(["skipped", "fail"]).toContain(out.kind);
+  });
+});
+
+describe("resolveMechanicalCmd · scoped (v15.9)", () => {
+  beforeEach(() => _clearProfileCache());
+  function stateWith(stack: State["stack"]): State {
+    return {
+      current_phase: 10,
+      session_id: "test",
+      spec_approved: false,
+      ui_flow_active: false,
+      regression_block_active: false,
+      project_root: "/tmp",
+      created_at: 0,
+      updated_at: 0,
+      stack,
+    };
+  }
+
+  it("scoped_key + scope dolu → değişen dosyalara daralır (node eslint)", async () => {
+    const r = await resolveMechanicalCmd(
+      { type: "profile_key", key: "lint", scoped_key: "lint_scoped" },
+      stateWith("node-npm"),
+      ["src/a.ts", "src/b.ts"],
+    );
+    expect(r).toBe("npx --no-install eslint 'src/a.ts' 'src/b.ts'");
+  });
+
+  it("scope BOŞ → tüm-proje fallback (key)", async () => {
+    const r = await resolveMechanicalCmd(
+      { type: "profile_key", key: "lint", scoped_key: "lint_scoped" },
+      stateWith("node-npm"),
+      [],
+    );
+    expect(r).toBe("npm run lint");
+  });
+
+  it("changedScope verilmedi → tüm-proje fallback", async () => {
+    const r = await resolveMechanicalCmd(
+      { type: "profile_key", key: "lint", scoped_key: "lint_scoped" },
+      stateWith("python-uv"),
+    );
+    expect(r).toBe("uv run ruff check .");
+  });
+
+  it("profil scoped_key taşımıyor (rust) → tüm-proje fallback", async () => {
+    const r = await resolveMechanicalCmd(
+      { type: "profile_key", key: "lint", scoped_key: "lint_scoped" },
+      stateWith("rust"),
+      ["src/main.rs"],
+    );
+    // rust profilinde lint_scoped yok → key "lint" (tüm-proje) döner (veya null)
+    expect(r === null || !r.includes("{files}")).toBe(true);
+    expect(r === null || !r.includes("src/main.rs")).toBe(true);
+  });
+
+  it("python-uv scoped → ruff {files}", async () => {
+    const r = await resolveMechanicalCmd(
+      { type: "profile_key", key: "lint", scoped_key: "lint_scoped" },
+      stateWith("python-uv"),
+      ["app/main.py"],
+    );
+    expect(r).toBe("uv run ruff check 'app/main.py'");
+  });
+});
+
+describe("shellQuote + expandFilesPlaceholder", () => {
+  it("shellQuote basit + boşluklu + tek-tırnaklı yol", () => {
+    expect(shellQuote("src/a.ts")).toBe("'src/a.ts'");
+    expect(shellQuote("dir with space/a.ts")).toBe("'dir with space/a.ts'");
+    expect(shellQuote("it's.ts")).toBe("'it'\\''s.ts'");
+  });
+
+  it("expandFilesPlaceholder {files}'ı quote'lu yollarla genişletir", () => {
+    expect(expandFilesPlaceholder("eslint {files}", ["a.ts", "b.ts"])).toBe(
+      "eslint 'a.ts' 'b.ts'",
+    );
+  });
+
+  it("injection denemesi quote içinde kalır (güvenlik)", () => {
+    const r = expandFilesPlaceholder("eslint {files}", ["a.ts; rm -rf /"]);
+    expect(r).toBe("eslint 'a.ts; rm -rf /'");
   });
 });

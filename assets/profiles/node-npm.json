@@ -7,6 +7,8 @@
     "test": "npm test",
     "lint": "npm run lint",
     "lint_fix": "npm run lint -- --fix",
+    "lint_scoped": "npx --no-install eslint {files}",
+    "lint_fix_scoped": "npx --no-install eslint --fix {files}",
     "simplify": "npx --no-install ts-prune --error",
     "perf": "npm run perf",
     "security": "npm audit --omit=dev --audit-level=high",

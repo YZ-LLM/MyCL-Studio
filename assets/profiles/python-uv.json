@@ -7,6 +7,8 @@
     "test": "uv run pytest",
     "lint": "uv run ruff check .",
     "lint_fix": "uv run ruff check . --fix",
+    "lint_scoped": "uv run ruff check {files}",
+    "lint_fix_scoped": "uv run ruff check {files} --fix",
     "simplify": null,
     "perf": null,
     "security": "uv run pip-audit",

@@ -7,6 +7,8 @@
     "test": "pnpm test",
     "lint": "pnpm lint",
     "lint_fix": "pnpm lint --fix",
+    "lint_scoped": "npx --no-install eslint {files}",
+    "lint_fix_scoped": "npx --no-install eslint --fix {files}",
     "simplify": "pnpm dlx ts-prune --error",
     "perf": "pnpm perf",
     "security": "pnpm audit --prod --audit-level=high",
