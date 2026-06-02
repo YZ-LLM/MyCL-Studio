@@ -9,8 +9,8 @@
 //   --settings '{"ultracode":true}' (ultracode efor seviyesi DEĞİL — ayrı ayar),
 //   --output-format stream-json --verbose, --permission-mode, --add-dir,
 //   --allowedTools/--disallowedTools, --no-session-persistence,
-//   --max-budget-usd (maliyet sınırı; bu sürümde --max-turns YOK),
-//   --append-system-prompt.
+//   --append-system-prompt. (v15.9: --max-budget-usd KALDIRILDI — gerekli
+//   codegen'i kesiyordu; maliyet sınırı bu sürümde YOK, --max-turns de YOK.)
 //
 // Güvenlik (SDK bash-guard/path-sandbox paritesi KISMİ): cwd=project_root +
 // --add-dir <project_root> ile dosya erişimi sınırlı; --disallowedTools ile
@@ -47,9 +47,6 @@ const DISALLOWED_TOOLS = [
 
 /** Codegen'in ihtiyaç duyduğu araçlar (auto-approve allowlist). */
 const ALLOWED_TOOLS = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"];
-
-/** Maliyet sınırı (USD) — kullanıcı maliyet-duyarlı; runaway koruması. */
-const DEFAULT_MAX_BUDGET_USD = 2.0;
 
 // undefined = henüz çözülmedi; null = bulunamadı; string = mutlak yol.
 let claudePathCache: string | null | undefined;
@@ -345,8 +342,10 @@ export class CliCodegenBackend implements CodegenBackend {
       "--add-dir",
       opts.state.project_root,
       "--no-session-persistence",
-      "--max-budget-usd",
-      String(DEFAULT_MAX_BUDGET_USD),
+      // v15.9: --max-budget-usd KALDIRILDI (Ümit). $2 cap opus/ultracode tam-app
+      // codegen'ini ortada kesiyordu (Faz 5 exit=1 → degraded). Maliyet sınırı
+      // gerekli işi kesmemeli; gereksiz harcama ajan scope disiplini + faz/tur
+      // yapısıyla önlenir, $-cap ile değil.
     ];
     // agent-skills opt-in: dizin varsa --plugin-dir ile açıkça bağla.
     const skillsDir = resolveSkillsDir();
