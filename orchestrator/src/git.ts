@@ -367,3 +367,46 @@ export async function restoreCheckpoint(projectRoot: string, ref: string): Promi
   const cl = await runGitWrite(projectRoot, cleanArgs);
   return co.code === 0 && cl.code === 0;
 }
+
+/** Bir yolun `.mycl`/`error_folder` (MyCL state + hata kataloğu) altında mı. */
+function isExcludedScopePath(file: string): boolean {
+  return ROLLBACK_EXCLUDES.some((ex) => file === ex || file.startsWith(`${ex}/`));
+}
+
+/**
+ * Değişen dosyaları döndürür (scoped mekanik gate'ler için "değişen kapsam").
+ * `since` (bir commit sha) verilirse working tree'nin o commit'ten bu yana
+ * değişenleri (fix checkpoint'i = temiz HEAD → tam fix değişiklikleri); yoksa
+ * HEAD'den bu yana working-tree değişiklikleri. Untracked (yeni) dosyalar da
+ * dahil. `.mycl` + `error_folder` hariç. Yollar projectRoot-relative.
+ *
+ * Fail-safe: git repo değil / hata → boş array (kanıt opsiyonel; scope boşsa
+ * caller tüm-proje fallback yapar — asla "temiz" varsayma).
+ */
+export async function getChangedFiles(
+  projectRoot: string,
+  since?: string,
+): Promise<string[]> {
+  // since yalnız geçerli sha ise kullanılır (option injection engeli); değilse HEAD.
+  const base = since && /^[0-9a-f]{4,40}$/i.test(since) ? since : "HEAD";
+  const files = new Set<string>();
+
+  // Tracked değişiklikler: working tree (staged + unstaged) vs base.
+  const diff = await runGit(projectRoot, ["diff", "--name-only", "--relative", base, "--"]);
+  if (diff.code === 0) {
+    for (const line of diff.stdout.split("\n")) {
+      const f = line.trim();
+      if (f.length > 0) files.add(f);
+    }
+  }
+  // Untracked (fix'in yeni oluşturduğu dosyalar).
+  const untracked = await runGit(projectRoot, ["ls-files", "--others", "--exclude-standard"]);
+  if (untracked.code === 0) {
+    for (const line of untracked.stdout.split("\n")) {
+      const f = line.trim();
+      if (f.length > 0) files.add(f);
+    }
+  }
+
+  return [...files].filter((f) => !isExcludedScopePath(f));
+}

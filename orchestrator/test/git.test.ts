@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   createCheckpoint,
   getBlameForLines,
+  getChangedFiles,
   getCommitStats,
   getRecentCommits,
   isGitRepo,
@@ -280,5 +281,54 @@ describe("git · checkpoint / rollback", () => {
 
   it("geçersiz ref → GitError", async () => {
     await expect(restoreCheckpoint(dir, "not-a-sha!")).rejects.toThrow("invalid checkpoint ref");
+  });
+});
+
+describe("git · getChangedFiles", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "mycl-git-ch-"));
+    gitInit(dir);
+    await writeFile(join(dir, "foo.ts"), "original\n");
+    spawnSync("git", ["add", "foo.ts"], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "seed"], { cwd: dir, stdio: "ignore" });
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("modified tracked + untracked dosyaları döner; .mycl + error_folder hariç", async () => {
+    await writeFile(join(dir, "foo.ts"), "changed\n"); // modified tracked
+    await writeFile(join(dir, "bar.ts"), "new\n"); // untracked
+    await mkdirP(join(dir, ".mycl"), { recursive: true });
+    await writeFile(join(dir, ".mycl", "state.json"), "{}\n"); // hariç
+    await mkdirP(join(dir, "error_folder"), { recursive: true });
+    await writeFile(join(dir, "error_folder", "errors.db"), "x\n"); // hariç
+
+    const changed = await getChangedFiles(dir);
+    expect(changed.sort()).toEqual(["bar.ts", "foo.ts"]);
+    expect(changed.some((f) => f.includes(".mycl"))).toBe(false);
+    expect(changed.some((f) => f.includes("error_folder"))).toBe(false);
+  });
+
+  it("since (commit sha) → o commit'ten bu yana değişenler", async () => {
+    const head = (await getRecentCommits(dir, 1))[0].sha;
+    await writeFile(join(dir, "foo.ts"), "changed after head\n");
+    const changed = await getChangedFiles(dir, head);
+    expect(changed).toContain("foo.ts");
+  });
+
+  it("temiz working-tree → boş", async () => {
+    const changed = await getChangedFiles(dir);
+    expect(changed).toEqual([]);
+  });
+
+  it("git deposu değil → boş (graceful)", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "mycl-nogit-ch-"));
+    try {
+      expect(await getChangedFiles(plain)).toEqual([]);
+    } finally {
+      await rm(plain, { recursive: true, force: true });
+    }
   });
 });

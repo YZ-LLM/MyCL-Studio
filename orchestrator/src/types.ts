@@ -324,6 +324,27 @@ export interface State {
    */
   pending_backend_fix?: string;
   /**
+   * v15.9: Scoped mekanik gate'ler için "değişen kapsam" — fix/development
+   * sonrası computeChangedScope (git diff ∪ blast-radius) ile set edilir.
+   * Faz 10/13/14 bunu okuyup lint/güvenlik/birim-test'i bu dosyalara daraltır;
+   * scope'lanamayan gate'ler (11/12/15/17) scoped-touch modunda atlanır.
+   * undefined → full mod (tüm-proje, mevcut davranış). Pipeline sonu temizlenir.
+   */
+  changed_scope?: {
+    /** Değişen kaynak dosyalar ∪ blast-radius (projectRoot-relative). */
+    files: string[];
+    /** Diff tabanı (fix checkpoint ref'i, varsa). */
+    since?: string;
+    /** Hesaplanma zamanı (stale scope koruması). */
+    computed_at: number;
+  };
+  /**
+   * v15.9: Faz 8 fix mode'da alınan git checkpoint ref'i (createCheckpoint).
+   * Fix bittikten sonra computeChangedScope'a `since` olarak verilir → tam fix
+   * diff'i. Tüketilince (scope hesaplanınca) temizlenir.
+   */
+  fix_checkpoint_ref?: string;
+  /**
    * Toplam UI tweak iterasyon sayısı; Phase 6 başarıyla tamamlandığında
    * sıfırlanır. MAX_UI_TWEAKS (5) aşıldığında force-complete Phase 7'e geçer.
    */

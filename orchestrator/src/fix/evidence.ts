@@ -102,7 +102,7 @@ const SOURCE_EXTS = [
   ".rb", ".php", ".vue", ".svelte",
 ];
 
-function hasSourceExt(p: string): boolean {
+export function hasSourceExt(p: string): boolean {
   for (const e of SOURCE_EXTS) if (p.endsWith(e)) return true;
   return false;
 }
