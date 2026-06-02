@@ -182,3 +182,43 @@ describe("createQaAskqBackend (factory)", () => {
     expect(createQaAskqBackend(opts)).toBeInstanceOf(QaAskqBaseController);
   });
 });
+
+// v15.9: terminal blok zorunlu-alan doğrulaması + nudge (Faz 2 contract bug fix).
+// complete_audit'in required'ı [enriched_summary, dimensions] → ajan generic
+// {summary} emit ederse nudge; düzeltirse approved; düzeltmezse görünür fail.
+function makeOptsRequired(): QaAskqRunOpts {
+  const o = makeOpts();
+  o.tools = o.tools.map((t) =>
+    t.name === "complete_audit"
+      ? { ...t, input_schema: { type: "object", required: ["enriched_summary", "dimensions"] } }
+      : t,
+  );
+  return o;
+}
+
+describe("CliQaAskqBackend zorunlu-alan nudge", () => {
+  it("approval eksik zorunlu alan → nudge → düzeltme → approved", async () => {
+    sessionMock
+      .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"audit done"}`)) // eksik
+      .mockResolvedValueOnce(
+        ok(`{"kind":"approval","enriched_summary":"E","dimensions":[{"name":"SCOPE","decision":"covered"}]}`),
+      ); // düzeltilmiş
+    const backend = createQaAskqBackend(makeOptsRequired()) as CliQaAskqBackend;
+    const p = backend.run();
+    await answerOnce(backend, "Approve");
+    const out = (await p) as { kind: string; approvalInput: Record<string, unknown> };
+    expect(out.kind).toBe("approved");
+    expect(out.approvalInput.enriched_summary).toBe("E");
+    expect(sessionMock).toHaveBeenCalledTimes(2); // nudge resume edildi
+  });
+
+  it("approval iki kez eksik → görünür fail (sessiz pass-through YOK)", async () => {
+    sessionMock
+      .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"x"}`))
+      .mockResolvedValueOnce(ok(`{"kind":"approval","title":"y"}`)); // hâlâ eksik
+    const backend = createQaAskqBackend(makeOptsRequired()) as CliQaAskqBackend;
+    const out = (await backend.run()) as { kind: string; reason?: string };
+    expect(out.kind).toBe("failed");
+    expect(String(out.reason)).toContain("zorunlu alan eksik");
+  });
+});

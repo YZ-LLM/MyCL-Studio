@@ -36,6 +36,13 @@ function buildOutputInstruction(opts: QaAskqRunOpts): string {
     const tool = name ? tools.find((tt) => tt.name === name) : undefined;
     return JSON.stringify(tool?.input_schema ?? {});
   };
+  // v15.9: zorunlu alan adlarını belirgin listele — ajan generic "summary"/"title"
+  // yerine TAM şema alanlarını (örn. enriched_summary) kullansın (Faz 2 contract bug fix).
+  const requiredOf = (name?: string): string => {
+    const tool = name ? tools.find((tt) => tt.name === name) : undefined;
+    const req = (tool?.input_schema as { required?: string[] } | undefined)?.required ?? [];
+    return req.length ? req.join(", ") : "(şemadaki alanlar)";
+  };
   const lines: string[] = [];
   if (askq.clarifying_tool_name) {
     lines.push(
@@ -44,7 +51,9 @@ function buildOutputInstruction(opts: QaAskqRunOpts): string {
     );
   }
   lines.push(
-    `- Onay/sonuç için: {"kind":"approval", ...} — alanlar: ${schemaOf(askq.approval_tool_name)}.`,
+    `- Onay/sonuç için: {"kind":"approval", ...} — ZORUNLU alanlar TAM bu adlarla ` +
+      `(generic "summary"/"title" DEĞİL): ${requiredOf(askq.approval_tool_name)}. ` +
+      `Tam şema: ${schemaOf(askq.approval_tool_name)}.`,
   );
   if (askq.abandon_tool_name) {
     lines.push(`- Vazgeçmek için: {"kind":"abandon", ...} — alanlar: ${schemaOf(askq.abandon_tool_name)}.`);
@@ -127,6 +136,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
     let resume = false;
     let userMessage = opts.initialUserMessage;
     let nudged = false;
+    let fieldNudgeUsed = false; // v15.9: terminal blok eksik-zorunlu-alan nudge'ı (1×)
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (this.aborted) return { kind: "aborted" };
@@ -166,6 +176,43 @@ export class CliQaAskqBackend implements QaAskqBackend {
         continue;
       }
       nudged = false;
+
+      // v15.9: terminal blok (approval/abandon/tweak/ac_failure) ZORUNLU alan
+      // doğrulaması. Ajan generic {summary,title} emit edip tüketicinin beklediği
+      // alanı (örn. enriched_summary) eksik bırakırsa: nudge (1×); hâlâ eksikse
+      // GÖRÜNÜR fail. Aksi halde malformed blok downstream'e geçer → faz "missing"
+      // hatası + pipeline asılması (Faz 2 contract bug'ının kökü).
+      if (block.kind !== "askq") {
+        const kindToToolName: Record<string, string | undefined> = {
+          approval: askq.approval_tool_name,
+          abandon: askq.abandon_tool_name,
+          tweak: askq.tweak_tool_name,
+          ac_failure: askq.failure_tool_name,
+        };
+        const toolName = kindToToolName[String(block.kind)];
+        const tool = toolName ? opts.tools.find((tt) => tt.name === toolName) : undefined;
+        const required =
+          (tool?.input_schema as { required?: string[] } | undefined)?.required ?? [];
+        const missing = required.filter((f) => {
+          const v = (block as Record<string, unknown>)[f];
+          return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+        });
+        if (missing.length > 0) {
+          if (fieldNudgeUsed) {
+            return {
+              kind: "failed",
+              reason: `${opts.tag}: '${String(block.kind)}' bloğu zorunlu alan eksik (${missing.join(", ")}) — nudge sonrası da düzelmedi`,
+            };
+          }
+          fieldNudgeUsed = true;
+          resume = true;
+          userMessage =
+            `'${String(block.kind)}' bloğun ZORUNLU alan(lar) eksik: ${missing.join(", ")}. ` +
+            `${toolName} şemasındaki TAM alan adlarıyla {"kind":"${String(block.kind)}", ...} bloğunu ` +
+            `YENİDEN yaz (generic "summary"/"title" KULLANMA — örn. enriched_summary gibi tam adları kullan).`;
+          continue;
+        }
+      }
 
       // Terminal kind'ler (askq emit YOK — kullanıcı kararı zaten verilmiş).
       const dropKind = (b: Record<string, unknown>): Record<string, unknown> => {
