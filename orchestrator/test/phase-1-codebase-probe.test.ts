@@ -8,7 +8,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { buildCodebaseSnapshot } from "../src/phase-1-codebase-probe.js";
+import { buildCodebaseSnapshot, isExistingProject } from "../src/phase-1-codebase-probe.js";
 
 describe("phase-1-codebase-probe · buildCodebaseSnapshot", () => {
   let projectRoot: string;
@@ -122,5 +122,50 @@ export function App() {
     const s = await buildCodebaseSnapshot(fakeRoot);
     // readdir başarısız olur ama function throw etmemeli; ya empty ya unavailable
     expect(s).toContain("Codebase snapshot");
+  });
+});
+
+describe("phase-1-codebase-probe · isExistingProject", () => {
+  let projectRoot: string;
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "mycl-exist-"));
+  });
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it("gerçekten boş proje → false (fresh)", async () => {
+    expect(await isExistingProject(projectRoot)).toBe(false);
+  });
+
+  it("package.json (node) → true", async () => {
+    await writeFile(join(projectRoot, "package.json"), '{"name":"x"}', "utf-8");
+    expect(await isExistingProject(projectRoot)).toBe(true);
+  });
+
+  it("requirements.txt (python) → true", async () => {
+    await writeFile(join(projectRoot, "requirements.txt"), "flask\n", "utf-8");
+    expect(await isExistingProject(projectRoot)).toBe(true);
+  });
+
+  it("Cargo.toml (rust) / go.mod (go) → true", async () => {
+    await writeFile(join(projectRoot, "go.mod"), "module x\n", "utf-8");
+    expect(await isExistingProject(projectRoot)).toBe(true);
+  });
+
+  it("src/ dizini → true (manifest olmasa bile)", async () => {
+    await mkdir(join(projectRoot, "src"), { recursive: true });
+    expect(await isExistingProject(projectRoot)).toBe(true);
+  });
+
+  it(".mycl/spec.md → true", async () => {
+    await mkdir(join(projectRoot, ".mycl"), { recursive: true });
+    await writeFile(join(projectRoot, ".mycl", "spec.md"), "# spec", "utf-8");
+    expect(await isExistingProject(projectRoot)).toBe(true);
+  });
+
+  it("sadece README → false (kaynak/manifest yok)", async () => {
+    await writeFile(join(projectRoot, "README.md"), "# x", "utf-8");
+    expect(await isExistingProject(projectRoot)).toBe(false);
   });
 });

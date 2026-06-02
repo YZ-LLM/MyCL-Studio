@@ -10,6 +10,7 @@
 // faz çökmez, Claude context'siz devam eder.
 
 import type { MyclConfig } from "../config.js";
+import { isExistingProject } from "../phase-1-codebase-probe.js";
 import type { State } from "../types.js";
 import { extractSpecChunks } from "./chunk-store.js";
 import { getRelevantChunks } from "./relevance-engine.js";
@@ -187,10 +188,12 @@ export function formatAuditChunk(c: ScoredChunk): string {
  * proje zaten var olduğunu görür ve **mevcut özelliklere göre** clarifying
  * yapar.
  *
- * Yeni proje (iter 1, spec.md yok, audit boş) → tüm extractor'lar boş array
- * döner → engine sonuç boş → sentinel `"(no prior project context — fresh
- * project)"`. Phase 1 template bu sentinel'i görünce eski 5-ambiguity flow'una
- * döner (backward compat).
+ * Relevance boş dönerse (bu niyet için indekslenmiş spec/audit chunk'ı yok)
+ * sentinel döner — AMA projenin gerçekten boş olup olmadığını `isExistingProject`
+ * (deterministik dosya sistemi) belirler. Mevcut kod varken relevance boş olabilir
+ * (henüz .mycl spec/audit yazılmamış); o durumda "fresh project" DEMEK yanlış
+ * (greenfield false-positive). Mevcut projede sentinel "mevcudu değiştir, sıfırdan
+ * kurma" der; gerçekten boş projede "fresh project" der.
  */
 export async function buildRelevantProjectContext(
   config: MyclConfig,
@@ -208,6 +211,11 @@ export async function buildRelevantProjectContext(
   });
 
   if (chunks.length === 0) {
+    // Relevance boş ≠ proje boş. Deterministik dosya sistemiyle ayırt et.
+    const existing = await isExistingProject(state.project_root);
+    if (existing) {
+      return "(no indexed MyCL context (spec/audit) for this intent yet — but the project has EXISTING CODE; per the codebase snapshot, MODIFY the existing code, do NOT rebuild from scratch)";
+    }
     return "(no prior project context — fresh project)";
   }
 

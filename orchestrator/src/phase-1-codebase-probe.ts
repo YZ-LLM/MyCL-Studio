@@ -354,3 +354,51 @@ async function dirExists(path: string): Promise<boolean> {
     return false;
   }
 }
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    const s = await fs.stat(path);
+    return s.isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Bilinen proje manifest dosyaları (çok dilli). */
+const PROJECT_MANIFESTS = [
+  "package.json",
+  "requirements.txt",
+  "pyproject.toml",
+  "setup.py",
+  "go.mod",
+  "Cargo.toml",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "Package.swift",
+  "mix.exs",
+  "Gemfile",
+  "composer.json",
+];
+
+/** Bilinen kaynak dizinleri. */
+const SOURCE_DIRS = ["src", "app", "lib", "backend", "frontend", "server", "pkg", "cmd"];
+
+/**
+ * Proje MEVCUT KOD içeriyor mu? Tamamen DETERMİNİSTİK (dosya sistemi; LLM ve
+ * relevance engine YOK). `.mycl/spec.md`, bilinen bir manifest dosyası veya
+ * kaynak dizini varsa true. Relevance engine boş dönse bile (bu niyet için
+ * indekslenmiş MyCL bağlamı yokken) projenin gerçekten boş olup olmadığını
+ * ayırt eder → greenfield false-positive'ini (mevcut kodu "fresh project"
+ * sanma) engeller. Fail-safe: erişim hatası → false (boş varsay).
+ */
+export async function isExistingProject(projectRoot: string): Promise<boolean> {
+  if (await fileExists(join(projectRoot, ".mycl", "spec.md"))) return true;
+  for (const m of PROJECT_MANIFESTS) {
+    if (await fileExists(join(projectRoot, m))) return true;
+  }
+  for (const d of SOURCE_DIRS) {
+    if (await dirExists(join(projectRoot, d))) return true;
+  }
+  return false;
+}
