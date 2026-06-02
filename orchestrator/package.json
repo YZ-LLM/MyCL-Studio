@@ -12,11 +12,11 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.40.0"
+    "@anthropic-ai/sdk": "^0.40.0",
+    "typescript": "~5.8.3"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
-    "typescript": "~5.8.3",
     "vitest": "^4.1.6"
   }
 }
