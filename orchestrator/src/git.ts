@@ -280,3 +280,90 @@ export async function getBlameForLines(
   if (r.code !== 0) return [];
   return parseBlamePorcelain(r.stdout);
 }
+
+// ── Write işlemleri (checkpoint / rollback) ──────────────────────────────────
+// runGit READ-ONLY kalır; write komutları ayrı allowlist'li runGitWrite'tan
+// geçer (saldırı yüzeyi ayrımı). MyCL state'i (.mycl) ve hata kataloğu
+// (error_folder) rollback'ten DAİMA hariç tutulur.
+
+const GIT_WRITE_ALLOWED = new Set(["checkout", "clean", "reset", "stash", "add"]);
+const ROLLBACK_EXCLUDES = [".mycl", "error_folder"];
+
+function runGitWrite(projectRoot: string, args: string[]): Promise<SpawnResult> {
+  if (args.length === 0 || !GIT_WRITE_ALLOWED.has(args[0])) {
+    return Promise.reject(new GitError(`git write komutuna izin yok: ${args[0] ?? "(boş)"}`));
+  }
+  return runGit(projectRoot, args);
+}
+
+export interface CheckpointResult {
+  /** Checkpoint kuruldu mu (rollback mümkün mü). */
+  ok: boolean;
+  /** ok ise rollback hedefi (HEAD sha). */
+  ref?: string;
+  /** ok=false ise neden — kullanıcıya GÖRÜNÜR (sessiz değil). */
+  reason?: string;
+}
+
+/** Working tree temiz mi? `git status --porcelain` boş → temiz. */
+export async function isWorkingTreeClean(projectRoot: string): Promise<boolean> {
+  const r = await runGit(projectRoot, ["status", "--porcelain"]);
+  if (r.code !== 0) {
+    throw new GitError(`git status failed (exit ${r.code}): ${r.stderr.slice(0, 200)}`);
+  }
+  return r.stdout.trim().length === 0;
+}
+
+/**
+ * Fix öncesi checkpoint. SADECE git deposu + TEMİZ working-tree'de etkin: kirli
+ * tree'de kullanıcının kaydedilmemiş WIP'i otomatik geri alma sırasında
+ * kaybolabilir → ok:false + görünür `reason` (sessiz fallback yok). Temizse
+ * ref = HEAD sha (rollback hedefi).
+ */
+export async function createCheckpoint(projectRoot: string): Promise<CheckpointResult> {
+  let inRepo: boolean;
+  try {
+    inRepo = await isGitRepo(projectRoot);
+  } catch {
+    return { ok: false, reason: "git durumu okunamadı" };
+  }
+  if (!inRepo) return { ok: false, reason: "git deposu değil — otomatik geri alma yok" };
+
+  let clean: boolean;
+  try {
+    clean = await isWorkingTreeClean(projectRoot);
+  } catch {
+    return { ok: false, reason: "git status okunamadı" };
+  }
+  if (!clean) {
+    return {
+      ok: false,
+      reason: "kaydedilmemiş değişiklik var — otomatik geri alma kapalı (önce commit/stash et)",
+    };
+  }
+
+  const r = await runGit(projectRoot, ["rev-parse", "HEAD"]);
+  if (r.code !== 0) return { ok: false, reason: "commit yok (HEAD çözülemedi)" };
+  return { ok: true, ref: r.stdout.trim() };
+}
+
+/**
+ * Checkpoint'e geri al — fix'in değişikliklerini at, pre-fix temiz duruma dön.
+ * Tracked değişiklikler `ref`'e döndürülür + fix'in oluşturduğu untracked
+ * dosyalar temizlenir. `.mycl` (MyCL state) ve `error_folder` (hata kataloğu)
+ * DAİMA hariç. Yalnız `createCheckpoint` ok:true döndüyse çağrılmalı (temiz
+ * başlangıç garantisi → yalnız fix'in değişiklikleri geri alınır).
+ */
+export async function restoreCheckpoint(projectRoot: string, ref: string): Promise<boolean> {
+  if (!/^[0-9a-f]{4,40}$/i.test(ref)) {
+    throw new GitError(`invalid checkpoint ref: ${ref}`);
+  }
+  const excludePathspecs = ROLLBACK_EXCLUDES.map((p) => `:(exclude)${p}`);
+  const co = await runGitWrite(projectRoot, ["checkout", ref, "--", ".", ...excludePathspecs]);
+  const cleanArgs = ["clean", "-fd"];
+  for (const p of ROLLBACK_EXCLUDES) {
+    cleanArgs.push("-e", p);
+  }
+  const cl = await runGitWrite(projectRoot, cleanArgs);
+  return co.code === 0 && cl.code === 0;
+}

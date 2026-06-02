@@ -4,13 +4,18 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createCheckpoint,
   getBlameForLines,
   getCommitStats,
   getRecentCommits,
   isGitRepo,
+  isWorkingTreeClean,
   parseBlamePorcelain,
   parseStatOutput,
+  restoreCheckpoint,
 } from "../src/git.js";
+import { readFile, mkdir as mkdirP } from "node:fs/promises";
+import { existsSync } from "node:fs";
 
 function gitInit(dir: string) {
   spawnSync("git", ["init", "--initial-branch=main"], { cwd: dir, stdio: "ignore" });
@@ -192,5 +197,88 @@ describe("git · getBlameForLines", () => {
     await expect(getBlameForLines(dir, "-evil", 1, 1)).rejects.toThrow("invalid blame file");
     await expect(getBlameForLines(dir, "foo.ts", 0, 1)).rejects.toThrow("invalid blame range");
     await expect(getBlameForLines(dir, "foo.ts", 5, 2)).rejects.toThrow("invalid blame range");
+  });
+});
+
+describe("git · checkpoint / rollback", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "mycl-git-cp-"));
+    gitInit(dir);
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("temiz repo → createCheckpoint ok:true + HEAD ref", async () => {
+    await writeFile(join(dir, "foo.ts"), "a\n");
+    spawnSync("git", ["add", "foo.ts"], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "seed"], { cwd: dir, stdio: "ignore" });
+    const cp = await createCheckpoint(dir);
+    expect(cp.ok).toBe(true);
+    expect(cp.ref).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("kirli working-tree → ok:false + görünür reason (WIP korunur)", async () => {
+    await writeFile(join(dir, "foo.ts"), "a\n");
+    spawnSync("git", ["add", "foo.ts"], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "seed"], { cwd: dir, stdio: "ignore" });
+    await writeFile(join(dir, "foo.ts"), "modified WIP\n"); // kaydedilmemiş
+    const cp = await createCheckpoint(dir);
+    expect(cp.ok).toBe(false);
+    expect(cp.reason).toContain("kaydedilmemiş");
+  });
+
+  it("git deposu değil → ok:false", async () => {
+    const plain = await mkdtemp(join(tmpdir(), "mycl-nogit-"));
+    try {
+      const cp = await createCheckpoint(plain);
+      expect(cp.ok).toBe(false);
+      expect(cp.reason).toContain("git deposu değil");
+    } finally {
+      await rm(plain, { recursive: true, force: true });
+    }
+  });
+
+  it("rollback: tracked değişiklik geri alınır + untracked silinir; .mycl + error_folder KORUNUR", async () => {
+    await writeFile(join(dir, "foo.ts"), "original\n");
+    spawnSync("git", ["add", "foo.ts"], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "seed"], { cwd: dir, stdio: "ignore" });
+
+    const cp = await createCheckpoint(dir);
+    expect(cp.ok).toBe(true);
+
+    // Fix simülasyonu: tracked'i değiştir, yeni untracked ekle, MyCL state yaz.
+    await writeFile(join(dir, "foo.ts"), "BROKEN by fix\n");
+    await writeFile(join(dir, "new-from-fix.ts"), "x\n");
+    await mkdirP(join(dir, ".mycl"), { recursive: true });
+    await writeFile(join(dir, ".mycl", "state.json"), '{"keep":true}\n');
+    await mkdirP(join(dir, "error_folder"), { recursive: true });
+    await writeFile(join(dir, "error_folder", "errors.db"), "KEEP\n");
+
+    const ok = await restoreCheckpoint(dir, cp.ref!);
+    expect(ok).toBe(true);
+
+    // tracked geri alındı
+    expect(await readFile(join(dir, "foo.ts"), "utf-8")).toBe("original\n");
+    // fix'in untracked dosyası silindi
+    expect(existsSync(join(dir, "new-from-fix.ts"))).toBe(false);
+    // MyCL state + hata kataloğu KORUNDU
+    expect(existsSync(join(dir, ".mycl", "state.json"))).toBe(true);
+    expect(await readFile(join(dir, ".mycl", "state.json"), "utf-8")).toContain("keep");
+    expect(existsSync(join(dir, "error_folder", "errors.db"))).toBe(true);
+  });
+
+  it("isWorkingTreeClean: temiz→true, değişiklik sonrası→false", async () => {
+    await writeFile(join(dir, "a.txt"), "x\n");
+    spawnSync("git", ["add", "a.txt"], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "x"], { cwd: dir, stdio: "ignore" });
+    expect(await isWorkingTreeClean(dir)).toBe(true);
+    await writeFile(join(dir, "a.txt"), "y\n");
+    expect(await isWorkingTreeClean(dir)).toBe(false);
+  });
+
+  it("geçersiz ref → GitError", async () => {
+    await expect(restoreCheckpoint(dir, "not-a-sha!")).rejects.toThrow("invalid checkpoint ref");
   });
 });
