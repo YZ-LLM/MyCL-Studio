@@ -96,6 +96,40 @@ export function extractSourceLocations(
   return [...seen.entries()].map(([file, line]) => ({ file, line }));
 }
 
+const SOURCE_EXTS = [
+  ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+  ".py", ".go", ".rs", ".java", ".kt", ".swift", ".ex", ".exs",
+  ".rb", ".php", ".vue", ".svelte",
+];
+
+function hasSourceExt(p: string): boolean {
+  for (const e of SOURCE_EXTS) if (p.endsWith(e)) return true;
+  return false;
+}
+
+/**
+ * Serbest metinden (LLM plan özeti, kök neden) DOSYA YOLU token'larını çıkarır
+ * — `extractSourceLocations`'tan farkı: satır numarası GEREKMEZ (plan "src/foo.ts"
+ * der, satır vermez). `src/a.ts:42` → `src/a.ts` (satır:sütun soyulur). Kaynak
+ * uzantısı taşıyan token'lar tutulur (regex yok). Bağımlılık grafiği seed'i için;
+ * gerçek olmayan/3rd-party token'lar grafikte karşılığı olmadığı için zararsız.
+ */
+export function extractFilePaths(text: string): string[] {
+  if (!text) return [];
+  const seen = new Set<string>();
+  for (const tok of tokenize(text)) {
+    let t = tok;
+    while (t.length && (t.endsWith(":") || t.endsWith(".") || t.endsWith(")") || t.endsWith(";"))) {
+      t = t.slice(0, -1);
+    }
+    // `path:line[:col]` → ':' öncesi yol kısmı (uzantı ondan önce gelir).
+    const colon = t.indexOf(":");
+    const pathPart = colon > 1 ? t.slice(0, colon) : t;
+    if (hasSourceExt(pathPart)) seen.add(pathPart);
+  }
+  return [...seen];
+}
+
 function formatErrorsBlock(rows: RuntimeErrorRow[]): string | null {
   if (rows.length === 0) return null;
   const lines = rows.slice(0, MAX_ERRORS).map((r) => {

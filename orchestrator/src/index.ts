@@ -85,6 +85,7 @@ import {
 } from "./agent-memory/store.js";
 import { randomUUID } from "node:crypto";
 import { handleCommandIntent } from "./intent-router/handlers/command.js";
+import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
 import {
   assessPhase16Verification,
@@ -2470,6 +2471,18 @@ export async function handleAskqAnswer(
     if (!selected) {
       emitChatMessage("error", `Seçenek bulunamadı: ${selectedText}`);
       return;
+    }
+    // D5 dokunuş haritası (Ümit: "hangi çözümü seçersem nerelere dokunur").
+    // Seçilen çözümün dokunacağı dosyalar + DETERMİNİSTİK blast-radius. Routing'den
+    // önce, kullanıcı uygulamadan ÖNCE görsün. Fail-safe (non-fatal).
+    try {
+      const touchMap = await buildTouchpointSummary(
+        runtime.state.project_root,
+        selected.planSummary,
+      );
+      if (touchMap) emitChatMessage("system", touchMap);
+    } catch (err) {
+      log.warn("orchestrator", "dokunuş haritası üretilemedi (non-fatal)", err);
     }
     // v15.7 (2026-05-27): Plan-aware routing. Eski regex classifier yerine
     // D1 ana ajanın `plan_kind` tool field'ı kullanılır. Defansif default:

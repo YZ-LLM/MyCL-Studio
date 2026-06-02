@@ -14,6 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { appendAudit, formatDecisions, readDecisions } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
@@ -23,7 +24,8 @@ import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { ensureErrorCatalog } from "./errors-db.js";
-import { buildFixEvidence } from "./fix/evidence.js";
+import { buildReverseImportGraph, getAffected } from "./fix/dep-graph/index.js";
+import { buildFixEvidence, extractFilePaths } from "./fix/evidence.js";
 import { clearHistory } from "./history.js";
 // v15.7 (2026-05-26): runtime-error-watcher / vite-runtime-injector /
 // dev-server-launcher / command handler import'ları kaldırıldı — Phase 0 D3
@@ -530,12 +532,42 @@ export class Phase0Controller {
 
     emitChatMessage("system", `🔍 **Tespit**\n\n${rootCauseTR}`);
 
+    // D2 BLAST-RADIUS (Ümit: "kök nedene dokunulursa başka nereler etkilenir").
+    // DETERMİNİSTİK bağımlılık grafiğinden — model üretmez. Seed: kök neden +
+    // plan özetleri + kanıttaki şüpheli dosyalar. Grafik kurulamazsa (analyzer
+    // yok / dosya yok) sessizce atlanır (kaba plan_kind fallback).
+    let affected: Array<{ module: string; why: string; risk: "high" | "medium" | "low" }> = [];
+    try {
+      const graph = await buildReverseImportGraph(this.state.project_root);
+      if (graph.available) {
+        const seedText = `${rootCauseEn}\n${fixOptionsRaw
+          .map((o) => o.plan_summary_en)
+          .join("\n")}\n${contextSuffix}`;
+        const seeds = extractFilePaths(seedText).map((p) =>
+          isAbsolute(p) ? p : join(this.state.project_root, p),
+        );
+        affected = getAffected(graph, seeds, 2, this.state.project_root);
+      }
+    } catch (err) {
+      log.warn("phase-0", "blast-radius hesaplanamadı (non-fatal)", err);
+    }
+    if (affected.length > 0) {
+      const top = affected
+        .slice(0, 8)
+        .map((a) => `- ${a.module} — **${a.risk}** (${a.why})`)
+        .join("\n");
+      emitChatMessage(
+        "system",
+        `📊 **Etki alanı** (deterministik — bu kök nedene dokunmak şunları etkiler):\n${top}`,
+      );
+    }
+
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 0,
       event: "debug-d1-complete",
       caller: "mycl-orchestrator",
-      detail: `confidence=${confidence} options=${optionsTR.length}`,
+      detail: `confidence=${confidence} options=${optionsTR.length} affected=${affected.length}`,
     });
 
     // v15.7 (2026-05-26): Auto-apply path KALDIRILDI. Yeni mimari: Phase 0
@@ -560,6 +592,7 @@ export class Phase0Controller {
         askq_id: askqId,
         rootCauseTR,
         options: optionsTR,
+        affected,
         ts: Date.now(),
       },
     };

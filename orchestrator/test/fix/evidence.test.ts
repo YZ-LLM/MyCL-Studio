@@ -2,7 +2,7 @@
 // token-temelli file:line çıkarımı). git/errors.db entegrasyonu canlı/manuel.
 
 import { describe, expect, it } from "vitest";
-import { extractSourceLocations } from "../../src/fix/evidence.js";
+import { extractSourceLocations, extractFilePaths } from "../../src/fix/evidence.js";
 
 describe("fix/evidence · extractSourceLocations", () => {
   it("relative path:line çıkarır", () => {
@@ -53,5 +53,32 @@ describe("fix/evidence · extractSourceLocations", () => {
     expect(extractSourceLocations("app/main.py:12")).toEqual([
       { file: "app/main.py", line: 12 },
     ]);
+  });
+});
+
+describe("fix/evidence · extractFilePaths", () => {
+  it("satır numarası OLMADAN dosya yollarını çıkarır (plan metni)", () => {
+    const plan = "Edit src/foo.ts and app/models.py, then update lib/util.go.";
+    expect(extractFilePaths(plan).sort()).toEqual([
+      "app/models.py",
+      "lib/util.go",
+      "src/foo.ts",
+    ]);
+  });
+
+  it("satır:sütun soyulur (src/a.ts:42:3 → src/a.ts)", () => {
+    expect(extractFilePaths("hata src/a.ts:42:3 burada")).toEqual(["src/a.ts"]);
+  });
+
+  it("kaynak uzantısı olmayan token'ları atar", () => {
+    expect(extractFilePaths("README.md ve config.yaml ve /api/route")).toEqual([]);
+  });
+
+  it("tekrarları tekiller", () => {
+    expect(extractFilePaths("src/a.ts ... src/a.ts tekrar")).toEqual(["src/a.ts"]);
+  });
+
+  it("boş → boş", () => {
+    expect(extractFilePaths("")).toEqual([]);
   });
 });

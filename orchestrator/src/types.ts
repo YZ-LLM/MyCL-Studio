@@ -359,6 +359,16 @@ export interface State {
             | "full-stack"
             | "new-iteration";
         }>;
+        /**
+         * D2 blast-radius — kök nedene dokunulursa etkilenen modüller.
+         * Deterministik bağımlılık grafiğinden (fix/dep-graph) üretilir, model
+         * üretmez. Grafik kurulamazsa (analyzer yok / dosya yok) undefined.
+         */
+        affected?: Array<{
+          module: string;
+          why: string;
+          risk: "high" | "medium" | "low";
+        }>;
         ts: number;
       }
     | {
