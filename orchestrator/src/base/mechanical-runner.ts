@@ -101,7 +101,7 @@ export async function resolveMechanicalCmd(
  *   - stderr'de "command not found"
  *   - stderr'de "could not determine executable" (npx)
  */
-function isMissingCommand(result: {
+export function isMissingCommand(result: {
   code: number;
   stdout: string;
   stderr: string;

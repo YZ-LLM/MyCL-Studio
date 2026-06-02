@@ -12,9 +12,11 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { appendAudit, readAuditLogTail } from "./audit.js";
+import { isMissingCommand, resolveMechanicalCmd } from "./base/mechanical-runner.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
+import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
@@ -299,10 +301,10 @@ export class Phase8Controller {
       return "fail";
     }
 
-    // v15.8 BÜTÜNLÜK ÇAPASI (CLI): ajanın self-report'una körü körüne güvenme —
-    // ajanın koştuğu son test komutunu MyCL KENDİ koşar (deterministik exit code).
-    // Otoriter SON tdd event'i bu olur → yanlış-green gate'i geçemez (sessiz teknik
-    // borç önlenir). API yolunda observer'ın gerçek is_error'u zaten var → anchor yok.
+    // v15.9 BÜTÜNLÜK ÇAPASI (HER İKİ MOD): ajanın testine körü körüne güvenme —
+    // MyCL profilden gelen DETERMİNİSTİK TAM-SUITE'i KENDİ koşar (gerçek exit code).
+    // Otoriter SON tdd event'i bu olur → yanlış-green gate'i geçemez + regresyon
+    // (yeni iş eskiyi kırdı) yakalanır. Hem Fix hem Development iterasyonunda geçerli.
     await this.runIntegrityAnchor();
 
     // Gate evaluation (v15.2.4 "ASLA TEKNİK BORÇ BIRAKMA" enforcement):
@@ -443,34 +445,49 @@ export class Phase8Controller {
   }
 
   /**
-   * CLI bütünlük çapası: ajanın koştuğu son test komutunu MyCL deterministik koşar
-   * (gerçek exit code) → otoriter SON tdd event. Geçerse tdd-green, başarısızsa
-   * tdd-red → gate'in `lastEvent === "tdd-green"` koşulu yanlış-green'i eler.
-   * Hiç test koşulmadıysa (lastTestCmd yok) çapa yok — gate zaten greens<minGreens ile fail eder.
+   * Bütünlük çapası (HER İKİ MOD): MyCL, profilden gelen DETERMİNİSTİK TAM-SUITE
+   * test komutunu (`profile_key:test` → ör. `npm test`, `pytest`, `cargo test`)
+   * kendi koşar (gerçek exit code) → otoriter SON tdd event. Geçerse tdd-green,
+   * başarısızsa tdd-red → gate'in `lastEvent === "tdd-green"` koşulu hem yanlış-
+   * green'i hem REGRESYONU (yeni iş eskiyi kırdı) eler.
+   *
+   * Komut kaynağı: önce profil tam-suite; yoksa (CLI'da) ajanın son test komutu;
+   * o da yoksa çapa atlanır. "Test script/runner yok" (isMissingCommand) gerçek
+   * başarısızlık DEĞİL → çapa atlanır, yanlış-red yazılmaz (Stage 3b fix modunda
+   * repro testini ayrıca zorunlu kılar).
    */
   private async runIntegrityAnchor(): Promise<void> {
-    if (!this.cliMode) return;
-    // Tüm marker self-report yazımları bitsin (anchor SON event olmalı → lastEvent doğru).
-    await Promise.allSettled(this.testResultWrites);
-    if (!this.lastTestCmd) return; // hiç test koşulmadı → gate greens<minGreens ile fail eder
-    const cmd = this.lastTestCmd;
-    emitChatMessage("system", `🔬 Faz 8 final doğrulama — MyCL testi kendi koşuyor: \`${cmd.slice(0, 80)}\``);
-    let pass: boolean;
-    let detail: string;
-    try {
-      await execAsync(cmd, {
-        cwd: this.state.project_root,
-        timeout: 300_000,
-        maxBuffer: 8 * 1024 * 1024,
-        env: process.env,
-      });
-      pass = true;
-      detail = "final suite (MyCL anchor): pass";
-    } catch (err) {
-      pass = false;
-      const msg = err instanceof Error ? err.message : String(err);
-      detail = `final suite (MyCL anchor): FAIL — ${msg.slice(0, 80)}`;
+    // CLI modunda marker self-report yazımları bitsin (anchor SON event olmalı).
+    if (this.cliMode) await Promise.allSettled(this.testResultWrites);
+
+    // Deterministik tam-suite: profilden çöz; yoksa ajanın son komutuna düş.
+    let cmd = await resolveMechanicalCmd({ type: "profile_key", key: "test" }, this.state);
+    let source = "profil tam-suite";
+    if (!cmd) {
+      cmd = this.lastTestCmd;
+      source = "ajanın son test komutu";
     }
+    if (!cmd) return; // ne profil ne ajan test komutu → çapa yok (gate greens'e güvenir)
+
+    emitChatMessage(
+      "system",
+      `🔬 Faz 8 final doğrulama (${source}) — MyCL kendi koşuyor: \`${cmd.slice(0, 80)}\``,
+    );
+    const res = await this.runCmdResult(cmd);
+
+    // Test script/runner yok → regresyon değil; çapa atla (yanlış-red yazma).
+    if (isMissingCommand(res)) {
+      emitChatMessage(
+        "system",
+        `ℹ️ Faz 8 final doğrulama atlandı — '${cmd.slice(0, 40)}' test komutu/script'i bulunamadı.`,
+      );
+      return;
+    }
+
+    const pass = res.code === 0;
+    const detail = pass
+      ? `final suite (MyCL anchor, ${source}): pass`
+      : `final suite (MyCL anchor, ${source}): FAIL — ${(res.stderr || res.stdout).slice(0, 120)}`;
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 8,
@@ -481,9 +498,39 @@ export class Phase8Controller {
     emitChatMessage(
       "system",
       pass
-        ? "✅ Faz 8 final test (MyCL doğrulaması): GEÇTİ."
-        : "🔴 Faz 8 final test (MyCL doğrulaması): BAŞARISIZ — gate fail (sessiz teknik borç önlendi).",
+        ? "✅ Faz 8 final tam-suite (MyCL doğrulaması): GEÇTİ."
+        : "🔴 Faz 8 final tam-suite (MyCL doğrulaması): BAŞARISIZ — gate fail (regresyon / sessiz teknik borç önlendi).",
     );
+  }
+
+  /**
+   * Komutu çalıştır, {code, stdout, stderr} döndür (mechanical-runner.execCmd
+   * deseni). Güvenlik: env safeEnv() allowlist + LC_ALL=C (mekanik fazlarla aynı
+   * disiplin). Hata → exit code (sayı değilse 1).
+   */
+  private async runCmdResult(
+    cmd: string,
+  ): Promise<{ code: number; stdout: string; stderr: string }> {
+    try {
+      const { stdout, stderr } = await execAsync(cmd, {
+        cwd: this.state.project_root,
+        timeout: 300_000,
+        maxBuffer: 8 * 1024 * 1024,
+        env: { ...safeEnv(), LC_ALL: "C" },
+      });
+      return { code: 0, stdout: String(stdout), stderr: String(stderr) };
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException & {
+        code?: number;
+        stdout?: string;
+        stderr?: string;
+      };
+      return {
+        code: typeof e.code === "number" ? e.code : 1,
+        stdout: String(e.stdout ?? ""),
+        stderr: String(e.stderr ?? e.message ?? ""),
+      };
+    }
   }
 
   private async observeTool(ctx: {
