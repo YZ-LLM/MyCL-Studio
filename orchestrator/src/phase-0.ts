@@ -23,6 +23,7 @@ import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { ensureErrorCatalog } from "./errors-db.js";
+import { buildFixEvidence } from "./fix/evidence.js";
 import { clearHistory } from "./history.js";
 // v15.7 (2026-05-26): runtime-error-watcher / vite-runtime-injector /
 // dev-server-launcher / command handler import'ları kaldırıldı — Phase 0 D3
@@ -275,6 +276,25 @@ export class Phase0Controller {
       this.state.stack,
     );
 
+    // v15.9: D1'e DETERMİNİSTİK kanıt besle (errors.db + git blame + son
+    // commit penceresi). LLM yok; model tahmin etmesin, kanıta atıfla
+    // yorumlasın. Fail-safe — kanıt yoksa boş string (probe gibi koşullu eklenir).
+    let evidenceBlock = "";
+    try {
+      evidenceBlock = await buildFixEvidence({
+        projectRoot: this.state.project_root,
+        dbPath: ensured.dbPath,
+        extraText: `${bugReportEn}\n${probeOutput ?? ""}`,
+      });
+    } catch (err) {
+      log.warn("phase-0", "fix evidence build failed (non-fatal)", err);
+    }
+    // Probe çıktısı + kanıt bloğu tek bir context ek'ine birleşir; D1 user
+    // message'ına (SDK ve CLI yolları) eklenir.
+    const contextSuffix = [probeOutput, evidenceBlock]
+      .filter((s): s is string => typeof s === "string" && s.length > 0)
+      .join("\n\n");
+
     const role = this.spec.model_role!;
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
@@ -305,7 +325,7 @@ export class Phase0Controller {
       reportTool = await this.runD1Cli(
         systemPrompt,
         (this.config.selected_models[role] ?? this.config.selected_models.main) as string,
-        probeOutput,
+        contextSuffix,
       );
     } else {
     this.base = createCodegenBackend({
@@ -318,7 +338,7 @@ export class Phase0Controller {
       apiKey: this.config.api_keys.main,
       initialUserMessage:
         "D1 — Investigation phase. Use Read/Grep/Bash to find the root cause. When ready, call `report_root_cause` with root_cause_en + 2-4 fix_options. Do NOT call any other tool to conclude." +
-        (probeOutput ? `\n\n${probeOutput}` : ""),
+        (contextSuffix ? `\n\n${contextSuffix}` : ""),
       tools,
       allowed_tool_names: [
         ...(this.spec.allowed_tools ?? []),
@@ -560,7 +580,7 @@ export class Phase0Controller {
   private async runD1Cli(
     systemPrompt: string,
     modelId: string,
-    probeOutput: string | null,
+    contextSuffix: string,
   ): Promise<{ name: string; input: Record<string, unknown> } | null> {
     const schema = JSON.stringify(TOOL_REPORT_ROOT_CAUSE.input_schema);
     const sys = `${systemPrompt}
@@ -575,7 +595,7 @@ Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
       systemPrompt: sys,
       userMessage:
         'D1 — investigate with Read/Grep/Bash, then conclude by emitting the {"kind":"root_cause",...} JSON block (root_cause_en + 2-4 fix_options).' +
-        (probeOutput ? `\n\n${probeOutput}` : ""),
+        (contextSuffix ? `\n\n${contextSuffix}` : ""),
       modelId,
       cwd: this.state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],

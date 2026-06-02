@@ -4,9 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  getBlameForLines,
   getCommitStats,
   getRecentCommits,
   isGitRepo,
+  parseBlamePorcelain,
   parseStatOutput,
 } from "../src/git.js";
 
@@ -130,5 +132,65 @@ describe("git · getCommitStats + parseStatOutput", () => {
     const stats = parseStatOutput(lines.join("\n") + "\n");
     expect(stats.files).toHaveLength(20);
     expect(stats.files[0]).toBe("file-0.txt");
+  });
+});
+
+describe("git · parseBlamePorcelain", () => {
+  it("parses --line-porcelain blocks into sha/author/ts/summary/line", () => {
+    const sha = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+    const stdout =
+      `${sha} 1 1 1\n` +
+      "author Alice\n" +
+      "author-mail <alice@example.com>\n" +
+      "author-time 1700000000\n" +
+      "committer Alice\n" +
+      "committer-time 1700000123\n" +
+      "summary fix null guard\n" +
+      "filename src/foo.ts\n" +
+      "\tconst x = 1;\n";
+    const rows = parseBlamePorcelain(stdout);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sha).toBe("a1b2c3d4e5"); // 10-char kısa sha
+    expect(rows[0].author).toBe("Alice");
+    expect(rows[0].summary).toBe("fix null guard");
+    expect(rows[0].ts).toBe(1700000123 * 1000);
+    expect(rows[0].line).toBe(1);
+  });
+
+  it("empty stdout → empty array", () => {
+    expect(parseBlamePorcelain("")).toEqual([]);
+  });
+});
+
+describe("git · getBlameForLines", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "mycl-git-"));
+    gitInit(dir);
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("returns the commit that last changed a line", async () => {
+    await writeFile(join(dir, "foo.ts"), "a\nb\nc\n");
+    spawnSync("git", ["add", "foo.ts"], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "seed foo"], { cwd: dir, stdio: "ignore" });
+    const blame = await getBlameForLines(dir, "foo.ts", 2, 2);
+    expect(blame).toHaveLength(1);
+    expect(blame[0].summary).toBe("seed foo");
+    expect(blame[0].line).toBe(2);
+  });
+
+  it("untracked file → empty array (graceful, no throw)", async () => {
+    await writeFile(join(dir, "new.ts"), "x\n");
+    const blame = await getBlameForLines(dir, "new.ts", 1, 1);
+    expect(blame).toEqual([]);
+  });
+
+  it("invalid file/range throws GitError", async () => {
+    await expect(getBlameForLines(dir, "-evil", 1, 1)).rejects.toThrow("invalid blame file");
+    await expect(getBlameForLines(dir, "foo.ts", 0, 1)).rejects.toThrow("invalid blame range");
+    await expect(getBlameForLines(dir, "foo.ts", 5, 2)).rejects.toThrow("invalid blame range");
   });
 });

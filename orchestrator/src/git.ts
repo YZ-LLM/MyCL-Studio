@@ -174,3 +174,109 @@ export function parseStatOutput(stdout: string): GitCommitStats {
 
   return { files_changed: filesChanged, insertions, deletions, files };
 }
+
+/** Bir kaynak satırını en son değiştiren commit (git blame çıktısı). */
+export interface GitBlameLine {
+  /** Kısa SHA (10 char). */
+  sha: string;
+  /** Commit yazarı. */
+  author: string;
+  /** Commit zamanı (unix ms). */
+  ts: number;
+  /** Commit mesajı ilk satırı. */
+  summary: string;
+  /** Blame edilen dosya satır numarası. */
+  line: number;
+}
+
+/** 40 karakterlik hex (git SHA) mı? Saf char kontrolü — regex yok. */
+function isHex40(s: string): boolean {
+  if (s.length !== 40) return false;
+  for (const c of s) {
+    const hex = (c >= "0" && c <= "9") || (c >= "a" && c <= "f");
+    if (!hex) return false;
+  }
+  return true;
+}
+
+/**
+ * `git blame -L <s>,<e> --line-porcelain -- <file>` çıktısını parse eder.
+ * --line-porcelain her satır için tam başlığı tekrarlar; her blok
+ * `<sha> <orig> <final>` başlığıyla başlar, `author`/`committer-time`/`summary`
+ * alanlarını taşır ve `\t`-prefix'li içerik satırıyla biter. Export — pure,
+ * unit-testlenebilir (parseStatOutput gibi).
+ */
+export function parseBlamePorcelain(stdout: string): GitBlameLine[] {
+  const out: GitBlameLine[] = [];
+  let cur: { sha?: string; author?: string; ts?: number; summary?: string; line?: number } = {};
+  for (const raw of stdout.split("\n")) {
+    if (raw.startsWith("\t")) {
+      // İçerik satırı → mevcut bloğu kapat.
+      if (cur.sha && typeof cur.line === "number") {
+        out.push({
+          sha: cur.sha.slice(0, 10),
+          author: cur.author ?? "?",
+          ts: cur.ts ?? 0,
+          summary: cur.summary ?? "",
+          line: cur.line,
+        });
+      }
+      cur = {};
+      continue;
+    }
+    const sp = raw.indexOf(" ");
+    const head = sp === -1 ? raw : raw.slice(0, sp);
+    const rest = sp === -1 ? "" : raw.slice(sp + 1);
+    if (isHex40(head)) {
+      const toks = raw.split(" ");
+      cur.sha = head;
+      const finalLine = Number(toks[2]);
+      if (Number.isFinite(finalLine)) cur.line = finalLine;
+    } else if (head === "author") {
+      cur.author = rest;
+    } else if (head === "committer-time") {
+      const t = Number(rest) * 1000;
+      if (Number.isFinite(t)) cur.ts = t;
+    } else if (head === "summary") {
+      cur.summary = rest;
+    }
+  }
+  return out;
+}
+
+/**
+ * `file` dosyasının `[startLine, endLine]` aralığını en son değiştiren
+ * commit'leri döndürür (git blame). Untracked/commit'siz dosya veya geçersiz
+ * aralık → boş array (graceful; blame kanıtı opsiyonel). Dosya `--` sonrası
+ * geçirilir (option injection engeli).
+ */
+export async function getBlameForLines(
+  projectRoot: string,
+  file: string,
+  startLine: number,
+  endLine: number,
+): Promise<GitBlameLine[]> {
+  if (typeof file !== "string" || file.length === 0 || file.startsWith("-")) {
+    throw new GitError(`invalid blame file: ${file}`);
+  }
+  if (
+    !Number.isInteger(startLine) ||
+    !Number.isInteger(endLine) ||
+    startLine < 1 ||
+    endLine < startLine
+  ) {
+    throw new GitError(`invalid blame range: ${startLine},${endLine}`);
+  }
+  const r = await runGit(projectRoot, [
+    "blame",
+    "-L",
+    `${startLine},${endLine}`,
+    "--line-porcelain",
+    "--",
+    file,
+  ]);
+  // exit ≠ 0 → dosya untracked/yok veya satır aralığı dosya dışında. Kanıt
+  // opsiyonel; sessizce boş dön (throw etme — D1 akışı bozulmasın).
+  if (r.code !== 0) return [];
+  return parseBlamePorcelain(r.stdout);
+}
