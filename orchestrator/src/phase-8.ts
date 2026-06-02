@@ -16,6 +16,7 @@ import { isMissingCommand, resolveMechanicalCmd } from "./base/mechanical-runner
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
+import { createCheckpoint, restoreCheckpoint } from "./git.js";
 import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
@@ -37,6 +38,21 @@ export function countAcceptanceCriteria(acSection: string): number {
   const re = /^\s*-\s+\*\*AC\d+\*\*:/gm;
   const matches = acSection.match(re);
   return matches ? matches.length : 0;
+}
+
+/**
+ * Fix modu repro-first kontrolü: olay akışında bir `tdd-red` (repro testi
+ * başarısız = bug üretildi) ardından DAHA SONRA bir `tdd-green` var mı? Bu sıra
+ * "önce bug'ı kırmızıyla üret, sonra yeşil yap" disiplinini objektifleştirir.
+ * Sadece yeşil (repro yok) → false → gate fix modunda reddeder. Export — testlenebilir.
+ */
+export function hasReproRedThenGreen(events: Array<{ event: string }>): boolean {
+  let sawRed = false;
+  for (const e of events) {
+    if (e.event === "tdd-red") sawRed = true;
+    else if (e.event === "tdd-green" && sawRed) return true;
+  }
+  return false;
 }
 
 const TEST_PATH_PATTERNS = [
@@ -93,6 +109,10 @@ export class Phase8Controller {
   private pendingMigrationNote = "";
   /** v15.7 (2026-05-27): Phase 0 D2 backend-only fix routing'ten gelen plan. */
   private pendingFixNote = "";
+  /** Fix modu (pending_backend_fix) — repro-first gate + checkpoint/rollback. */
+  private isFixMode = false;
+  /** Fix öncesi git checkpoint ref'i (rollback hedefi). null → rollback yok. */
+  private checkpointRef: string | null = null;
 
   private readonly state: State;
   private readonly config: MyclConfig;
@@ -151,16 +171,21 @@ export class Phase8Controller {
     // pending_backend_fix set ise: bug fix odaklı initial message + cleanup.
     let fixModeNote = "";
     if (this.state.pending_backend_fix) {
+      this.isFixMode = true;
       fixModeNote =
         `\n\n**BUG FIX MODE — Phase 0 D2 yönlendirmesi**:\n${this.state.pending_backend_fix}\n\n` +
-        `Bu bir geniş yeni-özellik talebi DEĞİL; mevcut backend'de targeted fix. ` +
-        `Plan'daki dosyalara DAR scope edit yap. Önce ilgili AC'yi (varsa) test ile düşür, ` +
-        `sonra minimal patch ile yeşil yap. Eski testleri kırma. Stop when full suite green.`;
+        `Bu bir geniş yeni-özellik talebi DEĞİL; mevcut backend'de targeted fix.\n` +
+        `ZORUNLU repro-first sıra:\n` +
+        `1. ÖNCE bug'ı yeniden üreten bir test yaz ve koş → testin KIRMIZI (fail) olduğunu ` +
+        `DOĞRULA (bug hâlâ üretilebiliyor). Repro yazmadan patch yapma.\n` +
+        `2. SONRA minimal patch uygula (plan'daki dosyalara DAR scope).\n` +
+        `3. Aynı testi tekrar koş → YEŞİL; ardından FULL suite yeşil.\n` +
+        `Gate kırmızı-önce-yeşil sırası arar — repro testi yoksa fix REDDEDİLİR. Eski testleri kırma.`;
       this.statePatch = {
         ...this.statePatch,
         pending_backend_fix: undefined, // tek seferlik tüketim
       };
-      log.info("phase-8", "backend fix mode active");
+      log.info("phase-8", "backend fix mode active (repro-first + checkpoint)");
     }
     this.pendingFixNote = fixModeNote;
 
@@ -283,8 +308,29 @@ export class Phase8Controller {
         : undefined,
     });
 
+    // v15.9 Fix modu: kod değişikliği ÖNCESİ git checkpoint (regresyon/başarısız
+    // fix'te otomatik geri alma hedefi). SADECE temiz working-tree'de etkin;
+    // kirliyse görünür uyarı + rollback devre dışı (kullanıcı WIP'i riske girmez).
+    if (this.isFixMode) {
+      const cp = await createCheckpoint(this.state.project_root);
+      if (cp.ok && cp.ref) {
+        this.checkpointRef = cp.ref;
+        emitChatMessage(
+          "system",
+          "📌 Fix öncesi checkpoint alındı — regresyon olursa değişiklikler otomatik geri alınacak.",
+        );
+      } else {
+        this.checkpointRef = null;
+        emitChatMessage(
+          "system",
+          `⚠️ Otomatik geri alma kapalı: ${cp.reason}. Regresyon yine raporlanır, ama geri almayı elle yaparsın.`,
+        );
+      }
+    }
+
     const outcome = await this.base.run();
     if (outcome.kind === "aborted") {
+      await this.rollbackFixIfNeeded();
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 8,
@@ -298,6 +344,7 @@ export class Phase8Controller {
     if (outcome.kind === "failed") {
       log.warn("phase-8", "codegen failed", { reason: outcome.reason });
       this.lastFailReason = outcome.reason;
+      await this.rollbackFixIfNeeded();
       return "fail";
     }
 
@@ -396,7 +443,10 @@ export class Phase8Controller {
 
     const tddOk = greens >= minGreens && lastEvent === "tdd-green";
     const debtOk = techDebtCount === 0;
-    if (tddOk && debtOk && finalSuiteRun) {
+    // Fix modu: repro-first ZORUNLU — kırmızı (repro) önce, sonra yeşil sırası
+    // olmalı (Ümit prensip 1: repro yazmadan dokundurma). Fix dışı: muaf.
+    const reproOk = !this.isFixMode || hasReproRedThenGreen(p9);
+    if (tddOk && debtOk && finalSuiteRun && reproOk) {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 8,
@@ -421,12 +471,37 @@ export class Phase8Controller {
         }`,
       );
     if (!finalSuiteRun) reasons.push("final test suite çalıştırılmadı");
+    if (!reproOk) reasons.push("repro-first ihlali: bug'ı yeniden üreten failing test (kırmızı→yeşil) yok");
     emitChatMessage(
       "system",
       `❌ Faz 8 gate fail: ${reasons.join("; ")}. MyCL_Pseudocode.md:203 — "ASLA TEKNİK BORÇ BIRAKMA".`,
     );
     this.lastFailReason = `gate fail: ${reasons.join("; ")}`;
+    await this.rollbackFixIfNeeded();
     return "fail";
+  }
+
+  /**
+   * Fix modunda + checkpoint alınmışsa, değişiklikleri checkpoint'e geri al
+   * (regresyon/başarısız fix → pre-fix temiz duruma dön). .mycl + error_folder
+   * korunur. Tek seferlik (ref temizlenir). Fix dışı / checkpoint yok → no-op.
+   */
+  private async rollbackFixIfNeeded(): Promise<void> {
+    if (!this.isFixMode || !this.checkpointRef) return;
+    const ref = this.checkpointRef;
+    this.checkpointRef = null; // tek seferlik
+    try {
+      const ok = await restoreCheckpoint(this.state.project_root, ref);
+      emitChatMessage(
+        "system",
+        ok
+          ? "↩️ Başarısız/regresyonlu fix — değişiklikler checkpoint'e geri alındı (MyCL state ve hata kataloğu korundu)."
+          : "⚠️ Otomatik geri alma kısmen başarısız — değişiklikleri elle gözden geçir.",
+      );
+    } catch (err) {
+      log.warn("phase-8", "rollback failed", err);
+      emitChatMessage("system", "⚠️ Otomatik geri alma başarısız — değişiklikleri elle gözden geçir.");
+    }
   }
 
   /**

@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { countAcceptanceCriteria, isTestCommand } from "../src/phase-8.js";
+import {
+  countAcceptanceCriteria,
+  hasReproRedThenGreen,
+  isTestCommand,
+} from "../src/phase-8.js";
+
+describe("hasReproRedThenGreen (fix modu repro-first)", () => {
+  const ev = (...es: string[]) => es.map((event) => ({ event }));
+
+  it("tdd-red sonra tdd-green → true (repro yapıldı)", () => {
+    expect(hasReproRedThenGreen(ev("tdd-red", "tdd-green"))).toBe(true);
+    expect(hasReproRedThenGreen(ev("tdd-test-write", "tdd-red", "tdd-green", "tdd-green"))).toBe(true);
+  });
+
+  it("sadece tdd-green (repro yok) → false", () => {
+    expect(hasReproRedThenGreen(ev("tdd-green", "tdd-green"))).toBe(false);
+  });
+
+  it("yeşil sonra kırmızı (sıra yanlış) → false", () => {
+    expect(hasReproRedThenGreen(ev("tdd-green", "tdd-red"))).toBe(false);
+  });
+
+  it("boş → false", () => {
+    expect(hasReproRedThenGreen([])).toBe(false);
+  });
+});
 
 describe("countAcceptanceCriteria", () => {
   it("returns 0 for empty section", () => {
