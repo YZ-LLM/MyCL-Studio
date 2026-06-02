@@ -1,6 +1,9 @@
 // updater — In-app güncelleme: kaynak dosyaları binary mtime ile karşılaştır;
-// "orchestrator" (TS-only, hızlı yol: subprocess restart) veya "full" (Tauri
-// release build + .app swap + relaunch) modunda update tetikle.
+// "orchestrator" (TS-only hızlı yol: subprocess restart — SADECE dev mode) veya
+// "full" (Tauri release build + .app swap + relaunch) modunda update tetikle.
+// Paketli app orchestrator'ı .app içindeki bundled dist'ten çalıştırdığı için
+// orchestrator değişikliği de "full" gerektirir (bkz. check_update_status):
+// repo dist'ini rebuild edip subprocess restart etmek eski bundled kodu yükler.
 //
 // Embedded helper bash script: full mode için detached spawn. SOURCE_ROOT
 // compile-time `env!("CARGO_MANIFEST_DIR")` üzerinden türer; helper script'e
@@ -70,6 +73,14 @@ pub fn check_update_status() -> Result<UpdateStatus, String> {
         .iter()
         .any(|opt| opt.map(|t| t > ref_mtime).unwrap_or(false));
 
+    // Paketli app mı (.app bundle içinde) yoksa dev mi? Paketli app orchestrator'ı
+    // .app içindeki bundled dist'ten çalıştırır → repo dist'ini rebuild edip
+    // subprocess restart etmek eski kodu yükler (futile) + başlığı tazelemez. Bu
+    // yüzden paketli app'te orchestrator-only değişiklik de "full" (tam rebuild +
+    // .app swap + relaunch) ister. Dev mode'da hızlı yol doğru çalışır (repo dist
+    // doğrudan koşulur), korunur.
+    let is_packaged = current_app_bundle_path().is_ok();
+
     let (mode, reason) = if full_changed {
         let which = if app_newest.map(|t| t > ref_mtime).unwrap_or(false) {
             "frontend (src/)"
@@ -80,10 +91,17 @@ pub fn check_update_status() -> Result<UpdateStatus, String> {
         };
         ("full".to_string(), format!("{} değişti", which))
     } else if orch_changed {
-        (
-            "orchestrator".to_string(),
-            "orchestrator/src/ değişti".to_string(),
-        )
+        if is_packaged {
+            (
+                "full".to_string(),
+                "orchestrator/src/ değişti (paketli app → tam güncelleme)".to_string(),
+            )
+        } else {
+            (
+                "orchestrator".to_string(),
+                "orchestrator/src/ değişti".to_string(),
+            )
+        }
     } else {
         ("none".to_string(), "güncel".to_string())
     };
@@ -117,6 +135,10 @@ pub fn apply_update(
     result
 }
 
+/// Dev-mode hızlı yol: repo orchestrator/dist'ini rebuild + subprocess restart
+/// (relaunch yok). Paketli app'te ÇAĞRILMAZ — check_update_status orada "full"
+/// döndürür; çünkü çalışan orchestrator .app içindeki bundled dist'tir ve repo
+/// dist'ini yenilemek ona ulaşmaz.
 fn apply_orchestrator_update(
     app: &AppHandle,
     state: &OrchestratorState,
