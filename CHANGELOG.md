@@ -6,6 +6,16 @@
 
 ## 2026-06-03
 
+- **20:13 feat(auto-mode-seamless):** Auto Mode'a FAZ-İÇİ kesintisiz retry (Ümit onayı:
+  "Evet, kesintisiz yap"). `cli-rate-limit.ts`'e generic `autoFallbackBackend(makeCli,
+  makeApi)`: CLI backend limit YÜZÜNDEN (kind:"failed" + cliCurrentlyLimited) başarısız
+  olursa AYNI faz içinde API backend'ine geçip yeniden dener — başka hatada fallback YOK
+  (sessiz API kaçışı değil). submitAskqAnswer/abort aktif backend'e yönlenir. 3 ana
+  factory'ye uygulandı (yalnız Auto Mode'da): qa-askq (1/2/9), production-schema (3/4/7),
+  codegen (5/8). Orchestrator zaten görünür CLI→SDK fallback'e sahip. phase-0 D1 (triage
+  girişi) bespoke kaldı — limit dolarsa yeniden tetikte API'ye geçer (backendForRole çözer).
+  19:36'daki AÇIK NOT kapandı: ana pipeline artık faz-ortası limitte kesintisiz. 4 yeni test
+  (CLI-ok→API yok / CLI-fail+limitsiz→fallback yok / CLI-fail+limitli→API / askq routing).
 - **19:36 feat(auto-mode):** Rol başına backend'e 3. seçenek "auto" (Auto Mode) —
   CLI (Claude Code aboneliği) ile başlar; abonelik usage-limit'i dolunca otomatik API'ye
   geçer, limit açılınca CLI'ye döner. Reset zamanı `claude -p` stream-json'undaki

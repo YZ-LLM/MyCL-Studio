@@ -17,7 +17,8 @@ import {
 } from "../base/codegen-controller.js";
 import { CliCodegenBackend, isClaudeAvailable } from "./cli-backend.js";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
-import { backendForRole } from "../config.js";
+import { autoFallbackBackend } from "../cli-rate-limit.js";
+import { backendForRole, isAutoMode } from "../config.js";
 import { emitChatMessage, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 
@@ -58,6 +59,13 @@ export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
   if (flagOn && eligible) {
     if (isClaudeAvailable()) {
       log.info("codegen-backend", "using CLI backend", { tag: opts.tag });
+      // Auto Mode: limit faz ortasında dolarsa SDK'ya (API) kesintisiz geç.
+      if (isAutoMode(opts.config, "main")) {
+        return autoFallbackBackend<CodegenOutcome, CodegenBackend>(
+          () => new CliCodegenBackend(opts),
+          () => new CodegenBaseController(opts),
+        );
+      }
       return new CliCodegenBackend(opts);
     }
     // Kullanıcı kuralı: HİÇBİR ŞEY SESSİZCE çalışmasın. Main 'CLI' seçili ama

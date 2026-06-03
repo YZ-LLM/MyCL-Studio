@@ -18,8 +18,9 @@ import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { appendAudit } from "../audit.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
+import { autoFallbackBackend } from "../cli-rate-limit.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
-import { backendForRole } from "../config.js";
+import { backendForRole, isAutoMode } from "../config.js";
 import { localizeOptionLabels, t } from "../i18n.js";
 import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
@@ -272,6 +273,13 @@ export function createProductionSchemaBackend(opts: ProductionRunOpts): Producti
   if (wantCli) {
     if (isClaudeAvailable()) {
       log.info(opts.tag, "using CLI production-schema backend (abonelik)");
+      // Auto Mode: limit faz ortasında dolarsa API'ye kesintisiz geç.
+      if (isAutoMode(opts.config, "main")) {
+        return autoFallbackBackend<ProductionOutcome, ProductionBackend>(
+          () => new ProductionSchemaCliBackend(opts),
+          () => new ProductionSchemaBaseController(opts),
+        );
+      }
       return new ProductionSchemaCliBackend(opts);
     }
     const m =

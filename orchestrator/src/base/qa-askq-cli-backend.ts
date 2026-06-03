@@ -13,8 +13,9 @@ import { randomUUID } from "node:crypto";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
+import { autoFallbackBackend } from "../cli-rate-limit.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
-import { backendForRole } from "../config.js";
+import { backendForRole, isAutoMode } from "../config.js";
 import { appendHistory } from "../history-loader.js";
 import { localizeOptionLabels, t } from "../i18n.js";
 import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
@@ -368,6 +369,13 @@ export function createQaAskqBackend(opts: QaAskqRunOpts): QaAskqBackend {
   if (wantCli) {
     if (isClaudeAvailable()) {
       log.info(opts.tag, "using CLI qa-askq backend (abonelik)");
+      // Auto Mode: limit faz ortasında dolarsa API'ye kesintisiz geç.
+      if (isAutoMode(opts.config, "main")) {
+        return autoFallbackBackend<QaAskqOutcome, QaAskqBackend>(
+          () => new CliQaAskqBackend(opts),
+          () => new QaAskqBaseController(opts),
+        );
+      }
       return new CliQaAskqBackend(opts);
     }
     const m =

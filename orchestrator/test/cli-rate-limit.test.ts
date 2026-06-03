@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  autoFallbackBackend,
   cliCurrentlyLimited,
   computeLimitedUntilMs,
   getCliLimitedUntilMs,
@@ -9,6 +10,24 @@ import {
   resetCliRateLimitState,
   resolveAuto,
 } from "../src/cli-rate-limit.js";
+
+interface Outcome { kind: string; }
+function fakeBackend(outcome: Outcome) {
+  const calls = { run: 0, submit: 0, abort: 0 };
+  const backend = {
+    run: async (): Promise<Outcome> => {
+      calls.run++;
+      return outcome;
+    },
+    submitAskqAnswer: (_id: string, _sel: string) => { calls.submit++; },
+    abort: () => { calls.abort++; },
+  };
+  return { backend, calls };
+}
+function rejectNow(): void {
+  // state'i "limitli" yap: rejected + gelecek resetsAt.
+  noteRateLimitEvent({ status: "rejected", resetsAt: Math.floor(Date.now() / 1000) + 3600 });
+}
 
 // Saf çekirdek + global state geçişleri. State testleri sonrası resetlenir.
 
@@ -97,12 +116,52 @@ describe("cli-rate-limit · noteRateLimitEvent + cliCurrentlyLimited (state)", (
   });
 
   it("reset geçince cliCurrentlyLimited → false ve state temizlenir", () => {
-    // until'i geçmişe set etmek için: resetsAt geçmiş → backoff devreye girer,
-    // o yüzden doğrudan state'i kontrol et: önce gelecekte limitle, sonra elle test.
     const resetsAt = Math.floor(Date.now() / 1000) + 1; // ~1 sn sonra
     noteRateLimitEvent({ status: "blocked", resetsAt });
     expect(cliCurrentlyLimited()).toBe(true);
     // until'i geçmişe taşımak için yeniden note (saf isLimited zaten test edildi);
     // burada reset davranışını isLimited üzerinden dolaylı doğruladık.
+  });
+});
+
+describe("cli-rate-limit · autoFallbackBackend (faz-içi kesintisiz retry)", () => {
+  it("CLI başarılı → CLI sonucu döner, API ÇAĞRILMAZ", async () => {
+    const cli = fakeBackend({ kind: "approved" });
+    const api = fakeBackend({ kind: "approved" });
+    const wrapped = autoFallbackBackend(() => cli.backend, () => api.backend);
+    const r = await wrapped.run();
+    expect(r.kind).toBe("approved");
+    expect(cli.calls.run).toBe(1);
+    expect(api.calls.run).toBe(0);
+  });
+
+  it("CLI fail + limit YOK → fallback YOK (sessiz API kaçışı değil)", async () => {
+    const cli = fakeBackend({ kind: "failed" });
+    const api = fakeBackend({ kind: "approved" });
+    const wrapped = autoFallbackBackend(() => cli.backend, () => api.backend);
+    const r = await wrapped.run();
+    expect(r.kind).toBe("failed"); // CLI hatası aynen döner
+    expect(api.calls.run).toBe(0); // API'ye düşülmedi
+  });
+
+  it("CLI fail + limit DOLDU → API'ye kesintisiz geçer", async () => {
+    rejectNow(); // limit state'i set
+    const cli = fakeBackend({ kind: "failed" });
+    const api = fakeBackend({ kind: "approved" });
+    const wrapped = autoFallbackBackend(() => cli.backend, () => api.backend);
+    const r = await wrapped.run();
+    expect(cli.calls.run).toBe(1);
+    expect(api.calls.run).toBe(1); // API ile yeniden denendi
+    expect(r.kind).toBe("approved"); // API sonucu
+  });
+
+  it("submitAskqAnswer/abort aktif backend'e yönlenir (fallback öncesi CLI)", async () => {
+    const cli = fakeBackend({ kind: "approved" });
+    const api = fakeBackend({ kind: "approved" });
+    const wrapped = autoFallbackBackend(() => cli.backend, () => api.backend);
+    wrapped.submitAskqAnswer?.("id", "ans");
+    wrapped.abort?.();
+    expect(cli.calls.submit).toBe(1);
+    expect(cli.calls.abort).toBe(1);
   });
 });

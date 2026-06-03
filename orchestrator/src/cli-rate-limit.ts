@@ -153,3 +153,46 @@ export function resetCliRateLimitState(): void {
 export function getCliLimitedUntilMs(): number | undefined {
   return _limitedUntilMs;
 }
+
+// ───────────────────────── Faz-içi kesintisiz retry (Auto Mode) ─────────────────────────
+
+export interface FallbackableBackend<O extends { kind: string }> {
+  run(): Promise<O>;
+  abort?(): void;
+  submitAskqAnswer?(askqId: string, selected: string): void;
+}
+
+/**
+ * Auto Mode faz-içi kesintisiz retry: CLI backend'i çalıştır; abonelik limiti
+ * faz ORTASINDA dolup CLI başarısız olursa (kind:"failed" + cliCurrentlyLimited)
+ * AYNI faz içinde API backend'ine geçip YENİDEN dener. Yalnız limit-kaynaklı
+ * failure'da fallback yapar — başka hatada fallback YOK (sessiz API kaçışı değil).
+ * submitAskqAnswer/abort aktif backend'e yönlendirilir (geçişte pending askq yok:
+ * CLI run bitmiş olur). Yalnız Auto Mode'da çağrılır (explicit "cli" sarmalanmaz).
+ */
+export function autoFallbackBackend<O extends { kind: string }, B extends FallbackableBackend<O>>(
+  makeCli: () => B,
+  makeApi: () => B,
+): B {
+  let active: B = makeCli();
+  let fellBack = false;
+  const wrapper: FallbackableBackend<O> = {
+    run: async (): Promise<O> => {
+      const r = await active.run();
+      if (!fellBack && r.kind === "failed" && cliCurrentlyLimited()) {
+        fellBack = true;
+        emitChatMessage(
+          "system",
+          "↪️ Abonelik limiti faz ortasında doldu — bu faz API ile kesintisiz yeniden deneniyor (Auto Mode).",
+        );
+        log.info("cli-rate-limit", "in-phase auto fallback CLI → API");
+        active = makeApi();
+        return active.run();
+      }
+      return r;
+    },
+    abort: () => active.abort?.(),
+    submitAskqAnswer: (id: string, sel: string) => active.submitAskqAnswer?.(id, sel),
+  };
+  return wrapper as unknown as B;
+}
