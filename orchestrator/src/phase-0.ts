@@ -40,6 +40,7 @@ import {
   emitPhaseIdle,
   emitPhaseRunning,
 } from "./ipc.js";
+import { MAIN_AGENT_LANGUAGE_RULE } from "./agent-language.js";
 import { log } from "./logger.js";
 import { buildRelevantProjectContext } from "./relevance/injectors.js";
 import { substitute } from "./template-engine.js";
@@ -627,7 +628,7 @@ CEVABININ TAMAMI tek bir JSON bloğu olsun (blok DIŞINDA düz metin YAZMA): {"k
 Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
     emitClaudeStream({ sub: "init", text: "cli-phase-0-d1", model: modelId, cwd: this.state.project_root });
     const res = await runClaudeCli({
-      systemPrompt: sys,
+      systemPrompt: sys + MAIN_AGENT_LANGUAGE_RULE,
       userMessage:
         'D1 — investigate with Read/Grep/Bash, then conclude by emitting the {"kind":"root_cause",...} JSON block (root_cause_en + 2-4 fix_options).' +
         (contextSuffix ? `\n\n${contextSuffix}` : ""),

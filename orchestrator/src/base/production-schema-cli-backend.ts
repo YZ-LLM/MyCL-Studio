@@ -14,6 +14,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { appendAudit } from "../audit.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
@@ -265,6 +266,8 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
  * API YOK); aksi halde SDK. Faz controller'ları dönüş tipini (ProductionBackend) bilir.
  */
 export function createProductionSchemaBackend(opts: ProductionRunOpts): ProductionBackend {
+  // v15.11: main ajan yalnız İngilizce yazar (genel kural, CLI+SDK). Çevirmen hariç.
+  opts = { ...opts, systemPrompt: opts.systemPrompt + MAIN_AGENT_LANGUAGE_RULE };
   const wantCli = backendForRole(opts.config, "main") === "cli";
   if (wantCli) {
     if (isClaudeAvailable()) {

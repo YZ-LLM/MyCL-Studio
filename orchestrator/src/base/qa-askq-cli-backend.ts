@@ -10,6 +10,7 @@
 // Abonelik (cli-session API key enjekte etmez).
 
 import { randomUUID } from "node:crypto";
+import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
@@ -361,6 +362,8 @@ export class CliQaAskqBackend implements QaAskqBackend {
  * + claude → CLI; "cli" ama claude yok → görünür fail (sessiz API YOK); aksi SDK.
  */
 export function createQaAskqBackend(opts: QaAskqRunOpts): QaAskqBackend {
+  // v15.11: main ajan yalnız İngilizce yazar (genel kural, CLI+SDK). Çevirmen hariç.
+  opts = { ...opts, systemPrompt: opts.systemPrompt + MAIN_AGENT_LANGUAGE_RULE };
   const wantCli = backendForRole(opts.config, "main") === "cli";
   if (wantCli) {
     if (isClaudeAvailable()) {

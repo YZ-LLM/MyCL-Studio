@@ -16,6 +16,7 @@ import {
   type CodegenRunOpts,
 } from "../base/codegen-controller.js";
 import { CliCodegenBackend, isClaudeAvailable } from "./cli-backend.js";
+import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { backendForRole } from "../config.js";
 import { emitChatMessage, emitError } from "../ipc.js";
 import { log } from "../logger.js";
@@ -50,6 +51,8 @@ const CLI_ELIGIBLE_TAGS = new Set(["phase-5", "verify-feature", "phase-8"]);
  * tek seferlik uyarı.
  */
 export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
+  // v15.11: main ajan yalnız İngilizce yazar (genel kural, CLI+SDK). Çevirmen hariç.
+  opts = { ...opts, systemPrompt: opts.systemPrompt + MAIN_AGENT_LANGUAGE_RULE };
   const flagOn = backendForRole(opts.config, "main") === "cli";
   const eligible = CLI_ELIGIBLE_TAGS.has(opts.tag);
   if (flagOn && eligible) {

@@ -42,7 +42,7 @@ export function buildLivingDocsPrompt(opts: {
   includeUserGuide: boolean;
 }): string {
   const guideInstruction = opts.includeUserGuide
-    ? "Produce **user-guide.md** — an end-user manual for the UI. One `## <Nasıl: görev>` heading per common task, with numbered steps a non-technical user can follow."
+    ? "Produce **user-guide.md** — an end-user manual for the UI, written **in Turkish** (the end user reads Turkish). One `## <Nasıl: görev>` heading per common task, with numbered steps a non-technical user can follow."
     : 'This project has NO end-user UI — set `user_guide_md` to an empty string "".';
   return substitute(opts.tmpl, {
     INTENT_SUMMARY: opts.intentSummary || "(no intent recorded)",
