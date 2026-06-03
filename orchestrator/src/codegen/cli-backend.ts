@@ -27,6 +27,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { MAIN_AGENT_LANGUAGE_REMINDER } from "../agent-language.js";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "../agent-sandbox.js";
 import { noteRateLimitEvent, type RateLimitInfo } from "../cli-rate-limit.js";
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
@@ -334,9 +335,10 @@ export class CliCodegenBackend implements CodegenBackend {
   private buildArgs(effort: string): string[] {
     const { opts } = this;
     // Faz EN system prompt + EN task — translator zaten EN üretti (mimari sınır).
+    // v15.12: user mesajına İngilizce-çıktı hatırlatması (recency, belt-and-suspenders).
     const args: string[] = [
       "-p",
-      opts.initialUserMessage,
+      `${opts.initialUserMessage}\n\n${MAIN_AGENT_LANGUAGE_REMINDER}`,
       "--append-system-prompt",
       opts.systemPrompt,
       "--model",

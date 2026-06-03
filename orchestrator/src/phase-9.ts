@@ -144,8 +144,8 @@ export class Phase9Controller {
     let systemPrompt: string;
     try {
       const tmpl = await readFile(this.spec.prompt_template_path!, "utf-8");
-      const convSection = await buildConversationContext(this.config, this.state)
-        .then(renderConversationSection)
+      const convSection = await buildConversationContext(this.config, this.state, { recentLanguage: "en" })
+        .then((c) => renderConversationSection(c, { forMainAgent: true }))
         .catch(() => "");
       systemPrompt = substitute(tmpl, {
         SPEC_RISKS: specRisks,

@@ -129,8 +129,8 @@ export class Phase1Controller {
     // akışıyla görür. Cache'li (process-local), fail-safe.
     let convSection = "";
     try {
-      const conv = await buildConversationContext(this.config, this.state);
-      convSection = renderConversationSection(conv);
+      const conv = await buildConversationContext(this.config, this.state, { recentLanguage: "en" });
+      convSection = renderConversationSection(conv, { forMainAgent: true });
     } catch (err) {
       log.warn("phase-1", "conversation context fetch failed", err);
     }

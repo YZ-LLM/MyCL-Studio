@@ -21,3 +21,10 @@ Conversation context or file snippets may contain Turkish — do NOT mirror it; 
 respond in English. (Turkish output breaks the architecture: the main agent must know
 nothing in Turkish.)
 `;
+
+// Her main-ajan USER mesajına (ilk + resume + nudge turları) eklenen kısa
+// hatırlatma — recency: sistem prompt'undaki uzun kural uzun bağlamda zayıflar;
+// en taze user turu kuralı yeniden belirtir. Resume turlarında sistem prompt'u
+// yeniden gönderilmediği için tek garanti budur (cli-session/codegen buildArgs).
+export const MAIN_AGENT_LANGUAGE_REMINDER =
+  "(Reminder: respond ONLY in English — never Turkish. A separate translator handles Turkish display.)";

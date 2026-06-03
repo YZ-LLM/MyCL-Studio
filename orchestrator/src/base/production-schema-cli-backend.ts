@@ -47,19 +47,19 @@ function buildOutputInstruction(opts: ProductionRunOpts): string {
 
 ---
 
-## ÇIKTI FORMATI — CLI modu (tool YOK, text-JSON)
+## OUTPUT FORMAT — CLI mode (no tools, text-JSON)
 
-Bu modda \`${opts.production.write_tool_name}\`/\`${opts.production.approval_tool_name}\` TOOL'LARI YOKTUR.
-Gerekirse Read/Grep/Glob/Bash ile araştır (DOSYAYA YAZMA — dosyayı MyCL yazar). Adımlar:
+In this mode the \`${opts.production.write_tool_name}\`/\`${opts.production.approval_tool_name}\` TOOLS DO NOT EXIST.
+Investigate with Read/Grep/Glob/Bash if needed (DO NOT write to disk — MyCL writes the file). Steps:
 
-1) Çıktıyı TEK bir JSON bloğu olarak yaz: \`{"kind":"write", ...alanlar}\`. Alanlar AYNEN şu
-   JSON Schema'ya uymalı (kind hariç):
+1) Write the output as a SINGLE JSON block: \`{"kind":"write", ...fields}\`. Fields must match this
+   JSON Schema EXACTLY (excluding kind):
    ${JSON.stringify(schema)}
-2) "Kaydedildi" onayını aldıktan SONRA: \`{"kind":"approval","pitch_en":"2-3 cümle İngilizce özet"}\` yaz.
-3) Kullanıcı revizyon isterse güncellenmiş yeni bir \`{"kind":"write",...}\` yaz.
+2) AFTER you receive the "Saved" confirmation: write \`{"kind":"approval","pitch_en":"2-3 sentence English summary"}\`.
+3) If the user requests a revision, write an updated new \`{"kind":"write",...}\` block.
 
-KURALLAR: CEVABININ TAMAMI tek bir JSON bloğu olmalı — blok DIŞINDA düz metin YAZMA (ne öncesinde
-ne sonrasında); geçerli JSON (çift tırnak, trailing comma yok).`;
+RULES: Your ENTIRE answer must be a single JSON block — write NO plain text outside the block (neither
+before nor after); valid JSON (double quotes, no trailing comma).`;
 }
 
 interface PendingAskq {
@@ -153,7 +153,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
         nudged = true;
         resume = true;
         userMessage =
-          "Geçerli JSON blok yoktu. SADECE tek bir {\"kind\":\"write\",...} ya da {\"kind\":\"approval\",...} bloğu yaz.";
+          "No valid JSON block found. Write ONLY a single {\"kind\":\"write\",...} or {\"kind\":\"approval\",...} block.";
         continue;
       }
       nudged = false;
@@ -164,7 +164,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
         const missing = required.filter((f) => !(f in writeInput));
         if (missing.length > 0) {
           resume = true;
-          userMessage = `Eksik zorunlu alan(lar): ${missing.join(", ")}. Tüm alanlarla yeniden {"kind":"write",...} yaz.`;
+          userMessage = `Missing required field(s): ${missing.join(", ")}. Rewrite {"kind":"write",...} with all fields.`;
           continue;
         }
         let md: string;
@@ -172,7 +172,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
           md = opts.artifactRenderer(writeInput);
         } catch (err) {
           resume = true;
-          userMessage = `Çıktı render edilemedi (${String(err).slice(0, 120)}). Alanları şemaya uygun düzelt + tekrar {"kind":"write",...} yaz.`;
+          userMessage = `Output could not be rendered (${String(err).slice(0, 120)}). Fix the fields to match the schema and write {"kind":"write",...} again.`;
           continue;
         }
         const hash = sha256(md);
@@ -196,7 +196,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
         }
         emitChatMessage("system", `📄 ${path} (sha256: ${hash.slice(0, 12)}…)`);
         resume = true;
-        userMessage = `Kaydedildi: ${path}. Şimdi SADECE {"kind":"approval","pitch_en":"..."} bloğu yaz (kullanıcıdan onay iste).`;
+        userMessage = `Saved: ${path}. Now write ONLY a {"kind":"approval","pitch_en":"..."} block (to request user approval).`;
         continue;
       }
 
@@ -213,7 +213,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
         if (!this.lastArtifactPath || !this.lastArtifactHash || !this.lastWriteInput) {
           // Onay write'tan önce geldi — yazmaya yönlendir.
           resume = true;
-          userMessage = "Henüz {\"kind\":\"write\"} ile içerik kaydedilmedi. Önce onu yaz.";
+          userMessage = "No content has been saved via {\"kind\":\"write\"} yet. Write that first.";
           continue;
         }
         return {
@@ -226,7 +226,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
       if (decision === "cancel") return { kind: "cancelled" };
       // revise
       resume = true;
-      userMessage = "Kullanıcı revizyon istedi. Güncellenmiş bir {\"kind\":\"write\",...} bloğu yaz.";
+      userMessage = "The user requested a revision. Write an updated {\"kind\":\"write\",...} block.";
     }
 
     return { kind: "failed", reason: `${opts.tag}: MAX_TURNS (${MAX_TURNS}) aşıldı` };

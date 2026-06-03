@@ -11,6 +11,7 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { MAIN_AGENT_LANGUAGE_REMINDER } from "./agent-language.js";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import { noteRateLimitEvent, type RateLimitInfo } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
@@ -61,7 +62,10 @@ export interface CliSessionResult {
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 function buildArgs(opts: CliSessionTurnOpts): string[] {
-  const args: string[] = ["-p", opts.userMessage];
+  // v15.12: her main-ajan user mesajına İngilizce-çıktı hatırlatması (ilk + resume
+  // + nudge). Recency: resume turlarında sistem prompt'u yeniden gönderilmez → tek
+  // garanti bu. Çevirmen runClaudeCli kullanır (bunu DEĞİL) → yalnız main-ajan etkilenir.
+  const args: string[] = ["-p", `${opts.userMessage}\n\n${MAIN_AGENT_LANGUAGE_REMINDER}`];
   if (opts.resume) {
     args.push("--resume", opts.sessionId);
   } else {

@@ -6,6 +6,23 @@
 
 ## 2026-06-03
 
+- **21:38 fix(main-agent-english):** Ana ajan ARTIK kesin İngilizce konuşur (kullanıcı
+  şartı; ekran: CLAUDE CODE paneli Faz 2'de Türkçe üretmişti). Kök neden: ajanın GİRDİLERİ
+  Türkçe'ydi (kural recency'si zayıf, yenemiyordu). Düzeltme — ana ajanın TÜM girdileri
+  İngilizce + recency:
+  - `conversation-context.ts`: `buildConversationContext(.., {recentLanguage:"en"})` → son 3
+    user mesajı ANA AJAN için `translate()` ile İngilizce'ye çevrilir (set-hash cache'li,
+    `recentEnCache`); çeviri başarısızsa boş (ham TR'ye DÜŞMEZ). `renderConversationSection(c,
+    {forMainAgent:true})` İngilizce render eder. Orkestratör HAM TR görmeye devam eder (default).
+    Boş-sohbet sentinel'i İngilizce. 6 faz caller'ı (1/2/3/4/7/9) güncellendi.
+  - Ajana giden Türkçe CLI talimatları İngilizce'ye çevrildi: `qa-askq-cli-backend` +
+    `production-schema-cli-backend` `buildOutputInstruction` + tüm resume/nudge userMessage'ları;
+    `cli-interactive-loop` STRICT_NUDGE. (UI/log/askq-label stringleri Türkçe kaldı — ajana gitmez.)
+  - Recency + resume: `MAIN_AGENT_LANGUAGE_REMINDER` her main-ajan user mesajına eklenir
+    (`cli-session` + `codegen/cli-backend` buildArgs) — resume turlarında sistem prompt'u
+    yeniden gönderilmediği için tek garanti bu (çevirmen `runClaudeCli` kullanır, etkilenmez).
+  - Test: `conversation-context.test.ts` (5 saf test — forMainAgent EN, orkestratör ham-TR
+    regresyon, EN sentinel, cache, çeviri-hatası ham-TR'ye düşmez). npm run check yeşil (727).
 - **20:46 feat(auto-mode-symmetric):** Auto Mode artık SİMETRİK çift-yön, 3 rol de (Ümit:
   "Tam simetrik çift-yön"). Çözülen birincil backend (limit yokken CLI, limitliyse API)
   denenir; KALICI `failed`/throw → görünür mesajla diğerine BİR KEZ geçilir (case 1:

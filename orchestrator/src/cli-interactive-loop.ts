@@ -44,9 +44,9 @@ export interface InteractiveCliOpts {
 }
 
 const STRICT_NUDGE =
-  "UYARI: Önceki çıktında geçerli JSON karar/soru bloğu bulunamadı. Bu sefer SADECE " +
-  "tek bir geçerli JSON nesnesi yaz (```json bloğu içinde olabilir), başka metin yazma. " +
-  "`kind` alanı zorunlu.";
+  "WARNING: No valid JSON decision/question block was found in your previous output. This time write " +
+  "ONLY a single valid JSON object (may be inside a ```json block), no other text. " +
+  "The `kind` field is required.";
 
 /**
  * Interaktif CLI fazını koştur; terminal blok döner. askq → onAskq → resume.

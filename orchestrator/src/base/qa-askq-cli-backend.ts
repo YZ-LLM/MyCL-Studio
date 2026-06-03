@@ -43,42 +43,42 @@ function buildOutputInstruction(opts: QaAskqRunOpts): string {
   const requiredOf = (name?: string): string => {
     const tool = name ? tools.find((tt) => tt.name === name) : undefined;
     const req = (tool?.input_schema as { required?: string[] } | undefined)?.required ?? [];
-    return req.length ? req.join(", ") : "(şemadaki alanlar)";
+    return req.length ? req.join(", ") : "(fields from the schema)";
   };
   const lines: string[] = [];
   if (askq.clarifying_tool_name) {
     lines.push(
-      `- Soru sormak için: {"kind":"askq", ...} — alanlar şu şemaya uy: ${schemaOf(askq.clarifying_tool_name)} ` +
-        `(question + options[] zorunlu; suggested_answer opsiyonel, options'tan biri olmalı).`,
+      `- To ask a question: {"kind":"askq", ...} — fields must match this schema: ${schemaOf(askq.clarifying_tool_name)} ` +
+        `(question + options[] required; suggested_answer optional, must be one of options).`,
     );
   }
   lines.push(
-    `- Onay/sonuç için: {"kind":"approval", ...} — ZORUNLU alanlar TAM bu adlarla ` +
-      `(generic "summary"/"title" DEĞİL): ${requiredOf(askq.approval_tool_name)}. ` +
-      `Tam şema: ${schemaOf(askq.approval_tool_name)}.`,
+    `- To approve/conclude: {"kind":"approval", ...} — REQUIRED fields with EXACTLY these names ` +
+      `(NOT generic "summary"/"title"): ${requiredOf(askq.approval_tool_name)}. ` +
+      `Full schema: ${schemaOf(askq.approval_tool_name)}.`,
   );
   if (askq.abandon_tool_name) {
-    lines.push(`- Vazgeçmek için: {"kind":"abandon", ...} — alanlar: ${schemaOf(askq.abandon_tool_name)}.`);
+    lines.push(`- To abandon: {"kind":"abandon", ...} — fields: ${schemaOf(askq.abandon_tool_name)}.`);
   }
   if (askq.tweak_tool_name) {
-    lines.push(`- UI değişiklik için: {"kind":"tweak", ...} — alanlar: ${schemaOf(askq.tweak_tool_name)}.`);
+    lines.push(`- For a UI change: {"kind":"tweak", ...} — fields: ${schemaOf(askq.tweak_tool_name)}.`);
   }
   if (askq.failure_tool_name) {
-    lines.push(`- AC başarısızlığı için: {"kind":"ac_failure", ...} — alanlar: ${schemaOf(askq.failure_tool_name)}.`);
+    lines.push(`- For AC failure: {"kind":"ac_failure", ...} — fields: ${schemaOf(askq.failure_tool_name)}.`);
   }
   return `
 
 ---
 
-## ÇIKTI FORMATI — CLI modu (tool YOK, text-JSON)
+## OUTPUT FORMAT — CLI mode (no tools, text-JSON)
 
-Tool ÇAĞIRAMAZSIN. CEVABININ TAMAMI tek bir JSON bloğu olmalı — blok DIŞINDA düz metin YAZMA
-(ne öncesinde ne sonrasında). Geçerli JSON: çift tırnak, trailing comma yok. \`kind\` alanı
-zorunlu. Blok içeriği (question/summary vb.) İngilizce. Kullanılabilir bloklar:
+You CANNOT call tools. Your ENTIRE answer must be a single JSON block — write NO plain text
+outside the block (neither before nor after). Valid JSON: double quotes, no trailing comma.
+The \`kind\` field is required. Block content (question/summary/etc.) is in English. Available blocks:
 ${lines.join("\n")}
 
-DOSYAYA YAZMA (Read/Grep/Glob/Bash ile sadece araştır). Soru sorduğunda kullanıcı cevabını
-bir sonraki mesajda alacaksın; ona göre devam et (sonra başka {"kind":"askq"} veya {"kind":"approval"}).`;
+DO NOT write to disk (only investigate with Read/Grep/Glob/Bash). When you ask a question you will
+receive the user's answer in the next message; continue accordingly (then another {"kind":"askq"} or {"kind":"approval"}).`;
 }
 
 interface PendingAskq {
@@ -180,7 +180,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
         nudged = true;
         resume = true;
         userMessage =
-          "Geçerli JSON blok yoktu. SADECE tek bir {\"kind\":\"askq\"|\"approval\"|...} bloğu yaz, başka metin yok.";
+          "No valid JSON block found. Write ONLY a single {\"kind\":\"askq\"|\"approval\"|...} block, no other text.";
         continue;
       }
       nudged = false;
@@ -215,9 +215,9 @@ export class CliQaAskqBackend implements QaAskqBackend {
           fieldNudgeUsed = true;
           resume = true;
           userMessage =
-            `'${String(block.kind)}' bloğun ZORUNLU alan(lar) eksik: ${missing.join(", ")}. ` +
-            `${toolName} şemasındaki TAM alan adlarıyla {"kind":"${String(block.kind)}", ...} bloğunu ` +
-            `YENİDEN yaz (generic "summary"/"title" KULLANMA — örn. enriched_summary gibi tam adları kullan).`;
+            `Your '${String(block.kind)}' block is missing REQUIRED field(s): ${missing.join(", ")}. ` +
+            `REWRITE the {"kind":"${String(block.kind)}", ...} block using the EXACT field names from the ` +
+            `${toolName} schema (do NOT use generic "summary"/"title" — use exact names like enriched_summary).`;
           continue;
         }
       }
@@ -253,7 +253,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
           return { kind: "cancelled" };
         }
         resume = true;
-        userMessage = "Kullanıcı revizyon istedi. Güncellenmiş {\"kind\":\"approval\",...} (veya gerekiyorsa {\"kind\":\"askq\"}) yaz.";
+        userMessage = "The user requested a revision. Write an updated {\"kind\":\"approval\",...} block (or {\"kind\":\"askq\"} if needed).";
         continue;
       }
 
