@@ -145,9 +145,19 @@ function BackendSelector({
   value: AgentBackend;
   onChange: (v: AgentBackend) => void;
 }) {
+  const LABELS: Record<AgentBackend, string> = {
+    api: "API",
+    cli: "Abonelik (CLI)",
+    auto: "Auto",
+  };
+  const TITLES: Record<AgentBackend, string> = {
+    api: "Anthropic API (API key gerekir, çağrı başına faturalı)",
+    cli: "Claude Code Aboneliği — `claude` CLI ile çalışır, API faturası yok (abonelik kullanılır)",
+    auto: "Auto Mode — Claude Code Aboneliği (CLI) ile başlar; abonelik limiti dolunca otomatik API'ye geçer, limit açılınca CLI'ye döner.",
+  };
   return (
     <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-      {(["api", "cli"] as const).map((b) => {
+      {(["api", "cli", "auto"] as const).map((b) => {
         const active = value === b;
         return (
           <button
@@ -165,13 +175,9 @@ function BackendSelector({
               color: active ? "var(--fg)" : "var(--fg-dim)",
               fontWeight: active ? 600 : 400,
             }}
-            title={
-              b === "api"
-                ? "Anthropic API (API key gerekir, çağrı başına faturalı)"
-                : "Claude Code Aboneliği — `claude` CLI ile çalışır, API faturası yok (abonelik kullanılır)"
-            }
+            title={TITLES[b]}
           >
-            {b === "api" ? "API" : "Claude Code Aboneliği"}
+            {LABELS[b]}
           </button>
         );
       })}

@@ -17,6 +17,7 @@
 
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import { cliCurrentlyLimited, resolveAuto } from "./cli-rate-limit.js";
 import { globalConfigDir } from "./paths.js";
 
 export interface ClaudeCodeFlags {
@@ -108,12 +109,19 @@ const DEFAULT_FEATURES: FeatureFlags = {
  * = `claude` CLI (abonelik). Eski `features.claude_code_cli_enabled:true` →
  * `main:"cli"` migration'ı resolveAgentBackends'te yapılır.
  */
+/** Efektif (çözülmüş) backend — dispatch noktalarının tükettiği. */
 export type AgentBackend = "api" | "cli";
+/**
+ * Yapılandırılmış backend (config'te saklanan). "auto" = Auto Mode: CLI ile başla,
+ * abonelik limiti dolunca API kullan, limit açılınca CLI'ye dön (cli-rate-limit.ts).
+ * backendForRole bunu runtime'da "api"|"cli"'ye çözer.
+ */
+export type ConfiguredBackend = AgentBackend | "auto";
 export type AgentRole = "orchestrator" | "translator" | "main";
 export interface AgentBackends {
-  orchestrator: AgentBackend;
-  translator: AgentBackend;
-  main: AgentBackend;
+  orchestrator: ConfiguredBackend;
+  translator: ConfiguredBackend;
+  main: ConfiguredBackend;
 }
 const DEFAULT_BACKENDS: AgentBackends = {
   orchestrator: "api",
@@ -308,12 +316,19 @@ function resolveAgentBackends(file: ConfigFile): AgentBackends {
 }
 
 /**
- * Bir rol için aktif backend ("api" | "cli"). loadConfig her zaman agent_backends'i
- * doldurur; yine de partial/cast config'lere karşı savunmacı — eksikse "api"
- * (DEFAULT_BACKENDS güvenli default'u, bugünkü SDK davranışı).
+ * Bir rol için EFEKTİF backend ("api" | "cli"). "auto" → runtime'da çözülür:
+ * abonelik limiti aktifse "api", değilse "cli" (cli-rate-limit.ts). loadConfig her
+ * zaman agent_backends'i doldurur; partial/cast config'lere karşı savunmacı — eksikse
+ * "api" (güvenli default). Tek çözüm-noktası: 9 dispatch yeri bunu çağırır.
  */
 export function backendForRole(config: MyclConfig, role: AgentRole): AgentBackend {
-  return config.agent_backends?.[role] ?? "api";
+  const configured = config.agent_backends?.[role] ?? "api";
+  return resolveAuto(configured, configured === "auto" ? cliCurrentlyLimited() : false);
+}
+
+/** Rol Auto Mode'da mı (factory'ler görünür CLI→API fallback'i yalnız auto'da uygular). */
+export function isAutoMode(config: MyclConfig, role: AgentRole): boolean {
+  return (config.agent_backends?.[role] ?? "api") === "auto";
 }
 
 /**

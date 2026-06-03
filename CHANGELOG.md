@@ -6,6 +6,21 @@
 
 ## 2026-06-03
 
+- **19:36 feat(auto-mode):** Rol başına backend'e 3. seçenek "auto" (Auto Mode) —
+  CLI (Claude Code aboneliği) ile başlar; abonelik usage-limit'i dolunca otomatik API'ye
+  geçer, limit açılınca CLI'ye döner. Reset zamanı `claude -p` stream-json'undaki
+  `rate_limit_event.rate_limit_info.resetsAt` (Unix epoch sn) — canlı doğrulandı,
+  "resets in 1h" metni parse etmeye gerek YOK. Yeni `cli-rate-limit.ts` (leaf): global
+  limit state + saf çekirdek (isBlockedStatus/computeLimitedUntilMs/isLimited/resolveAuto)
+  + `noteRateLimitEvent` (görünür "API'ye geçildi ~Xdk sonra HH:MM açılacak") +
+  `cliCurrentlyLimited` (reset geçince "CLI'ye dönüldü"). `backendForRole` tek
+  çözüm-noktası: "auto"→runtime'da api/cli'ye çözer (9 dispatch yeri DEĞİŞMEDİ). 3 CLI
+  runner stream-json'da `rate_limit_event` yakalar. config `ConfiguredBackend=api|cli|auto`.
+  Frontend: Modeller sekmesi seçicisine "Auto" düğmesi. Her geçiş GÖRÜNÜR (sessiz fallback
+  istisnası: auto'da CLI→API KASITLI; explicit "cli" hâlâ API'ye düşmez). 17 saf birim test.
+  AÇIK NOT: faz-sınırında çalışır (limit dolunca sonraki fazlar API); limit TAM bir fazın
+  ortasında dolarsa o faz bir hata verip yeniden tetiklenmeli (in-phase seamless retry =
+  interactive-backend wrapper, Ümit kararına bırakıldı — ayrı iş).
 - **18:22 feat(phase-9-tech-debt):** Faz 9 (Risk Review) artık TEKNİK BORÇ kontrolü de yapar
   (kullanıcı: "Faz 9'da teknik borç kontrolü de yapsın" + "sadece o iterasyondaki iş için").
   Yeni `phase-9-tech-debt.ts`: bu iterasyonda değişen ÜRETİM dosyalarını (getChangedFiles

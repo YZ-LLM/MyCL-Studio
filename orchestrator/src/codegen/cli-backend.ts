@@ -28,6 +28,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "../agent-sandbox.js";
+import { noteRateLimitEvent, type RateLimitInfo } from "../cli-rate-limit.js";
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
 import type { CodegenBackend } from "./backend.js";
 import { emitChatMessage, emitClaudeStream } from "../ipc.js";
@@ -273,6 +274,11 @@ export class CliCodegenBackend implements CodegenBackend {
     const type = ev.type;
     if (type === "system") {
       // init — model/cwd zaten emit edildi; tekrar gerekmez.
+      return;
+    }
+    if (type === "rate_limit_event") {
+      // v15.12 Auto Mode: abonelik usage-limit + resetsAt sinyali.
+      noteRateLimitEvent(ev.rate_limit_info as RateLimitInfo | undefined);
       return;
     }
     if (type === "assistant") {

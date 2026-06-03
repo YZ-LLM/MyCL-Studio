@@ -138,8 +138,12 @@ export interface ModelsListEvent {
   };
 }
 
-/** v15.8: rol başına backend — "api" (Anthropic SDK) | "cli" (Claude Code Aboneliği). */
-export type AgentBackend = "api" | "cli";
+/**
+ * v15.8: rol başına backend — "api" (Anthropic SDK) | "cli" (Claude Code Aboneliği).
+ * v15.12: "auto" = Auto Mode — CLI ile başla, abonelik limiti dolunca API kullan,
+ * limit açılınca CLI'ye dön.
+ */
+export type AgentBackend = "api" | "cli" | "auto";
 export interface AgentBackends {
   orchestrator: AgentBackend;
   translator: AgentBackend;

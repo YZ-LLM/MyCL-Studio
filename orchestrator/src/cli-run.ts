@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
+import { noteRateLimitEvent, type RateLimitInfo } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import type { TokenUsage } from "./cli-session.js";
 import { log } from "./logger.js";
@@ -151,7 +152,10 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
         return; // NDJSON olmayan satır (banner) — atla
       }
       const type = ev.type;
-      if (type === "assistant") {
+      if (type === "rate_limit_event") {
+        // v15.12 Auto Mode: abonelik usage-limit + resetsAt sinyali.
+        noteRateLimitEvent(ev.rate_limit_info as RateLimitInfo | undefined);
+      } else if (type === "assistant") {
         const msg = ev.message as { content?: unknown[] } | undefined;
         for (const block of Array.isArray(msg?.content) ? msg!.content : []) {
           const b = block as Record<string, unknown>;

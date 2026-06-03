@@ -746,12 +746,13 @@ async function handleSaveSelectedModels(
       await persistClaudeCodeFlags({ effort: effort as ClaudeCodeFlags["effort"] });
     }
     // v15.8: rol başına backend (API/Abonelik) — Modeller sekmesinde modellerle
-    // birlikte kaydedilir. Geçerli değerler "api"|"cli"; gerisi yok sayılır.
+    // birlikte kaydedilir. Geçerli değerler "api"|"cli"|"auto"; gerisi yok sayılır.
+    // v15.12: "auto" = Auto Mode (CLI→API limitte, reset'te CLI'ye dön).
     if (backends) {
       const clean: Partial<AgentBackends> = {};
       for (const role of ["orchestrator", "translator", "main"] as const) {
         const v = backends[role];
-        if (v === "api" || v === "cli") clean[role] = v;
+        if (v === "api" || v === "cli" || v === "auto") clean[role] = v;
       }
       if (Object.keys(clean).length > 0) {
         await persistAgentBackends(clean);
