@@ -227,8 +227,13 @@ export function attachRuntimeErrorWatcher(opts: AttachOpts): RuntimeErrorWatcher
     });
 
     // Chat toast — rate-limited (aynı hata 10sn içinde 2. kez gelse atla).
+    // v15.10: infra/başlangıç hataları (EADDRINUSE, ECONNREFUSED, ENOENT, EACCES,
+    // EPERM) chat'e BASILMAZ — bunlar ortam/başlangıç sorunu (örn. port zaten
+    // kullanımda), app runtime bug'ı DEĞİL; "Runtime hata yakalandı" toast'ı
+    // yanıltıcı gürültü. Yine de errors.db + runtime_error event'ine kaydedilir
+    // (debug/panel için kaybolmaz) — yalnız chat sessizleşir.
     const lastToast = toastDebounce.get(dedupeKey);
-    if (!lastToast || now - lastToast >= TOAST_DEBOUNCE_MS) {
+    if (category.typeCode !== "INFRA" && (!lastToast || now - lastToast >= TOAST_DEBOUNCE_MS)) {
       toastDebounce.set(dedupeKey, now);
       emitChatMessage(
         "system",
