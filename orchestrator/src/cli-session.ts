@@ -36,15 +36,27 @@ export interface CliSessionTurnOpts {
   observer?: (toolUse: { name: string; input: Record<string, unknown> }) => void;
 }
 
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
 export interface CliSessionResult {
   ok: boolean;
   text: string;
   toolUses: Array<{ name: string; input: Record<string, unknown> }>;
   turns: number;
   error?: string;
+  /** result olayından alınan token kullanımı (faz-başına maliyet raporu için). */
+  usage?: TokenUsage;
 }
 
-const DEFAULT_TIMEOUT_MS = 180_000;
+// IDLE timeout: claude'tan bu kadar süre HİÇ çıktı gelmezse (gerçekten asılı)
+// öldür. Her stdout/stderr satırında sıfırlanır → uzun-ama-aktif tur (tool-yoğun
+// Faz 9 risk-review, 32k thinking) cezalandırılmaz. Mutlak değil, idle.
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 function buildArgs(opts: CliSessionTurnOpts): string[] {
   const args: string[] = ["-p", opts.userMessage];
@@ -60,6 +72,10 @@ function buildArgs(opts: CliSessionTurnOpts): string[] {
     "--output-format",
     "stream-json",
     "--verbose",
+    // v15.10: partial mesajlar — uzun thinking/sentez sırasında token delta'ları
+    // stream'lenir → idle timer gerçek ilerlemede sıfırlanır, yalnız GERÇEK hang'de
+    // (delta yok) tetiklenir. Çok-turlu qa-askq resume'unun sessiz asılmasını çözer.
+    "--include-partial-messages",
     "--permission-mode",
     "acceptEdits", // non-interactive: izin beklemede ASILMASIN
     "--add-dir",
@@ -102,6 +118,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
     let resultIsError = false;
     let resultSeen = false;
     let stderrTail = "";
+    let usage: TokenUsage | undefined;
 
     const child = spawn(claudeBin, args, {
       cwd: opts.cwd,
@@ -109,6 +126,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    let timer: ReturnType<typeof setTimeout>;
     const done = (r: CliSessionResult): void => {
       if (settled) return;
       settled = true;
@@ -117,13 +135,21 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
       resolve(r);
     };
 
-    const timer = setTimeout(() => {
-      log.warn("cli-session", "timeout — killing claude", { timeoutMs, resume: opts.resume });
-      done({ ok: false, text: texts.join(""), toolUses, turns, error: `cli timeout ${timeoutMs}ms` });
-    }, timeoutMs);
+    // IDLE-bazlı kill: her stdout/stderr satırında sıfırlanır → uzun ama aktif
+    // tur (tool-yoğun review) öldürülmez; yalnızca timeoutMs boyunca HİÇ çıktı
+    // gelmezse (gerçekten asılı) öldürür.
+    const resetTimer = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        log.warn("cli-session", "idle timeout — killing claude", { timeoutMs, resume: opts.resume });
+        done({ ok: false, text: texts.join(""), toolUses, turns, usage, error: `cli idle timeout ${timeoutMs}ms` });
+      }, timeoutMs);
+    };
+    resetTimer();
 
     const rl = createInterface({ input: child.stdout! });
     rl.on("line", (line) => {
+      resetTimer();
       const trimmed = line.trim();
       if (!trimmed) return;
       let ev: Record<string, unknown>;
@@ -153,10 +179,22 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
         resultSeen = true;
         resultIsError = ev.is_error === true || ev.subtype === "error";
         if (typeof ev.num_turns === "number") turns = ev.num_turns;
+        const u = ev.usage as Record<string, unknown> | undefined;
+        if (u) {
+          usage = {
+            input_tokens: Number(u.input_tokens ?? 0),
+            output_tokens: Number(u.output_tokens ?? 0),
+            cache_read_input_tokens: Number(u.cache_read_input_tokens ?? 0),
+            cache_creation_input_tokens: Number(u.cache_creation_input_tokens ?? 0),
+          };
+        }
       }
     });
 
     child.stderr!.on("data", (chunk: Buffer) => {
+      // NOT: idle timer'ı SIFIRLAMA — stderr gürültüsü (rate-limit retry vb.)
+      // gerçek bir stdout-hang'i maskelemesin. Canlılık sinyali yalnız stdout
+      // (partial mesajlar dahil). Sadece tail'i tut (hata teşhisi).
       stderrTail = (stderrTail + chunk.toString()).slice(-2000);
     });
 
@@ -171,6 +209,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
         text: texts.join(""),
         toolUses,
         turns,
+        usage,
         error: ok ? undefined : `claude exit=${code}${stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""}`,
       });
     });

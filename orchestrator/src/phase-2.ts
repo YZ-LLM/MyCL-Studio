@@ -237,7 +237,17 @@ export class Phase2Controller {
     }
 
     const enriched = String(outcome.approvalInput.enriched_summary ?? "");
-    const dimensions = (outcome.approvalInput.dimensions ?? []) as AuditDimension[];
+    // v15.10: `?? []` yalnız null/undefined'ı yakalar; ajan (CLI text-JSON)
+    // `dimensions`'ı non-array (obje/string) emit ederse for...of çöker
+    // (TypeError: dimensions is not iterable). Array.isArray ile katı guard —
+    // malformed dimensions audit detayını düşürür ama pipeline'ı bozmaz.
+    const rawDims = outcome.approvalInput.dimensions;
+    const dimensions = (Array.isArray(rawDims) ? rawDims : []) as AuditDimension[];
+    if (rawDims !== undefined && !Array.isArray(rawDims)) {
+      log.warn("phase-2", "dimensions array değil — boş kabul edildi (audit detayı düştü)", {
+        type: typeof rawDims,
+      });
+    }
     if (!enriched) {
       emitError("phase-2: enriched_summary missing in completion", null);
       this.lastFailReason = "enriched_summary missing";

@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MyclConfig } from "../src/config.js";
 import {
   classifyProjectType,
   shouldSkipUiPhases,
 } from "../src/project-type-classifier.js";
 import type { ProjectType } from "../src/types.js";
+
+// v15.10: abonelik modu text-JSON CLI sınıflandırma yolu için mock'lar.
+const cliMock = vi.fn();
+vi.mock("../src/cli-run.js", () => ({
+  runClaudeCli: (...a: unknown[]) => cliMock(...a),
+}));
+let subscription = false;
+vi.mock("../src/subscription-mode.js", () => ({
+  isSubscriptionMode: () => subscription,
+  noteSubscriptionSkipOnce: vi.fn(),
+}));
+vi.mock("../src/logger.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 
 describe("project-type-classifier", () => {
   it("classifyProjectType returns {project_type:'unknown'} for empty summary", async () => {
@@ -25,6 +39,57 @@ describe("project-type-classifier", () => {
     } as unknown as MyclConfig;
     const r = await classifyProjectType(fakeConfig, "ab");
     expect(r.project_type).toBe("unknown");
+  });
+});
+
+// v15.10: abonelik modunda artık "unknown"a sessizce düşülmez — text-JSON CLI.
+describe("classifyProjectType (abonelik / CLI text-JSON)", () => {
+  const cfg = {
+    api_keys: { main: "fake", translator: "fake" },
+    selected_models: { translator: "claude-haiku-4-5" },
+  } as unknown as MyclConfig;
+  const SUMMARY = "Single-page product admin panel, vanilla TypeScript, localStorage.";
+
+  beforeEach(() => {
+    cliMock.mockReset();
+    subscription = true;
+  });
+
+  it("geçerli JSON blok → sınıflandırma (CLI çağrıldı, skip YOK)", async () => {
+    cliMock.mockResolvedValueOnce({
+      ok: true,
+      text: `Buyrun:\n{"kind":"project_type","project_type":"web","has_database":false}`,
+      toolUses: [],
+      turns: 1,
+    });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.project_type).toBe("web");
+    expect(r.has_database).toBe(false);
+    expect(cliMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("CLI fail → unknown (fail-soft)", async () => {
+    cliMock.mockResolvedValueOnce({ ok: false, text: "", toolUses: [], turns: 0, error: "x" });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.project_type).toBe("unknown");
+  });
+
+  it("blok yok → unknown (fail-soft)", async () => {
+    cliMock.mockResolvedValueOnce({ ok: true, text: "düz metin, json yok", toolUses: [], turns: 1 });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.project_type).toBe("unknown");
+  });
+
+  it("geçersiz project_type değeri → unknown ama has_database korunur", async () => {
+    cliMock.mockResolvedValueOnce({
+      ok: true,
+      text: `{"kind":"project_type","project_type":"banana","has_database":true}`,
+      toolUses: [],
+      turns: 1,
+    });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.project_type).toBe("unknown");
+    expect(r.has_database).toBe(true);
   });
 });
 

@@ -34,6 +34,7 @@ import { clearHistory } from "./history.js";
 import {
   emitAskq,
   emitChatMessage,
+  emitClaudeStream,
   emitError,
   emitPhaseChanged,
   emitPhaseIdle,
@@ -624,6 +625,7 @@ export class Phase0Controller {
 \`report_root_cause\` TOOL'U YOKTUR. Read/Grep/Bash ile araştır (DOSYAYA YAZMA), sonra
 CEVABININ TAMAMI tek bir JSON bloğu olsun (blok DIŞINDA düz metin YAZMA): {"kind":"root_cause", ...}.
 Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
+    emitClaudeStream({ sub: "init", text: "cli-phase-0-d1", model: modelId, cwd: this.state.project_root });
     const res = await runClaudeCli({
       systemPrompt: sys,
       userMessage:
@@ -634,7 +636,11 @@ Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
       disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
       effort: this.config.claude_code_flags.effort,
+      onText: (text) => emitClaudeStream({ sub: "text", text }),
+      // tool_use aktivitesini yüzeye çıkar (D1 araştırması Read/Grep/Bash yoğun).
+      observer: (tu) => emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
     });
+    if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
     if (!res.ok) {
       emitChatMessage("error", `❌ Faz 0 D1 (CLI) başarısız: ${res.error ?? "bilinmeyen"}`);
       return null;

@@ -613,7 +613,7 @@ export async function ensurePlaywrightScaffold(
 ): Promise<ScaffoldResult> {
   const check = await checkPlaywrightScaffold(projectRoot);
   const configPath = join(projectRoot, "playwright.config.ts");
-  const specPath = join(projectRoot, "tests", "smoke.spec.ts");
+  // specPath efektif testDir'e göre configIsStale sonrası hesaplanır (aşağıda).
 
   // v15.7 (2026-05-27): MyCL-imzalı eski scaffold tespit edilirse şablon
   // güncellendiyse refresh et. Kullanıcı manuel düzenlerse imza kaybolur →
@@ -645,7 +645,34 @@ export async function ensurePlaywrightScaffold(
       configIsStale = false;
     }
   }
-  if (check.hasTests && (await pathExists(specPath))) {
+
+  // v15.10: smoke testini EFEKTİF config'in testDir'ine yaz. Ajan/kullanıcı
+  // config'i (örn. testDir: "tests/e2e") korunuyorsa (configIsStale=false) ona
+  // uy; MyCL kendi config'ini (./tests) yazıyorsa "tests". Aksi halde
+  // `playwright test` config.testDir'e bakar ama smoke tests/'tedir → "No tests
+  // found" (Faz 16 yanlış-fail).
+  let testDir = "tests";
+  if (check.hasConfig && !configIsStale) {
+    const existingConfig = check.configPath
+      ? join(projectRoot, check.configPath)
+      : configPath;
+    try {
+      const m = (await readFile(existingConfig, "utf-8")).match(
+        /testDir\s*:\s*['"]([^'"]+)['"]/,
+      );
+      if (m?.[1]) testDir = m[1].replace(/^\.\//, "").replace(/\/+$/, "");
+    } catch {
+      /* varsayılan "tests" */
+    }
+  }
+  const specPath = join(projectRoot, testDir, "smoke.spec.ts");
+  // testDir-spesifik: genel hasTests entegrasyon (Vitest) testlerini de görebilir;
+  // Faz 16 için config'in testDir'inde ÇALIŞABİLİR bir Playwright spec'i olmalı.
+  const hasTestInDir = await scanForTests(join(projectRoot, testDir), 2, {
+    reads: MAX_FILE_READS,
+  });
+
+  if (await pathExists(specPath)) {
     try {
       const existing = await readFile(specPath, "utf-8");
       if (await isMyclScaffolded(specPath)) {
@@ -663,7 +690,7 @@ export async function ensurePlaywrightScaffold(
     }
   }
 
-  if (check.hasConfig && check.hasTests && !configIsStale && !specIsStale) {
+  if (check.hasConfig && hasTestInDir && !configIsStale && !specIsStale) {
     return {
       ok: true,
       action: "already",
@@ -678,8 +705,8 @@ export async function ensurePlaywrightScaffold(
         refresh: configIsStale,
       });
     }
-    if (!check.hasTests || specIsStale) {
-      const testsDir = join(projectRoot, "tests");
+    if (!hasTestInDir || specIsStale) {
+      const testsDir = join(projectRoot, testDir);
       await mkdir(testsDir, { recursive: true });
       // Test dosyası başka isimle varsa (user-written) ona dokunma; sadece
       // smoke.spec.ts'i MyCL kendi imzasıyla yönetir. specIsStale durumunda

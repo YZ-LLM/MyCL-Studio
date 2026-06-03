@@ -2,8 +2,26 @@ import { describe, expect, it } from "vitest";
 import {
   countAcceptanceCriteria,
   hasReproRedThenGreen,
+  isCosmeticFile,
   isTestCommand,
 } from "../src/phase-8.js";
+
+describe("isCosmeticFile (repro-gate kapsamı — v15.10)", () => {
+  it("stil/markup/görsel/doküman → kozmetik (repro muaf)", () => {
+    for (const f of ["src/styles.css", "a/b.scss", "index.html", "logo.svg", "icon.png", "README.md"]) {
+      expect(isCosmeticFile(f)).toBe(true);
+    }
+  });
+  it("kod/config → mantık (repro zorunlu)", () => {
+    for (const f of ["src/validation.ts", "main.js", "server.py", "go.mod", "package.json", "x.tsx"]) {
+      expect(isCosmeticFile(f)).toBe(false);
+    }
+  });
+  it("uzantısız → kozmetik değil (güvenli taraf: mantık)", () => {
+    expect(isCosmeticFile("Makefile")).toBe(false);
+    expect(isCosmeticFile("LICENSE")).toBe(false);
+  });
+});
 
 describe("hasReproRedThenGreen (fix modu repro-first)", () => {
   const ev = (...es: string[]) => es.map((event) => ({ event }));

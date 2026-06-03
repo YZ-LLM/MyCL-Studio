@@ -137,7 +137,11 @@ export function isMissingCommand(result: {
     /Missing script:/.test(s) ||
     /command not found/i.test(s) ||
     /could not determine executable/i.test(s) ||
-    /npm error code E[A-Z]+\s+npm error.*Missing script/.test(s)
+    /npm error code E[A-Z]+\s+npm error.*Missing script/.test(s) ||
+    // v15.10: `npx --no-install <tool>` aracı projede kurulu değilse npx bunu
+    // yazıp iptal eder. "Araç yok" → hard-fail değil, skip (örn. Faz 11 ts-prune
+    // kurulu olmayan repo) → pipeline kesilmez, görünür `phase-N-skipped`.
+    /npx canceled due to missing packages/i.test(s)
   );
 }
 

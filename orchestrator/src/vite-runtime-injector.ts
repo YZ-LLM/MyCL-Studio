@@ -11,6 +11,7 @@
 import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureGitignoreEntry } from "./gitignore-util.js";
 import { log } from "./logger.js";
 import { getRuntimeHttpPort } from "./runtime-http-server.js";
 
@@ -178,22 +179,9 @@ async function appendGitignoreEntry(
   projectRoot: string,
   entry: string,
 ): Promise<void> {
-  const giPath = join(projectRoot, ".gitignore");
-  let current = "";
+  // İdempotent ortak util (zaten kapsanıyorsa no-op → tree kirlenmez).
   try {
-    current = await fs.readFile(giPath, "utf-8");
-  } catch {
-    // yok — oluşturulacak
-  }
-  const lines = current.split("\n").map((l) => l.trim());
-  if (lines.includes(entry) || lines.includes(entry.replace(/\/$/, ""))) return;
-  const next = current.length === 0
-    ? `${entry}\n`
-    : current.endsWith("\n")
-      ? `${current}${entry}\n`
-      : `${current}\n${entry}\n`;
-  try {
-    await fs.writeFile(giPath, next, "utf-8");
+    await ensureGitignoreEntry(projectRoot, entry);
   } catch (err) {
     log.warn("vite-injector", ".gitignore write failed", err);
   }

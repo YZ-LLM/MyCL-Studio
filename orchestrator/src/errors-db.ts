@@ -14,6 +14,7 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import { ensureGitignoreEntry } from "./gitignore-util.js";
 import { log } from "./logger.js";
 
 const FOLDER_NAME = "error_folder";
@@ -338,35 +339,18 @@ function runSqlite(dbPath: string, sql: string): Promise<boolean> {
 }
 
 /**
- * Proje root'undaki `.gitignore` dosyasına `entry` satırını ekler (yoksa).
- * `.gitignore` hiç yoksa oluşturur. Pattern zaten varsa no-op.
+ * Proje root'undaki `.gitignore`'a `entry` ekler — idempotent, ortak util
+ * üzerinden (zaten kapsanıyorsa no-op → tree kirlenmez → fix checkpoint korunur).
+ * Yazma hatası non-fatal (read-only mount vs.) — ana akış bozulmaz.
  */
 async function appendGitignoreEntry(
   projectRoot: string,
   entry: string,
 ): Promise<void> {
-  const giPath = join(projectRoot, ".gitignore");
-  let current = "";
   try {
-    current = await fs.readFile(giPath, "utf-8");
-  } catch {
-    // .gitignore yok — yeni oluştur
-  }
-  const lines = current.split("\n").map((l) => l.trim());
-  if (lines.includes(entry) || lines.includes(entry.replace(/\/$/, ""))) {
-    return; // zaten var
-  }
-  const nextContent =
-    current.length === 0
-      ? `${entry}\n`
-      : current.endsWith("\n")
-        ? `${current}${entry}\n`
-        : `${current}\n${entry}\n`;
-  try {
-    await fs.writeFile(giPath, nextContent, "utf-8");
-    log.info("errors-db", ".gitignore entry appended", { entry });
+    const wrote = await ensureGitignoreEntry(projectRoot, entry);
+    if (wrote) log.info("errors-db", ".gitignore entry appended", { entry });
   } catch (err) {
-    // .gitignore yazılamadı (read-only mount vs.) — sessiz; ana akış bozulmaz.
     log.warn("errors-db", ".gitignore write failed (non-fatal)", err);
   }
 }

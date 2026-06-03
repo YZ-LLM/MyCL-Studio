@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
+import type { TokenUsage } from "./cli-session.js";
 import { log } from "./logger.js";
 
 export interface CliRunOpts {
@@ -24,6 +25,10 @@ export interface CliRunOpts {
   effort?: string;
   maxBudgetUsd?: number;
   timeoutMs?: number;
+  /** Assistant metin parçaları geldikçe (UI stream köprüsü). */
+  onText?: (text: string) => void;
+  /** Her tool_use için (review-yoğun fazların aktivitesini yüzeye çıkarır). */
+  observer?: (toolUse: { name: string; input: Record<string, unknown> }) => void;
 }
 
 export interface CliRunResult {
@@ -33,9 +38,13 @@ export interface CliRunResult {
   toolUses: Array<{ name: string; input: Record<string, unknown> }>;
   turns: number;
   error?: string;
+  /** result olayından alınan token kullanımı (faz-başına maliyet raporu için). */
+  usage?: TokenUsage;
 }
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+// IDLE timeout (mutlak değil): her stdout/stderr satırında sıfırlanır →
+// uzun-ama-aktif tur öldürülmez; yalnız bu süre HİÇ çıktı gelmezse asılı sayılır.
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 function buildArgs(opts: CliRunOpts): string[] {
   const args: string[] = [
@@ -48,6 +57,9 @@ function buildArgs(opts: CliRunOpts): string[] {
     "--output-format",
     "stream-json",
     "--verbose",
+    // v15.10: partial mesajlar — uzun thinking/sentez idle-kill olmasın (stdout
+    // canlılığı). Bkz cli-session.ts aynı gerekçe.
+    "--include-partial-messages",
     "--permission-mode",
     "acceptEdits", // non-interactive: izin beklemede ASILMASIN
     "--add-dir",
@@ -89,6 +101,7 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     let resultIsError = false;
     let resultSeen = false;
     let stderrTail = "";
+    let usage: TokenUsage | undefined;
 
     // Mutlak yol + zenginleştirilmiş PATH — minimal PATH'te bare "claude" ENOENT.
     const claudeBin = resolveClaudePath() ?? "claude";
@@ -98,6 +111,7 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    let timer: ReturnType<typeof setTimeout>;
     const done = (r: CliRunResult): void => {
       if (settled) return;
       settled = true;
@@ -106,13 +120,19 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       resolve(r);
     };
 
-    const timer = setTimeout(() => {
-      log.warn("cli-run", "timeout — killing claude", { timeoutMs });
-      done({ ok: false, text: texts.join(""), toolUses, turns, error: `cli timeout ${timeoutMs}ms` });
-    }, timeoutMs);
+    // IDLE-bazlı: her çıktı satırında sıfırlanır → uzun ama aktif tur öldürülmez.
+    const resetTimer = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        log.warn("cli-run", "idle timeout — killing claude", { timeoutMs });
+        done({ ok: false, text: texts.join(""), toolUses, turns, usage, error: `cli idle timeout ${timeoutMs}ms` });
+      }, timeoutMs);
+    };
+    resetTimer();
 
     const rl = createInterface({ input: child.stdout! });
     rl.on("line", (line) => {
+      resetTimer();
       const trimmed = line.trim();
       if (!trimmed) return;
       let ev: Record<string, unknown>;
@@ -128,21 +148,34 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
           const b = block as Record<string, unknown>;
           if (b.type === "text" && typeof b.text === "string") {
             texts.push(b.text);
+            opts.onText?.(b.text);
           } else if (b.type === "tool_use") {
-            toolUses.push({
+            const tu = {
               name: String(b.name ?? ""),
               input: (b.input as Record<string, unknown>) ?? {},
-            });
+            };
+            toolUses.push(tu);
+            opts.observer?.(tu);
           }
         }
       } else if (type === "result") {
         resultSeen = true;
         resultIsError = ev.is_error === true || ev.subtype === "error";
         if (typeof ev.num_turns === "number") turns = ev.num_turns;
+        const u = ev.usage as Record<string, unknown> | undefined;
+        if (u) {
+          usage = {
+            input_tokens: Number(u.input_tokens ?? 0),
+            output_tokens: Number(u.output_tokens ?? 0),
+            cache_read_input_tokens: Number(u.cache_read_input_tokens ?? 0),
+            cache_creation_input_tokens: Number(u.cache_creation_input_tokens ?? 0),
+          };
+        }
       }
     });
 
     child.stderr!.on("data", (chunk: Buffer) => {
+      // idle timer'ı SIFIRLAMA — stderr gürültüsü stdout-hang'i maskelemesin.
       stderrTail = (stderrTail + chunk.toString()).slice(-2000);
     });
 
@@ -157,6 +190,7 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
         text: texts.join(""),
         toolUses,
         turns,
+        usage,
         error: ok ? undefined : `claude exit=${code}${stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""}`,
       });
     });

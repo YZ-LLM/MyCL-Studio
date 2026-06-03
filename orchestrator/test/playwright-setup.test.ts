@@ -118,9 +118,10 @@ describe("playwright-setup · ensurePlaywrightScaffold", () => {
       "// user-written config\nexport default { testDir: './e2e' };\n",
       "utf-8",
     );
-    await mkdir(join(projectRoot, "tests"), { recursive: true });
+    // v15.10: user testi config'in testDir'inde (./e2e) — tutarlı çalışan kurulum.
+    await mkdir(join(projectRoot, "e2e"), { recursive: true });
     await writeFile(
-      join(projectRoot, "tests", "user.spec.ts"),
+      join(projectRoot, "e2e", "user.spec.ts"),
       `import { test } from '@playwright/test';\ntest('user', () => {});\n`,
       "utf-8",
     );
@@ -136,6 +137,36 @@ describe("playwright-setup · ensurePlaywrightScaffold", () => {
       m.readFile(join(projectRoot, "playwright.config.ts"), "utf-8"),
     );
     expect(after).toBe(before); // dokunulmamış
+  });
+
+  it("v15.10: ajan config testDir='tests/e2e' + boş e2e → smoke ORAYA yazılır (Faz 16 'No tests found' fix)", async () => {
+    // Ajan-üretimi (MyCL imzasız) config testDir 'tests/e2e'; e2e dizini boş ama
+    // tests/integration'da Vitest testleri var. Eski davranış: genel hasTests
+    // (entegrasyon) → 'already' veya smoke yanlış dizine → `playwright test`
+    // testDir'de bulamaz. Fix: smoke EFEKTİF testDir'e (tests/e2e) yazılır, config korunur.
+    await writeFile(
+      join(projectRoot, "playwright.config.ts"),
+      `import { defineConfig } from '@playwright/test';\nexport default defineConfig({ testDir: 'tests/e2e' });\n`,
+      "utf-8",
+    );
+    await mkdir(join(projectRoot, "tests", "integration"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "tests", "integration", "x.test.ts"),
+      `import { it, expect } from 'vitest';\nit('x', () => expect(1).toBe(1));\n`,
+      "utf-8",
+    );
+    const r = await ensurePlaywrightScaffold(projectRoot, 5173);
+    expect(r.action).toBe("scaffolded");
+    const fs = await import("node:fs/promises");
+    // smoke testDir'e (tests/e2e) yazıldı mı
+    const wrote = await fs
+      .readFile(join(projectRoot, "tests", "e2e", "smoke.spec.ts"), "utf-8")
+      .then(() => true)
+      .catch(() => false);
+    expect(wrote).toBe(true);
+    // ajan config'i korundu mu (üzerine yazılmadı)
+    const cfg = await fs.readFile(join(projectRoot, "playwright.config.ts"), "utf-8");
+    expect(cfg).toContain("tests/e2e");
   });
 
   it("MyCL imzalı eski scaffold + yeni şablon farklı → refresh (üzerine yazar)", async () => {
@@ -263,8 +294,9 @@ test('user own test', async ({ page }) => {
 `;
     const fs = await import("node:fs/promises");
     await fs.writeFile(join(projectRoot, "playwright.config.ts"), userConfig, "utf-8");
-    await fs.mkdir(join(projectRoot, "tests"), { recursive: true });
-    await fs.writeFile(join(projectRoot, "tests", "smoke.spec.ts"), userSmoke, "utf-8");
+    // v15.10: user testi config'in testDir'inde (./e2e) — tutarlı kurulum.
+    await fs.mkdir(join(projectRoot, "e2e"), { recursive: true });
+    await fs.writeFile(join(projectRoot, "e2e", "smoke.spec.ts"), userSmoke, "utf-8");
 
     const r = await ensurePlaywrightScaffold(projectRoot, 5173);
     expect(r.action).toBe("already");
@@ -272,7 +304,7 @@ test('user own test', async ({ page }) => {
     // Dosyalar dokunulmamış olmalı
     const checkConfig = await fs.readFile(join(projectRoot, "playwright.config.ts"), "utf-8");
     expect(checkConfig).toBe(userConfig);
-    const checkSmoke = await fs.readFile(join(projectRoot, "tests", "smoke.spec.ts"), "utf-8");
+    const checkSmoke = await fs.readFile(join(projectRoot, "e2e", "smoke.spec.ts"), "utf-8");
     expect(checkSmoke).toBe(userSmoke);
   });
 });

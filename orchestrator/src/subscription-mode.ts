@@ -28,8 +28,9 @@ export function noteSubscriptionSkipOnce(): void {
   skipNoticeShown = true;
   emitChatMessage(
     "system",
-    "ℹ️ Abonelik modu: yardımcı sınıflandırmalar (relevance / konuşma özeti / proje-tipi) " +
+    "ℹ️ Abonelik modu: bazı yardımcı sınıflandırmalar (relevance / konuşma özeti) " +
       "atlanıyor — bunlar zorlanmış-tool gerektirir, Claude Code CLI'da çalışmaz (API anahtarı + " +
-      "kredi ister). Pipeline bunlarsız da çalışır; yalnızca bağlam zenginleştirmesi kısıtlı.",
+      "kredi ister). Pipeline bunlarsız da çalışır; yalnızca bağlam zenginleştirmesi kısıtlı. " +
+      "(proje-tipi v15.10'dan beri text-JSON CLI ile sınıflandırılır.)",
   );
 }

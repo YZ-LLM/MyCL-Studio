@@ -84,7 +84,8 @@ import {
   appendAgentDecisionLog,
 } from "./agent-memory/store.js";
 import { randomUUID } from "node:crypto";
-import { handleCommandIntent } from "./intent-router/handlers/command.js";
+import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
+import { createCheckpoint } from "./git.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
 import {
@@ -1611,6 +1612,29 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     }
 
     state = { ...state, current_phase: next };
+    // v15.10 stack stale-detection fix: greenfield'de state OLUŞUMUNDA dizin boş
+    // olduğu için detectStack "unknown" döner; codegen (Faz 5/8) manifest'i
+    // yarattıktan sonra YENİDEN tespit edilmezse Faz 10-15 mekanik kalite-
+    // gate'leri "profile_resolve_null" ile SESSİZCE atlanır (lint/test/güvenlik
+    // hiç koşmaz). Stack "unknown"/eksikse her ilerlemede deterministik yeniden
+    // tespit (ucuz + idempotent); çözülünce kalıcı. Mevcut projelerde (FIX/DEV)
+    // zaten doğru tespit edilir → no-op.
+    if (!state.stack || state.stack === "unknown") {
+      const freshStack = detectStack(state.project_root);
+      // String() — detectStack runtime'da "unknown" dönebilir; tip görünümü
+      // dışlasa da güvenli karşılaştırma.
+      if (String(freshStack) !== "unknown" && freshStack !== state.stack) {
+        state = { ...state, stack: freshStack };
+        emitChatMessage(
+          "system",
+          `🧭 Proje stack'i tespit edildi: **${freshStack}** — mekanik kalite-gate'leri (lint/test/…) bu profile göre çalışacak.`,
+        );
+        log.info("orchestrator", "stack re-detected post-codegen", {
+          stack: freshStack,
+          phase: next,
+        });
+      }
+    }
     runtime.state = state;
     await saveState(state);
     // v15.6: faz değişti — NDJSON metadata bağlamını da güncelle
@@ -2586,6 +2610,27 @@ export async function handleAskqAnswer(
       detail: `label="${selected.label}" kind=${kind}${planKindMissing ? " (defaulted)" : ""} plan_len=${selected.planSummary.length}`,
     });
     const fixPayload = `Fix request: ${selected.label}\n\nPlan:\n${selected.planSummary}`;
+    // v15.10: fix-güvenlik katmanı TÜM kod fix'lerine (backend + UI). Kod
+    // değişiminden ÖNCE checkpoint al → regresyonda rollback hedefi + scoped-gate
+    // (fix_checkpoint_ref shouldComputeScope'u tetikler; mekanik gate'ler yalnız
+    // değişen dosyalara koşar). Kirli ağaçta atlanır (görünür uyarı), fix ilerler.
+    // ui-only'de ilk kod değişimi Faz 5'te → checkpoint advance'ten ÖNCE alınmalı.
+    let fixCheckpointRef: string | undefined;
+    if (kind === "ui-only" || kind === "backend-only") {
+      const cp = await createCheckpoint(runtime.state.project_root);
+      if (cp.ok && cp.ref) {
+        fixCheckpointRef = cp.ref;
+        emitChatMessage(
+          "system",
+          "📌 Fix öncesi checkpoint alındı — regresyonda otomatik geri alınabilir; mekanik kalite-gate'leri değişen dosyalara odaklanacak (scoped).",
+        );
+      } else {
+        emitChatMessage(
+          "system",
+          `⚠️ Otomatik geri alma kapalı: ${cp.reason}. Fix yine uygulanır; gerekirse geri almayı elle yaparsın.`,
+        );
+      }
+    }
     if (kind === "ui-only") {
       emitChatMessage(
         "system",
@@ -2594,6 +2639,7 @@ export async function handleAskqAnswer(
       runtime.state = {
         ...runtime.state,
         pending_ui_tweak: fixPayload,
+        fix_checkpoint_ref: fixCheckpointRef,
         pending_diagnostic: undefined,
         current_phase: 4 as PhaseId,
         updated_at: Date.now(),
@@ -2608,6 +2654,7 @@ export async function handleAskqAnswer(
       runtime.state = {
         ...runtime.state,
         pending_backend_fix: fixPayload,
+        fix_checkpoint_ref: fixCheckpointRef,
         pending_diagnostic: undefined,
         current_phase: 7 as PhaseId,
         updated_at: Date.now(),

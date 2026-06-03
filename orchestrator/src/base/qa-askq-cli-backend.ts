@@ -152,8 +152,14 @@ export class CliQaAskqBackend implements QaAskqBackend {
         disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
         effort,
         onText: (text) => emitClaudeStream({ sub: "text", text }),
+        // tool_use'ları yüzeye çıkar: review-yoğun fazlar (Faz 9) onlarca
+        // Read/Grep/Bash çağrısı yapar; bunlar görünmezse UI/izleyici "asılı"
+        // sanır ve idle-kill eder. Her tool_use bir ilerleme event'i.
+        observer: (tu) =>
+          emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
       });
       if (this.aborted) return { kind: "aborted" };
+      if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
       if (!res.ok) {
         return { kind: "failed", reason: `claude CLI failed: ${res.error ?? "bilinmeyen"}` };
       }

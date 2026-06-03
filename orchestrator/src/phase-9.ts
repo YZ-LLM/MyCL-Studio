@@ -164,7 +164,13 @@ export class Phase9Controller {
       return "fail";
     }
 
-    const decisions = (outcome.approvalInput.decisions ?? []) as RiskDecision[];
+    // v15.10: Array.isArray guard — ajan `decisions`'ı non-array emit ederse
+    // `?? []` yakalamaz, for...of çökerdi (bkz phase-2 dimensions fix).
+    const rawDecs = outcome.approvalInput.decisions;
+    const decisions = (Array.isArray(rawDecs) ? rawDecs : []) as RiskDecision[];
+    if (rawDecs !== undefined && !Array.isArray(rawDecs)) {
+      log.warn("phase-9", "decisions array değil — boş kabul edildi", { type: typeof rawDecs });
+    }
     for (const d of decisions) {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),

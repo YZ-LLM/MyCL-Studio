@@ -134,8 +134,11 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
         disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
         effort,
         onText: (text) => emitClaudeStream({ sub: "text", text }),
+        observer: (tu) =>
+          emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
       });
       if (this.aborted) return { kind: "aborted" };
+      if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
       if (!res.ok) {
         return { kind: "failed", reason: `claude CLI failed: ${res.error ?? "bilinmeyen"}` };
       }

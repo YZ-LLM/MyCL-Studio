@@ -16,7 +16,7 @@ import { isMissingCommand, resolveMechanicalCmd } from "./base/mechanical-runner
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
-import { createCheckpoint, restoreCheckpoint } from "./git.js";
+import { createCheckpoint, getChangedFiles, restoreCheckpoint } from "./git.js";
 import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
@@ -70,6 +70,20 @@ function isTestPath(path: string): boolean {
 function isProdPath(path: string): boolean {
   if (path.includes("node_modules") || isTestPath(path)) return false;
   return PROD_EXT.test(path);
+}
+
+// v15.10: repro-gate kapsamı için "kozmetik" dosya (stil/markup/doküman/görsel)
+// ayrımı — yalnız bunlar değiştiyse mantık değişikliği yok → repro-gate muaf.
+// Diğer her şey (kod, config) mantık sayılır (güvenli taraf). Regex yerine uzantı
+// kümesi (minimal).
+const COSMETIC_EXTS = new Set([
+  ".css", ".scss", ".sass", ".less", ".html", ".htm",
+  ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico",
+  ".md", ".markdown", ".txt",
+]);
+export function isCosmeticFile(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  return dot >= 0 && COSMETIC_EXTS.has(path.slice(dot).toLowerCase());
 }
 // Yaygın test runner pattern'leri. Faz 8 audit observer Bash command'ı bu
 // listeye karşı test eder; match olursa exit code 0→tdd-green, nonzero→tdd-red
@@ -167,10 +181,14 @@ export class Phase8Controller {
     }
     this.pendingMigrationNote = migrationNote;
 
-    // v15.7 (2026-05-27): Backend-only fix mode (Phase 0 D2 routing'den).
-    // pending_backend_fix set ise: bug fix odaklı initial message + cleanup.
+    // v15.7/v15.10: Fix mode (Phase 0 D2 routing'den). Backend fix →
+    // pending_backend_fix; UI/frontend fix → fix_checkpoint_ref set (D2'de
+    // checkpoint alındı, pending_ui_tweak Faz 5'te tüketildi). İKİSİ de fix-
+    // güvenlik katmanını (checkpoint/rollback + scoped-gate + repro-gate) açar.
+    const isBackendFix = Boolean(this.state.pending_backend_fix);
+    const isUiFix = !isBackendFix && Boolean(this.state.fix_checkpoint_ref);
     let fixModeNote = "";
-    if (this.state.pending_backend_fix) {
+    if (isBackendFix) {
       this.isFixMode = true;
       fixModeNote =
         `\n\n**BUG FIX MODE — Phase 0 D2 yönlendirmesi**:\n${this.state.pending_backend_fix}\n\n` +
@@ -186,6 +204,15 @@ export class Phase8Controller {
         pending_backend_fix: undefined, // tek seferlik tüketim
       };
       log.info("phase-8", "backend fix mode active (repro-first + checkpoint)");
+    } else if (isUiFix) {
+      this.isFixMode = true;
+      fixModeNote =
+        `\n\n**FIX MODE (UI/frontend) — Phase 0 yönlendirmesi**:\n` +
+        `Bu targeted bir fix; mevcut davranışı bozma, kapsamı dar tut.\n` +
+        `MANTIK değiştiriyorsan (yalnız stil/markup değil) repro-first uygula: ÖNCE bug'ı ` +
+        `üreten test (KIRMIZI), SONRA minimal patch → YEŞİL; ardından FULL suite yeşil.\n` +
+        `Mantık dosyası değiştiyse gate kırmızı-önce-yeşil sırası arar; eski testleri kırma.`;
+      log.info("phase-8", "ui fix mode active (repro-first if logic + checkpoint)");
     }
     this.pendingFixNote = fixModeNote;
 
@@ -312,19 +339,27 @@ export class Phase8Controller {
     // fix'te otomatik geri alma hedefi). SADECE temiz working-tree'de etkin;
     // kirliyse görünür uyarı + rollback devre dışı (kullanıcı WIP'i riske girmez).
     if (this.isFixMode) {
-      const cp = await createCheckpoint(this.state.project_root);
-      if (cp.ok && cp.ref) {
-        this.checkpointRef = cp.ref;
-        emitChatMessage(
-          "system",
-          "📌 Fix öncesi checkpoint alındı — regresyon olursa değişiklikler otomatik geri alınacak.",
-        );
+      if (this.state.fix_checkpoint_ref) {
+        // v15.10: D2 routing'de (ilk kod değişiminden ÖNCE) alındı — onu kullan.
+        // ui fix'lerde ilk değişim Faz 5'te olduğu için checkpoint orada erken
+        // alınmış olmalı; burada yeniden almak fix sonrası state'i yakalardı.
+        this.checkpointRef = this.state.fix_checkpoint_ref;
       } else {
-        this.checkpointRef = null;
-        emitChatMessage(
-          "system",
-          `⚠️ Otomatik geri alma kapalı: ${cp.reason}. Regresyon yine raporlanır, ama geri almayı elle yaparsın.`,
-        );
+        // Fallback (eski state / doğrudan Faz 8 fix): burada al.
+        const cp = await createCheckpoint(this.state.project_root);
+        if (cp.ok && cp.ref) {
+          this.checkpointRef = cp.ref;
+          emitChatMessage(
+            "system",
+            "📌 Fix öncesi checkpoint alındı — regresyon olursa değişiklikler otomatik geri alınacak.",
+          );
+        } else {
+          this.checkpointRef = null;
+          emitChatMessage(
+            "system",
+            `⚠️ Otomatik geri alma kapalı: ${cp.reason}. Regresyon yine raporlanır, ama geri almayı elle yaparsın.`,
+          );
+        }
       }
     }
 
@@ -444,8 +479,20 @@ export class Phase8Controller {
     const tddOk = greens >= minGreens && lastEvent === "tdd-green";
     const debtOk = techDebtCount === 0;
     // Fix modu: repro-first ZORUNLU — kırmızı (repro) önce, sonra yeşil sırası
-    // olmalı (Ümit prensip 1: repro yazmadan dokundurma). Fix dışı: muaf.
-    const reproOk = !this.isFixMode || hasReproRedThenGreen(p9);
+    // (Ümit prensip 1: repro yazmadan dokundurma). v15.10: yalnız MANTIK
+    // değişikliklerinde zorunlu — backend fix her zaman; UI fix'te değişen
+    // dosyalarda stil/markup dışı kod varsa. Salt-kozmetik tweak → muaf (repro
+    // testi anlamsız). Fix dışı: muaf.
+    let reproRequired = this.isFixMode && Boolean(this.state.pending_backend_fix);
+    if (this.isFixMode && !reproRequired && this.checkpointRef) {
+      try {
+        const changed = await getChangedFiles(this.state.project_root, this.checkpointRef);
+        reproRequired = changed.some((f) => !isCosmeticFile(f));
+      } catch {
+        reproRequired = true; // belirsizse güvenli taraf: repro iste
+      }
+    }
+    const reproOk = !reproRequired || hasReproRedThenGreen(p9);
     if (tddOk && debtOk && finalSuiteRun && reproOk) {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),

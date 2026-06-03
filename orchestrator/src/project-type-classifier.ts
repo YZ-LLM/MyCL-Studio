@@ -9,8 +9,10 @@
 // pipeline durmaz. v15.1 confirm askq ile kullanıcı override edebilir.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { extractKindBlock } from "./cli-json.js";
+import { runClaudeCli } from "./cli-run.js";
 import type { MyclConfig } from "./config.js";
-import { isSubscriptionMode, noteSubscriptionSkipOnce } from "./subscription-mode.js";
+import { isSubscriptionMode } from "./subscription-mode.js";
 import { log } from "./logger.js";
 import type { ProjectType } from "./types.js";
 
@@ -81,9 +83,61 @@ export interface ProjectClassification {
   has_database?: boolean;
 }
 
+// CLI (abonelik) modunda forced-tool yoktur → ajan tek bir JSON bloğu yazar.
+const CLI_JSON_INSTRUCTION = `
+
+## OUTPUT — CLI mode (no tools)
+Do NOT call any tool and do NOT investigate. Decide from the summary only. Your
+ENTIRE reply must be exactly one JSON block and nothing else:
+{"kind":"project_type","project_type":"<one category>","has_database":<true|false>}`;
+
+/**
+ * Abonelik modu sınıflandırma — text-JSON CLI (forced-tool yerine). Çıktıyı
+ * extractKindBlock ile parse eder; geçersiz/başarısızsa "unknown" (fail-soft).
+ */
+async function classifyViaCli(
+  config: MyclConfig,
+  summary: string,
+): Promise<ProjectClassification> {
+  const model = config.selected_models.translator;
+  try {
+    const res = await runClaudeCli({
+      systemPrompt: SYSTEM_PROMPT + CLI_JSON_INSTRUCTION,
+      userMessage: summary,
+      modelId: model,
+      cwd: process.cwd(), // sınıflandırma sadece özetten — proje erişimi gerekmez
+      timeoutMs: 120_000,
+    });
+    if (!res.ok) {
+      log.warn("project-type-classifier", "cli failed (fail-soft)", { error: res.error });
+      return { project_type: "unknown" };
+    }
+    const block = extractKindBlock(res.text, ["project_type"]);
+    if (!block) {
+      log.warn("project-type-classifier", "cli: no project_type block (fail-soft)");
+      return { project_type: "unknown" };
+    }
+    const raw = block.project_type;
+    const hasDb = typeof block.has_database === "boolean" ? block.has_database : undefined;
+    if (typeof raw === "string" && (VALID_TYPES as readonly string[]).includes(raw)) {
+      log.info("project-type-classifier", "classified (cli)", {
+        project_type: raw,
+        has_database: hasDb,
+      });
+      return { project_type: raw as ProjectType, has_database: hasDb };
+    }
+    log.warn("project-type-classifier", "cli: invalid project_type (fail-soft)", { raw });
+    return { project_type: "unknown", has_database: hasDb };
+  } catch (err) {
+    log.error("project-type-classifier", "cli threw (fail-soft)", err);
+    return { project_type: "unknown" };
+  }
+}
+
 /**
  * Spec özetinden project_type sınıflandırır. Haiku tool_use'tan döndürdüğü
- * değeri valide eder, geçersizse "unknown" döner (fail-soft).
+ * değeri valide eder, geçersizse "unknown" döner (fail-soft). Abonelik modunda
+ * text-JSON CLI yoluna (classifyViaCli) düşer.
  */
 export async function classifyProjectType(
   config: MyclConfig,
@@ -93,11 +147,11 @@ export async function classifyProjectType(
     log.warn("project-type-classifier", "summary too short — unknown");
     return { project_type: "unknown" };
   }
-  // v15.8: saf abonelik modunda API'ye sokulmaz (zorlanmış-tool, CLI yok) → "unknown"
-  // fail-soft (kullanıcı sonraki fazlarda override edebilir).
+  // v15.10: abonelik modunda da sınıflandır — forced-tool API yerine text-JSON
+  // CLI (Faz 0/2/9 ile aynı desen). "unknown"a sessizce düşmek Faz 5/6/7 skip
+  // kararını + Faz 16/17 runner seçimini bozuyordu (bkz no-silent-fallback).
   if (isSubscriptionMode(config)) {
-    noteSubscriptionSkipOnce();
-    return { project_type: "unknown" };
+    return await classifyViaCli(config, summary);
   }
 
   const client = new Anthropic({ apiKey: config.api_keys.main });
