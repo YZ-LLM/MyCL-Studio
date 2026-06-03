@@ -50,10 +50,10 @@ describe("agent-sandbox · detectSandboxAvailability (çapraz-platform)", () => 
     expect(r.reason).toMatch(/socat/);
   });
 
-  it("win32 → unavailable + reason WSL2/Windows içerir", () => {
+  it("mac/linux dışı (örn. win32) → unavailable + 'desteklenmiyor' (fail-closed catch-all)", () => {
     const r = detectSandboxAvailability({ platform: "win32", hasBwrap: true, hasSocat: true });
     expect(r.available).toBe(false);
-    expect(r.reason).toMatch(/Windows|WSL2/);
+    expect(r.reason).toMatch(/desteklenmiyor|macOS|Linux/);
   });
 });
 
@@ -150,7 +150,7 @@ describe("agent-sandbox · buildAgentSandboxSettings · Linux", () => {
   });
 });
 
-describe("agent-sandbox · buildAgentSandboxSettings · Windows (sandbox yok)", () => {
+describe("agent-sandbox · buildAgentSandboxSettings · mac/linux dışı (örn. win32, sandbox yok)", () => {
   const { settings, denyCount } = buildAgentSandboxSettings({
     projectRoot: "C:\\Users\\umit\\proj",
     ultracode: false,

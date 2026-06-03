@@ -2,10 +2,11 @@
 // hapsetme (güvenlik). Kullanıcı kuralı: "ajan YALNIZ proje + alt klasörlerine
 // erişir, başka hiçbir yere değil." + "her zaman çapraz-platform."
 //
+// Hedef platformlar: macOS + Linux (Windows KAPSAM DIŞI — kullanıcı kararı).
 // Mekanizma: Claude Code YERLİ sandbox'ı (`--settings`) — çekirdek-zorlamalı:
 //   - macOS: Seatbelt (yerleşik, kurulum yok).
-//   - Linux/WSL2: bubblewrap (`bwrap`) + `socat` (kurulu olmalı).
-//   - native Windows: DESTEKLENMEZ (WSL2 gerekir) → enforce'ta spawn-öncesi durdurulur.
+//   - Linux: bubblewrap (`bwrap`) + `socat` (kurulu olmalı).
+//   - mac/linux DIŞI platform: DESTEKLENMEZ → enforce'ta spawn-öncesi durdurulur (fail-closed).
 // `sandbox.enabled:true` + `allowUnsandboxedCommands:false` → YAZMA+BASH otomatik
 // proje-hapsine girer. OKUMA için (yerli sandbox'ta read-allowlist anahtarı YOK)
 // home top-level girdileri (runtime + proje HARİÇ) `denyRead` + `permissions.deny`.
@@ -44,7 +45,7 @@ const RUNTIME_ALLOW_COMMON = [
 export function runtimeAllowFor(platform: NodeJS.Platform): Set<string> {
   const s = new Set(RUNTIME_ALLOW_COMMON);
   if (platform === "darwin") s.add("Library"); // Caches/App Support/keychain (securityd)
-  // Linux: .config zaten ortak sette. Windows: denyRead üretilmez (aşağı).
+  // Linux: .config zaten ortak sette. mac/linux dışı: denyRead üretilmez (aşağı).
   return s;
 }
 
@@ -85,10 +86,10 @@ export function detectSandboxAvailability(params: {
       reason: `${missing} kurulu değil — sandbox başlatılamaz (kur: apt install bubblewrap socat / dnf install bubblewrap socat)`,
     };
   }
-  // win32 + diğer: Claude Code yerli sandbox'ı yalnız macOS/Linux/WSL2'de çalışır.
+  // mac/linux dışı (Windows dahil): Claude Code yerli sandbox'ı çalışmaz → fail-closed.
   return {
     available: false,
-    reason: "native Windows'ta Claude Code sandbox desteklenmiyor (WSL2 içinde çalıştırın)",
+    reason: `bu platform (${platform}) desteklenmiyor — sandbox yalnız macOS ve Linux'ta çalışır`,
   };
 }
 
@@ -198,9 +199,10 @@ export function buildAgentSandboxSettings(params: {
 
   const failIfUnavailable = policy === "enforce";
 
-  // Windows: yerli sandbox yok → POSIX-olmayan yollarla anlamsız denyRead üretme.
-  // Gerçek fail-closed guardSandboxOrWarn (spawn-öncesi) + claude failIfUnavailable.
-  if (platform === "win32") {
+  // mac/linux dışı platform: yerli sandbox yok → POSIX-olmayan yollarla anlamsız
+  // denyRead üretme. Gerçek fail-closed guardSandboxOrWarn (spawn-öncesi) +
+  // claude failIfUnavailable. (Windows kapsam dışı; bu sadece güvenli catch-all.)
+  if (platform !== "darwin" && platform !== "linux") {
     return {
       settings: {
         ...base,
@@ -248,7 +250,7 @@ export function sandboxSettingsArgs(projectRoot: string, ultracode: boolean): st
   const home = homedir();
   let homeEntries: string[] = [];
   let readdirFailed = false;
-  if (platform !== "win32") {
+  if (platform === "darwin" || platform === "linux") {
     try {
       homeEntries = readdirSync(home);
     } catch (err) {

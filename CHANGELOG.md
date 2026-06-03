@@ -6,6 +6,12 @@
 
 ## 2026-06-03
 
+- **17:40 chore(scope):** Windows KAPSAM DIŞI bırakıldı (kullanıcı kararı: "sadece linux
+  ve mac"). `agent-sandbox.ts`: Windows özel-durumu "mac/linux DIŞI her platform →
+  fail-closed catch-all" genellemesine çevrildi (`platform !== "darwin" && !== "linux"`);
+  reason artık "bu platform desteklenmiyor — yalnız macOS ve Linux". 17:20'deki CLI-backend
+  POSIX-only AÇIĞI KAPANDI: `:` PATH ayracı + POSIX yolları mac+linux için doğru, Windows
+  hedef olmadığından sorun değil. Hedef platformlar: macOS + Linux. (26 test yeşil.)
 - **17:20 feat(agent-sandbox-xplatform):** Sandbox ÇAPRAZ-PLATFORM yapıldı (kural:
   "her zaman çapraz-platform"; 16:35 macOS-only halini Linux/Windows'a genişletti).
   `agent-sandbox.ts`: (1) `detectSandboxAvailability(platform,hasBwrap,hasSocat)` saf
@@ -79,8 +85,9 @@
 - **Ajan dosya hapsi:** spawn edilen `claude` YALNIZ proje + alt klasörlerine erişir
   (`--settings` sandbox, OS-zorlamalı). `--add-dir` hapis değildir; sandbox hapistir.
   Tek kaynak `agent-sandbox.ts`; 3 buildArgs oradan beslenir.
-- **Her zaman çapraz-platform:** her özellik baştan macOS+Linux+Windows düşünülür;
-  macOS-only yazıp gerisini "sonraki faza" erteleme. Platform-özel araç (bwrap/Seatbelt)
-  eksikse görünür + fail-closed. Yol için `node:path` (hardcoded `/` veya `:` yok).
+- **Çapraz-platform = macOS + Linux** (Windows KAPSAM DIŞI): her özellik baştan mac **ve**
+  Linux düşünülür; macOS-only yazıp Linux'u "sonraki faza" erteleme. Platform-özel araç
+  (bwrap+socat / Seatbelt) eksikse görünür + fail-closed. mac/linux dışı → fail-closed
+  catch-all (Windows'a özel kod yazma). Yol için `node:path` (hardcoded `/` yok).
 - **Her anlamlı değişiklikten sonra `npm run check` yeşil olmalı** (proje gate'i).
 - **Tamamlanan + check-yeşil işi sormadan commit + main'e push.**
