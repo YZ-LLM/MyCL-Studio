@@ -59,6 +59,7 @@ export type OrchestratorEvent =
   | TaskQueueLoadedEvent
   | TaskQueueChangedEvent
   | FeaturesValueEvent
+  | UserGuideEvent
   | ErrorEvent;
 
 /**
@@ -97,6 +98,13 @@ export interface TaskQueueChangedEvent {
 export interface FeaturesValueEvent {
   kind: "features_value";
   data: { features: { playwright_enabled: boolean } };
+}
+
+/** v15.11: UI kullanma kılavuzu (.mycl/user-guide.md) içeriği — "Kılavuz"
+ * sekmesi/modalında gösterilir. Açılışta (varsa) + her güncellemede push edilir. */
+export interface UserGuideEvent {
+  kind: "user_guide";
+  data: { content: string };
 }
 
 export interface ConfigStatusEvent {

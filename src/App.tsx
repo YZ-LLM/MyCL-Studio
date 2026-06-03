@@ -5,6 +5,7 @@ import "./App.css";
 import { Splash } from "./components/Splash";
 import { Settings } from "./components/Settings";
 import { AgentThinkingModal } from "./components/AgentThinkingModal";
+import { GuideModal } from "./components/GuideModal";
 import { AppHeader } from "./components/AppHeader";
 import { PhaseSidebar } from "./components/PhaseSidebar";
 import {
@@ -488,6 +489,9 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // v15.6: Orkestrator ajan düşünceler modalı.
   const [orchestratorModalOpen, setOrchestratorModalOpen] = useState(false);
+  // v15.11: UI kullanma kılavuzu (Kılavuz sekmesi) — içerik user_guide event'inden.
+  const [userGuide, setUserGuide] = useState("");
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
   // v15.7 (2026-05-25): Feature flags (Playwright vb.). Backend read_features → features_value event ile dolur.
@@ -579,6 +583,8 @@ function App() {
         setFeatures({
           playwright_enabled: ev.data.features.playwright_enabled,
         });
+      } else if (ev.kind === "user_guide") {
+        setUserGuide(ev.data.content);
       }
     }
     setMainState((current) => {
@@ -589,7 +595,8 @@ function App() {
           ev.kind === "models_list" ||
           ev.kind === "selected_models" ||
           ev.kind === "phases_list" ||
-          ev.kind === "features_value"
+          ev.kind === "features_value" ||
+          ev.kind === "user_guide"
         ) {
           continue;
         }
@@ -1076,6 +1083,8 @@ function App() {
           agentEventsCount={mainState.agentEvents.length}
           agentBusy={mainState.agentBusyCount > 0}
           onAddTaskToQueue={handleAddTaskToQueue}
+          onGuideClick={() => setGuideModalOpen(true)}
+          guideAvailable={userGuide.trim().length > 0}
         />
         {rightPanelsOpen && (
           <>
@@ -1102,6 +1111,11 @@ function App() {
         open={orchestratorModalOpen}
         events={mainState.agentEvents}
         onClose={() => setOrchestratorModalOpen(false)}
+      />
+      <GuideModal
+        open={guideModalOpen}
+        content={userGuide}
+        onClose={() => setGuideModalOpen(false)}
       />
       <TaskQueuePanel
         open={taskQueueOpen}

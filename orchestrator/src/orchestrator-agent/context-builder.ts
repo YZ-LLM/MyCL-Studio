@@ -11,6 +11,7 @@ import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readAuditLogTail, readDecisions } from "../audit.js";
+import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import {
   readProjectMemory,
   readGeneralMemory,
@@ -94,6 +95,9 @@ export interface AgentContextSnapshot {
   project_memory: AgentMemoryEntry[];
   /** v15.6: Genel hafıza son N girişi. */
   general_memory: AgentMemoryEntry[];
+  /** v15.11: .mycl/features.md başlık-indeksi — orkestratör mevcut özellikleri
+   * görüp grounded soru sorar. Detay için features.md'yi kendi Read'ler. */
+  feature_headings: string[];
 }
 
 /**
@@ -152,6 +156,12 @@ export async function buildAgentContext(
   const recentDecisions = (
     await readDecisions(state.project_root).catch(() => [])
   ).slice(-3);
+  // v15.11: features.md başlık-indeksi (ucuz; full body değil — token bütçesi).
+  const featureHeadings = (
+    await extractFeatureChunks(state.project_root).catch(() => [])
+  )
+    .map((c) => c.metadata.heading)
+    .filter((h): h is string => typeof h === "string");
   return {
     current_phase: state.current_phase ?? 0,
     iteration_count: state.iteration_count ?? 1,
@@ -168,6 +178,7 @@ export async function buildAgentContext(
     was_pipeline_completed: wasCompleted,
     project_memory: projectMemory,
     general_memory: generalMemory,
+    feature_headings: featureHeadings,
   };
 }
 
@@ -188,6 +199,14 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
   lines.push(`- **skip_ui_phases**: ${ctx.skip_ui_phases}`);
   lines.push(`- **dev_server_pid**: ${ctx.dev_server_pid ?? "null"}`);
   lines.push(`- **tdd_compliance_score**: ${ctx.tdd_compliance_score ?? "null"}`);
+  // v15.11: Mevcut özellikler — orkestratör "X var mı?" diye sormak yerine bilir.
+  lines.push("", "### Mevcut özellikler (.mycl/features.md başlıkları)", "");
+  if (ctx.feature_headings.length === 0) {
+    lines.push("(henüz dökümante edilmiş özellik yok)");
+  } else {
+    for (const h of ctx.feature_headings) lines.push(`- ${h}`);
+    lines.push("", "(detay için .mycl/features.md'yi Read et)");
+  }
   lines.push("", "### Recent audit events (last 10)", "");
   if (ctx.recent_audit.length === 0) {
     lines.push("(no events)");

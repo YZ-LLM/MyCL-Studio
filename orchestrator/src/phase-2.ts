@@ -18,6 +18,7 @@ import {
 } from "./project-type-classifier.js";
 import {
   buildRelevantAbandonedDigest,
+  buildRelevantFeatureDigest,
   buildRelevantSpecDigest,
 } from "./relevance/injectors.js";
 import { substitute } from "./template-engine.js";
@@ -175,6 +176,12 @@ export class Phase2Controller {
       this.state,
       this.state.intent_summary,
     );
+    // v15.11: mevcut özellik dökümantasyonu — ajan gereksiz/kapsam-dışı soru sormasın.
+    const featuresDigest = await buildRelevantFeatureDigest(
+      this.config,
+      this.state,
+      this.state.intent_summary,
+    );
 
     let systemPrompt: string;
     try {
@@ -185,6 +192,7 @@ export class Phase2Controller {
       systemPrompt = substitute(tmpl, {
         INTENT_SUMMARY: this.state.intent_summary,
         EXISTING_SPEC_DIGEST: existingSpecDigest,
+        EXISTING_FEATURES_DIGEST: featuresDigest,
         ABANDONED_INTENTS_DIGEST: abandonedDigest,
         CONVERSATION_CONTEXT: convSection,
       });

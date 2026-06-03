@@ -14,7 +14,9 @@ export type ChunkSource =
   | "patterns"
   | "brief"
   | "git"
-  | "agent-decisions";  // v15.6 — orkestrator ajan recurring topic dedup için
+  | "agent-decisions"  // v15.6 — orkestrator ajan recurring topic dedup için
+  | "features"  // v15.11 — yaşayan özellik dökümantasyonu (.mycl/features.md)
+  | "user-guide";  // v15.11 — UI kullanma kılavuzu (.mycl/user-guide.md)
 
 export interface ChunkMetadata {
   ts?: number;

@@ -10,10 +10,12 @@ import {
   extractAbandonedChunks,
   extractAuditChunks,
   extractBriefChunks,
+  extractFeatureChunks,
   extractGitChunks,
   extractHistoryChunks,
   extractPatternsChunks,
   extractSpecChunks,
+  extractUserGuideChunks,
 } from "../../src/relevance/chunk-store.js";
 
 describe("relevance/chunk-store", () => {
@@ -219,6 +221,44 @@ Existing app has no theme provider.
       expect(chunks[0].text).toContain("a.txt");
       expect(chunks[0].metadata.heading).toMatch(/^[0-9a-f]{7}$/);
       expect(chunks[0].metadata.ts).toBeGreaterThan(0);
+    });
+  });
+
+  describe("extractFeatureChunks (v15.11 yaşayan dökümantasyon)", () => {
+    it("dosya yok → boş array", async () => {
+      expect(await extractFeatureChunks(projectRoot)).toEqual([]);
+    });
+    it("## heading başına bir chunk + stabil id", async () => {
+      await mkdir(join(projectRoot, ".mycl"), { recursive: true });
+      await writeFile(
+        join(projectRoot, ".mycl", "features.md"),
+        "# Özellikler\n## Ürün CRUD\nÜrün ekle/sil.\n## Arama\nCanlı filtre.\n",
+        "utf-8",
+      );
+      const chunks = await extractFeatureChunks(projectRoot);
+      expect(chunks).toHaveLength(2);
+      expect(chunks.map((c) => c.source)).toEqual(["features", "features"]);
+      expect(chunks[0].id).toBe("features-Ürün CRUD");
+      expect(chunks[0].metadata.heading).toBe("Ürün CRUD");
+      expect(chunks[1].metadata.heading).toBe("Arama");
+    });
+  });
+
+  describe("extractUserGuideChunks (v15.11)", () => {
+    it("dosya yok → boş array", async () => {
+      expect(await extractUserGuideChunks(projectRoot)).toEqual([]);
+    });
+    it("## heading başına bir chunk", async () => {
+      await mkdir(join(projectRoot, ".mycl"), { recursive: true });
+      await writeFile(
+        join(projectRoot, ".mycl", "user-guide.md"),
+        "# Kılavuz\n## Nasıl ürün eklenir\n1. Forma gir 2. Kaydet\n",
+        "utf-8",
+      );
+      const chunks = await extractUserGuideChunks(projectRoot);
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].source).toBe("user-guide");
+      expect(chunks[0].metadata.heading).toBe("Nasıl ürün eklenir");
     });
   });
 });

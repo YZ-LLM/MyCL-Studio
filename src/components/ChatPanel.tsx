@@ -163,6 +163,10 @@ interface Props {
   agentBusy?: boolean;
   /** v15.7 (2026-05-24): Composer'daki metni iş kuyruğuna ekle. */
   onAddTaskToQueue?: (text: string) => void;
+  /** v15.11: 📖 Kılavuz butonu — UI kullanma kılavuzu modalını açar. */
+  onGuideClick?: () => void;
+  /** v15.11: Kılavuz içeriği mevcut mu (buton aktif/pasif görünümü). */
+  guideAvailable?: boolean;
 }
 
 export function ChatPanel({
@@ -182,6 +186,8 @@ export function ChatPanel({
   agentEventsCount,
   agentBusy,
   onAddTaskToQueue,
+  onGuideClick,
+  guideAvailable,
 }: Props) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -402,6 +408,23 @@ export function ChatPanel({
                   </span>
                 )}
             </span>
+          </button>
+        )}
+        {/* v15.11: 📖 Kılavuz — UI kullanma kılavuzu modalını açar. */}
+        {onGuideClick && (
+          <button
+            type="button"
+            className="intent-pill"
+            onClick={onGuideClick}
+            title={
+              guideAvailable
+                ? "UI kullanma kılavuzunu gör"
+                : "Kılavuz henüz üretilmedi (MyCL projeye dokundukça oluşturur)"
+            }
+            style={{ opacity: guideAvailable ? 1 : 0.6 }}
+          >
+            <span className="intent-pill-emoji" aria-hidden>📖</span>
+            <span className="intent-pill-label">Kılavuz</span>
           </button>
         )}
         {/* v15.7 (2026-05-24): "İş Ekle" buton — composer'daki metni proje

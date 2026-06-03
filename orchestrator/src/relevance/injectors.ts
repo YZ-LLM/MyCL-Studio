@@ -42,6 +42,28 @@ export async function buildRelevantSpecDigest(
 }
 
 /**
+ * v15.11: features.md'den mevcut intent'e en alakalı özellikleri markdown digest
+ * olarak döndür. Faz 2 `{{EXISTING_FEATURES_DIGEST}}` placeholder'ı için — ajan
+ * mevcut özellikleri görüp gereksiz/kapsam-dışı clarifying sormaz.
+ */
+export async function buildRelevantFeatureDigest(
+  config: MyclConfig,
+  state: State,
+  intent: string,
+): Promise<string> {
+  const chunks = await getRelevantChunks(config, state, {
+    sources: ["features"],
+    intent,
+    max_chunks: 6,
+    min_score: 5,
+  });
+  if (chunks.length === 0) {
+    return "(no documented features yet)";
+  }
+  return chunks.map(formatSpecChunk).join("\n\n");
+}
+
+/**
  * abandoned-intents.jsonl'dan mevcut intent'e en alakalı vazgeçmeleri
  * markdown digest olarak döndür. Faz 2 `{{ABANDONED_INTENTS_DIGEST}}`
  * placeholder'ı bunu kullanır.
@@ -201,7 +223,9 @@ export async function buildRelevantProjectContext(
   intent: string,
 ): Promise<string> {
   const chunks = await getRelevantChunks(config, state, {
-    sources: ["spec", "abandoned", "audit", "patterns", "brief", "git"],
+    // v15.11: "features" — yaşayan özellik dökümantasyonu (en grounded kaynak;
+    // ajan "X özelliği var mı?" diye sormak yerine features.md'den görür).
+    sources: ["features", "spec", "abandoned", "audit", "patterns", "brief", "git"],
     intent,
     // Phase 1 için zengin context — diğer fazlardan (max=5) yüksek.
     max_chunks: 8,
@@ -246,7 +270,8 @@ export function formatProjectContextGroups(chunks: ScoredChunk[]): string {
   }
 
   // Source render sırası — okunabilirlik için anlamlı bir öncelik.
-  const order = ["spec", "brief", "abandoned", "audit", "git", "patterns"];
+  // v15.11: "features" en başta — mevcut özellikler ajanın ilk görmesi gereken.
+  const order = ["features", "spec", "brief", "abandoned", "audit", "git", "patterns"];
   const sections: string[] = [];
 
   for (const source of order) {

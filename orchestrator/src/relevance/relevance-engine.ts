@@ -19,10 +19,12 @@ import {
   extractAbandonedChunks,
   extractAuditChunks,
   extractBriefChunks,
+  extractFeatureChunks,
   extractGitChunks,
   extractHistoryChunks,
   extractPatternsChunks,
   extractSpecChunks,
+  extractUserGuideChunks,
 } from "./chunk-store.js";
 import { scoreChunks } from "./classifier.js";
 import type { Chunk, RelevanceQueryOptions, ScoredChunk } from "./types.js";
@@ -103,6 +105,8 @@ async function gatherChunks(
   if (sources.has("abandoned")) tasks.push(extractAbandonedChunks(projectRoot));
   if (sources.has("patterns")) tasks.push(extractPatternsChunks(projectRoot));
   if (sources.has("brief")) tasks.push(extractBriefChunks(projectRoot));
+  if (sources.has("features")) tasks.push(extractFeatureChunks(projectRoot));
+  if (sources.has("user-guide")) tasks.push(extractUserGuideChunks(projectRoot));
   if (sources.has("git")) tasks.push(extractGitChunks(projectRoot));
   if (sources.has("history") && typeof options.history_phase === "number") {
     tasks.push(extractHistoryChunks(projectRoot, options.history_phase));

@@ -50,6 +50,7 @@ import {
   emitChatMessage,
   emitError,
   emitPhaseChanged,
+  emitUserGuide,
   getActiveAskq,
   setHistoryRoot,
   takePhaseCost,
@@ -86,6 +87,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
+import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
 import {
@@ -281,6 +283,13 @@ async function handleOpenProject(path: string): Promise<void> {
     // Persistence root'u set et — sonraki emit'ler history.log'a yazılır.
     // Erken set: loadOrInit sonrası ilk emit'ler de kaydedilsin.
     setHistoryRoot(path);
+    // v15.11: Açılışta mevcut UI kullanma kılavuzunu "Kılavuz" sekmesine push
+    // et (varsa). Yoksa sessiz — bootstrap arka planda üretip sonra emit eder.
+    void fsReadFile(pathJoin(path, ".mycl", "user-guide.md"), "utf-8")
+      .then((c) => {
+        if (c.trim()) emitUserGuide(c);
+      })
+      .catch(() => {});
     // v15.6: NDJSON record metadata bağlamı (session/iter/phase) — her append
     // edilen satıra otomatik enjekte edilir, ilerde dataset için anchor alan.
     setRecordContext({
@@ -392,6 +401,16 @@ async function handleOpenProject(path: string): Promise<void> {
         emitError("boot resume failed", String(e));
       });
       return; // boot check skip — phase zaten başladı
+    }
+
+    // v15.11: Mevcut (MyCL-dışı) projeyi ilk açışta dökümante et — features.md
+    // yoksa + kod varsa arka planda (await'siz, open'ı bloklamaz) üretir.
+    // İdempotent: sonraki açılışlarda no-op. Orkestratör/Faz 1-2 sonradan bu
+    // belgelere bakıp grounded soru sorar (gereksiz "X var mı?" sormaz).
+    if (runtime.config && runtime.state) {
+      void bootstrapLivingDocs(runtime.state, runtime.config).catch((e: unknown) =>
+        log.warn("orchestrator", "living-docs bootstrap failed (non-fatal)", e),
+      );
     }
 
     // v15.6 (2026-05-24): Boot durum özeti — kullanıcı talebi: "ilk açılışta
@@ -1597,6 +1616,11 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // v15.8 (2026-05-30): Akış sonu DÜRÜST özet — istenen vs gerçekte
       // doğrulanan. Yanlış "her şey tamam" hissini önler.
       await emitPipelineEndSummary(state);
+      // v15.11: Yaşayan dökümantasyon + UI kılavuzu güncelle (projeye dokunuldu).
+      // Non-blocking — fail görünür uyarı, pipeline'ı bloklamaz.
+      await updateLivingDocs(state, cfg).catch((e: unknown) =>
+        log.warn("orchestrator", "living-docs update failed (non-fatal)", e),
+      );
       // v15.9: scoped kapsam + fix checkpoint ref tüketildi — temizle (sonraki
       // iterasyonda stale scope yanlış daraltma yapmasın).
       if (state.changed_scope || state.fix_checkpoint_ref) {

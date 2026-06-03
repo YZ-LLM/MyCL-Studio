@@ -96,6 +96,16 @@ chose Continue at step 8c (or COMPLIANCE was `covered` outright), call
 {{EXISTING_SPEC_DIGEST}}
 ---
 
+## Existing project features (from .mycl/features.md — what the app ALREADY does)
+
+The app's existing capabilities are documented below. Do NOT raise compliance
+concerns or clarifying needs about whether something already exists — read this.
+Only flag what the CURRENT request genuinely leaves ambiguous.
+
+---
+{{EXISTING_FEATURES_DIGEST}}
+---
+
 ## Previously abandoned intents in this project
 
 If non-empty, the current intent has overlap risk — flag it as a COMPLIANCE
