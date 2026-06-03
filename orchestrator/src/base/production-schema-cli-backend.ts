@@ -18,7 +18,7 @@ import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { appendAudit } from "../audit.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
-import { autoFallbackBackend } from "../cli-rate-limit.js";
+import { autoBackendPair } from "../cli-rate-limit.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
 import { localizeOptionLabels, t } from "../i18n.js";
@@ -269,17 +269,23 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
 export function createProductionSchemaBackend(opts: ProductionRunOpts): ProductionBackend {
   // v15.11: main ajan yalnız İngilizce yazar (genel kural, CLI+SDK). Çevirmen hariç.
   opts = { ...opts, systemPrompt: opts.systemPrompt + MAIN_AGENT_LANGUAGE_RULE };
+  // Auto Mode: simetrik çift-yön (limit yokken CLI birincil, limitliyse API birincil);
+  // birincil KALICI başarısızsa diğerine kesintisiz geçer. claude yoksa → API.
+  if (isAutoMode(opts.config, "main")) {
+    if (!isClaudeAvailable()) {
+      emitChatMessage("system", "ℹ️ Auto Mode: `claude` bulunamadı → API kullanılıyor.");
+      return new ProductionSchemaBaseController(opts);
+    }
+    return autoBackendPair<ProductionOutcome, ProductionBackend>(
+      backendForRole(opts.config, "main"),
+      () => new ProductionSchemaCliBackend(opts),
+      () => new ProductionSchemaBaseController(opts),
+    );
+  }
   const wantCli = backendForRole(opts.config, "main") === "cli";
   if (wantCli) {
     if (isClaudeAvailable()) {
       log.info(opts.tag, "using CLI production-schema backend (abonelik)");
-      // Auto Mode: limit faz ortasında dolarsa API'ye kesintisiz geç.
-      if (isAutoMode(opts.config, "main")) {
-        return autoFallbackBackend<ProductionOutcome, ProductionBackend>(
-          () => new ProductionSchemaCliBackend(opts),
-          () => new ProductionSchemaBaseController(opts),
-        );
-      }
       return new ProductionSchemaCliBackend(opts);
     }
     const m =

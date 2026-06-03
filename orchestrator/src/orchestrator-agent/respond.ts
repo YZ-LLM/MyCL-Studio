@@ -9,8 +9,9 @@
 // cli-orchestrator agent.ts'ten yalnız buildOrchestratorSystemPrompt alır;
 // respond.ts ikisini de import eder.
 
-import { backendForRole, type MyclConfig } from "../config.js";
+import { backendForRole, isAutoMode, type MyclConfig } from "../config.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
+import { API_LABEL, CLI_LABEL } from "../cli-rate-limit.js";
 import { emitChatMessage, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import type { State } from "../types.js";
@@ -29,6 +30,33 @@ export async function respondAsOrchestrator(
   state: State,
   userText: string,
 ): Promise<AgentDecision> {
+  // Auto Mode: simetrik çift-yön. Çözülen birincil backend (limit yokken CLI,
+  // limitliyse API) denenir; THROW ederse görünür mesajla diğerine geçilir.
+  // claude yoksa → SDK (CLI tarafı kullanılamaz).
+  if (isAutoMode(config, "orchestrator")) {
+    const claudeOk = isClaudeAvailable();
+    const tryCli = (): Promise<AgentDecision> =>
+      new CliOrchestratorBackend(config, state).respond(userText);
+    const trySdk = (): Promise<AgentDecision> =>
+      new OrchestratorAgent({ config, state }).respond(userText);
+    if (!claudeOk) {
+      emitChatMessage("system", "ℹ️ Auto Mode: `claude` bulunamadı → API (SDK) kullanılıyor.");
+      return trySdk();
+    }
+    const primaryCli = backendForRole(config, "orchestrator") === "cli";
+    const primary = primaryCli ? tryCli : trySdk;
+    const secondary = primaryCli ? trySdk : tryCli;
+    const fromL = primaryCli ? CLI_LABEL : API_LABEL;
+    const toL = primaryCli ? API_LABEL : CLI_LABEL;
+    try {
+      return await primary();
+    } catch (err) {
+      log.warn("orchestrator", "auto fallback (symmetric)", { from: fromL, error: String(err).slice(0, 200) });
+      emitChatMessage("system", `↪️ ${fromL} başarısız oldu — ${toL} ile kesintisiz yeniden deneniyor (Auto Mode).`);
+      return secondary();
+    }
+  }
+
   const wantCli = backendForRole(config, "orchestrator") === "cli";
 
   // Kullanıcı kuralı: HİÇBİR ŞEY SESSİZCE çalışmasın. CLI seçili ama `claude`

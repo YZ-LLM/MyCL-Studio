@@ -162,31 +162,40 @@ export interface FallbackableBackend<O extends { kind: string }> {
   submitAskqAnswer?(askqId: string, selected: string): void;
 }
 
+/** Auto fallback görünür mesajı için yön etiketleri. */
+export interface AutoFallbackLabels {
+  from: string;
+  to: string;
+}
+
 /**
- * Auto Mode faz-içi kesintisiz retry: CLI backend'i çalıştır; abonelik limiti
- * faz ORTASINDA dolup CLI başarısız olursa (kind:"failed" + cliCurrentlyLimited)
- * AYNI faz içinde API backend'ine geçip YENİDEN dener. Yalnız limit-kaynaklı
- * failure'da fallback yapar — başka hatada fallback YOK (sessiz API kaçışı değil).
- * submitAskqAnswer/abort aktif backend'e yönlendirilir (geçişte pending askq yok:
- * CLI run bitmiş olur). Yalnız Auto Mode'da çağrılır (explicit "cli" sarmalanmaz).
+ * Auto Mode SİMETRİK faz-içi kesintisiz retry: birincil backend'i çalıştır; KALICI
+ * `failed` dönerse (geçici hatalar — overloaded/5xx — zaten backend içinde retry'lı)
+ * AYNI faz içinde ikincil backend'e BİR KEZ geçip yeniden dener. Yön caller'a göre:
+ *   - limit yokken birincil=CLI, ikincil=API  → CLI başarısızsa API (case 2)
+ *   - limit penceresinde birincil=API, ikincil=CLI → API başarısızsa CLI (case 1)
+ * `aborted`/başarı → geçiş YOK. submitAskqAnswer/abort aktif backend'e yönlenir
+ * (geçişte pending askq yok: önceki run bitmiş olur). Yalnız Auto Mode'da çağrılır
+ * (explicit "api"/"cli" sarmalanmaz → strict, sessiz fallback yok). Tek geçiş (loop yok).
  */
 export function autoFallbackBackend<O extends { kind: string }, B extends FallbackableBackend<O>>(
-  makeCli: () => B,
-  makeApi: () => B,
+  makePrimary: () => B,
+  makeSecondary: () => B,
+  labels: AutoFallbackLabels,
 ): B {
-  let active: B = makeCli();
+  let active: B = makePrimary();
   let fellBack = false;
   const wrapper: FallbackableBackend<O> = {
     run: async (): Promise<O> => {
       const r = await active.run();
-      if (!fellBack && r.kind === "failed" && cliCurrentlyLimited()) {
+      if (!fellBack && r.kind === "failed") {
         fellBack = true;
         emitChatMessage(
           "system",
-          "↪️ Abonelik limiti faz ortasında doldu — bu faz API ile kesintisiz yeniden deneniyor (Auto Mode).",
+          `↪️ ${labels.from} başarısız oldu — ${labels.to} ile kesintisiz yeniden deneniyor (Auto Mode).`,
         );
-        log.info("cli-rate-limit", "in-phase auto fallback CLI → API");
-        active = makeApi();
+        log.info("cli-rate-limit", "auto fallback (symmetric)", { from: labels.from, to: labels.to });
+        active = makeSecondary();
         return active.run();
       }
       return r;
@@ -195,4 +204,22 @@ export function autoFallbackBackend<O extends { kind: string }, B extends Fallba
     submitAskqAnswer: (id: string, sel: string) => active.submitAskqAnswer?.(id, sel),
   };
   return wrapper as unknown as B;
+}
+
+export const CLI_LABEL = "Abonelik (CLI)";
+export const API_LABEL = "API";
+
+/**
+ * Auto Mode yön seçimi: çözülmüş efektif backend'e göre birincil/ikincil sırala +
+ * doğru yön etiketleriyle autoFallbackBackend döndür. effective="cli" → CLI birincil
+ * (API fallback); "api" (limit penceresi) → API birincil (CLI fallback). 3 factory bunu çağırır.
+ */
+export function autoBackendPair<O extends { kind: string }, B extends FallbackableBackend<O>>(
+  effective: "api" | "cli",
+  makeCli: () => B,
+  makeApi: () => B,
+): B {
+  return effective === "cli"
+    ? autoFallbackBackend<O, B>(makeCli, makeApi, { from: CLI_LABEL, to: API_LABEL })
+    : autoFallbackBackend<O, B>(makeApi, makeCli, { from: API_LABEL, to: CLI_LABEL });
 }

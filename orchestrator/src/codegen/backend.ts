@@ -17,7 +17,7 @@ import {
 } from "../base/codegen-controller.js";
 import { CliCodegenBackend, isClaudeAvailable } from "./cli-backend.js";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
-import { autoFallbackBackend } from "../cli-rate-limit.js";
+import { autoBackendPair } from "../cli-rate-limit.js";
 import { backendForRole, isAutoMode } from "../config.js";
 import { emitChatMessage, emitError } from "../ipc.js";
 import { log } from "../logger.js";
@@ -54,18 +54,31 @@ const CLI_ELIGIBLE_TAGS = new Set(["phase-5", "verify-feature", "phase-8"]);
 export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
   // v15.11: main ajan yalnız İngilizce yazar (genel kural, CLI+SDK). Çevirmen hariç.
   opts = { ...opts, systemPrompt: opts.systemPrompt + MAIN_AGENT_LANGUAGE_RULE };
-  const flagOn = backendForRole(opts.config, "main") === "cli";
   const eligible = CLI_ELIGIBLE_TAGS.has(opts.tag);
+  // Auto Mode: simetrik çift-yön. CLI-uygun faz + claude varsa CLI↔SDK kesintisiz;
+  // CLI-uygun değilse (custom tool) ya da claude yoksa → SDK (görünür not).
+  if (isAutoMode(opts.config, "main")) {
+    if (!eligible) {
+      emitChatMessage(
+        "system",
+        `ℹ️ Faz "${opts.tag}" custom tool gerektirir → SDK (API) kullanılıyor (Auto Mode; CLI bu fazı yapamaz).`,
+      );
+      return new CodegenBaseController(opts);
+    }
+    if (!isClaudeAvailable()) {
+      emitChatMessage("system", "ℹ️ Auto Mode: `claude` bulunamadı → SDK (API) kullanılıyor.");
+      return new CodegenBaseController(opts);
+    }
+    return autoBackendPair<CodegenOutcome, CodegenBackend>(
+      backendForRole(opts.config, "main"),
+      () => new CliCodegenBackend(opts),
+      () => new CodegenBaseController(opts),
+    );
+  }
+  const flagOn = backendForRole(opts.config, "main") === "cli";
   if (flagOn && eligible) {
     if (isClaudeAvailable()) {
       log.info("codegen-backend", "using CLI backend", { tag: opts.tag });
-      // Auto Mode: limit faz ortasında dolarsa SDK'ya (API) kesintisiz geç.
-      if (isAutoMode(opts.config, "main")) {
-        return autoFallbackBackend<CodegenOutcome, CodegenBackend>(
-          () => new CliCodegenBackend(opts),
-          () => new CodegenBaseController(opts),
-        );
-      }
       return new CliCodegenBackend(opts);
     }
     // Kullanıcı kuralı: HİÇBİR ŞEY SESSİZCE çalışmasın. Main 'CLI' seçili ama

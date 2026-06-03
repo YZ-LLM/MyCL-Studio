@@ -6,6 +6,17 @@
 
 ## 2026-06-03
 
+- **20:46 feat(auto-mode-symmetric):** Auto Mode artık SİMETRİK çift-yön, 3 rol de (Ümit:
+  "Tam simetrik çift-yön"). Çözülen birincil backend (limit yokken CLI, limitliyse API)
+  denenir; KALICI `failed`/throw → görünür mesajla diğerine BİR KEZ geçilir (case 1:
+  API→CLI + case 2: CLI→API). Geçici hatalar (overloaded/5xx) zaten backend içinde retry'lı.
+  `autoFallbackBackend` yön-bağımsız (makePrimary/makeSecondary + etiket); yeni
+  `autoBackendPair(effective, makeCli, makeApi)` yönü seçer. Uygulandı: main (qa-askq 1/2/9,
+  production-schema 3/4/7, codegen 5/8 — wantCli'den ÖNCE auto branch), orchestrator
+  (throw-based, iki yön), translator (`attempt(useCli)` helper'a refactor + primary/secondary).
+  Explicit "api"/"cli" STRICT kalır (sessiz fallback yok). phase-0 D1 (triage girişi)
+  bespoke — limit penceresinde SDK'ya çözülür, ortada dolarsa yeniden tetikte. 24 birim test
+  (her iki yön + abort→geçiş yok + tek-geçiş + askq routing + yön seçimi). check yeşil (722).
 - **20:13 feat(auto-mode-seamless):** Auto Mode'a FAZ-İÇİ kesintisiz retry (Ümit onayı:
   "Evet, kesintisiz yap"). `cli-rate-limit.ts`'e generic `autoFallbackBackend(makeCli,
   makeApi)`: CLI backend limit YÜZÜNDEN (kind:"failed" + cliCurrentlyLimited) başarısız

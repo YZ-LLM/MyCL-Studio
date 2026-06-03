@@ -11,7 +11,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { MyclConfig } from "./config.js";
-import { backendForRole } from "./config.js";
+import { backendForRole, isAutoMode } from "./config.js";
+import { API_LABEL, CLI_LABEL } from "./cli-rate-limit.js";
 import { runClaudeCli } from "./cli-run.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { emitChatMessage, emitError, emitTranslation } from "./ipc.js";
@@ -210,12 +211,77 @@ export async function translate(
   const model = config.selected_models.translator;
   const chunks = splitForChunking(text);
 
-  // v15.8: rol "cli" ise `claude -p` (abonelik). Kullanıcı kuralı: HİÇBİR ŞEY
-  // SESSİZCE çalışmasın — CLI seçili ama `claude` bulunamıyorsa API'ye SESSİZCE
-  // DÜŞME (abonelik kullanıcısında API kredisi yok → kafa karıştırıcı fatura
-  // hatası). Görünür hata ver + dur. API isteniyorsa Ayarlar'dan "API" seçilir.
+  // Bir backend ile TÜM chunk'ları çevir (closure: startTs/model/chunks/dir).
+  // Auto Mode bunu birincil, gerekirse ikincil backend'le çağırır.
+  const attempt = async (useCli: boolean): Promise<TranslateResult> => {
+    // SDK client yalnızca API yolunda gerekir (CLI'da API key kullanılmaz).
+    const client = useCli ? null : new Anthropic({ apiKey: config.api_keys.translator });
+    log.info("translator", "request", {
+      dir,
+      model,
+      backend: useCli ? "cli" : "api",
+      text_len: text.length,
+      chunks: chunks.length,
+    });
+    let totalAttempts = 0;
+    const translatedChunks: string[] = [];
+    // Sequential chunk işleme — bir chunk fail ederse THROW (partial-success yok).
+    try {
+      for (const chunk of chunks) {
+        const result = await withExpBackoff(RETRY_ATTEMPTS, async (att) => {
+          totalAttempts++;
+          if (att > 0) {
+            log.warn("translator", "retry", { attempt: att + 1, model });
+          }
+          return useCli
+            ? callCli(model, chunk, config.timeouts_ms.translator, dir)
+            : callApi(client!, model, chunk, config.timeouts_ms.translator, dir);
+        });
+        translatedChunks.push(result);
+      }
+    } catch (err) {
+      log.error("translator", "failed after retries", err);
+      emitTranslation({ dir, input: text, output: "", model, elapsed_ms: Date.now() - startTs, ok: false });
+      throw err;
+    }
+    const out = translatedChunks.join("\n\n");
+    const elapsed = Date.now() - startTs;
+    log.info("translator", "response", {
+      dir,
+      model,
+      out_len: out.length,
+      attempts: totalAttempts,
+      elapsed_ms: elapsed,
+    });
+    emitTranslation({ dir, input: text, output: out, model, elapsed_ms: elapsed, ok: true });
+    return { text: out, model, attempts: totalAttempts, elapsed_ms: elapsed };
+  };
+
+  // Auto Mode: simetrik çift-yön. Birincil (limit yokken CLI, limitliyse API)
+  // THROW ederse görünür mesajla diğerine geçer. claude yoksa → API.
+  if (isAutoMode(config, "translator")) {
+    if (!isClaudeAvailable()) {
+      emitChatMessage("system", "ℹ️ Auto Mode: `claude` bulunamadı → API kullanılıyor (çevirmen).");
+      return attempt(false);
+    }
+    const primaryCli = backendForRole(config, "translator") === "cli";
+    try {
+      return await attempt(primaryCli);
+    } catch (err) {
+      const fromL = primaryCli ? CLI_LABEL : API_LABEL;
+      const toL = primaryCli ? API_LABEL : CLI_LABEL;
+      log.warn("translator", "auto fallback (symmetric)", { from: fromL, error: String(err).slice(0, 200) });
+      emitChatMessage(
+        "system",
+        `↪️ ${fromL} başarısız oldu — ${toL} ile kesintisiz yeniden deneniyor (Auto Mode, çevirmen).`,
+      );
+      return attempt(!primaryCli);
+    }
+  }
+
+  // Explicit api/cli (eski davranış — sessiz fallback YOK). CLI seçili + claude
+  // yoksa görünür hata ver + dur (API'ye sessizce düşme).
   const wantCli = backendForRole(config, "translator") === "cli";
-  const useCli = wantCli; // claude erişilebilirliği aşağıda zorlanır
   if (wantCli && !isClaudeAvailable()) {
     const m =
       "Translator 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı " +
@@ -226,75 +292,5 @@ export async function translate(
     emitChatMessage("system", `🔴 ${m}`);
     throw new Error("translator CLI backend kullanılamıyor: claude bulunamadı");
   }
-  // SDK client yalnızca API yolunda gerekir (CLI'da API key kullanılmaz).
-  const client = useCli ? null : new Anthropic({ apiKey: config.api_keys.translator });
-
-  log.info("translator", "request", {
-    dir,
-    model,
-    backend: useCli ? "cli" : "api",
-    text_len: text.length,
-    chunks: chunks.length,
-  });
-
-  let totalAttempts = 0;
-  const translatedChunks: string[] = [];
-  let ok = true;
-
-  // Sequential chunk işleme — bir chunk fail ederse pipeline durur (fallback
-  // yok). Promise.allSettled gibi paralel + partial-success yapısı kullanıcı
-  // kuralına aykırıdır: çeviri ya tamamen başarılı olur ya da hata fırlatır.
-  try {
-    for (const chunk of chunks) {
-      const result = await withExpBackoff(RETRY_ATTEMPTS, async (attempt) => {
-        totalAttempts++;
-        if (attempt > 0) {
-          log.warn("translator", "retry", { attempt: attempt + 1, model });
-        }
-        return useCli
-          ? callCli(model, chunk, config.timeouts_ms.translator, dir)
-          : callApi(client!, model, chunk, config.timeouts_ms.translator, dir);
-      });
-      translatedChunks.push(result);
-    }
-  } catch (err) {
-    ok = false;
-    log.error("translator", "failed after retries", err);
-    emitTranslation({
-      dir,
-      input: text,
-      output: "",
-      model,
-      elapsed_ms: Date.now() - startTs,
-      ok: false,
-    });
-    throw err;
-  }
-
-  const out = translatedChunks.join("\n\n");
-  const elapsed = Date.now() - startTs;
-  log.info("translator", "response", {
-    dir,
-    model,
-    out_len: out.length,
-    attempts: totalAttempts,
-    elapsed_ms: elapsed,
-  });
-
-  // UI translator paneline yansıt — başarılı çeviri kaydı.
-  emitTranslation({
-    dir,
-    input: text,
-    output: out,
-    model,
-    elapsed_ms: elapsed,
-    ok,
-  });
-
-  return {
-    text: out,
-    model,
-    attempts: totalAttempts,
-    elapsed_ms: elapsed,
-  };
+  return attempt(wantCli);
 }
