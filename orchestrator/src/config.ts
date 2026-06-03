@@ -31,6 +31,14 @@ export interface ClaudeCodeFlags {
    */
   effort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
   betas?: string[];
+  /**
+   * v15.11 GÜVENLİK: spawn edilen main-ajan `claude` alt-süreçlerinin dosya
+   * erişimini açık proje + alt klasörlerine hapseder (Claude Code yerli sandbox
+   * + denyRead). "enforce" (varsayılan): sandbox kurulamazsa fail-closed (ajan
+   * koşmaz). "warn": kurulamazsa görünür uyarı + soft (deny-only) devam. "off":
+   * sandbox kapalı (eski davranış — acil geri-alma). Bkz agent-sandbox.ts.
+   */
+  agent_sandbox_policy?: "enforce" | "warn" | "off";
 }
 
 export interface ApiKeys {
@@ -135,6 +143,8 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
   // ephemeral koyunca multi-turn fazlarda (Faz 8 vb.) ilk turn'den sonraki
   // input token'lar **%90 indirimle** cache'ten okunur. 5dk TTL.
   betas: ["context-1m-2025-08-07", "prompt-caching-2024-07-31"],
+  // GÜVENLİK varsayılanı: ajanı projeye hapset, sandbox yoksa fail-closed.
+  agent_sandbox_policy: "enforce",
 };
 
 const DEFAULT_TIMEOUTS = {

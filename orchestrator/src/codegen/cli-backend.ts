@@ -27,6 +27,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { sandboxSettingsArgs } from "../agent-sandbox.js";
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
 import type { CodegenBackend } from "./backend.js";
 import { emitChatMessage, emitClaudeStream } from "../ipc.js";
@@ -352,10 +353,9 @@ export class CliCodegenBackend implements CodegenBackend {
     if (skillsDir) {
       args.push("--plugin-dir", skillsDir);
     }
-    // Efor: ultracode AYRI ayar (--effort değil); diğerleri --effort.
-    if (effort === "ultracode") {
-      args.push("--settings", JSON.stringify({ ultracode: true }));
-    } else {
+    // v15.11 GÜVENLİK: --settings ile sandbox (+ ultracode) — ajanı proje-root'a hapset.
+    args.push(...sandboxSettingsArgs(opts.state.project_root, effort === "ultracode"));
+    if (effort && effort !== "ultracode") {
       args.push("--effort", effort);
     }
     return args;

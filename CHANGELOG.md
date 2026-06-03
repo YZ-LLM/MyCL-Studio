@@ -6,6 +6,18 @@
 
 ## 2026-06-03
 
+- **16:35 feat(agent-sandbox):** GÜVENLİK — spawn edilen `claude` ajan alt-süreçleri artık
+  YALNIZ açık proje klasörü + alt klasörlerine erişir, OS-zorlamalı (macOS Seatbelt).
+  Yeni `agent-sandbox.ts`: `--settings` ile `sandbox.enabled:true` +
+  `allowUnsandboxedCommands:false` → YAZMA+BASH otomatik proje-hapsine girer; OKUMA için
+  home top-level girdileri (runtime + proje HARİÇ) `denyRead` + `permissions.deny Read()`.
+  3 spawn noktasına (`cli-run`/`cli-session`/`codegen/cli-backend`) enjekte edildi (eski
+  ultracode-only `--settings` dalı yerine; ultracode merge korunur). Config:
+  `claude_code_flags.agent_sandbox_policy` (varsayılan `enforce`: sandbox kurulamazsa
+  fail-closed; `warn`/`off` kapıları). Canlı doğrulandı: proje okunur/yazılır, `~/Music`/
+  `~/Documents`/diğer-projeler/`.ssh` reddedilir ("denied by your permission settings").
+  Tetikleyici: macOS'ta ajanın Apple Music/Photos (TCC) izni istemesi — kapandı.
+  `agent-sandbox.test.ts` (12 saf birim test). Kural: `--add-dir` HAPİS DEĞİL, sandbox hapistir.
 - **15:32 fix(main-agent-language):** Main ajan GENEL kuralla yalnız İngilizce yazar —
   ortak `MAIN_AGENT_LANGUAGE_RULE` (yeni `agent-language.ts`) tüm main-ajan backend
   factory'lerine (qa-askq / production-schema / codegen, CLI+SDK) + Faz 0'a enjekte edildi.
@@ -48,5 +60,8 @@
   yalnız orkestratörün `reason`/`message_to_user` + askq UI gösterimi TR (çevirmen çevirir).
   Kaynak: `assets/agent-prompts/orchestrator-system.md:115`.
 - **CLI seçiliyken sessiz API fallback yok** (görünür hata + dur).
+- **Ajan dosya hapsi:** spawn edilen `claude` YALNIZ proje + alt klasörlerine erişir
+  (`--settings` sandbox, OS-zorlamalı). `--add-dir` hapis değildir; sandbox hapistir.
+  Tek kaynak `agent-sandbox.ts`; 3 buildArgs oradan beslenir.
 - **Her anlamlı değişiklikten sonra `npm run check` yeşil olmalı** (proje gate'i).
 - **Tamamlanan + check-yeşil işi sormadan commit + main'e push.**

@@ -87,6 +87,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
+import { setSandboxPolicy } from "./agent-sandbox.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
@@ -283,6 +284,10 @@ async function handleOpenProject(path: string): Promise<void> {
     // Persistence root'u set et — sonraki emit'ler history.log'a yazılır.
     // Erken set: loadOrInit sonrası ilk emit'ler de kaydedilsin.
     setHistoryRoot(path);
+    // v15.11 GÜVENLİK: ajan sandbox politikasını config'ten set et (spawn'lar okur).
+    if (runtime.config) {
+      setSandboxPolicy(runtime.config.claude_code_flags.agent_sandbox_policy ?? "enforce");
+    }
     // v15.11: Açılışta mevcut UI kullanma kılavuzunu "Kılavuz" sekmesine push
     // et (varsa). Yoksa sessiz — bootstrap arka planda üretip sonra emit eder.
     void fsReadFile(pathJoin(path, ".mycl", "user-guide.md"), "utf-8")

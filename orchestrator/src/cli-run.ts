@@ -7,6 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { sandboxSettingsArgs } from "./agent-sandbox.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import type { TokenUsage } from "./cli-session.js";
 import { log } from "./logger.js";
@@ -75,12 +76,10 @@ function buildArgs(opts: CliRunOpts): string[] {
   if (opts.maxBudgetUsd !== undefined) {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }
-  if (opts.effort) {
-    if (opts.effort === "ultracode") {
-      args.push("--settings", JSON.stringify({ ultracode: true }));
-    } else {
-      args.push("--effort", opts.effort);
-    }
+  // v15.11 GÜVENLİK: --settings ile sandbox (+ ultracode) — ajanı opts.cwd'ye hapset.
+  args.push(...sandboxSettingsArgs(opts.cwd, opts.effort === "ultracode"));
+  if (opts.effort && opts.effort !== "ultracode") {
+    args.push("--effort", opts.effort);
   }
   return args;
 }
