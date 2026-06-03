@@ -4,6 +4,15 @@
 > Amaç: eski kararları/kuralları unutup bozmamak; bir işi değiştirmeden önce buraya bak.
 > Eski bir işi değiştirmek/silmek gerekiyorsa ÖNCE Ümit'e sor (kural, 2026-06-03).
 
+## 2026-06-04
+
+- **feat(living-docs) [saha-2/5]:** `.mycl/features.md` + `user-guide.md` artık ORKESTRATÖR
+  rolü yazar (ana ajana/codegen'e GİTMEZ — kullanıcı kuralı). `living-docs.ts`:
+  `backendForRole(config,"main")` → `"orchestrator"` (bootstrap + update CLI kapısı);
+  model `selected_models.orchestrator ?? .main`. Orkestratör "her şeyi bilen" hafif rol →
+  docs için doğru yer; ana ajan codegen'e odaklı kalır. Saf testler etkilenmedi. (5 saha
+  iyileştirmesinden 2.)
+
 ## 2026-06-03
 
 - **22:06 fix(robustness):** Pipeline ARTIK ajan text-JSON bozukluğunda TAKILMIYOR (kullanıcı

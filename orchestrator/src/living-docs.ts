@@ -3,9 +3,9 @@
 // mevcut projeyi ilk açışta (bootstrap) günceller. Orkestratör + Faz 1/2 ajanları
 // bunları okuyup grounded soru sorar — gereksiz "X özelliği var mı?" sorusunu sormaz.
 //
-// Backend: abonelik/CLI modunda runClaudeCli (Read/Grep/Glob/Bash açık → ajan kodu
-// inceler). Ajan tek bir {"kind":"docs",...} JSON bloğu döner; YAZIMI MyCL yapar
-// (forced-tool yok; ajan .mycl dışına yazamaz). Approval YOK (iç belge).
+// Backend: ORKESTRATÖR rolü (v15.13 — ana ajana/codegen'e GİTMEZ), abonelik/CLI modunda
+// runClaudeCli (Read/Grep/Glob/Bash açık → ajan kodu inceler). Ajan tek bir {"kind":"docs",...}
+// JSON bloğu döner; YAZIMI MyCL yapar (forced-tool yok; ajan .mycl dışına yazamaz). Approval YOK.
 // Fail → görünür uyarı + audit, ana akışı BLOKLAMAZ (yan-yarar, sessiz değil).
 
 import { promises as fs } from "node:fs";
@@ -86,7 +86,8 @@ export async function bootstrapLivingDocs(state: State, config: MyclConfig): Pro
     if (await fileExists(join(state.project_root, FEATURES_REL))) return; // zaten var
     const { isExistingProject } = await import("./phase-1-codebase-probe.js");
     if (!(await isExistingProject(state.project_root))) return; // boş proje → pipeline üretir
-    if (backendForRole(config, "main") !== "cli") return; // API modu: sessiz değil ama updateLivingDocs not basar
+    // v15.13: docs'u ORKESTRATÖR rolü yazar (ana ajan değil — kullanıcı kuralı).
+    if (backendForRole(config, "orchestrator") !== "cli") return; // API modu: updateLivingDocs not basar
     emitChatMessage(
       "system",
       "📚 İlk açılış: mevcut koddan proje dökümantasyonu + kullanma kılavuzu üretiliyor…",
@@ -103,15 +104,19 @@ export async function bootstrapLivingDocs(state: State, config: MyclConfig): Pro
  */
 export async function updateLivingDocs(state: State, config: MyclConfig): Promise<void> {
   try {
+    // v15.13: Yaşayan dökümantasyonu ORKESTRATÖR rolü yazar — ana ajana (codegen) GİTMEZ
+    // (kullanıcı kuralı). Orkestratör "her şeyi bilen" hafif rol → docs için doğru yer.
     // Abonelik/CLI modu birincil hedef. API modu sonraki tur — görünür not (sessiz değil).
-    if (backendForRole(config, "main") !== "cli") {
+    if (backendForRole(config, "orchestrator") !== "cli") {
       emitChatMessage(
         "system",
-        "ℹ️ Yaşayan dökümantasyon şu an yalnız CLI/abonelik modunda güncellenir.",
+        "ℹ️ Yaşayan dökümantasyon şu an yalnız CLI/abonelik modunda güncellenir (orkestratör rolü).",
       );
       return;
     }
     const includeUserGuide = !(state.skip_ui_phases ?? false);
+    // Orkestratör modeli (yoksa main'e fallback — SelectedModels.orchestrator opsiyonel).
+    const docsModel = config.selected_models.orchestrator ?? config.selected_models.main;
 
     const tmpl = await fs.readFile(templatePath("living-docs.md"), "utf-8");
     const prompt = buildLivingDocsPrompt({
@@ -128,13 +133,13 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
     emitClaudeStream({
       sub: "init",
       text: "cli-living-docs",
-      model: config.selected_models.main,
+      model: docsModel,
       cwd: state.project_root,
     });
     const res = await runClaudeCli({
       systemPrompt: prompt,
       userMessage: "Inspect the codebase and emit the updated documentation JSON block now.",
-      modelId: config.selected_models.main,
+      modelId: docsModel,
       cwd: state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
       disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
