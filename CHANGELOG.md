@@ -6,6 +6,20 @@
 
 ## 2026-06-03
 
+- **18:22 feat(phase-9-tech-debt):** Faz 9 (Risk Review) artık TEKNİK BORÇ kontrolü de yapar
+  (kullanıcı: "Faz 9'da teknik borç kontrolü de yapsın" + "sadece o iterasyondaki iş için").
+  Yeni `phase-9-tech-debt.ts`: bu iterasyonda değişen ÜRETİM dosyalarını (getChangedFiles
+  ile — create'te HEAD baseline, fix'te `fix_checkpoint_ref`; pipeline mid-run commit
+  yapmadığından working tree = bu iterasyonun işi) deterministik tarar (`scanTechDebt`),
+  bulguları `{{TECH_DEBT_FINDINGS}}`'e enjekte eder. Önceki commit'li borç KAPSAM DIŞI
+  (entegrasyon testiyle kanıtlı: değişen dosya taranır, commit'li dosya taranmaz). Ajan
+  derinliği: prompt'a 6. eksen "Technical debt" + kapsamlı Read izni — ajan SADECE
+  `{{TECH_DEBT_FILES}}` listesindeki değişen dosyaları Read/Grep edip semantik borcu
+  (duplikasyon, sızan soyutlama, dead code) değerlendirir, her bulguyu skip/fix/rule gezer.
+  Test/spec dosyaları taranmaz (`isTestPath` tech-debt-scanner'a eklendi, paylaşılan).
+  Git yoksa DÜRÜST not (sessiz boş değil). `MAX_SCAN_FILES=200` aşımı görünür NOTE.
+  12 saf+git-entegrasyon testi. NOT: scope ajan talimatıyla sınırlı (Read'i listeyle bağladım);
+  inject-only katı garanti istenirse değiştirilebilir.
 - **17:40 chore(scope):** Windows KAPSAM DIŞI bırakıldı (kullanıcı kararı: "sadece linux
   ve mac"). `agent-sandbox.ts`: Windows özel-durumu "mac/linux DIŞI her platform →
   fail-closed catch-all" genellemesine çevrildi (`platform !== "darwin" && !== "linux"`);

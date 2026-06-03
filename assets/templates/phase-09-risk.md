@@ -9,22 +9,29 @@ Your job is to walk through residual risks and decide for each:
 
 ## Steps
 
-1. From **Spec risks** + **Phase 9 audit** below, enumerate residual risks.
+1. From **Spec risks** + **Phase 9 audit** + **Technical debt scan** below,
+   enumerate residual risks (the scan's deterministic markers are concrete risks).
 2. For each risk surface (input validation, error paths, race conditions,
-   resource leaks, dependency surfaces, etc.), call **ask_risk_decision** with
-   a concrete question and the three options above.
+   resource leaks, dependency surfaces, technical debt, etc.), call
+   **ask_risk_decision** with a concrete question and the three options above.
 3. After all risks classified, call **complete_risk_review** with a structured
    summary { risk_count, decisions[] }.
 
-## Review across five axes (code-review-and-quality discipline)
+## Review across six axes (code-review-and-quality discipline)
 
-Don't review ad hoc. Sweep these five axes; a risk in any one deserves a decision:
+Don't review ad hoc. Sweep these six axes; a risk in any one deserves a decision:
 
 1. **Correctness** — does it actually do what the AC says (not just run)?
 2. **Security** — input validation, authz boundaries, secrets, injection, unsafe deserialize.
 3. **Error & edge paths** — failure handling, empty/`null`/huge inputs, partial writes.
 4. **Performance & resources** — N+1 queries, unbounded loops, leaks, missing indexes.
 5. **Maintainability** — dead code, duplicated logic, unclear contracts (lighter weight).
+6. **Technical debt (THIS iteration's changes only)** — the deterministic scan below lists
+   markers (TODO/FIXME/HACK, prod-mock, hardcoded credential, empty catch, skipped test).
+   Each is a candidate risk. Go DEEPER than the scanner: duplicated logic across the changed
+   files, leaky/missing abstractions, dead code, over-complex flow, shotgun changes — these
+   regex can't catch. Scope is STRICTLY the changed files listed under "Changed files you may
+   inspect"; do NOT raise debt about pre-existing code this iteration did not touch.
 
 `skip` / `fix` / `rule` is your **severity label**: skip = low & genuinely acceptable;
 fix = must address before shipping; rule = systemic, encode a convention so it's caught earlier.
@@ -57,7 +64,23 @@ Before complete_risk_review, confirm:
 
 - Cap at 20 questions. Do NOT loop indefinitely.
 - Decisions must be one of skip|fix|rule (lowercase).
-- Do NOT use file-system tools — only ask_risk_decision and complete_risk_review.
+- File access is SCOPED: you MAY use **Read** and **Grep** to inspect ONLY the files
+  listed in "Changed files you may inspect (this iteration)" — to assess deeper technical
+  debt. Do NOT read any other path (pre-existing code, configs, home). Do NOT use Bash,
+  Write, Edit, or any other tool besides Read/Grep/ask_risk_decision/complete_risk_review.
+  If the deterministic scan + audit are enough, you need not read at all.
+
+## Technical debt — deterministic scan (THIS iteration's changed production files)
+
+---
+{{TECH_DEBT_FINDINGS}}
+---
+
+## Changed files you may inspect (this iteration only)
+
+You may Read/Grep ONLY these files (and nothing else) for deeper tech-debt assessment:
+
+{{TECH_DEBT_FILES}}
 
 ## Spec risks (from spec.md)
 

@@ -155,3 +155,21 @@ export function scanTechDebt(content: string): TechDebtFinding[] {
 export function getTechDebtCount(state: State): number {
   return (state as State & { tdd_tech_debt_count?: number }).tdd_tech_debt_count ?? 0;
 }
+
+// Test/spec dosyaları — tech-debt taraması dışı (mock/dummy/skip oralarda meşru).
+// Phase 8 kendi private kopyasını kullanır; Phase 9 (proje-geneli scope) bunu kullanır.
+const TEST_PATH_PATTERNS: RegExp[] = [
+  /\.test\.[tj]sx?$/,
+  /\.spec\.[tj]sx?$/,
+  /_test\.(py|go|rs)$/,
+  /test_.*\.py$/,
+  /\/__tests__\//,
+  /\/tests?\//,
+  /\/spec\//,
+];
+
+/** Bir yol test/spec dosyası mı (tech-debt taraması dışı). node_modules → false (zaten elenir). */
+export function isTestPath(path: string): boolean {
+  if (path.includes("node_modules")) return false;
+  return TEST_PATH_PATTERNS.some((re) => re.test(path));
+}

@@ -11,6 +11,11 @@ import {
 } from "./relevance/injectors.js";
 import type { QaAskqBackend } from "./base/qa-askq-controller.js";
 import { createQaAskqBackend } from "./base/qa-askq-cli-backend.js";
+import {
+  collectIterationTechDebt,
+  renderChangedFilesList,
+  renderTechDebtFindings,
+} from "./phase-9-tech-debt.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { emitError } from "./ipc.js";
@@ -116,14 +121,25 @@ export class Phase9Controller {
     //   - SPEC_RISKS: deterministic — spec'in Risks section'u olduğu gibi.
     //   - PHASE_9_AUDIT: relevance-filtered — TDD codegen event'lerinden
     //     mevcut intent'e en alakalı olanlar (eskiden last-30 capping idi).
-    const [specRisks, phase9Audit] = await Promise.all([
+    const [specRisks, phase9Audit, techDebt] = await Promise.all([
       getSpecSectionMarkdown(this.state.project_root, "Risks"),
       buildRelevantPhase9Audit(
         this.config,
         this.state,
         this.state.intent_summary,
       ),
+      // v15.12: bu iterasyonda değişen üretim dosyalarında deterministik teknik
+      // borç taraması (Faz 8 per-dosya gate'ini tamamlar; SADECE bu iterasyonun işi).
+      collectIterationTechDebt(this.state),
     ]);
+
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 9,
+      event: "phase-9-tech-debt-scan",
+      caller: "mycl-orchestrator",
+      detail: `scanned=${techDebt.scannedCount} findings=${techDebt.totalFindings}${techDebt.truncated ? " (truncated)" : ""}`,
+    });
 
     let systemPrompt: string;
     try {
@@ -134,6 +150,8 @@ export class Phase9Controller {
       systemPrompt = substitute(tmpl, {
         SPEC_RISKS: specRisks,
         PHASE_9_AUDIT: phase9Audit,
+        TECH_DEBT_FINDINGS: renderTechDebtFindings(techDebt),
+        TECH_DEBT_FILES: renderChangedFilesList(techDebt),
         CONVERSATION_CONTEXT: convSection,
       });
     } catch (err) {
