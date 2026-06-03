@@ -6,6 +6,13 @@
 
 ## 2026-06-04
 
+- **feat(os-notification) [saha-5/5]:** Kullanıcı aksiyonu beklenirken (askq) OS bildirimi.
+  `tauri-plugin-notification` eklendi (Cargo.toml + lib.rs `.plugin(...init())` + capabilities
+  `notification:default` + `@tauri-apps/plugin-notification`). `App.tsx`: açılışta izin iste;
+  yeni askq (id değişince) gelince — yalnız pencere ODAKTA DEĞİLSE (spam yok) — bildirim gönder
+  (başlık + soru). Tüm askq'ları kapsar (Özellik 1 hata-askq'sı + onaylar dahil). cargo check +
+  npm run check yeşil. DRIVE-BY flaky-fix: `app.test.ts` boot testi sabit 2×`setTimeout(0)` ile
+  bekliyordu (boot adımlarına ara sıra yetişmiyor → ~4'te 1 fail) → `vi.waitFor` deterministik.
 - **feat(living-docs) [saha-2/5]:** `.mycl/features.md` + `user-guide.md` artık ORKESTRATÖR
   rolü yazar (ana ajana/codegen'e GİTMEZ — kullanıcı kuralı). `living-docs.ts`:
   `backendForRole(config,"main")` → `"orchestrator"` (bootstrap + update CLI kapısı);

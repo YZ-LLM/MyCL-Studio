@@ -27,6 +27,12 @@ import type {
 } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
 import { ErrorDrawer } from "./components/ErrorDrawer";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type ConfigStatus =
   | { state: "unknown" }
@@ -481,6 +487,42 @@ function App() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [mainState, setMainState] = useState<MainState>(INITIAL_STATE);
   const [processedCount, setProcessedCount] = useState(0);
+
+  // v15.13 (saha 5/5): kullanıcı aksiyonu beklenirken (askq) OS bildirimi.
+  // Açılışta izin iste (sessiz başarısız — bildirim plugin'i yoksa akışı bozma).
+  useEffect(() => {
+    void (async () => {
+      try {
+        if (!(await isPermissionGranted())) await requestPermission();
+      } catch {
+        /* bildirim yoksa sessiz geç */
+      }
+    })();
+  }, []);
+
+  // Yeni bir askq gelince (id değişince) bildirim — yalnız pencere ODAKTA DEĞİLSE
+  // (kullanıcı zaten bakıyorsa spam etme). Tek askq başına bir kez.
+  const lastNotifiedAskq = useRef<string | null>(null);
+  useEffect(() => {
+    const askq = mainState.pendingAskq;
+    if (!askq || lastNotifiedAskq.current === askq.id) return;
+    lastNotifiedAskq.current = askq.id;
+    void (async () => {
+      try {
+        const focused = await getCurrentWindow()
+          .isFocused()
+          .catch(() => true);
+        if (focused) return; // odakta → bildirme
+        if (!(await isPermissionGranted())) return;
+        sendNotification({
+          title: "MyCL — yanıtın bekleniyor",
+          body: askq.question.slice(0, 140),
+        });
+      } catch {
+        /* sessiz */
+      }
+    })();
+  }, [mainState.pendingAskq]);
   const [configStatus, setConfigStatus] = useState<ConfigStatus>({
     state: "unknown",
   });

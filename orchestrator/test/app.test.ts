@@ -13,16 +13,18 @@ describe("App composition root (v15.1)", () => {
       dispatch: vi.fn().mockResolvedValue(undefined),
     };
     const app = new App(deps);
-    // start() readline.on("close") ile process.exit(0) çağıracağı için
-    // void promise — beklemiyoruz. setImmediate ile event loop bir tur dön
-    // ki init bloku tamamlansın.
+    // start() readline.on("close") ile process.exit(0) çağıracağı için void promise
+    // (beklemiyoruz; stdin loop oturmaz). Boot async → SABİT tick yerine vi.waitFor
+    // ile deterministik bekle (2 setTimeout(0) bazen boot adımlarına yetişmiyordu → flaky).
     void app.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(deps.loadI18n).toHaveBeenCalledTimes(1);
-    expect(deps.startRuntimeHttpServer).toHaveBeenCalledTimes(1);
-    expect(deps.emitConfigStatus).toHaveBeenCalledTimes(1);
+    await vi.waitFor(
+      () => {
+        expect(deps.loadI18n).toHaveBeenCalledTimes(1);
+        expect(deps.startRuntimeHttpServer).toHaveBeenCalledTimes(1);
+        expect(deps.emitConfigStatus).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 2000, interval: 10 },
+    );
   });
 
   it("continues boot when loadI18n throws (emits config_status fail-soft)", async () => {
@@ -36,11 +38,13 @@ describe("App composition root (v15.1)", () => {
     };
     const app = new App(deps);
     void app.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(deps.loadI18n).toHaveBeenCalled();
-    // i18n fail olsa bile startRuntimeHttpServer çağrılır (boot devam eder)
-    expect(deps.startRuntimeHttpServer).toHaveBeenCalled();
+    await vi.waitFor(
+      () => {
+        expect(deps.loadI18n).toHaveBeenCalled();
+        // i18n fail olsa bile startRuntimeHttpServer çağrılır (boot devam eder)
+        expect(deps.startRuntimeHttpServer).toHaveBeenCalled();
+      },
+      { timeout: 2000, interval: 10 },
+    );
   });
 });

@@ -112,6 +112,8 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // v15.13 (saha 5/5): askq beklerken OS bildirimi.
+        .plugin(tauri_plugin_notification::init())
         .manage(OrchestratorState::default())
         .invoke_handler(tauri::generate_handler![
             get_recent_projects,

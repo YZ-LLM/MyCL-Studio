@@ -21,6 +21,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2.7.1"
+# v15.13 (saha 5/5): kullanıcı aksiyonu beklendiğinde (askq) OS bildirimi.
+tauri-plugin-notification = "2"
 # v15.2.1: aynı binary ikinci kez exec edildiğinde, ikinci process ilk
 # instance'a relay yapar (argv aktarımı). v15.2.2'de bu argv'den yeni pencere
 # açma logic'i devreye girecek. Şu an sadece plugin init + log; davranış
