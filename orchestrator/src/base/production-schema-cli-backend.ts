@@ -16,7 +16,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { appendAudit } from "../audit.js";
-import { extractKindBlock } from "../cli-json.js";
+import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
@@ -42,7 +42,9 @@ function sha256(s: string): string {
 /** Faz controller'larının verdiği write-tool şemasından CLI çıktı talimatı üret. */
 function buildOutputInstruction(opts: ProductionRunOpts): string {
   const writeTool = opts.tools.find((tt) => tt.name === opts.production.write_tool_name);
-  const schema = writeTool?.input_schema ?? {};
+  const schema = (writeTool?.input_schema as Record<string, unknown> | undefined) ?? {};
+  // v15.12: somut örnek — iç içe dizileri GÖSTERİR (ajan düzyazıya çevirmesin).
+  const example = JSON.stringify({ kind: "write", ...(schemaToSkeleton(schema) as Record<string, unknown>) });
   return `
 
 ---
@@ -55,6 +57,8 @@ Investigate with Read/Grep/Glob/Bash if needed (DO NOT write to disk — MyCL wr
 1) Write the output as a SINGLE JSON block: \`{"kind":"write", ...fields}\`. Fields must match this
    JSON Schema EXACTLY (excluding kind):
    ${JSON.stringify(schema)}
+   EXACT shape — copy this structure (nested arrays of objects must be JSON arrays, NOT prose):
+   ${example}
 2) AFTER you receive the "Saved" confirmation: write \`{"kind":"approval","pitch_en":"2-3 sentence English summary"}\`.
 3) If the user requests a revision, write an updated new \`{"kind":"write",...}\` block.
 
@@ -107,7 +111,13 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
     const sessionId = randomUUID();
     const systemPrompt = opts.systemPrompt + buildOutputInstruction(opts);
     const writeTool = opts.tools.find((tt) => tt.name === opts.production.write_tool_name);
-    const required = (writeTool?.input_schema?.required as string[] | undefined) ?? [];
+    const writeSchema = (writeTool?.input_schema as Record<string, unknown> | undefined) ?? {};
+    const required = (writeSchema.required as string[] | undefined) ?? [];
+    // v15.12: somut örnek (nudge + son-çare sentez için).
+    const writeExample = JSON.stringify({
+      kind: "write",
+      ...(schemaToSkeleton(writeSchema) as Record<string, unknown>),
+    });
     const effort = opts.config.claude_code_flags.effort;
 
     emitClaudeStream({
@@ -120,7 +130,8 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
 
     let resume = false;
     let userMessage = opts.initialUserMessage;
-    let nudged = false;
+    let noJsonNudges = 0; // JSON yok → örnekli nudge (≤2), sonra prose'tan sentez
+    let writeFieldNudges = 0; // write eksik-alan → örnekli nudge (≤2), sonra coerce + devam
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.aborted) return { kind: "aborted" };
@@ -145,27 +156,48 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
         return { kind: "failed", reason: `claude CLI failed: ${res.error ?? "bilinmeyen"}` };
       }
 
-      const block = extractKindBlock(res.text, ["write", "approval"]);
+      let block = extractKindBlock(res.text, ["write", "approval"]);
       if (block === null) {
-        if (nudged) {
-          return { kind: "failed", reason: `${opts.tag}: geçerli write/approval JSON üretilemedi` };
+        if (noJsonNudges < 2) {
+          noJsonNudges++;
+          resume = true;
+          userMessage = `No valid JSON block found. Write ONLY a single JSON block (no prose). Copy this shape: ${writeExample}`;
+          continue;
         }
-        nudged = true;
-        resume = true;
-        userMessage =
-          "No valid JSON block found. Write ONLY a single {\"kind\":\"write\",...} or {\"kind\":\"approval\",...} block.";
-        continue;
+        // v15.12: 2 nudge sonrası hâlâ JSON yok → ASLA takılma. Ajanın metnini write
+        // olarak sentezle (prose = içerik) + coerce + GÖRÜNÜR uyarı + devam.
+        const { coerced, defaulted } = coerceToSchema({}, writeSchema, res.text);
+        block = { kind: "write", ...coerced };
+        emitChatMessage(
+          "system",
+          `⚠️ ${opts.tag}: ajan yapılandırılmış blok üretmedi; mevcut metinle devam edildi (dolduruldu: ${defaulted.join(", ") || "—"}).`,
+        );
       }
-      nudged = false;
 
       if (block.kind === "write") {
-        const writeInput: Record<string, unknown> = { ...block };
+        let writeInput: Record<string, unknown> = { ...block };
         delete writeInput.kind;
-        const missing = required.filter((f) => !(f in writeInput));
+        const missing = required.filter((f) => {
+          const v = writeInput[f];
+          return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+        });
         if (missing.length > 0) {
-          resume = true;
-          userMessage = `Missing required field(s): ${missing.join(", ")}. Rewrite {"kind":"write",...} with all fields.`;
-          continue;
+          if (writeFieldNudges < 2) {
+            writeFieldNudges++;
+            resume = true;
+            userMessage =
+              `Missing required field(s): ${missing.join(", ")}. Rewrite {"kind":"write",...} with ALL fields + exact shapes ` +
+              `(arrays of objects must be JSON arrays, NOT prose). Copy: ${writeExample}`;
+            continue;
+          }
+          // v15.12: nudge sonrası hâlâ eksik → takılma yerine coerce + görünür uyarı + devam.
+          const c = coerceToSchema(block, writeSchema, res.text);
+          writeInput = { ...c.coerced };
+          delete writeInput.kind;
+          emitChatMessage(
+            "system",
+            `⚠️ ${opts.tag}: write bloğunda eksik alan vardı — mevcut bilgiyle dolduruldu, devam edildi (${c.defaulted.join(", ") || "—"}).`,
+          );
         }
         let md: string;
         try {

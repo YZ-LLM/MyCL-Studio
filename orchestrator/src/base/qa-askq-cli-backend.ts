@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
-import { extractKindBlock } from "../cli-json.js";
+import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
@@ -45,6 +45,21 @@ function buildOutputInstruction(opts: QaAskqRunOpts): string {
     const req = (tool?.input_schema as { required?: string[] } | undefined)?.required ?? [];
     return req.length ? req.join(", ") : "(fields from the schema)";
   };
+  // Somut örnek: şemadan tam şekli üret (iç içe dizileri GÖSTERİR → ajan düzyazıya
+  // çevirmesin; v15.12 "dimensions düzyazı" takılmasının proaktif çözümü).
+  const exampleOf = (kind: string, name?: string): string | null => {
+    const tool = name ? tools.find((tt) => tt.name === name) : undefined;
+    if (!tool) return null;
+    const skel = schemaToSkeleton(tool.input_schema as Record<string, unknown>) as Record<string, unknown>;
+    return JSON.stringify({ kind, ...skel });
+  };
+  const examples = [
+    askq.clarifying_tool_name ? exampleOf("askq", askq.clarifying_tool_name) : null,
+    exampleOf("approval", askq.approval_tool_name),
+    askq.abandon_tool_name ? exampleOf("abandon", askq.abandon_tool_name) : null,
+    askq.tweak_tool_name ? exampleOf("tweak", askq.tweak_tool_name) : null,
+    askq.failure_tool_name ? exampleOf("ac_failure", askq.failure_tool_name) : null,
+  ].filter((x): x is string => x !== null);
   const lines: string[] = [];
   if (askq.clarifying_tool_name) {
     lines.push(
@@ -76,6 +91,9 @@ You CANNOT call tools. Your ENTIRE answer must be a single JSON block — write 
 outside the block (neither before nor after). Valid JSON: double quotes, no trailing comma.
 The \`kind\` field is required. Block content (question/summary/etc.) is in English. Available blocks:
 ${lines.join("\n")}
+
+### EXACT shape — copy this structure (note nested arrays of objects; do NOT write them as prose):
+${examples.join("\n")}
 
 DO NOT write to disk (only investigate with Read/Grep/Glob/Bash). When you ask a question you will
 receive the user's answer in the next message; continue accordingly (then another {"kind":"askq"} or {"kind":"approval"}).`;
@@ -135,10 +153,19 @@ export class CliQaAskqBackend implements QaAskqBackend {
     });
     emitChatMessage("system", `🤖 Claude Code CLI (abonelik) — ${opts.tag} (model: ${opts.modelId})…`);
 
+    // v15.12 dayanıklılık: onay bloğunun somut örneği (nudge + son-çare sentez için).
+    const approvalTool = opts.tools.find((tt) => tt.name === askq.approval_tool_name);
+    const approvalExample = approvalTool
+      ? JSON.stringify({
+          kind: "approval",
+          ...(schemaToSkeleton(approvalTool.input_schema as Record<string, unknown>) as Record<string, unknown>),
+        })
+      : null;
+
     let resume = false;
     let userMessage = opts.initialUserMessage;
-    let nudged = false;
-    let fieldNudgeUsed = false; // v15.9: terminal blok eksik-zorunlu-alan nudge'ı (1×)
+    let noJsonNudges = 0; // JSON yok → örnekli nudge (≤2), sonra prose'tan sentez (takılma yok)
+    let fieldNudges = 0; // eksik zorunlu alan → örnekli nudge (≤2), sonra coerce + devam
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (this.aborted) return { kind: "aborted" };
@@ -166,7 +193,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
         return { kind: "failed", reason: `claude CLI failed: ${res.error ?? "bilinmeyen"}` };
       }
 
-      const block = extractKindBlock(res.text, [
+      let block = extractKindBlock(res.text, [
         "askq",
         "approval",
         "abandon",
@@ -174,22 +201,36 @@ export class CliQaAskqBackend implements QaAskqBackend {
         "ac_failure",
       ]);
       if (block === null) {
-        if (nudged) {
-          return { kind: "failed", reason: `${opts.tag}: geçerli JSON blok üretilemedi` };
+        if (noJsonNudges < 2) {
+          noJsonNudges++;
+          resume = true;
+          userMessage =
+            "No valid JSON block found. Write ONLY a single JSON block (no prose, no text around it). " +
+            (approvalExample ? `Copy this EXACT shape: ${approvalExample}` : "");
+          continue;
         }
-        nudged = true;
-        resume = true;
-        userMessage =
-          "No valid JSON block found. Write ONLY a single {\"kind\":\"askq\"|\"approval\"|...} block, no other text.";
-        continue;
+        // v15.12: 2 nudge sonrası hâlâ JSON yok → ASLA takılma. Ajanın metnini onay
+        // bloğu olarak sentezle (prose = içerik), eksikleri coerce et, GÖRÜNÜR uyarı ver.
+        if (!approvalTool) {
+          return { kind: "failed", reason: `${opts.tag}: geçerli JSON blok üretilemedi (onay aracı yok)` };
+        }
+        const { coerced, defaulted } = coerceToSchema(
+          {},
+          approvalTool.input_schema as Record<string, unknown>,
+          res.text,
+        );
+        block = { kind: "approval", ...coerced };
+        emitChatMessage(
+          "system",
+          `⚠️ ${opts.tag}: ajan yapılandırılmış blok üretmedi; mevcut metinle devam edildi (dolduruldu: ${defaulted.join(", ") || "—"}).`,
+        );
       }
-      nudged = false;
 
-      // v15.9: terminal blok (approval/abandon/tweak/ac_failure) ZORUNLU alan
-      // doğrulaması. Ajan generic {summary,title} emit edip tüketicinin beklediği
-      // alanı (örn. enriched_summary) eksik bırakırsa: nudge (1×); hâlâ eksikse
-      // GÖRÜNÜR fail. Aksi halde malformed blok downstream'e geçer → faz "missing"
-      // hatası + pipeline asılması (Faz 2 contract bug'ının kökü).
+      // v15.9 + v15.12: terminal blok (approval/abandon/tweak/ac_failure) ZORUNLU alan
+      // doğrulaması. Ajan generic {summary,title} emit eder veya dizi alanını (dimensions)
+      // düzyazıya çevirip atlarsa: örnekli nudge (≤2). Hâlâ eksikse ASLA hard-fail ETME →
+      // coerceToSchema ile tip-güvenli doldur (array→[], string→alias/ham-metin) + GÖRÜNÜR
+      // uyarı + DEVAM. Pipeline takılmaz; downstream boş diziyi zaten tolere eder.
       if (block.kind !== "askq") {
         const kindToToolName: Record<string, string | undefined> = {
           approval: askq.approval_tool_name,
@@ -199,26 +240,35 @@ export class CliQaAskqBackend implements QaAskqBackend {
         };
         const toolName = kindToToolName[String(block.kind)];
         const tool = toolName ? opts.tools.find((tt) => tt.name === toolName) : undefined;
-        const required =
-          (tool?.input_schema as { required?: string[] } | undefined)?.required ?? [];
+        const schema = (tool?.input_schema as Record<string, unknown> | undefined) ?? {};
+        const required = (schema.required as string[] | undefined) ?? [];
         const missing = required.filter((f) => {
           const v = (block as Record<string, unknown>)[f];
           return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
         });
         if (missing.length > 0) {
-          if (fieldNudgeUsed) {
-            return {
-              kind: "failed",
-              reason: `${opts.tag}: '${String(block.kind)}' bloğu zorunlu alan eksik (${missing.join(", ")}) — nudge sonrası da düzelmedi`,
-            };
+          if (fieldNudges < 2) {
+            fieldNudges++;
+            resume = true;
+            const ex = tool
+              ? JSON.stringify({
+                  kind: block.kind,
+                  ...(schemaToSkeleton(schema) as Record<string, unknown>),
+                })
+              : "";
+            userMessage =
+              `Your '${String(block.kind)}' block is missing REQUIRED field(s): ${missing.join(", ")}. ` +
+              `REWRITE the block with the EXACT field names + shapes (arrays of objects must be JSON arrays, NOT prose). ` +
+              (ex ? `Copy this shape: ${ex}` : "");
+            continue;
           }
-          fieldNudgeUsed = true;
-          resume = true;
-          userMessage =
-            `Your '${String(block.kind)}' block is missing REQUIRED field(s): ${missing.join(", ")}. ` +
-            `REWRITE the {"kind":"${String(block.kind)}", ...} block using the EXACT field names from the ` +
-            `${toolName} schema (do NOT use generic "summary"/"title" — use exact names like enriched_summary).`;
-          continue;
+          // v15.12: nudge sonrası hâlâ eksik → takılma yerine coerce + görünür uyarı + devam.
+          const { coerced, defaulted } = coerceToSchema(block, schema, res.text);
+          block = { ...coerced, kind: block.kind };
+          emitChatMessage(
+            "system",
+            `⚠️ ${opts.tag}: '${String(block.kind)}' bloğunda eksik alan vardı — mevcut bilgiyle dolduruldu, devam edildi (${defaulted.join(", ") || "—"}).`,
+          );
         }
       }
 

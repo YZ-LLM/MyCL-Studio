@@ -6,6 +6,29 @@
 
 ## 2026-06-03
 
+- **22:06 fix(robustness):** Pipeline ARTIK ajan text-JSON bozukluğunda TAKILMIYOR (kullanıcı
+  şartı: "hiçbir yerde takılmamalı; her özellik işini iyi yapmalı"). Tetik: Faz 2 ana ajanı
+  `dimensions` dizisini düzyazı yazıp atlayınca backend 1-nudge sonrası hard-fail → pipeline
+  durmuştu. Kök neden: CLI'da native tool yok → ajan iç içe diziyi düzyazıya çeviriyor.
+  - Yeni `cli-json.ts` saf helper'lar: `schemaToSkeleton(schema)` (şemadan SOMUT örnek —
+    iç içe diziyi `[{…}]` gösterir) + `coerceToSchema(block, schema, fallbackText)` (eksik/
+    yanlış-tip zorunlu alanı tip-güvenli doldur: array→[], string→alias `summary`/`title`/
+    `pitch` ya da ajanın ham metni; v15.9 contract bug'ını fail yerine ONARARAK çözer).
+  - `qa-askq` (1/2/9) + `production-schema` (3/4/7): (a) `buildOutputInstruction`'a EXAMPLE
+    eklendi (proaktif — ajan ilk seferde doğru şekli görür); (b) eksik-alan nudge'ı somut
+    örnekli + deneme **1→2**; (c) nudge sonrası hâlâ bozuksa ASLA hard-fail ETME →
+    `coerceToSchema` + tek GÖRÜNÜR uyarı + DEVAM; (d) no-JSON-at-all (2 nudge sonrası) →
+    ajan metnini terminal blok olarak sentezle + uyarı + devam. Downstream boş diziyi zaten
+    tolere eder (phase-2 dimensions / phase-9 decisions Array.isArray guard).
+  - Kapsam DIŞI (doğru şekilde görünür fail-closed kalır): altyapı hataları (claude yok /
+    spawn / exit≠0 / sandbox kurulamadı) — ortam sorunu, sessizce "uydurup devam" YANLIŞ olurdu.
+  - `cli-interactive-loop` KULLANILMIYOR (legacy) → dokunulmadı. Test: cli-json +9 birim
+    (schemaToSkeleton/coerce), qa-askq "iki kez eksik" testi yeni davranışa (coerce+devam)
+    güncellendi.
+  - DRIVE-BY flaky-test fix: `subscription-mode.test` v15.10'dan beri abonelik-modu
+    classifyViaCli'nin GERÇEK `claude` spawn'ını mock'lamıyordu → ~5sn timeout, CI'ı ara ara
+    kırıyordu. `runClaudeCli` mock'landı → deterministik + hızlı (kendisi de bir "takılma"ydı).
+  - npm run check yeşil.
 - **21:38 fix(main-agent-english):** Ana ajan ARTIK kesin İngilizce konuşur (kullanıcı
   şartı; ekran: CLAUDE CODE paneli Faz 2'de Türkçe üretmişti). Kök neden: ajanın GİRDİLERİ
   Türkçe'ydi (kural recency'si zayıf, yenemiyordu). Düzeltme — ana ajanın TÜM girdileri

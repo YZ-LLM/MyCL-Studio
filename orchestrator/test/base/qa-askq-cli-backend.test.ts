@@ -190,7 +190,17 @@ function makeOptsRequired(): QaAskqRunOpts {
   const o = makeOpts();
   o.tools = o.tools.map((t) =>
     t.name === "complete_audit"
-      ? { ...t, input_schema: { type: "object", required: ["enriched_summary", "dimensions"] } }
+      ? {
+          ...t,
+          input_schema: {
+            type: "object",
+            required: ["enriched_summary", "dimensions"],
+            properties: {
+              enriched_summary: { type: "string" },
+              dimensions: { type: "array", items: { type: "object" } },
+            },
+          },
+        }
       : t,
   );
   return o;
@@ -212,13 +222,19 @@ describe("CliQaAskqBackend zorunlu-alan nudge", () => {
     expect(sessionMock).toHaveBeenCalledTimes(2); // nudge resume edildi
   });
 
-  it("approval iki kez eksik → görünür fail (sessiz pass-through YOK)", async () => {
+  it("v15.12: nudge'lardan sonra hâlâ eksik → coerce + DEVAM (takılma YOK)", async () => {
+    // Ajan 3 turda da eksik blok yazıyor (2 nudge sonrası). Eski davranış: hard-fail.
+    // Yeni davranış: coerce (summary→enriched_summary alias, dimensions→[]) + devam.
     sessionMock
-      .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"x"}`))
-      .mockResolvedValueOnce(ok(`{"kind":"approval","title":"y"}`)); // hâlâ eksik
+      .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"audit x"}`))
+      .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"audit x"}`))
+      .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"audit x"}`));
     const backend = createQaAskqBackend(makeOptsRequired()) as CliQaAskqBackend;
-    const out = (await backend.run()) as { kind: string; reason?: string };
-    expect(out.kind).toBe("failed");
-    expect(String(out.reason)).toContain("zorunlu alan eksik");
+    const p = backend.run();
+    await answerOnce(backend, "Approve");
+    const out = (await p) as { kind: string; approvalInput: Record<string, unknown> };
+    expect(out.kind).toBe("approved"); // ASLA takılma — coerce + devam
+    expect(out.approvalInput.enriched_summary).toBe("audit x"); // alias'tan kurtarıldı
+    expect(Array.isArray(out.approvalInput.dimensions)).toBe(true); // coerce → []
   });
 });
