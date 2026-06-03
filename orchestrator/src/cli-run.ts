@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { sandboxSettingsArgs } from "./agent-sandbox.js";
+import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import type { TokenUsage } from "./cli-session.js";
 import { log } from "./logger.js";
@@ -89,6 +89,16 @@ function buildArgs(opts: CliRunOpts): string[] {
  * Hata/timeout durumunda `{ ok:false, error }` döner — caller SDK'ya düşebilir.
  */
 export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
+  // v15.11 GÜVENLİK: spawn-öncesi sandbox kapısı (enforce + sandbox yok → çalıştırma).
+  if (!guardSandboxOrWarn()) {
+    return Promise.resolve({
+      ok: false,
+      text: "",
+      toolUses: [],
+      turns: 0,
+      error: "sandbox kurulamadı (policy=enforce) — ajan çalıştırılmadı",
+    });
+  }
   const args = buildArgs(opts);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

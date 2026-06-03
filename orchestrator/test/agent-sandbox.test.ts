@@ -1,184 +1,258 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentSandboxSettings } from "../src/agent-sandbox.js";
+import {
+  buildAgentSandboxSettings,
+  detectSandboxAvailability,
+  runtimeAllowFor,
+  sandboxGuard,
+} from "../src/agent-sandbox.js";
 
-// buildAgentSandboxSettings SAF — home/homeEntries/policy/projectRoot/ultracode
-// param ile enjekte edilir; host home'dan bağımsız. paths.test.ts kalıbı.
+// Saf fonksiyonlar — platform/home/homeEntries/policy enjekte edilir; host'tan
+// bağımsız (çapraz-platform). paths.test.ts kalıbı. IPC yan etkisi yok.
 
 const HOME = "/Users/umit";
-// Tipik home: korunan kullanıcı verisi + runtime + kullanıcı projeleri karışık.
-const ENTRIES = [
-  "Music",
-  "Pictures",
-  "Documents",
-  "Desktop",
-  "Downloads",
-  ".ssh",
-  ".aws",
-  "adminpanel", // home altındaki bir proje
-  "other-project",
-  ".claude", // runtime — denylenmez
-  ".claude.json", // runtime
-  "Library", // runtime (Caches/App Support/keychain)
-  ".cache",
-  ".npm",
-  ".nvm",
+const LINUX_HOME = "/home/umit";
+// Tipik macOS home: korunan veri + runtime + projeler karışık.
+const MAC_ENTRIES = [
+  "Music", "Pictures", "Documents", "Desktop", "Downloads",
+  ".ssh", ".aws", "adminpanel", "other-project",
+  ".claude", ".claude.json", "Library", ".cache", ".npm", ".nvm", ".config",
+];
+const LINUX_ENTRIES = [
+  "Music", "Pictures", "Documents", "Downloads",
+  ".ssh", "myproject",
+  ".claude", ".claude.json", ".config", ".cache", ".npm", ".local",
 ];
 
-describe("agent-sandbox · buildAgentSandboxSettings", () => {
-  describe("denyRead listesi (katı okuma)", () => {
-    const { settings, denyCount } = buildAgentSandboxSettings({
-      projectRoot: "/tmp/mycl-validate/shop", // home DIŞINDA → hiçbir home girdisi proje değil
+function deny(settings: Record<string, unknown>): string[] {
+  return (settings.sandbox as { filesystem?: { denyRead?: string[] } })?.filesystem?.denyRead ?? [];
+}
+
+describe("agent-sandbox · detectSandboxAvailability (çapraz-platform)", () => {
+  it("darwin → her zaman available (Seatbelt yerleşik)", () => {
+    expect(detectSandboxAvailability({ platform: "darwin", hasBwrap: false, hasSocat: false }))
+      .toEqual({ available: true });
+  });
+
+  it("linux + bwrap & socat var → available", () => {
+    expect(detectSandboxAvailability({ platform: "linux", hasBwrap: true, hasSocat: true }))
+      .toEqual({ available: true });
+  });
+
+  it("linux + bwrap yok → unavailable + reason bwrap içerir", () => {
+    const r = detectSandboxAvailability({ platform: "linux", hasBwrap: false, hasSocat: true });
+    expect(r.available).toBe(false);
+    expect(r.reason).toMatch(/bwrap/);
+  });
+
+  it("linux + socat yok → unavailable + reason socat içerir", () => {
+    const r = detectSandboxAvailability({ platform: "linux", hasBwrap: true, hasSocat: false });
+    expect(r.available).toBe(false);
+    expect(r.reason).toMatch(/socat/);
+  });
+
+  it("win32 → unavailable + reason WSL2/Windows içerir", () => {
+    const r = detectSandboxAvailability({ platform: "win32", hasBwrap: true, hasSocat: true });
+    expect(r.available).toBe(false);
+    expect(r.reason).toMatch(/Windows|WSL2/);
+  });
+});
+
+describe("agent-sandbox · sandboxGuard (görünür fail-closed)", () => {
+  const unavailable = { available: false, reason: "test sebebi" };
+
+  it("off → proceed, mesaj yok", () => {
+    expect(sandboxGuard("off", unavailable)).toEqual({ proceed: true });
+  });
+
+  it("available → proceed, mesaj yok (policy farketmez)", () => {
+    expect(sandboxGuard("enforce", { available: true })).toEqual({ proceed: true });
+    expect(sandboxGuard("warn", { available: true })).toEqual({ proceed: true });
+  });
+
+  it("enforce + unavailable → proceed:false + error mesajı", () => {
+    const d = sandboxGuard("enforce", unavailable);
+    expect(d.proceed).toBe(false);
+    expect(d.message?.level).toBe("error");
+    expect(d.message?.text).toMatch(/test sebebi/);
+  });
+
+  it("warn + unavailable → proceed:true + warning mesajı (hapissiz devam)", () => {
+    const d = sandboxGuard("warn", unavailable);
+    expect(d.proceed).toBe(true);
+    expect(d.message?.level).toBe("warning");
+    expect(d.message?.text).toMatch(/HAPSİ OLMADAN|hapsi olmadan/i);
+  });
+});
+
+describe("agent-sandbox · runtimeAllowFor (platform-aware)", () => {
+  it("darwin → Library + .config dahil", () => {
+    const s = runtimeAllowFor("darwin");
+    expect(s.has("Library")).toBe(true);
+    expect(s.has(".config")).toBe(true);
+    expect(s.has(".claude")).toBe(true);
+  });
+
+  it("linux → .config dahil, Library YOK", () => {
+    const s = runtimeAllowFor("linux");
+    expect(s.has(".config")).toBe(true);
+    expect(s.has("Library")).toBe(false);
+  });
+});
+
+describe("agent-sandbox · buildAgentSandboxSettings · macOS denyRead", () => {
+  const { settings, denyCount } = buildAgentSandboxSettings({
+    projectRoot: "/tmp/mycl-validate/shop",
+    ultracode: false,
+    policy: "enforce",
+    platform: "darwin",
+    home: HOME,
+    homeEntries: MAC_ENTRIES,
+  });
+  const denyRead = deny(settings);
+
+  it("korunan kullanıcı verisini reddeder (path + path/**)", () => {
+    for (const name of ["Music", "Pictures", "Documents", "Desktop", "Downloads", ".ssh", ".aws"]) {
+      expect(denyRead).toContain(`${HOME}/${name}`);
+      expect(denyRead).toContain(`${HOME}/${name}/**`);
+    }
+  });
+
+  it("diğer kullanıcı projelerini de reddeder", () => {
+    expect(denyRead).toContain(`${HOME}/adminpanel`);
+    expect(denyRead).toContain(`${HOME}/other-project`);
+  });
+
+  it("runtime girdilerini ASLA reddetmez (.config + Library dahil)", () => {
+    for (const rt of [".claude", ".claude.json", "Library", ".cache", ".npm", ".nvm", ".config"]) {
+      expect(denyRead).not.toContain(`${HOME}/${rt}`);
+    }
+  });
+
+  it("denyCount = reddedilen girdi × 2 (9 girdi: 5 medya + .ssh + .aws + 2 proje)", () => {
+    expect(denyCount).toBe(9 * 2);
+  });
+});
+
+describe("agent-sandbox · buildAgentSandboxSettings · Linux", () => {
+  it(".config Linux'ta runtime → reddedilmez; Music reddedilir", () => {
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: "/srv/app",
       ultracode: false,
       policy: "enforce",
-      home: HOME,
-      homeEntries: ENTRIES,
+      platform: "linux",
+      home: LINUX_HOME,
+      homeEntries: LINUX_ENTRIES,
     });
-    const sandbox = settings.sandbox as { filesystem: { denyRead: string[] } };
-    const denyRead = sandbox.filesystem.denyRead;
+    const denyRead = deny(settings);
+    expect(denyRead).not.toContain(`${LINUX_HOME}/.config`);
+    expect(denyRead).toContain(`${LINUX_HOME}/Music`);
+    expect(denyRead).toContain(`${LINUX_HOME}/myproject`);
+  });
+});
 
-    it("korunan kullanıcı verisini reddeder (her biri path + path/**)", () => {
-      for (const name of ["Music", "Pictures", "Documents", "Desktop", "Downloads", ".ssh", ".aws"]) {
-        expect(denyRead).toContain(`${HOME}/${name}`);
-        expect(denyRead).toContain(`${HOME}/${name}/**`);
-      }
-    });
-
-    it("diğer kullanıcı projelerini de reddeder", () => {
-      expect(denyRead).toContain(`${HOME}/adminpanel`);
-      expect(denyRead).toContain(`${HOME}/other-project`);
-    });
-
-    it("runtime girdilerini ASLA reddetmez (yoksa claude kırılır)", () => {
-      for (const rt of [".claude", ".claude.json", "Library", ".cache", ".npm", ".nvm"]) {
-        expect(denyRead).not.toContain(`${HOME}/${rt}`);
-        expect(denyRead).not.toContain(`${HOME}/${rt}/**`);
-      }
-    });
-
-    it("denyCount = reddedilen girdi sayısı × 2 (path + glob)", () => {
-      // 9 reddedilen girdi (5 medya + .ssh + .aws + 2 proje) × 2.
-      expect(denyCount).toBe(9 * 2);
-    });
+describe("agent-sandbox · buildAgentSandboxSettings · Windows (sandbox yok)", () => {
+  const { settings, denyCount } = buildAgentSandboxSettings({
+    projectRoot: "C:\\Users\\umit\\proj",
+    ultracode: false,
+    policy: "enforce",
+    platform: "win32",
+    home: "C:\\Users\\umit",
+    homeEntries: ["Music", "Documents", ".claude", "AppData"],
   });
 
-  describe("projectRoot-overlap guard (proje home altındaysa)", () => {
-    it("proje girdisinin KENDİSİNİ denylemez (proje okunur kalır)", () => {
-      const { settings } = buildAgentSandboxSettings({
-        projectRoot: `${HOME}/adminpanel`, // proje home'da bir girdi
-        ultracode: false,
-        policy: "enforce",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      const denyRead = (settings.sandbox as { filesystem: { denyRead: string[] } }).filesystem.denyRead;
-      expect(denyRead).not.toContain(`${HOME}/adminpanel`);
-      expect(denyRead).not.toContain(`${HOME}/adminpanel/**`);
-      // Ama diğerleri yine reddedilir.
-      expect(denyRead).toContain(`${HOME}/other-project`);
-      expect(denyRead).toContain(`${HOME}/Music`);
-    });
-
-    it("proje bir home girdisinin ALT KLASÖRÜ ise o girdiyi denylemez", () => {
-      const { settings } = buildAgentSandboxSettings({
-        projectRoot: `${HOME}/Documents/work/app`, // Documents altında
-        ultracode: false,
-        policy: "enforce",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      const denyRead = (settings.sandbox as { filesystem: { denyRead: string[] } }).filesystem.denyRead;
-      expect(denyRead).not.toContain(`${HOME}/Documents`);
-      expect(denyRead).not.toContain(`${HOME}/Documents/**`);
-    });
+  it("win32 → denyRead ÜRETME (POSIX-olmayan yol bug'ına girme)", () => {
+    expect(denyCount).toBe(0);
+    expect("filesystem" in (settings.sandbox as object)).toBe(false);
+    expect("permissions" in settings).toBe(false);
   });
 
-  describe("ultracode merge (mevcut davranış korunur)", () => {
-    it("ultracode=true → settings.ultracode:true", () => {
-      const { settings } = buildAgentSandboxSettings({
-        projectRoot: "/tmp/x",
-        ultracode: true,
-        policy: "enforce",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      expect(settings.ultracode).toBe(true);
-    });
+  it("win32 → sandbox.enabled + failIfUnavailable korunur (claude exit-1 savunması)", () => {
+    const sb = settings.sandbox as { enabled: boolean; failIfUnavailable: boolean };
+    expect(sb.enabled).toBe(true);
+    expect(sb.failIfUnavailable).toBe(true); // enforce
+  });
+});
 
-    it("ultracode=false → ultracode anahtarı YOK", () => {
-      const { settings } = buildAgentSandboxSettings({
-        projectRoot: "/tmp/x",
-        ultracode: false,
-        policy: "enforce",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      expect("ultracode" in settings).toBe(false);
+describe("agent-sandbox · projectRoot-overlap guard (path.sep ile)", () => {
+  it("proje home girdisinin KENDİSİYSE denylemez", () => {
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: `${HOME}/adminpanel`,
+      ultracode: false, policy: "enforce", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
     });
+    const denyRead = deny(settings);
+    expect(denyRead).not.toContain(`${HOME}/adminpanel`);
+    expect(denyRead).toContain(`${HOME}/other-project`);
   });
 
-  describe("policy modları", () => {
-    it("enforce → failIfUnavailable:true (sandbox kurulamazsa fail-closed)", () => {
-      const { settings } = buildAgentSandboxSettings({
-        projectRoot: "/tmp/x",
-        ultracode: false,
-        policy: "enforce",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      const sandbox = settings.sandbox as { enabled: boolean; allowUnsandboxedCommands: boolean; failIfUnavailable: boolean };
-      expect(sandbox.enabled).toBe(true);
-      expect(sandbox.allowUnsandboxedCommands).toBe(false);
-      expect(sandbox.failIfUnavailable).toBe(true);
+  it("proje bir home girdisinin ALT KLASÖRÜ ise o girdiyi denylemez", () => {
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: `${HOME}/Documents/work/app`,
+      ultracode: false, policy: "enforce", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
     });
-
-    it("warn → failIfUnavailable:false (kilitleme yok)", () => {
-      const { settings } = buildAgentSandboxSettings({
-        projectRoot: "/tmp/x",
-        ultracode: false,
-        policy: "warn",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      const sandbox = settings.sandbox as { failIfUnavailable: boolean };
-      expect(sandbox.failIfUnavailable).toBe(false);
-    });
-
-    it("off → sandbox YOK, yalnız ultracode (acil geri-alma)", () => {
-      const off = buildAgentSandboxSettings({
-        projectRoot: "/tmp/x",
-        ultracode: true,
-        policy: "off",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      expect(off.denyCount).toBe(0);
-      expect("sandbox" in off.settings).toBe(false);
-      expect(off.settings.ultracode).toBe(true);
-
-      const offNoUltra = buildAgentSandboxSettings({
-        projectRoot: "/tmp/x",
-        ultracode: false,
-        policy: "off",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      expect(offNoUltra.settings).toEqual({});
-    });
+    expect(deny(settings)).not.toContain(`${HOME}/Documents`);
   });
 
-  describe("defense-in-depth: permissions.deny Read() paritesi", () => {
-    it("her denyRead girdisi permissions.deny'de Read(/...) olarak da var", () => {
-      const { settings } = buildAgentSandboxSettings({
-        projectRoot: "/tmp/x",
-        ultracode: false,
-        policy: "enforce",
-        home: HOME,
-        homeEntries: ENTRIES,
-      });
-      const denyRead = (settings.sandbox as { filesystem: { denyRead: string[] } }).filesystem.denyRead;
-      const permDeny = (settings.permissions as { deny: string[] }).deny;
-      expect(permDeny).toContain(`Read(/${HOME}/Music)`);
-      expect(permDeny.length).toBe(denyRead.length);
+  it("benzer prefix yanlış eşleşmez (Doc vs Documents — sep sınırı)", () => {
+    // projectRoot=/Users/umit/Doc, entry=/Users/umit/Documents → startsWith(entry+sep) FALSE
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: `${HOME}/Doc`,
+      ultracode: false, policy: "enforce", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
     });
+    // Documents yine reddedilmeli (proje onun altında değil)
+    expect(deny(settings)).toContain(`${HOME}/Documents`);
+  });
+});
+
+describe("agent-sandbox · ultracode merge + policy modları", () => {
+  it("ultracode=true → settings.ultracode:true", () => {
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: "/tmp/x", ultracode: true, policy: "enforce", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
+    });
+    expect(settings.ultracode).toBe(true);
+  });
+
+  it("ultracode=false → ultracode anahtarı YOK", () => {
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: "/tmp/x", ultracode: false, policy: "enforce", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
+    });
+    expect("ultracode" in settings).toBe(false);
+  });
+
+  it("enforce → failIfUnavailable:true; warn → false", () => {
+    const e = buildAgentSandboxSettings({
+      projectRoot: "/tmp/x", ultracode: false, policy: "enforce", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
+    });
+    const w = buildAgentSandboxSettings({
+      projectRoot: "/tmp/x", ultracode: false, policy: "warn", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
+    });
+    expect((e.settings.sandbox as { failIfUnavailable: boolean }).failIfUnavailable).toBe(true);
+    expect((w.settings.sandbox as { failIfUnavailable: boolean }).failIfUnavailable).toBe(false);
+    expect((e.settings.sandbox as { enabled: boolean; allowUnsandboxedCommands: boolean }).allowUnsandboxedCommands).toBe(false);
+  });
+
+  it("off → sandbox YOK; ultracode korunur / boş", () => {
+    const off = buildAgentSandboxSettings({
+      projectRoot: "/tmp/x", ultracode: true, policy: "off", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
+    });
+    expect(off.denyCount).toBe(0);
+    expect("sandbox" in off.settings).toBe(false);
+    expect(off.settings.ultracode).toBe(true);
+
+    const offNoUltra = buildAgentSandboxSettings({
+      projectRoot: "/tmp/x", ultracode: false, policy: "off", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
+    });
+    expect(offNoUltra.settings).toEqual({});
+  });
+});
+
+describe("agent-sandbox · defense-in-depth: permissions.deny paritesi (macOS)", () => {
+  it("her denyRead girdisi permissions.deny'de Read(/...) olarak var", () => {
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: "/tmp/x", ultracode: false, policy: "enforce", platform: "darwin", home: HOME, homeEntries: MAC_ENTRIES,
+    });
+    const denyRead = deny(settings);
+    const permDeny = (settings.permissions as { deny: string[] }).deny;
+    expect(permDeny).toContain(`Read(/${HOME}/Music)`);
+    expect(permDeny.length).toBe(denyRead.length);
   });
 });

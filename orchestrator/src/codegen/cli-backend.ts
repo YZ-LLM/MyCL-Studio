@@ -27,7 +27,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { sandboxSettingsArgs } from "../agent-sandbox.js";
+import { guardSandboxOrWarn, sandboxSettingsArgs } from "../agent-sandbox.js";
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
 import type { CodegenBackend } from "./backend.js";
 import { emitChatMessage, emitClaudeStream } from "../ipc.js";
@@ -160,6 +160,10 @@ export class CliCodegenBackend implements CodegenBackend {
 
   async run(): Promise<CodegenOutcome> {
     const { opts } = this;
+    // v15.11 GÜVENLİK: spawn-öncesi sandbox kapısı (enforce + sandbox yok → çalıştırma).
+    if (!guardSandboxOrWarn()) {
+      return { kind: "failed", reason: "sandbox kurulamadı (policy=enforce) — codegen çalıştırılmadı" };
+    }
     const effort = opts.config.claude_code_flags.effort ?? "max";
     const args = this.buildArgs(effort);
 
