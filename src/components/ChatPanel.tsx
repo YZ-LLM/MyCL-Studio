@@ -163,6 +163,9 @@ interface Props {
   agentBusy?: boolean;
   /** v15.7 (2026-05-24): Composer'daki metni iş kuyruğuna ekle. */
   onAddTaskToQueue?: (text: string) => void;
+  /** v15.13 (saha 3/5): Oto-cevap — önerili netleştirme soruları otomatik yanıtlansın mı. */
+  autoAnswer?: boolean;
+  onAutoAnswerToggle?: (enabled: boolean) => void;
   /** v15.11: 📖 Kılavuz butonu — UI kullanma kılavuzu modalını açar. */
   onGuideClick?: () => void;
   /** v15.11: Kılavuz içeriği mevcut mu (buton aktif/pasif görünümü). */
@@ -186,6 +189,8 @@ export function ChatPanel({
   agentEventsCount,
   agentBusy,
   onAddTaskToQueue,
+  autoAnswer,
+  onAutoAnswerToggle,
   onGuideClick,
   guideAvailable,
 }: Props) {
@@ -409,6 +414,23 @@ export function ChatPanel({
                 )}
             </span>
           </button>
+        )}
+        {/* v15.13 (saha 3/5): Oto-cevap checkbox — Orkestrator'ın yanında. Açıkken
+            önerili netleştirme soruları otomatik (orkestratör önerisiyle) yanıtlanır. */}
+        {onAutoAnswerToggle && (
+          <label
+            className="intent-pill"
+            title="Açıkken: bir önerisi olan netleştirme soruları otomatik o öneriyle yanıtlanır (daha hızlı iterasyon). Onaylar + önerisi olmayan sorular yine size sorulur."
+            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+          >
+            <input
+              type="checkbox"
+              checked={!!autoAnswer}
+              onChange={(e) => onAutoAnswerToggle(e.target.checked)}
+              style={{ margin: 0 }}
+            />
+            <span className="intent-pill-label">Oto-cevap</span>
+          </label>
         )}
         {/* v15.11: 📖 Kılavuz — UI kullanma kılavuzu modalını açar. */}
         {onGuideClick && (

@@ -42,6 +42,7 @@ import {
   CliQaAskqBackend,
   createQaAskqBackend,
 } from "../../src/base/qa-askq-cli-backend.js";
+import { setAutoAnswerSuggested } from "../../src/auto-answer.js";
 import { QaAskqBaseController } from "../../src/base/qa-askq-controller.js";
 
 function ok(text: string) {
@@ -95,6 +96,7 @@ beforeEach(() => {
   lastAskqId = null;
   lastAskqOpts = null;
   onAskqEmitted = null;
+  setAutoAnswerSuggested(false); // testler arası sızıntı olmasın
 });
 
 describe("CliQaAskqBackend.run", () => {
@@ -161,6 +163,44 @@ describe("CliQaAskqBackend.run", () => {
     await answerOnce(backend, "Approve");
     expect(((await p) as { kind: string }).kind).toBe("approved");
     expect(String(sessionMock.mock.calls[1][0].userMessage)).toContain("JSON");
+  });
+});
+
+describe("CliQaAskqBackend oto-cevap (saha 3/5)", () => {
+  it("ON + öneri var → netleştirme otomatik yanıtlanır (sormaz); resume=öneri", async () => {
+    setAutoAnswerSuggested(true);
+    try {
+      sessionMock
+        .mockResolvedValueOnce(
+          ok(`{"kind":"askq","question":"hangi db?","options":["Postgres","MySQL"],"suggested_answer":"MySQL"}`),
+        )
+        .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"done"}`));
+      const backend = new CliQaAskqBackend(makeOpts());
+      const p = backend.run();
+      // Netleştirme otomatik yanıtlandı → manuel cevap GEREKMEZ; yalnız approval'a cevap ver.
+      await answerOnce(backend, "Approve");
+      expect(((await p) as { kind: string }).kind).toBe("approved");
+      // Önerilen cevap ("MySQL") resume userMessage olarak gitti (kullanıcı sorulmadan).
+      expect(sessionMock.mock.calls[1][0].userMessage).toBe("MySQL");
+    } finally {
+      setAutoAnswerSuggested(false);
+    }
+  });
+
+  it("ON ama öneri YOK → yine kullanıcıya sorulur", async () => {
+    setAutoAnswerSuggested(true);
+    try {
+      sessionMock
+        .mockResolvedValueOnce(ok(`{"kind":"askq","question":"q?","options":["A","B"]}`))
+        .mockResolvedValueOnce(ok(`{"kind":"approval","summary":"s"}`));
+      const backend = new CliQaAskqBackend(makeOpts());
+      const p = backend.run();
+      await answerOnce(backend, "A"); // öneri yok → normal sorulur (answerOnce gerekli)
+      await answerOnce(backend, "Approve");
+      expect(((await p) as { kind: string }).kind).toBe("approved");
+    } finally {
+      setAutoAnswerSuggested(false);
+    }
   });
 });
 

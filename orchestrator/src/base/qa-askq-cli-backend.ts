@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
+import { autoAnswerSuggested } from "../auto-answer.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
@@ -390,6 +391,17 @@ export class CliQaAskqBackend implements QaAskqBackend {
     if (suggested_en) {
       const idx = options_en.indexOf(suggested_en);
       if (idx >= 0 && idx < options_tr.length) suggested_option_tr = options_tr[idx];
+    }
+    // v15.13 (saha 3/5): Oto-cevap ON + öneri var → kullanıcıya sormadan öneriyle yanıtla
+    // (görünür not). Önerisi olmayan + onaylar (askApproval suggested_en=null geçer) → normal akış.
+    if (autoAnswerSuggested() && suggested_option_tr !== undefined) {
+      this.pendingAskq = null;
+      this.currentAskqId = null;
+      emitChatMessage(
+        "system",
+        `🤖 Oto-cevap (öneri): "${question_tr}" → "${suggested_option_tr}"`,
+      );
+      return Promise.resolve(suggested_option_tr);
     }
     emitAskq({
       id: askqId,

@@ -16,7 +16,8 @@ import { runTurn, type ApiMessage, type ToolDef } from "../claude-api.js";
 import type { MyclConfig } from "../config.js";
 import { localizeOptionLabels, t } from "../i18n.js";
 import { appendHistory } from "../history-loader.js";
-import { emitAskq, emitClaudeStream, emitError } from "../ipc.js";
+import { autoAnswerSuggested } from "../auto-answer.js";
+import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import { translate } from "../translator.js";
 import type { AskqConfig, State } from "../types.js";
@@ -370,26 +371,36 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
             suggested_option_tr = options_tr[idx];
           }
         }
-        emitAskq({
-          id: askqId,
-          question: question_tr,
-          options: options_tr,
-          allow_other: !isApproval,
-          suggested_option: suggested_option_tr,
-        });
 
+        // v15.13 (saha 3/5): Oto-cevap ON + (clarifying + öneri var) → kullanıcıya sormadan
+        // öneriyle yanıtla (görünür not). Onaylar (isApproval) + önerisi olmayanlar → normal akış.
         let selected_tr: string;
-        try {
-          selected_tr = await new Promise<string>((resolve, reject) => {
-            this.pendingResolver = resolve;
-            this.pendingRejecter = reject;
+        if (!isApproval && suggested_option_tr !== undefined && autoAnswerSuggested()) {
+          emitChatMessage(
+            "system",
+            `🤖 Oto-cevap (öneri): "${question_tr}" → "${suggested_option_tr}"`,
+          );
+          selected_tr = suggested_option_tr;
+        } else {
+          emitAskq({
+            id: askqId,
+            question: question_tr,
+            options: options_tr,
+            allow_other: !isApproval,
+            suggested_option: suggested_option_tr,
           });
-        } catch (err) {
-          if (err === ABORT_SENTINEL) {
-            log.info(tag, "askq aborted mid-question");
-            return { kind: "aborted" };
+          try {
+            selected_tr = await new Promise<string>((resolve, reject) => {
+              this.pendingResolver = resolve;
+              this.pendingRejecter = reject;
+            });
+          } catch (err) {
+            if (err === ABORT_SENTINEL) {
+              log.info(tag, "askq aborted mid-question");
+              return { kind: "aborted" };
+            }
+            throw err;
           }
-          throw err;
         }
         this.pendingAskq = null;
         this.currentAskqId = null;

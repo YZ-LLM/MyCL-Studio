@@ -88,6 +88,7 @@ import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
+import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
@@ -3438,6 +3439,10 @@ ipcRouter.register("task_queue_add", async (data: unknown) => {
 });
 ipcRouter.register("task_queue_remove", async (data: unknown) => {
   await handleTaskQueueRemove(data as { id: string });
+});
+// v15.13 (saha 3/5): Oto-cevap toggle (Orkestrator yanındaki checkbox).
+ipcRouter.register("set_auto_answer", (data: unknown) => {
+  setAutoAnswerSuggested((data as { enabled?: boolean } | undefined)?.enabled === true);
 });
 
 async function dispatch(msg: IncomingCommand): Promise<void> {

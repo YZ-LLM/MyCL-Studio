@@ -369,5 +369,6 @@ export type OrchestratorCommand =
   | { kind: "shutdown" }
   | { kind: "task_queue_add"; data: { text: string } }
   | { kind: "task_queue_remove"; data: { id: string } }
+  | { kind: "set_auto_answer"; data: { enabled: boolean } }
   | { kind: "save_features"; data: { playwright_enabled?: boolean } }
   | { kind: "read_features" };

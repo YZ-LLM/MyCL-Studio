@@ -6,6 +6,13 @@
 
 ## 2026-06-04
 
+- **feat(auto-answer) [saha-3/5]:** Composer'da "Orkestrator" yanına "Oto-cevap" checkbox'ı.
+  Tikliyken: bir önerisi (suggested_answer) olan NETLEŞTİRME askq'ları otomatik o öneriyle
+  yanıtlanır (görünür "🤖 Oto-cevap" notu) → daha hızlı + kaliteli iterasyon. Onaylar
+  (Approve/Revise) + önerisi olmayan sorular YİNE kullanıcıya sorulur. Yeni `auto-answer.ts`
+  modül-singleton (`set_auto_answer` komutu); qa-askq CLI + SDK backend'leri `emitAndAwait`/
+  askq noktasında okur (`!isApproval` + öneri var). Frontend: ChatPanel checkbox + App.tsx
+  localStorage + config_status ready'de restore. 2 birim test. (5 saha iyileştirmesinden 3.)
 - **feat(os-notification) [saha-5/5]:** Kullanıcı aksiyonu beklenirken (askq) OS bildirimi.
   `tauri-plugin-notification` eklendi (Cargo.toml + lib.rs `.plugin(...init())` + capabilities
   `notification:default` + `@tauri-apps/plugin-notification`). `App.tsx`: açılışta izin iste;

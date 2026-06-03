@@ -487,6 +487,16 @@ function App() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [mainState, setMainState] = useState<MainState>(INITIAL_STATE);
   const [processedCount, setProcessedCount] = useState(0);
+  // v15.13 (saha 3/5): Oto-cevap toggle (Orkestrator yanındaki checkbox). localStorage'da
+  // saklanır; backend'e config_status ready'de (restore) + her değişimde komutla bildirilir.
+  const [autoAnswer, setAutoAnswer] = useState<boolean>(
+    () => localStorage.getItem("mycl_auto_answer") === "1",
+  );
+  const handleAutoAnswerToggle = (enabled: boolean): void => {
+    setAutoAnswer(enabled);
+    localStorage.setItem("mycl_auto_answer", enabled ? "1" : "0");
+    void orch.send({ kind: "set_auto_answer", data: { enabled } });
+  };
 
   // v15.13 (saha 5/5): kullanıcı aksiyonu beklenirken (askq) OS bildirimi.
   // Açılışta izin iste (sessiz başarısız — bildirim plugin'i yoksa akışı bozma).
@@ -593,6 +603,8 @@ function App() {
           setConfigStatus({ state: "ready" });
           void orch.send({ kind: "read_selected_models" });
           void orch.send({ kind: "read_features" });
+          // v15.13 (saha 3/5): oto-cevap tercihini (localStorage) backend'e geri yükle.
+          void orch.send({ kind: "set_auto_answer", data: { enabled: autoAnswer } });
         } else {
           setConfigStatus({
             state: "missing",
@@ -1125,6 +1137,8 @@ function App() {
           agentEventsCount={mainState.agentEvents.length}
           agentBusy={mainState.agentBusyCount > 0}
           onAddTaskToQueue={handleAddTaskToQueue}
+          autoAnswer={autoAnswer}
+          onAutoAnswerToggle={handleAutoAnswerToggle}
           onGuideClick={() => setGuideModalOpen(true)}
           guideAvailable={userGuide.trim().length > 0}
         />
