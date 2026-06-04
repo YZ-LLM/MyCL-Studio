@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { appendAudit } from "./audit.js";
 import { createCodegenBackend } from "./codegen/backend.js";
+import type { CodegenOutcome } from "./base/codegen-controller.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { tryDevServerChain } from "./dev-server-launcher.js";
@@ -314,13 +315,36 @@ export async function verifyFeatureHandler(
 
   // 5. Test üretimi (ilk deneme) — fresh history
   await clearHistory(state.project_root, VERIFY_PHASE_ID);
-  await runCodegen(
+  const codegenOutcome = await runCodegen(
     buildSystemPrompt(featureEn, slug, snapshot, authConfigured),
     `Write the Playwright E2E test for: ${featureEn}. Target file: ${specRel}.`,
     { state, config, modelId, apiKey, toolCtx },
   );
 
-  // Ajan dosyayı yazmadıysa → özelliği bulamadı (dürüst).
+  // Codegen BAŞARISIZ (API/CLI hatası, abort) → bu "özellik yok" DEĞİL; codegen
+  // çalışamadı. Sessiz-hata kuralı: yanlış "bulunamadı" teşhisi yerine GÖRÜNÜR
+  // codegen-fail mesajı + ayrı audit event (API hata-yüzeyi geniş → bu yol gerçek).
+  if (codegenOutcome.kind === "failed" || codegenOutcome.kind === "aborted") {
+    const why =
+      codegenOutcome.kind === "failed"
+        ? `: ${codegenOutcome.reason.slice(0, 150)}`
+        : ` (${codegenOutcome.turns} turn sonra durdu)`;
+    emitChatMessage(
+      "error",
+      `⚠️ "${targetFeatureTr}" için test üretimi başarısız (codegen ${codegenOutcome.kind}${why}). Bu "özellik yok" demek DEĞİL — kod üretimi çalışamadı; tekrar dene.`,
+    );
+    await appendAudit(state.project_root, {
+      ts: Date.now(),
+      phase: VERIFY_PHASE_ID,
+      event: "verify-feature-codegen-failed",
+      caller: "mycl-orchestrator",
+      detail: `${codegenOutcome.kind}: ${featureEn.slice(0, 100)}`,
+    });
+    return { statePatch: dev.statePatch };
+  }
+
+  // Ajan dosyayı yazmadıysa → özelliği bulamadı (dürüst). (Codegen "done" ama
+  // dosya yok = ajan gerçekten ilgili kodu/rotayı bulamadı.)
   if (!(await fileExists(specAbs))) {
     emitChatMessage(
       "system",
@@ -440,7 +464,7 @@ async function runCodegen(
   systemPrompt: string,
   initialUserMessage: string,
   deps: CodegenDeps,
-): Promise<void> {
+): Promise<CodegenOutcome> {
   const controller = createCodegenBackend({
     tag: "verify-feature",
     phaseId: VERIFY_PHASE_ID,
@@ -457,6 +481,7 @@ async function runCodegen(
   });
   const outcome = await controller.run();
   log.info("verify-feature", "codegen outcome", { kind: outcome.kind });
+  return outcome;
 }
 
 async function fileExists(path: string): Promise<boolean> {

@@ -183,9 +183,18 @@ export function mergeScoresWithChunks(
   for (const s of scores) {
     if (typeof s !== "object" || s === null) continue;
     const sc = s as { id?: unknown; score?: unknown; reason?: unknown };
-    if (typeof sc.id === "string" && typeof sc.score === "number") {
+    // CLI yolunda ajan JSON'u ELLE yazar → score "8" (string) veya "8/10" gelebilir.
+    // API yolunda input_schema number'a zorlar. parseFloat ile coerce et ki CLI
+    // skoru sessizce 0'a düşüp recall'dan kaybolmasın (API↔CLI parite).
+    const rawScore =
+      typeof sc.score === "number"
+        ? sc.score
+        : typeof sc.score === "string"
+          ? parseFloat(sc.score)
+          : NaN;
+    if (typeof sc.id === "string" && Number.isFinite(rawScore)) {
       scoreMap.set(sc.id, {
-        score: Math.max(0, Math.min(10, sc.score)),
+        score: Math.max(0, Math.min(10, rawScore)),
         reason: typeof sc.reason === "string" ? sc.reason : "",
       });
     }

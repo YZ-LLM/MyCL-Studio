@@ -76,6 +76,9 @@ ile AYNI semantik alanlar:
 - \`askq_answer\`: SADECE action="answer_askq" (aktif askq option label'ı veya freeform).
 - \`target_feature\`: SADECE action="verify_feature" (test edilecek özellik, Türkçe).
 - \`memory_proposal\`: SADECE action="save_memory_proposal" ({type_suggestion, summary[, scope]}).
+- \`clarify_options\`: SADECE action="ask_clarify" → 2-4 SOMUT Türkçe seçenek (string dizisi).
+  Riskli/belirsiz bir noktada kullanıcıya net seçenekler sun (jenerik Evet/Hayır yerine
+  proaktif-risk seçenekleri). Örn: ["Soft-delete kullan", "Hard-delete kullan", "Vazgeç"].
 
 KURALLAR:
 - JSON bloğu çıktının EN SONUNDA olmalı; sonrasında başka metin OLMAMALI.

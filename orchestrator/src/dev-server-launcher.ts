@@ -14,6 +14,7 @@
 // yapılır; Claude CLI'a değil. Bu mimari yasak ihlali değildir (spec.md §v14).
 
 import { spawn } from "node:child_process";
+import { connect as netConnect } from "node:net";
 import type { Readable } from "node:stream";
 import { promises as fs } from "node:fs";
 import { get as httpGet } from "node:http";
@@ -31,6 +32,10 @@ export interface DevServerHandle {
   stdout: Readable | null;
   /** Child stderr — backend Express 4xx/5xx logları, Vite proxy hataları burada. */
   stderr: Readable | null;
+  /** Event-driven exit bayrağı (child.on("exit")). shell:true olduğu için pid-poll
+   *  güvenilmez (handle.pid = SHELL wrapper'ı; alttaki vite strictPort-exit etse de
+   *  wrapper canlı kalabilir). waitForDevServer bunu kontrol edip erken çıkar. */
+  exited: boolean;
 }
 
 /**
@@ -70,12 +75,19 @@ export function spawnDevServer(
     cmd,
     port,
   });
-  return {
+  const handle: DevServerHandle = {
     pid: child.pid ?? -1,
     port,
     stdout: child.stdout ?? null,
     stderr: child.stderr ?? null,
+    exited: false,
   };
+  // Event-driven exit — strictPort-exit / crash'i KESİN yakala (pid-poll değil;
+  // shell:true wrapper pid'i yanıltıcı). waitForDevServer her turda kontrol eder.
+  child.on("exit", () => {
+    handle.exited = true;
+  });
+  return handle;
 }
 
 /**
@@ -89,15 +101,23 @@ export function spawnDevServer(
 export async function waitForDevServer(
   port: number,
   maxMs = 15_000,
-  opts: { okOnly2xx?: boolean } = {},
+  opts: { okOnly2xx?: boolean; handle?: { exited: boolean } } = {},
 ): Promise<boolean> {
   const okOnly2xx = opts.okOnly2xx ?? false;
   const startTs = Date.now();
   const interval = 500;
   while (Date.now() - startTs < maxMs) {
+    // Spawn edilen süreç öldüyse (strictPort-exit / crash) beklemeyi bırak —
+    // başka bir app porta yanıt verse bile O BİZİM DEĞİL (false-match önle).
+    if (opts.handle?.exited) {
+      log.warn("dev-server-launcher", "spawned process exited before ready", { port });
+      return false;
+    }
     const ready = await new Promise<boolean>((resolve) => {
       const req = httpGet(
-        { host: "localhost", port, path: "/", timeout: 1000 },
+        // 127.0.0.1 (localhost DEĞİL): Node 18+ ::1'i önce deneyip vite'ın
+        // 127.0.0.1 listener'ını kaçırabilir → false-negative. IPv4'e sabitle.
+        { host: "127.0.0.1", port, path: "/", timeout: 1000 },
         (res) => {
           // Default: her HTTP yanıtı "server dinliyor" sayılır. Phase 6 smoke
           // test okOnly2xx=true geçer → SADECE 2xx/3xx response başarı; 4xx/5xx
@@ -231,7 +251,84 @@ export function stopActiveDevServer(state: { dev_server_pid?: number }): void {
 export interface DevServerAttempt {
   cmd: string;
   port: number;
-  reason: "process_died" | "port_timeout";
+  reason:
+    | "process_died"
+    | "port_timeout"
+    | "port_occupied_unforceable" // hedef port başka app'te + bu komutta port zorlanamıyor → false-match yerine dürüst fail
+    | "no_free_port"; // hiç boş port bulunamadı
+}
+
+// ───────────────── SAF: port sahiplik / boş-port / komut-augment ─────────────────
+// Port false-match fix (2026-06-04): MyCL spawn ettiği sunucunun SAHİBİ olduğunu
+// kanıtlamalı. Kanıt = port spawn ÖNCESİ BOŞTU (connect-refused) + spawn SONRASI
+// DOLDU + child exit ETMEDİ. Başka app expected-portu tutuyorsa todo app BOŞ porta
+// zorlanır (--port flag); zorlanamazsa dürüst fail (false-match ASLA).
+
+/** Port BOŞ mu? 127.0.0.1'e connect dener — ECONNREFUSED → boş(true); bağlanırsa
+ *  başka süreç dinliyor → dolu(false). Bind-test DEĞİL (listen-release TOCTOU yok). */
+export function isPortFree(port: number, timeoutMs = 400): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = netConnect({ host: "127.0.0.1", port });
+    let done = false;
+    const finish = (free: boolean) => {
+      if (done) return;
+      done = true;
+      sock.destroy();
+      resolve(free);
+    };
+    sock.setTimeout(timeoutMs);
+    sock.once("connect", () => finish(false)); // bağlandı → dolu
+    sock.once("timeout", () => finish(true)); // yanıt yok → muhtemelen boş
+    sock.once("error", () => finish(true)); // ECONNREFUSED → boş
+  });
+}
+
+/** preferred'dan başlayıp yukarı ilk BOŞ portu bul (connect-probe). skip set'i
+ *  bilinen-dolu portları atlar. Bulamazsa null (→ caller dürüst fail). */
+export async function findFreePort(
+  preferred: number,
+  maxTries = 64,
+  skip: ReadonlySet<number> = new Set(),
+): Promise<number | null> {
+  for (let i = 0; i < maxTries; i++) {
+    const port = preferred + i;
+    if (port < 1 || port > 65535) break;
+    if (skip.has(port)) continue;
+    if (await isPortFree(port)) return port;
+  }
+  return null;
+}
+
+/**
+ * SAF: dev komutunu belirli bir porta ZORLA (CLI bayrağı; PORT env DEĞİL — vite
+ * onu yok sayar). null = bu komutta port zorlanamaz (fail-closed sinyali). Komutta
+ * zaten explicit port varsa idempotent: olduğu gibi döner. viteHint: proje vite mı
+ * (vite.config var) — npm/pnpm/yarn wrapper'ına `-- --port` ile zorlamayı açar.
+ */
+export function augmentPortFlag(
+  cmd: string,
+  port: number,
+  viteHint = false,
+): string | null {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  const c = cmd.trim();
+  // Idempotent: explicit port (kullanıcı/komut belirlemiş) → dokunma.
+  if (/--port[=\s]+\d{2,5}|(^|\s)-p[=\s]+\d{2,5}|-S\s+\S*?:\d{2,5}/.test(c)) return c;
+  // Leaf frontend dev sunucuları
+  if (/(^|\s)(npx |bunx |pnpm exec )?vite(\s|$)/.test(c))
+    return `${c} --port ${port} --strictPort`;
+  if (/(^|\s)next\s+dev(\s|$)/.test(c)) return `${c} --port ${port}`;
+  if (/webpack(-dev-server| serve)|vue-cli-service\s+serve/.test(c))
+    return `${c} --port ${port}`;
+  // Python / Ruby leaf
+  if (/(^|\s)(uvicorn|hypercorn)(\s|$)/.test(c)) return `${c} --port ${port}`;
+  if (/(^|\s)flask\s+run(\s|$)/.test(c)) return `${c} --port ${port}`;
+  if (/(^|\s)(rails\s+(server|s)|puma)(\s|$)/.test(c)) return `${c} -p ${port}`;
+  // Package-manager wrapper (npm run dev / pnpm dev / yarn dev / bun run dev) —
+  // alttaki leaf bilinmez; YALNIZ vite-projesinde `-- --port` ile zorla.
+  if (/(^|\s)(npm run|pnpm|yarn|bun run)\s+\S+/.test(c))
+    return viteHint ? `${c} -- --port ${port} --strictPort` : null;
+  return null; // tanınmayan → zorlanamaz
 }
 
 export interface DevServerChainResult {
@@ -261,53 +358,57 @@ export async function tryDevServerChain(
   timeoutMsPerAttempt = 20_000,
 ): Promise<DevServerChainResult> {
   const attempts: DevServerAttempt[] = [];
+  // viteHint: aday komutlardan biri vite içeriyorsa proje vite-tabanlı → wrapper
+  // komutlarına `-- --port` ile zorlamayı aç (vite PORT env'i yok sayar).
+  const viteHint = candidates.some((c) =>
+    /(^|\s)(npx |bunx |pnpm exec )?vite(\s|$)/.test(c.cmd),
+  );
   for (const cand of candidates) {
-    const primaryPort = cand.ports[0] ?? 5173;
-    const handle = spawnDevServer(projectRoot, cand.cmd, primaryPort);
-
-    // Multi-port probe: paralel değil; sıralı çünkü framework birden çok port
-    // dinlemez; ama farklı framework'ler farklı port kullanır. Sıralı probe.
-    let ready = false;
-    let readyPort = primaryPort;
-    for (const port of cand.ports) {
-      ready = await waitForDevServer(port, timeoutMsPerAttempt / cand.ports.length);
-      if (ready) {
-        readyPort = port;
-        break;
-      }
-    }
-
-    if (ready) {
-      log.info("dev-server-launcher", "chain attempt success", {
+    const primary = cand.ports[0] ?? 5173;
+    // FALSE-MATCH FIX: yalnız spawn-ÖNCESİ BOŞ olan bir portu hedefle + probe et.
+    // primary boşsa onu; doluysa (başka app tutuyor) yukarı ilk boş portu bul.
+    // Böylece probe'a gelen yanıt YA bizim sunucumuzdur YA hiç — foreign app'in
+    // tuttuğu expected-port ASLA "bizimki" sayılmaz (önceki bug buydu).
+    const target = (await isPortFree(primary))
+      ? primary
+      : await findFreePort(primary + 1, 64, new Set([primary]));
+    if (target === null) {
+      attempts.push({ cmd: cand.cmd, port: primary, reason: "no_free_port" });
+      log.warn("dev-server-launcher", "no free port for candidate", {
         cmd: cand.cmd,
-        port: readyPort,
+        primary,
+      });
+      continue;
+    }
+    // Sunucuyu hedef porta ZORLA (vite --port / next -p; PORT env spawnDevServer'da).
+    // augment null → flag eklenmez ama PORT env Express/Next/Flask'i yine yönlendirir;
+    // vite landingi başarısızsa target BOŞ kalır → dürüst timeout (false-match değil).
+    const cmd = augmentPortFlag(cand.cmd, target, viteHint) ?? cand.cmd;
+    const forced = cmd !== cand.cmd;
+    const handle = spawnDevServer(projectRoot, cmd, target);
+    const ready = await waitForDevServer(target, timeoutMsPerAttempt, { handle });
+
+    if (ready && !handle.exited) {
+      log.info("dev-server-launcher", "chain attempt success", {
+        cmd,
+        port: target,
+        forced,
         prior_attempts: attempts.length,
       });
-      return {
-        ok: true,
-        handle: {
-          pid: handle.pid,
-          port: readyPort,
-          stdout: handle.stdout,
-          stderr: handle.stderr,
-        },
-        cmd: cand.cmd,
-        attempts,
-      };
+      return { ok: true, handle, cmd, attempts };
     }
 
-    // Bu aday fail — process'i öldür, sonraki adaya geç.
-    const alive = isProcessAlive(handle.pid);
+    // Bu aday fail — process tree'sini öldür, sonraki adaya geç.
     attempts.push({
       cmd: cand.cmd,
-      port: primaryPort,
-      reason: alive ? "port_timeout" : "process_died",
+      port: target,
+      reason: handle.exited ? "process_died" : "port_timeout",
     });
     killProcessTree(handle.pid);
     log.warn("dev-server-launcher", "chain attempt failed", {
-      cmd: cand.cmd,
-      port: primaryPort,
-      alive,
+      cmd,
+      port: target,
+      exited: handle.exited,
       next: attempts.length < candidates.length ? "trying next" : "exhausted",
     });
   }

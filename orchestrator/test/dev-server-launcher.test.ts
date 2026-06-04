@@ -3,10 +3,16 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { createServer, type Server } from "node:http";
 import {
+  augmentPortFlag,
   buildDevServerFailMessage,
+  findFreePort,
+  isPortFree,
   isProcessAlive,
+  killProcessTree,
   stopActiveDevServer,
+  tryDevServerChain,
 } from "../src/dev-server-launcher.js";
 
 describe("dev-server-launcher · isProcessAlive", () => {
@@ -157,4 +163,103 @@ describe("dev-server-launcher · stopActiveDevServer", () => {
     expect(state.dev_server_pid).toBeUndefined();
     expect(await waitDead(pid)).toBe(true);
   });
+});
+
+// ───────────────── Port false-match fix (2026-06-04) ─────────────────
+describe("dev-server-launcher · augmentPortFlag (SAF flag matrisi)", () => {
+  it("leaf vite → --port + --strictPort", () => {
+    expect(augmentPortFlag("vite", 5180)).toBe("vite --port 5180 --strictPort");
+    expect(augmentPortFlag("npx vite", 5180)).toBe("npx vite --port 5180 --strictPort");
+    expect(augmentPortFlag("bunx vite", 5180)).toBe("bunx vite --port 5180 --strictPort");
+  });
+  it("next dev → --port (strictPort yok)", () => {
+    expect(augmentPortFlag("next dev", 5180)).toBe("next dev --port 5180");
+  });
+  it("wrapper (npm run dev): viteHint=false → null, true → -- --port", () => {
+    expect(augmentPortFlag("npm run dev", 5180, false)).toBeNull();
+    expect(augmentPortFlag("npm run dev", 5180, true)).toBe(
+      "npm run dev -- --port 5180 --strictPort",
+    );
+    expect(augmentPortFlag("pnpm dev", 5180, true)).toBe(
+      "pnpm dev -- --port 5180 --strictPort",
+    );
+  });
+  it("tanınmayan leaf (node server.js) → null (kör --port crash riski)", () => {
+    expect(augmentPortFlag("node server.js", 5180)).toBeNull();
+  });
+  it("idempotent: explicit port zaten varsa dokunma", () => {
+    expect(augmentPortFlag("vite --port 5173 --strictPort", 5180)).toBe(
+      "vite --port 5173 --strictPort",
+    );
+    expect(augmentPortFlag("next dev -p 3000", 5180)).toBe("next dev -p 3000");
+  });
+  it("geçersiz port → null", () => {
+    expect(augmentPortFlag("vite", 0)).toBeNull();
+    expect(augmentPortFlag("vite", 99999)).toBeNull();
+  });
+});
+
+describe("dev-server-launcher · isPortFree + findFreePort", () => {
+  let srv: Server | null = null;
+  afterEach(async () => {
+    if (srv) await new Promise<void>((r) => srv!.close(() => r()));
+    srv = null;
+  });
+
+  it("boş port → true; dolu port → false", async () => {
+    const free = await findFreePort(49200);
+    expect(free).not.toBeNull();
+    expect(await isPortFree(free!)).toBe(true);
+    srv = createServer((_q, s) => s.end("x"));
+    await new Promise<void>((r) => srv!.listen(free!, "127.0.0.1", () => r()));
+    expect(await isPortFree(free!)).toBe(false); // artık dolu
+  });
+
+  it("findFreePort: preferred doluysa farklı (boş) port döner", async () => {
+    const p = (await findFreePort(49300))!;
+    srv = createServer((_q, s) => s.end("x"));
+    await new Promise<void>((r) => srv!.listen(p, "127.0.0.1", () => r()));
+    const next = await findFreePort(p, 64, new Set());
+    expect(next).not.toBeNull();
+    expect(next).not.toBe(p); // dolu olanı atladı
+  });
+});
+
+describe("dev-server-launcher · tryDevServerChain FALSE-MATCH fix", () => {
+  let foreign: Server | null = null;
+  let spawnedPid: number | null = null;
+  afterEach(async () => {
+    if (spawnedPid && spawnedPid > 0) killProcessTree(spawnedPid);
+    spawnedPid = null;
+    if (foreign) await new Promise<void>((r) => foreign!.close(() => r()));
+    foreign = null;
+  });
+
+  it("expected port BAŞKA app'te → chain onu BİZİM sanmaz, boş porta zorlar (adminpanel senaryosu)", async () => {
+    // 1. "Foreign" app (adminpanel gibi) expected portu tutsun.
+    const squatPort = (await findFreePort(49400))!;
+    foreign = createServer((_q, s) => s.end("FOREIGN_ADMINPANEL"));
+    await new Promise<void>((r) => foreign!.listen(squatPort, "127.0.0.1", () => r()));
+
+    // 2. PORT env'i okuyup dinleyen bir stub dev server (Express benzeri).
+    const stub =
+      "node -e \"require('http').createServer((q,s)=>s.end('TODO_APP')).listen(process.env.PORT,'127.0.0.1')\"";
+
+    // 3. Chain: primary = squatPort (DOLU). Eski bug: squatPort'a yanıt (foreign) →
+    //    'hazır' false-match. Fix: squatPort dolu → boş porta zorla + orayı probe.
+    const res = await tryDevServerChain(
+      "/tmp",
+      [{ cmd: stub, ports: [squatPort] }],
+      15_000,
+    );
+    spawnedPid = res.handle?.pid ?? null;
+
+    expect(res.ok).toBe(true);
+    expect(res.handle).toBeDefined();
+    // KRİTİK: foreign portu BİZİM sanılmadı — başka (boş) porta gidildi.
+    expect(res.handle!.port).not.toBe(squatPort);
+    // Foreign sunucu DOKUNULMADI (hâlâ ayakta + kendi cevabı).
+    const foreignAlive = await isPortFree(squatPort);
+    expect(foreignAlive).toBe(false); // hâlâ dolu (foreign yaşıyor)
+  }, 20_000);
 });

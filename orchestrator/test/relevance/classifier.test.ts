@@ -59,6 +59,17 @@ describe("relevance/classifier · mergeScoresWithChunks", () => {
     expect(merged[0].reason).toBe("valid");
   });
 
+  it("string skor (CLI elle-JSON) coerce edilir — '8' → 8, '7/10' → 7 (API↔CLI parite)", () => {
+    const chunks = [chunk("a"), chunk("b")];
+    const scores = [
+      { id: "a", score: "8", reason: "string skor" },
+      { id: "b", score: "7/10", reason: "kesirli" },
+    ];
+    const merged = mergeScoresWithChunks(chunks, scores);
+    expect(merged[0].score).toBe(8); // sessizce 0'a düşmedi
+    expect(merged[1].score).toBe(7); // parseFloat "7/10" → 7
+  });
+
   it("missing reason → empty string (not undefined)", () => {
     const chunks = [chunk("a")];
     const scores = [{ id: "a", score: 6 }];

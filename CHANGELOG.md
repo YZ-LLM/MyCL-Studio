@@ -6,6 +6,29 @@
 
 ## 2026-06-04
 
+- **fix(dev-server) [E2E-bulgusu]:** **Port false-match** — Faz 5 dev-server tespiti, beklenen portta
+  (5173) yanıt veren BAŞKA bir app'i (kullanıcının adminpanel'i 5173'ü tutuyordu) kendi sunucusu sanıp
+  "✅ dev server hazır, tarayıcı açılıyor" diyordu → tarayıcı + Faz 16 e2e YANLIŞ app'e gidiyordu (todo
+  app'in gerçek dev server'ı port-çakışmasından ölmüştü). "Sahte-yeşil yok" ihlali. **Otonom E2E testi
+  yakaladı** (canlı kanıt: katman-doğrulama işe yarıyor). Fix (design+adversaryal workflow wf_f36835fe,
+  verdict rework→sağlam sentez): `tryDevServerChain` artık YALNIZ spawn-ÖNCESİ BOŞ olan bir portu hedefler+
+  probe eder → o porta gelen yanıt ya bizim ya hiç (foreign-port ASLA "bizimki" sayılmaz). Yeni saf
+  helper'lar: `isPortFree` (connect-probe 127.0.0.1, bind-TOCTOU yok), `findFreePort`, `augmentPortFlag`
+  (CLI-flag ile portu zorla — vite `--port --strictPort`, next `-p`, wrapper'a viteHint ile `-- --port`;
+  PORT env'i vite yoksaydığı için flag şart; tanınmayan→null=fail-closed). `spawnDevServer`'a event-driven
+  `child.on("exit")` (shell:true wrapper pid'i güvenilmez → pid-poll yerine exit-event); `waitForDevServer`
+  exited-flag'de erken çıkar + host `localhost`→`127.0.0.1` (IPv6 ::1 false-negative latent bug). İmzalar
+  korundu (geriye-uyum: phase-5/smoke-test/verify-feature değişmeden çalışır). adminpanel açıkken bile todo
+  app boş portta temiz koşar. +10 test (flag matrisi + false-match entegrasyonu: foreign server portu
+  tutarken chain boş porta zorluyor, foreign'a dokunmuyor).
+- **fix(API-yolu paritesi) [E2E API-trace bulguları]:** API-backend kod-yolu çift-doğrulama workflow'u
+  (wf_9a83bb03) gerçek bulguları (dedup "HIGH" YANLIŞ POZİTİF çıktı — ölü kod): (1) **verify-feature** codegen
+  `failed`/`aborted` outcome'unu yutup "özellik bulunamadı" diyordu → artık "codegen başarısız" (dürüst,
+  ayrı audit event). (2) **relevance CLI score-coercion**: ajan elle-JSON'da `"8"`/`"7/10"` yazınca skor
+  sessizce 0'a düşüp recall'dan kaybolıyordu → parseFloat coerce (API↔CLI parite). (3) **CLI orkestratör
+  clarify_options**: proaktif-risk somut-seçenekleri CLI talimatında yoktu → eklendi. Ertelendi (not):
+  1M-context beta model-gating (API-only, riskli fix), error-analysis API-modu (görünür-mesajlı, CLI-only).
+  +4 test.
 - **fix(abonelik-paritesi):** Saf-abonelik (tüm roller CLI) modunda relevance (recall sıralaması) +
   konuşma-özeti ARTIK atlanmıyor — proje-tipindeki (v15.10 `classifyViaCli`) kanıtlı **text-JSON CLI**
   desenine taşındı. Ümit: "abonelikte de her şey yapılıyor, kısıtlama gereken durum yok" — haklı: bu
