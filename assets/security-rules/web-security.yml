@@ -1,0 +1,43 @@
+# web-security — CORS yanlış-yapılandırma + güvensiz cookie (cookie-flags + CSRF/SameSite).
+# Açık-kötü desen tespiti (semgrep'in güçlü yanı) — düşük yanlış-pozitif. Faz 13 extra_scan;
+# bozuk/fatal kural → runner tool_error_codes:[2] ile skip (yanlış-blocking yapmaz).
+
+rules:
+  - id: mycl-cors-wildcard
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >
+      CORS herhangi bir origin'e açık (* veya origin:true) — her site API'ne erişebilir,
+      kimlik bilgisi sızabilir. origin'i bir allowlist ile sınırla.
+    patterns:
+      - pattern-either:
+          - pattern: 'cors({ origin: "*" })'
+          - pattern: 'cors({ origin: true })'
+          - pattern: '$RES.setHeader("Access-Control-Allow-Origin", "*")'
+          - pattern: '$RES.header("Access-Control-Allow-Origin", "*")'
+
+  - id: mycl-cookie-no-security-options
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >
+      Cookie güvenlik seçenekleri olmadan ayarlanıyor — httpOnly (XSS), secure (transport),
+      sameSite (CSRF) eksik. res.cookie(ad, değer, { httpOnly: true, secure: true, sameSite: 'lax' }).
+    pattern: $RES.cookie($N, $V)
+
+  - id: mycl-cookie-insecure-flag
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >
+      Cookie güvenlik bayrağı açıkça kapatılmış (httpOnly:false / secure:false) — XSS/transport riski.
+    patterns:
+      - pattern-either:
+          - pattern: "$RES.cookie($N, $V, {..., httpOnly: false, ...})"
+          - pattern: "$RES.cookie($N, $V, {..., secure: false, ...})"
+
+  - id: mycl-csrf-samesite-none
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >
+      Cookie sameSite:'none' — CSRF koruması devre dışı. Üçüncü-taraf bağlam gerekmiyorsa
+      sameSite:'lax' veya 'strict' kullan (CSRF savunması).
+    pattern: "$RES.cookie($N, $V, {..., sameSite: 'none', ...})"

@@ -6,6 +6,19 @@
 
 ## 2026-06-04
 
+- **feat(security) [tamamlık-2]:** Kalan dedicated güvenlik kontrolleri (Ümit: "herşey tam olsun,
+  güvenlik ciddi"). (1) `assets/security-rules/web-security.yml` (semgrep, validate+fixture'lı):
+  **CORS** wildcard (`*`/`origin:true`/`Access-Control-Allow-Origin:*`) + **cookie** güvensiz
+  (httpOnly/secure eksik veya `false`) + **CSRF** (`sameSite:'none'`) — allowlist-CORS + tam-güvenli
+  cookie hariç (fixture'da 4 bulgu / 2 güvenli-atlama doğrulandı). (2) **gitleaks** secret-scan
+  (semgrep p/secrets'e ek, daha özel entropy+regex) — `detect --no-git` (v8'in tüm sürümlerinde
+  çalışır); kurulu değilse 127→skip, leak→blocking. İkisi Faz 13 extra_scan, tool_error_codes:[2].
+  (3) **check.sh adım 6/6:** custom semgrep YAML'larını `semgrep --validate` eder (semgrep varsa) —
+  bozuk kural Faz 13'ü SESSİZCE düşürmesin (tam senin endişen: güvenlik sessizce kaybolmamalı);
+  semgrep yoksa atlanır (CI'yı kırmaz). CSP runtime-header bilinçli yapılmadı (dev-server FP'si;
+  statik CSP + helmet-presence zaten kapsıyor). `npm run check` yeşil.
+  **Güvenlik tarafı tam: dep-audit + CSP + secrets(semgrep+gitleaks) + 3 OWASP semgrep + security-headers
+  + sanitizer + CORS/cookie/CSRF — hepsi Faz 13 blocking (sessizce TAMAMLANDI demez).**
 - **feat(security) [tamamlık]:** Faz 13'e iki adanmış kontrol — **security-headers** + **veri-güvenliği
   sanitizer** (Ümit talebi). (1) `orchestrator/headers-check.mjs`: STATİK güvenlik-HTTP-başlık kontrolü
   (deps + kaynak tarama; canlı-server FP'siz — dev server'lar prod-header koymaz). HTTP backend

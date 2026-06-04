@@ -368,6 +368,21 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           scoped_cmd_template: `semgrep --config "${securityRulePath("data-sanitization.yml")}" {files} --error --quiet`,
           tool_error_codes: [2],
         },
+        {
+          // Web güvenliği: CORS yanlış-yapılandırma (* origin) + güvensiz cookie
+          // (httpOnly/secure/sameSite — XSS/transport/CSRF). Custom semgrep (mutlak yol).
+          name: "web-security",
+          cmd: `semgrep --config "${securityRulePath("web-security.yml")}" src/ --error --quiet`,
+          scoped_cmd_template: `semgrep --config "${securityRulePath("web-security.yml")}" {files} --error --quiet`,
+          tool_error_codes: [2],
+        },
+        {
+          // Secret-scan (gitleaks — semgrep p/secrets'e ek, daha özel entropy+regex).
+          // `detect` v8'in TÜM sürümlerinde çalışır (v8.19+ deprecated ama gizli/mevcut);
+          // kurulu değilse exit 127 → isMissingCommand skip; leak → exit 1 → blocking.
+          name: "gitleaks",
+          cmd: "gitleaks detect --source src/ --no-git --no-banner --redact --exit-code 1",
+        },
       ],
     },
   },
