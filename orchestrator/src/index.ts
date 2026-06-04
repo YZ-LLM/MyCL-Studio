@@ -69,6 +69,7 @@ import {
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
 import { Phase0Controller } from "./phase-0.js";
+import { snapshotPrototype } from "./prototype-cache.js";
 import {
   setRuntimeHttpTarget,
   startRuntimeHttpServer,
@@ -1674,6 +1675,10 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       await updateLivingDocs(state, cfg).catch((e: unknown) =>
         log.warn("orchestrator", "living-docs update failed (non-fatal)", e),
       );
+      // Prototip-cache (item 4): koşu YEŞİL (gate-fail yok) + stack biliniyorsa baseline
+      // dosyalarını golden prototip olarak kaydet (bu stack'te sonraki proje hızlı başlasın).
+      // Non-blocking — snapshotPrototype kendi içinde yeşil/stack kontrolü yapar + throw etmez.
+      await snapshotPrototype(state);
       // v15.9: scoped kapsam + fix checkpoint ref tüketildi — temizle (sonraki
       // iterasyonda stale scope yanlış daraltma yapmasın).
       if (state.changed_scope || state.fix_checkpoint_ref) {

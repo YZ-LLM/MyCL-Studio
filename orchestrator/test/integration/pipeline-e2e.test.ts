@@ -179,9 +179,15 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
   // edilir ki trailing yazımlar (cost flush / pipeline-end summary) `rm` ile
   // yarışıp ENOTEMPTY vermesin.
   let advancePromise: Promise<unknown> | null = null;
+  // Prototip-cache (item 4): pipeline-end snapshotPrototype global ~/.mycl/prototypes'a
+  // yazar → testte MYCL_HOME'u temp'e izole et ki GERÇEK ~/.mycl KİRLENMESİN.
+  let myclHome: string;
+  const origMyclHome = process.env.MYCL_HOME;
 
   beforeEach(async () => {
     advancePromise = null;
+    myclHome = await mkdtemp(join(tmpdir(), "mycl-home-"));
+    process.env.MYCL_HOME = myclHome;
     projectRoot = await mkdtemp(join(tmpdir(), "mycl-e2e-"));
     await writeFile(
       join(projectRoot, "package.json"),
@@ -213,6 +219,10 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     } catch (err) {
       console.warn(`[e2e teardown] rm best-effort başarısız (yok sayıldı): ${String(err)}`);
     }
+    // MYCL_HOME'u eski haline döndür + izole cache'i temizle (gerçek ~/.mycl korunur).
+    if (origMyclHome === undefined) delete process.env.MYCL_HOME;
+    else process.env.MYCL_HOME = origMyclHome;
+    await rm(myclHome, { recursive: true, force: true }).catch(() => {});
   });
 
   // Faz 1'i (intent) tamamlanmış varsayıp Faz 2'den gerçek motoru sürer; askq'ları

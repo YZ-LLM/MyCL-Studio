@@ -6,6 +6,20 @@
 
 ## 2026-06-04
 
+- **feat(prototype-cache) [program 4/8]:** Stack başına golden scaffold cache
+  (`~/.mycl/prototypes/<stack>/`) — "sağlam + hızlı başlangıç". Yeni `prototype-cache.ts`.
+  **Küratörleme = doğrulanmış koşudan oto-anlık-görüntü** (Ümit kararı): pipeline YEŞİL
+  (gate-fail yok) + stack biliniyorsa pipeline-end'de baseline dosyaları (conservative
+  allowlist: config + giriş-iskeleti + public/; **feature kodu HARİÇ** → yeni projeleri
+  kirletmez) golden prototip olarak kaydedilir + `<stack>.meta.json` (createdAt + node sürümü).
+  **Uygula:** Faz 5 başında greenfield (isExistingProject=false) + stack biliniyor + cache
+  varsa, codegen BAŞLAMADAN baseline projeye kopyalanır (mevcut dosya EZİLMEZ) → ana ajan
+  sıfırdan değil doğrulanmış baseline üzerine geliştirir. **Bayatlama (Ümit'in işaret ettiği
+  risk):** apply'da prototip 30+ günse GÖRÜNÜR uyarı (yine kopyalar, "ajan güncellemeli" notu).
+  Her yeşil koşu prototipi tazeler. Non-blocking + fail-closed (snapshot/apply throw etmez).
+  Test: 9 (allowlist feature-dışlama, isStale, snapshot+apply round-trip MYCL_HOME-izole,
+  yeşil-değil/unknown/existing guard'ları). pipeline-e2e testine MYCL_HOME izolasyonu
+  eklendi (gerçek ~/.mycl kirlenmesin). `npm run check` yeşil.
 - **feat(security-baseline/Unit 3) [program 3/8 — item 3 TAMAM]:** **secret-scan** + runner
   robustness. gitleaks YERİNE **semgrep `p/secrets`** (4. semgrep extra_scan) — gitleaks'in
   sürüm/komut (`dir` vs deprecated `detect`)/scope kırılganlığı yok; mevcut semgrep mimarisine
