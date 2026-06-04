@@ -6,6 +6,18 @@
 
 ## 2026-06-04
 
+- **feat(orchestrator/proaktif-risk) [doğru-karar B]:** Orkestratör artık **interaktif + proaktif**
+  — riski sessizce tahmin etmek yerine kullanıcıya SOMUT seçeneklerle sorar (Ümit: "risk gördüğü
+  kısımlarda bana sorsun"; yalnız sürekli orkestratör-içi, sabit faz-kapısı yok). (1) `ask_clarify`
+  zenginleştirildi: `AgentDecision.clarify_options` (decision.ts tip+`decide_action` şema+parser:
+  trim/dedup/cap-6) — handler (index.ts) doluysa jenerik Evet/Hayır yerine gerçek alternatifleri
+  sunar (örn. ["JWT","session-cookie"] + "Vazgeç"); cevap akışı DEĞİŞMEZ (agent_clarify_ →
+  handleUserMessage → ajan o yönle yeniden karar). (2) orchestrator-system.md **§14 Proactive Risk
+  Assessment**: CLAUDE.md kalibrasyonu birebir (belirgin→sessizce hallet; yalnız gerçekten kararsız/
+  geri-dönülemez/geçerli-seçenekler-arası-tercih→sor + öneri ver), önce recall'a bak (tekrar sorma),
+  risk çözülünce `save_memory_proposal` öner (storage→recall→reasoning döngüsü). Geveze olma uyarısı
+  + TR örnekler. Test: 9 (parser). `npm run check` yeşil. **Doğru-karar sistemi (A recall + B risk)
+  TAMAM.**
 - **feat(orchestrator/recall) [doğru-karar A]:** Orkestratör karar anında "doğru geri-çağırma"
   güçlendirildi (doğru karar = depolama + **doğru geri-çağırma** + iyi muhakeme). İki katman:
   (1) son-N limitleri artırıldı (context-builder.ts: audit 10→30, ADR 3→8, proje hafıza 10→15,

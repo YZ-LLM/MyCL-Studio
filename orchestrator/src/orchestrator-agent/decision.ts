@@ -88,6 +88,12 @@ export interface AgentDecision {
    *  ifadesi (örn. "anket oluşturma sayfası"). Handler bunu EN'e çevirip ana
    *  ajana hedefli E2E testi yazdırır. */
   target_feature?: string;
+  /** Doğru-karar/proaktif-risk (2026-06-04): action="ask_clarify" için SOMUT
+   *  seçenekler. Risk/belirsizlikte jenerik Evet/Hayır yerine ajan gerçek
+   *  alternatifleri sunar (örn. ["JWT kullan","session-cookie kullan"]). Boş/yok
+   *  → handler eski Evet/Hayır/Vazgeç davranışına düşer. Cevap akışı değişmez
+   *  (agent_clarify_ → handleAskqAnswer → seçilen metin handleUserMessage'e). */
+  clarify_options?: string[];
 }
 
 const VALID_ACTIONS: ReadonlySet<AgentAction> = new Set<AgentAction>([
@@ -263,6 +269,22 @@ export function parseAgentDecision(input: unknown): AgentDecision {
     decision.target_feature = tf.trim();
   }
 
+  // Doğru-karar/proaktif-risk (2026-06-04): ask_clarify için opsiyonel somut
+  // seçenekler (risk/belirsizlikte zengin askq). trim + boş eleme + dedup; cap 6
+  // (askq aşırı kalabalık olmasın). Diğer action'larda verilmişse sessizce ignore.
+  if (decision.action === "ask_clarify" && Array.isArray(obj.clarify_options)) {
+    const seen = new Set<string>();
+    const opts: string[] = [];
+    for (const o of obj.clarify_options) {
+      const t = typeof o === "string" ? o.trim() : "";
+      if (t === "" || seen.has(t)) continue;
+      seen.add(t);
+      opts.push(t);
+      if (opts.length >= 6) break;
+    }
+    if (opts.length > 0) decision.clarify_options = opts;
+  }
+
   return decision;
 }
 
@@ -341,6 +363,12 @@ export const DECIDE_ACTION_TOOL_SCHEMA = {
       type: "string",
       description:
         "v15.8 — Sadece action='verify_feature' için ZORUNLU. Test edilecek özelliğin kullanıcının dilindeki (Türkçe) ifadesi, örn. 'anket oluşturma sayfası', 'kullanıcı girişi'. Handler bunu İngilizceye çevirip ana ajana o özellik için hedefli E2E testi yazdırır.",
+    },
+    clarify_options: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "OPSİYONEL, sadece action='ask_clarify' için. Risk/belirsizlikte kullanıcıya SOMUT seçenekler sun (Türkçe, 2-4 madde) — jenerik Evet/Hayır yerine gerçek alternatifler, örn. ['JWT ile token-tabanlı auth','session-cookie tabanlı auth']. Önerini reason'da belirt. VERME → handler Evet/Hayır/Vazgeç'e düşer. Her küçük şeyde değil; yalnız gerçekten kararsız / geri-dönülemez / geçerli-seçenekler-arası-tercih durumunda kullan.",
     },
   },
   required: ["action", "reason"],

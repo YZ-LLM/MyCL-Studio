@@ -1085,13 +1085,16 @@ async function executeAgentDecision(
       return;
     }
     case "ask_clarify": {
-      // Agent tek soru sormak istiyor — Evet/Hayır/Vazgeç fallback options.
-      // Daha zengin opsiyon yapısı v15.6'da (agent options'ı output verebilir).
+      // Doğru-karar/proaktif-risk (2026-06-04): clarify_options doluysa SOMUT
+      // seçenekler (risk + gerçek alternatifler); yoksa jenerik Evet/Hayır/Vazgeç.
+      // Cevap akışı DEĞİŞMEZ: agent_clarify_ → handleAskqAnswer → "Vazgeç" sessiz
+      // kapanış, diğer seçim handleUserMessage'e → ajan o yönle yeniden karar verir.
       const askqId = `agent_clarify_${randomUUID()}`;
+      const rich = decision.clarify_options && decision.clarify_options.length > 0;
       emitAskq({
         id: askqId,
         question: decision.message_to_user ?? decision.reason,
-        options: ["Evet", "Hayır", "Vazgeç"],
+        options: rich ? [...decision.clarify_options!, "Vazgeç"] : ["Evet", "Hayır", "Vazgeç"],
         multi_select: false,
         allow_other: true,
       });
