@@ -6,6 +6,21 @@
 
 ## 2026-06-04
 
+- **feat(module-stock) [program 5/8]:** Yeniden-kullanılabilir feature modülleri
+  (~/.mycl/modules/<token>/). **Kritik pivot (4-ajan workflow + adversaryal review):** Ümit'in
+  "oto-çıkarım sezgisel" kararı dumb-heuristic (features.md-token + dosya-adı kümeleme) ile **çöp-modül**
+  üretiyordu → **agent-güdümlü explicit descriptor**'a geçildi (görünür filtre ile bildirildi): hâlâ
+  auto ama orkestratör-rol ajanı (living-docs deseni) kodu Read/Grep ile inceleyip NET
+  `{kind:"modules",modules:[{name,files,db_tables,routes}]}` döner; emin değilse boş → no-op (sessiz
+  çöp YASAK). Yeni `module-stock.ts` (prototype-cache kardeşi): SAF slugToken/matchesModule/isModuleStale/
+  sanitizeDescriptor (mutlak/../DENY reddi)/parseModuleBlock + `extractModule` (YEŞİL-gate computeVerdict
+  PASS+gateFail0+securitySkip0; yalnız GERÇEK var-olan dosyalar kopyalanır; hepsi yoksa çöp-dizin
+  bırakmaz) + `extractStockedModules` (pipeline-end, CLI-only fail-closed, asla throw) + `listAvailableModules`
+  (stack-filtre+limit). **Discover:** context-builder `available_modules` (orkestratör bağlamına stoklu
+  modüller; orchestrator-system.md §7.1 reuse-öner notu — ajan Read'leyip ADAPTE eder, auto-wire YOK).
+  pipeline-end hook (snapshotPrototype yanı). Test: 10 (saf + extract round-trip + guard, MYCL_HOME izole).
+  `npm run check` yeşil + ~/.mycl temiz. **ERTELENEN:** dumb-heuristic boundary, applyModule auto-kopya
+  (ajan kendi Read+yazar), versiyonlama. Detay: hafıza `project_module_stock_plan`.
 - **feat(token-timeline) [program 8/8]:** Faz-bazında token harcaması **zaman çizelgesi UI**
   paneli. Cost altyapısı zaten vardı (cost.jsonl + PhaseCostBucket); eksik olan görselleştirmeydi.
   Backend: faz-sonu cost-flush'ta `emit("cost_phase", rec)` (CANLI) + yeni `load_costs` IPC handler

@@ -261,6 +261,13 @@ Phase 0 is OUTSIDE the pipeline ve **SADECE TEŞHİS** yapar. If the user report
 **Mid-pipeline (Phase 2-17)**:
 - action: `develop_new_or_iter` (return to Phase 1 — state reset warning)
 
+**REUSABLE MODULE (module-stock):** if the requested feature overlaps a module in the
+CURRENT CONTEXT "Stoklu modüller" list, PROPOSE reuse in your Turkish `reason` before
+proceeding (e.g. "Stokta doğrulanmış bir anket modülü var — sıfırdan yazmak yerine onu
+temel alıp bu projeye uyarlayayım mı?"). The codegen agent will Read `~/.mycl/modules/<token>/`
+and ADAPT it (routes/schema/auth) — never blind-copy. You only SUGGEST; the user decides.
+No auto-wire, no regex match — you judge the overlap.
+
 ### 7.2 Command intent ("çalıştır", "test", "build")
 
 - action: `chat` (short explanation) or route to `handleCommandIntent`

@@ -13,6 +13,7 @@ import { dirname, resolve } from "node:path";
 import { readAuditLogTail, readDecisions } from "../audit.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
+import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
 import {
   readProjectMemory,
   readGeneralMemory,
@@ -99,6 +100,9 @@ export interface AgentContextSnapshot {
   /** v15.11: .mycl/features.md başlık-indeksi — orkestratör mevcut özellikleri
    * görüp grounded soru sorar. Detay için features.md'yi kendi Read'ler. */
   feature_headings: string[];
+  /** Modül-stoğu (discover): bu stack için stoklu reuse-edilebilir modüller. Orkestratör
+   *  yeni feature isteğinde reuse önerir (auto-wire YOK; ajan karar verir). */
+  available_modules: ModuleSummary[];
 }
 
 /**
@@ -167,6 +171,8 @@ export async function buildAgentContext(
   )
     .map((c) => c.metadata.heading)
     .filter((h): h is string => typeof h === "string");
+  // Modül-stoğu (discover): bu stack için stoklu modüller (özet; stack-filtre + limit).
+  const availableModules = await listAvailableModules(state.stack).catch(() => []);
   return {
     current_phase: state.current_phase ?? 0,
     iteration_count: state.iteration_count ?? 1,
@@ -184,6 +190,7 @@ export async function buildAgentContext(
     project_memory: projectMemory,
     general_memory: generalMemory,
     feature_headings: featureHeadings,
+    available_modules: availableModules,
   };
 }
 
@@ -212,7 +219,20 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
     for (const h of ctx.feature_headings) lines.push(`- ${h}`);
     lines.push("", "(detay için .mycl/features.md'yi Read et)");
   }
-  lines.push("", "### Recent audit events (last 10)", "");
+  // Modül-stoğu (discover): stoklu reuse-edilebilir modüller (bu stack). Orkestratör
+  // yeni feature isteğinde bunlardan birini önerebilir (auto-wire YOK — bkz §7.1).
+  lines.push("", "### Stoklu modüller (~/.mycl/modules — bu stack)", "");
+  if (ctx.available_modules.length === 0) {
+    lines.push("(stoklu modül yok)");
+  } else {
+    for (const m of ctx.available_modules) {
+      const db = m.db_tables.length > 0 ? `db: ${m.db_tables.join(",")}` : "db: yok";
+      const rt = m.routes.length > 0 ? `route: ${m.routes.join(",")}` : "route: yok";
+      lines.push(`- **${m.name}** (${m.fileCount} dosya, ${db}, ${rt})`);
+    }
+    lines.push("", "(reuse için: ilgili modülü `~/.mycl/modules/<token>/` altından Read et + projeye ADAPTE et)");
+  }
+  lines.push("", "### Recent audit events (last 30)", "");
   if (ctx.recent_audit.length === 0) {
     lines.push("(no events)");
   } else {

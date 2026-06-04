@@ -70,6 +70,7 @@ import {
 import { listModels } from "./models.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
+import { extractStockedModules } from "./module-stock.js";
 import {
   setRuntimeHttpTarget,
   startRuntimeHttpServer,
@@ -1687,6 +1688,12 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // dosyalarını golden prototip olarak kaydet (bu stack'te sonraki proje hızlı başlasın).
       // Non-blocking — snapshotPrototype kendi içinde yeşil/stack kontrolü yapar + throw etmez.
       await snapshotPrototype(state);
+      // Modül-stoğu (item 5): YEŞİL koşuda orkestratör-rol ajanı NET reuse-edilebilir
+      // feature modüllerini çıkarıp ~/.mycl/modules/<token>/'a stoklar (agent-güdümlü,
+      // emin değilse no-op — çöp yok). Non-blocking; kendi içinde yeşil/stack/CLI kontrolü.
+      await extractStockedModules(state, cfg).catch((e: unknown) =>
+        log.warn("orchestrator", "module extraction failed (non-fatal)", e),
+      );
       // v15.9: scoped kapsam + fix checkpoint ref tüketildi — temizle (sonraki
       // iterasyonda stale scope yanlış daraltma yapmasın).
       if (state.changed_scope || state.fix_checkpoint_ref) {

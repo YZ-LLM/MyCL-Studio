@@ -28,8 +28,9 @@ import type { State } from "./types.js";
 /** Prototip taze sayılma süresi (gün). Aşılırsa apply'da görünür "bayat" uyarısı. */
 const MAX_AGE_DAYS = 30;
 
-/** Yürüyüş sırasında HİÇ girilmeyen dizinler (build çıktısı / vcs / bağımlılık). */
-const DENY_SEGMENTS = new Set([
+/** Yürüyüş sırasında HİÇ girilmeyen dizinler (build çıktısı / vcs / bağımlılık).
+ *  EXPORT: module-stock.ts da aynı deny-listesini kullanır (DRY). */
+export const DENY_SEGMENTS = new Set([
   "node_modules", "dist", "build", ".git", ".mycl", "coverage", ".next",
   "target", "__pycache__", ".venv", "venv", ".cache", "out", "tmp", ".turbo",
 ]);
