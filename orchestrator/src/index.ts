@@ -71,6 +71,7 @@ import { listModels } from "./models.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { extractStockedModules } from "./module-stock.js";
+import { generateGuidePdf } from "./guide-pdf.js";
 import {
   setRuntimeHttpTarget,
   startRuntimeHttpServer,
@@ -1693,6 +1694,12 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // emin değilse no-op — çöp yok). Non-blocking; kendi içinde yeşil/stack/CLI kontrolü.
       await extractStockedModules(state, cfg).catch((e: unknown) =>
         log.warn("orchestrator", "module extraction failed (non-fatal)", e),
+      );
+      // F4 (item 6): proje-içi PDF kullanım kılavuzu (user-guide.md + dev-server ayaktaysa
+      // rota ss'leri → public/docs/kullanim-kilavuzu.pdf). Headless Chromium; precondition
+      // yoksa görünür skip. Non-blocking — kendi içinde fail-closed, asla throw.
+      await generateGuidePdf(state).catch((e: unknown) =>
+        log.warn("orchestrator", "guide-pdf generation failed (non-fatal)", e),
       );
       // v15.9: scoped kapsam + fix checkpoint ref tüketildi — temizle (sonraki
       // iterasyonda stale scope yanlış daraltma yapmasın).

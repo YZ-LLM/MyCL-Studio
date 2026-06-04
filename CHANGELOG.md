@@ -6,6 +6,19 @@
 
 ## 2026-06-04
 
+- **feat(guide-pdf/F4) [program 6/8 — PROGRAM TAMAM]:** Proje-içi **PDF kullanım kılavuzu**
+  (headless Chromium + `page.pdf()`). Yeni `guide-pdf.ts`: `.mycl/user-guide.md` (Türkçe,
+  living-docs üretimi) metnini + dev-server AYAKTAYSA rota ekran görüntülerini birleştirip
+  `<project>/public/docs/kullanim-kilavuzu.pdf` üretir. SAF + test'li: extractRoutesFromFeatures
+  (features.md `/route` parse), markdownToHtml (minimal, dep'siz), buildGuideHtml. **Bağımlılık
+  (Ümit kararı: orchestrator Playwright dep):** `playwright` eklendi AMA `.npmrc`
+  `playwright_skip_browser_download=1` → CI'da chromium İNMEZ (gerçek-zorlayıcı CI hafif/yeşil
+  kalır); chromium RUNTIME'da lazy kurulur (`npx playwright install chromium`). Fail-closed:
+  user-guide.md yoksa / UI'sız projede / chromium kurulamazsa → GÖRÜNÜR skip (asla throw).
+  Dev-server kapalıysa metin-only PDF (ss'siz) — yine üretilir. Pipeline-end non-blocking hook.
+  Test: 9 (saf). `npm run check` yeşil. **8-iş programının TÜM işleri bitti** (+ doğru-karar
+  sistemi). Kalan: ertelenen güvenlik kontrolleri + F4 in-app link (minör). Detay: hafıza
+  `project_f4_pdf_plan`.
 - **feat(module-stock) [program 5/8]:** Yeniden-kullanılabilir feature modülleri
   (~/.mycl/modules/<token>/). **Kritik pivot (4-ajan workflow + adversaryal review):** Ümit'in
   "oto-çıkarım sezgisel" kararı dumb-heuristic (features.md-token + dosya-adı kümeleme) ile **çöp-modül**
