@@ -6,6 +6,17 @@
 
 ## 2026-06-04
 
+- **feat(security) [tamamlık]:** Faz 13'e iki adanmış kontrol — **security-headers** + **veri-güvenliği
+  sanitizer** (Ümit talebi). (1) `orchestrator/headers-check.mjs`: STATİK güvenlik-HTTP-başlık kontrolü
+  (deps + kaynak tarama; canlı-server FP'siz — dev server'lar prod-header koymaz). HTTP backend
+  (express/fastify/koa/nest/next) var ama helmet/manuel-header YOKSA bulgu (HSTS/X-Frame-Options/...);
+  statik SPA → uygulanamaz skip. (2) `assets/security-rules/data-sanitization.yml` (semgrep, `--validate`
+  + fixture-test edildi): kullanıcı verisi sanitize edilmeden tehlikeli sink'lere (innerHTML/outerHTML
+  dinamik, dangerouslySetInnerHTML dinamik, eval/Function, SQL string-concat) akıyor mu — sabit-string +
+  DOMPurify.sanitize'lı kod hariç (düşük-FP). İkisi Faz 13 extra_scan (mutlak yol securityToolPath/
+  securityRulePath; `tool_error_codes:[2]` → bozuk-kural/araç-hatası skip, yanlış-blocking yok). Test: 6
+  (headers exit-kodu) + sanitizer fixture-doğrulama. `npm run check` yeşil. (Geri kalan ertelenenler —
+  CSRF/CORS/cookie dedicated, gitleaks, CSP runtime-header — mevcut owasp/auto paketleriyle örtüşür.)
 - **feat(guide-pdf/F4) [program 6/8 — PROGRAM TAMAM]:** Proje-içi **PDF kullanım kılavuzu**
   (headless Chromium + `page.pdf()`). Yeni `guide-pdf.ts`: `.mycl/user-guide.md` (Türkçe,
   living-docs üretimi) metnini + dev-server AYAKTAYSA rota ekran görüntülerini birleştirip

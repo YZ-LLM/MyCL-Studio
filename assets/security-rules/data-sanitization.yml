@@ -1,0 +1,60 @@
+# data-sanitization — veri güvenliği: kullanıcı verisinin sanitize edilmeden tehlikeli
+# sink'lere (XSS / kod-enjeksiyonu / SQL) akmasını yakalar. Sabit-string atamaları
+# (literal) güvenli → hariç (false-positive azalt). Faz 13 extra_scan (semgrep).
+# Bozuk kural → runner tool_error_codes:[2] ile skip (yanlış-blocking yapmaz).
+
+rules:
+  - id: mycl-unsanitized-innerhtml
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >
+      innerHTML/outerHTML'e dinamik değer atanıyor — XSS riski. Kullanıcı verisini
+      DOMPurify gibi bir sanitizer'dan geçir veya textContent kullan.
+    patterns:
+      - pattern-either:
+          - pattern: $EL.innerHTML = $X
+          - pattern: $EL.outerHTML = $X
+      - metavariable-pattern:
+          metavariable: $X
+          patterns:
+            - pattern-not: "\"...\""
+            - pattern-not: "'...'"
+
+  - id: mycl-react-dangerously-set-innerhtml
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >
+      dangerouslySetInnerHTML dinamik __html ile — XSS riski. __html'i DOMPurify.sanitize()
+      gibi bir sanitizer'dan geçir.
+    patterns:
+      - pattern: "<$EL dangerouslySetInnerHTML={{ __html: $X }} />"
+      - metavariable-pattern:
+          metavariable: $X
+          patterns:
+            - pattern-not: "\"...\""
+            - pattern-not: DOMPurify.sanitize(...)
+            - pattern-not: $SANITIZER.sanitize(...)
+
+  - id: mycl-eval-with-input
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >
+      eval()/new Function() dinamik ifadeyle — kod enjeksiyonu riski. Kaçın veya katı
+      doğrulama/sanitizasyon uygula.
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: new Function(...)
+      - pattern-not: eval("...")
+
+  - id: mycl-sql-string-concat
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >
+      SQL sorgusu string birleştirme/interpolasyon ile kuruluyor — SQL injection riski.
+      Parametreli sorgu (prepared statement / placeholder) kullan.
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query("..." + $X)
+          - pattern: $DB.query($A + $X)
+          - pattern: $DB.execute("..." + $X)

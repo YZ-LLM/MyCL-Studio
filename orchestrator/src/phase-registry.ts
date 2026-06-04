@@ -49,6 +49,12 @@ function securityToolPath(name: string): string {
   return resolve(__dirname, "..", name);
 }
 
+/** assets/security-rules/ altındaki custom kural dosyası (örn. data-sanitization.yml).
+ *  Runner cwd=hedef-proje olduğundan MUTLAK yol gerekir (semgrep --config <abs>). */
+function securityRulePath(name: string): string {
+  return join(ASSETS_ROOT, "security-rules", name);
+}
+
 export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
   0: {
     id: 0,
@@ -343,6 +349,23 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           name: "semgrep-owasp-top-ten",
           cmd: "semgrep --config p/owasp-top-ten src/ --error --quiet",
           scoped_cmd_template: "semgrep --config p/owasp-top-ten {files} --error --quiet",
+          tool_error_codes: [2],
+        },
+        {
+          // Güvenlik tamamlığı: adanmış güvenlik-HTTP-başlık kontrolü (deps + kaynak
+          // tarama; canlı-server FP'siz). Backend var ama helmet/manuel-header yoksa bulgu.
+          // MUTLAK yol (runner cwd=hedef-proje). exit 2 = araç-hatası → skip.
+          name: "security-headers",
+          cmd: `node "${securityToolPath("headers-check.mjs")}" --project .`,
+          tool_error_codes: [2],
+        },
+        {
+          // Veri güvenliği: sanitizer kontrolü — kullanıcı verisi sanitize edilmeden
+          // tehlikeli sink'lere (innerHTML/dangerouslySetInnerHTML/eval/SQL-concat) akıyor mu.
+          // Custom semgrep YAML (mutlak yol); bozuk/fatal kural exit 2 → skip (yanlış-blocking yok).
+          name: "data-sanitization",
+          cmd: `semgrep --config "${securityRulePath("data-sanitization.yml")}" src/ --error --quiet`,
+          scoped_cmd_template: `semgrep --config "${securityRulePath("data-sanitization.yml")}" {files} --error --quiet`,
           tool_error_codes: [2],
         },
       ],
