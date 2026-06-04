@@ -11,7 +11,7 @@
 // devam eder. Faz çökmez; relevance opsiyonel yan-yarar.
 
 import { relevanceApiKey, relevanceModelId, type MyclConfig } from "../config.js";
-import { isSubscriptionMode, noteSubscriptionSkipOnce } from "../subscription-mode.js";
+import { isSubscriptionMode } from "../subscription-mode.js";
 import { emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import type { State } from "../types.js";
@@ -26,7 +26,7 @@ import {
   extractSpecChunks,
   extractUserGuideChunks,
 } from "./chunk-store.js";
-import { scoreChunks } from "./classifier.js";
+import { scoreChunks, scoreChunksViaCli } from "./classifier.js";
 import type { Chunk, RelevanceQueryOptions, ScoredChunk } from "./types.js";
 import { RelevanceError } from "./types.js";
 
@@ -133,12 +133,10 @@ export async function getRelevantChunks(
   state: State,
   options: RelevanceQueryOptions,
 ): Promise<ScoredChunk[]> {
-  // v15.8: saf abonelik modunda relevance API'ye sokulmaz (zorlanmış-tool, CLI yok;
-  // best-effort) → boş sentinel (caller "no relevant ... found" ile devam eder).
-  if (isSubscriptionMode(config)) {
-    noteSubscriptionSkipOnce();
-    return [];
-  }
+  // v15.x (2026-06-04): saf abonelik modunda relevance ARTIK atlanmaz — text-JSON
+  // CLI ile skorlanır (scoreChunksViaCli, project-type deseni). Önceden boş sentinel
+  // dönüyordu → abonelik kullanıcısı recall sıralaması alamıyordu (MyCL "hiçbir şeyi
+  // unutmuyor" + "sessiz fallback yok" ihlali). Backend seçimi scoring adımında.
   const maxChunks = options.max_chunks ?? 5;
   const minScore = options.min_score ?? 6;
   const topK = options.keyword_top_k ?? 20;
@@ -161,13 +159,20 @@ export async function getRelevantChunks(
 
   let scored: ScoredChunk[];
   try {
-    scored = await scoreChunks(
-      config,
-      relevanceApiKey(config.api_keys),
-      relevanceModelId(config.selected_models),
-      options.intent,
-      candidates,
-    );
+    // Backend: saf-abonelik → text-JSON CLI (forced-tool yok); aksi → SDK forced-tool.
+    scored = isSubscriptionMode(config)
+      ? await scoreChunksViaCli(
+          relevanceModelId(config.selected_models),
+          options.intent,
+          candidates,
+        )
+      : await scoreChunks(
+          config,
+          relevanceApiKey(config.api_keys),
+          relevanceModelId(config.selected_models),
+          options.intent,
+          candidates,
+        );
   } catch (err) {
     // Relevance fail-safe: faz çökmesin; emit hata + log.warn + boş array.
     // Caller "(no relevant ... found)" sentinel'i kullanır.

@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MyclConfig } from "../src/config.js";
 import type { State } from "../src/types.js";
 
-// translate + loadMessages mock (vi.hoisted — factory'den önce tanımlı).
-const { translateMock, loadMessagesMock } = vi.hoisted(() => ({
+// translate + loadMessages + runClaudeCli mock (vi.hoisted — factory'den önce tanımlı).
+const { translateMock, loadMessagesMock, runCliMock } = vi.hoisted(() => ({
   translateMock: vi.fn(),
   loadMessagesMock: vi.fn(),
+  runCliMock: vi.fn(),
 }));
 vi.mock("../src/translator.js", () => ({ translate: translateMock }));
 vi.mock("../src/history-loader.js", () => ({ loadMessages: loadMessagesMock }));
+// Abonelik özeti CLI ile üretilir → gerçek `claude` spawn'ı YAPMA (mock).
+vi.mock("../src/cli-run.js", () => ({ runClaudeCli: runCliMock }));
 
 import {
   _clearSummaryCache,
@@ -36,6 +39,35 @@ beforeEach(() => {
   translateMock.mockImplementation(async () => ({ text: EN_MARKER }));
   loadMessagesMock.mockReset();
   loadMessagesMock.mockResolvedValue(msgEvents(TR));
+  runCliMock.mockReset();
+});
+
+// v15.x (2026-06-04): abonelik (saf-CLI) modunda özet ARTIK atlanmaz — CLI ile üretilir.
+describe("conversation-context · abonelik (CLI) özeti — parite", () => {
+  const subConfig = {
+    selected_models: { translator: "m", main: "m" },
+    api_keys: { translator: "k", main: "k" },
+    agent_backends: { orchestrator: "cli", translator: "cli", main: "cli" },
+  } as unknown as MyclConfig;
+
+  it("8+ mesaj + saf-abonelik → özet runClaudeCli ile üretilir (atlanmaz)", async () => {
+    // 8 user mesajı: 3 older + 5 recent → SUMMARY_TRIGGER(7) aşılır, özet tetiklenir.
+    const eight = Array.from({ length: 8 }, (_, i) => `mesaj ${i + 1}`);
+    loadMessagesMock.mockResolvedValue(msgEvents(eight));
+    runCliMock.mockResolvedValue({ ok: true, text: "CLI_SUMMARY_MARKER", toolUses: [], turns: 1 });
+
+    const ctx = await buildConversationContext(subConfig, state);
+    expect(ctx.earlier_summary).toBe("CLI_SUMMARY_MARKER"); // CLI yolu kullanıldı (atlanmadı)
+    expect(runCliMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("abonelik özeti CLI fail → null (fail-safe, takılma yok)", async () => {
+    const eight = Array.from({ length: 8 }, (_, i) => `mesaj ${i + 1}`);
+    loadMessagesMock.mockResolvedValue(msgEvents(eight));
+    runCliMock.mockResolvedValue({ ok: false, error: "boom", text: "", toolUses: [], turns: 0 });
+    const ctx = await buildConversationContext(subConfig, state);
+    expect(ctx.earlier_summary).toBeNull(); // fail → null (caller recent ile devam)
+  });
 });
 
 describe("conversation-context · ana ajan (forMainAgent) İngilizce", () => {

@@ -15,6 +15,8 @@
 // (~$0.0001/batch with Haiku).
 
 import { runTurn, type ToolDef } from "../claude-api.js";
+import { runClaudeCli } from "../cli-run.js";
+import { extractKindBlock } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
 import { emitClaudeStream } from "../ipc.js";
 import { log } from "../logger.js";
@@ -236,5 +238,97 @@ export async function scoreChunks(
     above_5: all.filter((c) => c.score > 5).length,
   });
 
+  return all;
+}
+
+// ───────────────── Abonelik (CLI) modu — text-JSON scoring ─────────────────
+// v15.x (2026-06-04): saf-abonelik modunda relevance ARTIK atlanmaz. `claude -p`
+// forced-tool (score_chunks) desteklemediği için project-type'taki (classifyViaCli)
+// kanıtlı text-JSON desenini uygula: ajan tek JSON bloğu yazar, extractKindBlock +
+// mergeScoresWithChunks (aynı saf merge) ile parse edilir. Böylece abonelik kullanıcısı
+// da gerçek recall sıralaması alır (MyCL "hiçbir şeyi unutmuyor" + "sessiz fallback yok").
+
+const CLI_JSON_INSTRUCTION = `\n\nDo NOT call any tool. Output your result as ONE JSON block at the very end and nothing after it:
+{"kind":"relevance_scores","scores":[{"id":"<chunk id>","score":<0-10>,"reason":"<short>"}]}
+Include exactly one entry per chunk id; do not skip any.`;
+
+/**
+ * SAF: CLI text-JSON çıktısından scores'u çıkar + chunks ile eşleştir. Geçerli
+ * `relevance_scores` bloğu yoksa RelevanceError (caller boş-array fallback yapar —
+ * API yolundaki "no tool_use" davranışıyla simetrik). Test edilebilir.
+ */
+export function parseCliScores(text: string, chunks: Chunk[]): ScoredChunk[] {
+  const block = extractKindBlock(text, ["relevance_scores"]);
+  if (!block || !Array.isArray(block.scores)) {
+    throw new RelevanceError("cli classifier: no valid relevance_scores block");
+  }
+  return mergeScoresWithChunks(chunks, block.scores as unknown[]);
+}
+
+/** Tek batch'i CLI ile skorla (runClaudeCli + text-JSON parse). */
+async function scoreBatchViaCli(
+  modelId: string,
+  intent: string,
+  chunks: Chunk[],
+): Promise<ScoredChunk[]> {
+  const chunksBlock = chunks
+    .map((c) => `[id=${c.id}]\n${c.text}`)
+    .join("\n\n---\n\n");
+  const userMessage = `INTENT:\n${intent}\n\nCHUNKS:\n\n${chunksBlock}`;
+  const callTs = Date.now();
+  emitClaudeStream({
+    sub: "init",
+    text: "cli-relevance-classifier",
+    model: modelId,
+    turn: 1,
+    max_turns: 1,
+    ts: callTs,
+  });
+  let res;
+  try {
+    res = await runClaudeCli({
+      systemPrompt: SYSTEM_PROMPT + CLI_JSON_INSTRUCTION,
+      userMessage,
+      modelId,
+      cwd: process.cwd(), // skorlama yalnız intent+chunks metninden — proje erişimi gerekmez
+      timeoutMs: 120_000,
+    });
+  } catch (err) {
+    throw new RelevanceError(`cli classifier failed: ${String(err)}`);
+  }
+  if (!res.ok) {
+    throw new RelevanceError(`cli classifier failed: ${res.error ?? "unknown"}`);
+  }
+  emitClaudeStream({
+    sub: "relevance_call",
+    model: modelId,
+    text: `scored ${chunks.length} chunks (cli)`,
+  });
+  return parseCliScores(res.text, chunks);
+}
+
+/**
+ * scoreChunks'ın abonelik-modu eşi: batch'leri `claude -p` text-JSON ile skorlar.
+ * Tek batch fail → RelevanceError (caller emitError + boş-array fallback).
+ */
+export async function scoreChunksViaCli(
+  modelId: string,
+  intent: string,
+  chunks: Chunk[],
+): Promise<ScoredChunk[]> {
+  if (chunks.length === 0) return [];
+  log.info("relevance/classifier", "scoring (cli)", {
+    chunk_count: chunks.length,
+    model: modelId,
+  });
+  const all: ScoredChunk[] = [];
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE);
+    all.push(...(await scoreBatchViaCli(modelId, intent, batch)));
+  }
+  log.info("relevance/classifier", "scoring done (cli)", {
+    chunks_scored: all.length,
+    above_5: all.filter((c) => c.score > 5).length,
+  });
   return all;
 }

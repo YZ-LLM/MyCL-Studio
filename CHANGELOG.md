@@ -6,6 +6,20 @@
 
 ## 2026-06-04
 
+- **fix(abonelik-paritesi):** Saf-abonelik (tüm roller CLI) modunda relevance (recall sıralaması) +
+  konuşma-özeti ARTIK atlanmıyor — proje-tipindeki (v15.10 `classifyViaCli`) kanıtlı **text-JSON CLI**
+  desenine taşındı. Ümit: "abonelikte de her şey yapılıyor, kısıtlama gereken durum yok" — haklı: bu
+  yarım kalmış migrasyondu (forced-tool API-only sanılıyordu). Üstelik konuşma-özeti zaten forced-tool
+  DEĞİL düz-metin SDK çağrısıydı (mesajdaki "zorlanmış-tool" gerekçesi yanlıştı). Değişiklik: (a)
+  `relevance/classifier.ts` → `scoreChunksViaCli` + saf `parseCliScores` (extractKindBlock +
+  mevcut `mergeScoresWithChunks` reuse); `relevance-engine.ts` erken-skip kalktı, scoring adımı
+  backend'e göre route (abonelik→CLI, aksi→SDK forced-tool); (b) `conversation-context.ts` →
+  `generateSummaryViaCli` (düz-metin `runClaudeCli`), abonelik skip'i kalktı; (c) `subscription-mode.ts`
+  → `noteSubscriptionSkipOnce` + "atlanıyor" mesajı SİLİNDİ (artık atlama yok; `isSubscriptionMode`
+  yalnız routing). Abonelik = tam recall/bağlam paritesi (MyCL "hiçbir şeyi unutmuyor" + "sessiz
+  fallback yok"). Tradeoff: abonelikte recall başına ~1 `claude -p` (Haiku, batched) — birkaç sn
+  gecikme + abonelik limiti; cache + batch mevcut. +7 test (parseCliScores parse vektörleri + CLI-özet
+  parite/fail-safe). `npm run check` yeşil (878 test).
 - **feat(WP4) [DAST]:** Composer'da 🛡️ **Güvenlik Taraması** butonu — çalışan localhost uygulamasına
   onay-gated aktif DAST (nuclei). YENİ ÖZELLİK (Ümit: "composer'ın altında buton, basınca açıkla + emin
   misin?"). design+SERT-adversaryal-güvenlik workflow (wf_3ebf64a7, verdict: rework → bu güvenli sentez).

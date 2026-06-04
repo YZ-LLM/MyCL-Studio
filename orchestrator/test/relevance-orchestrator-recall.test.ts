@@ -1,14 +1,19 @@
 // buildRelevantOrchestratorContext — doğru-karar/recall injector'ı (orkestratör
 // karar anında relevance-tabanlı "en ilgili geçmiş"). Triviyal-query skip +
 // fail-safe boş-sonuç sözleşmesi. (Gerçek relevance skorlama LLM çağrısı; burada
-// deterministik kollar: kısa-query atlama + abonelik-modu short-circuit → "".)
+// deterministik kollar: kısa-query atlama + no-chunks fail-safe → "".)
+//
+// NOT (2026-06-04): abonelik modu ARTIK relevance'ı atlamaz (text-JSON CLI ile
+// skorlar). Bu testte proje dizini var-olmadığından chunk toplanamaz → gatherChunks
+// boş → getRelevantChunks scoring'e GİTMEDEN [] döner (no-chunks fail-safe). Yani
+// burada CLI spawn'ı tetiklenmez; abonelik config'i yalnız config-şekli için kullanılır.
 
 import { describe, expect, it } from "vitest";
 import { buildRelevantOrchestratorContext } from "../src/relevance/injectors.js";
 import type { MyclConfig } from "../src/config.js";
 import type { State } from "../src/types.js";
 
-// Saf-abonelik config (tüm roller cli) → getRelevantChunks short-circuit ([]).
+// Saf-abonelik config (tüm roller cli). var-olmayan proje → no-chunks → [].
 const subscriptionConfig = (): MyclConfig =>
   ({
     selected_models: { translator: "m", main: "m", orchestrator: "m", relevance: "m" },
@@ -28,7 +33,7 @@ describe("buildRelevantOrchestratorContext", () => {
     expect(await buildRelevantOrchestratorContext(subscriptionConfig(), fakeState(), "")).toBe("");
   });
 
-  it("abonelik modu / boş sonuç → '' (bölüm eklenmez, fail-safe — karar bloklanmaz)", async () => {
+  it("no-chunks / boş sonuç → '' (bölüm eklenmez, fail-safe — karar bloklanmaz)", async () => {
     const r = await buildRelevantOrchestratorContext(
       subscriptionConfig(),
       fakeState(),

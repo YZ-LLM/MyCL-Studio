@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MyclConfig } from "./config.js";
 import { isSubscriptionMode } from "./subscription-mode.js";
+import { runClaudeCli } from "./cli-run.js";
 import { loadMessages } from "./history-loader.js";
 import { log } from "./logger.js";
 import { translate } from "./translator.js";
@@ -56,24 +57,26 @@ function hashMessages(messages: string[]): string {
     .slice(0, 16);
 }
 
+// Özet sistem promptu — SDK ve CLI yolları aynı talimatı kullanır (drift yok).
+const SUMMARY_SYSTEM =
+  "You summarize a conversation between a user (developer, Turkish-speaking) and an AI assistant (MyCL Studio, an AI development IDE). Output 1-2 SHORT English sentences capturing what the user has been asking about. No preamble, no quotes, no 'The user...' prefix — just the topic in plain English. Example: 'User is debugging a survey creation page; reported it doesn't work, then asked for clarification of the issue.'";
+
+function summaryUserMessage(olderMessages: string[]): string {
+  const numbered = olderMessages.map((m, i) => `${i + 1}. ${m}`).join("\n");
+  return `Summarize these user messages (chronological, oldest first):\n\n${numbered}`;
+}
+
 async function generateSummary(
   config: MyclConfig,
   olderMessages: string[],
 ): Promise<string> {
   const client = new Anthropic({ apiKey: config.api_keys.translator });
   const model = config.selected_models.translator;
-  const numbered = olderMessages.map((m, i) => `${i + 1}. ${m}`).join("\n");
   const response = await client.messages.create({
     model,
     max_tokens: SUMMARY_MAX_TOKENS,
-    system:
-      "You summarize a conversation between a user (developer, Turkish-speaking) and an AI assistant (MyCL Studio, an AI development IDE). Output 1-2 SHORT English sentences capturing what the user has been asking about. No preamble, no quotes, no 'The user...' prefix — just the topic in plain English. Example: 'User is debugging a survey creation page; reported it doesn't work, then asked for clarification of the issue.'",
-    messages: [
-      {
-        role: "user",
-        content: `Summarize these user messages (chronological, oldest first):\n\n${numbered}`,
-      },
-    ],
+    system: SUMMARY_SYSTEM,
+    messages: [{ role: "user", content: summaryUserMessage(olderMessages) }],
   });
   const text = response.content
     .filter((c): c is Anthropic.TextBlock => c.type === "text")
@@ -81,6 +84,26 @@ async function generateSummary(
     .join("")
     .trim();
   return text || "(summary unavailable)";
+}
+
+/**
+ * Abonelik (CLI) modu özet — düz-metin `claude -p` (forced-tool DEĞİL, sadece
+ * SDK yerine CLI). v15.x (2026-06-04): önceden saf-abonelik modunda özet
+ * atlanıyordu; artık CLI ile üretilir (bağlam-zenginleştirme paritesi).
+ */
+async function generateSummaryViaCli(
+  config: MyclConfig,
+  olderMessages: string[],
+): Promise<string> {
+  const res = await runClaudeCli({
+    systemPrompt: SUMMARY_SYSTEM,
+    userMessage: summaryUserMessage(olderMessages),
+    modelId: config.selected_models.translator,
+    cwd: process.cwd(), // özet yalnız mesaj metninden — proje erişimi gerekmez
+    timeoutMs: 120_000,
+  });
+  if (!res.ok) throw new Error(res.error ?? "cli summary failed");
+  return res.text.trim() || "(summary unavailable)";
 }
 
 export async function buildConversationContext(
@@ -138,16 +161,19 @@ export async function buildConversationContext(
   }
 
   let summary: string | null = null;
-  // v15.8: saf abonelik modunda özet (translator SDK çağrısı) atlanır → null
-  // (caller recent_messages ile devam eder; özet best-effort bağlam zenginleştirme).
-  if (total >= SUMMARY_TRIGGER && olderMessages.length > 0 && !isSubscriptionMode(config)) {
+  // v15.x (2026-06-04): özet saf-abonelik modunda da üretilir — SDK yerine CLI
+  // (generateSummaryViaCli). Önceden atlanıyordu (best-effort skip); parite için
+  // artık her iki backend'de de çalışır. Cache ortak.
+  if (total >= SUMMARY_TRIGGER && olderMessages.length > 0) {
     const key = hashMessages(olderMessages);
     const cached = summaryCache.get(key);
     if (cached) {
       summary = cached;
     } else {
       try {
-        summary = await generateSummary(config, olderMessages);
+        summary = isSubscriptionMode(config)
+          ? await generateSummaryViaCli(config, olderMessages)
+          : await generateSummary(config, olderMessages);
         summaryCache.set(key, summary);
         // Cache bloat'ı önle: 50 entry sınırı (FIFO).
         if (summaryCache.size > 50) {
