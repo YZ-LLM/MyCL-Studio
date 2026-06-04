@@ -172,6 +172,48 @@ describe("MechanicalRunnerBase · extra_scans", () => {
     expect(audit).toContain("semgrep-skipped");
   });
 
+  it("extra tool_error_codes exit (semgrep crash=2) → skipped, bulgu/fail DEĞİL", async () => {
+    // Güvenlik-baseline Unit 3: bozuk custom kural / uyumsuz araç sürümü exit 2
+    // verir → yanlış-blocking yapmasın → skip. scan pass etkilenmez.
+    const runner = new MechanicalRunnerBase({
+      tag: "test-tool-error",
+      phaseId: 13,
+      state: fakeState(),
+      mechanical: {
+        scan_cmd: "true",
+        max_rescans: 0,
+        skip_unless: "always",
+        extra_scans: [{ name: "semgrep-secrets", cmd: "exit 2", tool_error_codes: [2] }],
+      },
+      pass_event: "security-pass",
+    });
+    const out = await runner.run();
+    expect(out.kind).toBe("pass");
+    const audit = await readFile(join(projectRoot, ".mycl/audit.log"), "utf-8");
+    expect(audit).toContain("semgrep-secrets-skipped");
+  });
+
+  it("exit kodu tool_error_codes'ta DEĞİLSE (gerçek bulgu=1) → fail kalır", async () => {
+    const runner = new MechanicalRunnerBase({
+      tag: "test-tool-error-1",
+      phaseId: 13,
+      state: fakeState(),
+      mechanical: {
+        scan_cmd: "true",
+        max_rescans: 0,
+        skip_unless: "always",
+        // exit 1 (gerçek bulgu) tool_error_codes:[2]'de yok → fail (blocking) kalır.
+        extra_scans: [{ name: "semgrep-secrets", cmd: "false", tool_error_codes: [2] }],
+      },
+      pass_event: "security-pass",
+      fail_event: "security-fail",
+    });
+    const out = await runner.run();
+    expect(out.kind).toBe("fail");
+    const audit = await readFile(join(projectRoot, ".mycl/audit.log"), "utf-8");
+    expect(audit).toContain("semgrep-secrets-fail");
+  });
+
   it("extra with require_file missing → skipped event (missing_file)", async () => {
     const runner = new MechanicalRunnerBase({
       tag: "test-require-file",

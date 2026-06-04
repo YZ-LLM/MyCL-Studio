@@ -197,6 +197,14 @@ export interface MechanicalConfig {
      * (tüm-proje) fallback.
      */
     scoped_cmd_template?: string;
+    /**
+     * Güvenlik-baseline Unit 3: "araç düzgün çalışmadı" exit kodları — BULGU
+     * (fail) DEĞİL, SKIP olarak işlenir. Örn. semgrep fatal/bozuk-kural=2,
+     * gitleaks eski-sürümde bilinmeyen-komut=126. Bunlar olmadan bozuk bir custom
+     * kural ya da uyumsuz araç sürümü her projeyi yanlış-bloklardı. Atlanan güvenlik
+     * taraması harness-verdict'te securitySkipped→PARTIAL ile dürüstçe yüzeye çıkar.
+     */
+    tool_error_codes?: number[];
   }>;
 }
 

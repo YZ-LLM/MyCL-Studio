@@ -315,19 +315,35 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           cmd: `node "${securityToolPath("csp-check.mjs")}"`,
         },
         {
+          // Güvenlik-baseline (Unit 3): secret-scan. Hard-coded API key/token/private-key.
+          // gitleaks YERİNE semgrep p/secrets — mevcut semgrep mimarisine oturur (registry
+          // config, path sorunu yok), dil-agnostik, gitleaks'in sürüm/komut/scope
+          // kırılganlığı yok. Eksik→skip, semgrep-crash (exit 2)→skip (tool_error_codes).
+          name: "semgrep-secrets",
+          cmd: "semgrep --config p/secrets src/ --error --quiet",
+          scoped_cmd_template: "semgrep --config p/secrets {files} --error --quiet",
+          tool_error_codes: [2],
+        },
+        // tool_error_codes:[2]: semgrep fatal/crash (registry fetch hatası, bozuk hedef
+        // kod parse'ı) exit 2 verir — bu BULGU değil → yanlış-blocking yapmasın → skip
+        // (Unit 3 robustness; review landmine). exit 1 (gerçek bulgu) blocking kalır.
+        {
           name: "semgrep",
           cmd: "semgrep --config auto src/ --error --quiet",
           scoped_cmd_template: "semgrep --config auto {files} --error --quiet",
+          tool_error_codes: [2],
         },
         {
           name: "semgrep-security-audit",
           cmd: "semgrep --config p/security-audit src/ --error --quiet",
           scoped_cmd_template: "semgrep --config p/security-audit {files} --error --quiet",
+          tool_error_codes: [2],
         },
         {
           name: "semgrep-owasp-top-ten",
           cmd: "semgrep --config p/owasp-top-ten src/ --error --quiet",
           scoped_cmd_template: "semgrep --config p/owasp-top-ten {files} --error --quiet",
+          tool_error_codes: [2],
         },
       ],
     },

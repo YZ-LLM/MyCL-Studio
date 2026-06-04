@@ -6,6 +6,20 @@
 
 ## 2026-06-04
 
+- **feat(security-baseline/Unit 3) [program 3/8 — item 3 TAMAM]:** **secret-scan** + runner
+  robustness. gitleaks YERİNE **semgrep `p/secrets`** (4. semgrep extra_scan) — gitleaks'in
+  sürüm/komut (`dir` vs deprecated `detect`)/scope kırılganlığı yok; mevcut semgrep mimarisine
+  birebir oturur (registry config, path sorunu yok, dil-agnostik, eksik→skip). Yeni
+  **`tool_error_codes`** alanı (extra_scan): "araç düzgün çalışmadı" exit kodları (semgrep
+  fatal/crash=2; ileride gitleaks eski-sürüm=126) BULGU değil → fail değil **skip** → bozuk
+  custom kural / uyumsuz araç sürümü projeyi **yanlış-bloklamaz** (review landmine). 4
+  semgrep scan'inin hepsine `tool_error_codes:[2]` eklendi (crash robustness; exit 1 = gerçek
+  bulgu blocking kalır). Atlanan tarama harness `securitySkipped`→PARTIAL ile dürüstçe görünür.
+  Test: +2 (exit-2→skip, exit-1→fail). `npm run check` yeşil.
+  **Bilinçli ERTELENEN (review + dikkatlice):** custom semgrep YAML (security-headers/xss/sqli)
+  — "helmet yok→bulgu" gibi yokluk-kuralları yanlış-pozitif fırtınası yapar + mutlak-yol gerektirir;
+  xss/sqli zaten `p/owasp-top-ten`+`auto` ile örtüşür. gitleaks (daha özel, sürüm-robust çağrı
+  gerekir). CSRF/CORS/cookie (statik tarama FP). Detay: hafıza `project_security_baseline_plan`.
 - **feat(security-baseline/Unit 2) [program 3/8]:** Faz 13 (Güvenlik) artık **BLOCKING** —
   "TAMAMLANDI deme" (Ümit kararı; MEDIUM dahil bloklar). Güvenlik gate fail olunca
   soft-complete (`soft_complete_after_fail`) YAZILMAZ; F1 `analyzeAndAskError` askq'ına

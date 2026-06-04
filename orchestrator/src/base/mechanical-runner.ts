@@ -277,6 +277,25 @@ export class MechanicalRunnerBase {
       return "skipped";
     }
 
+    // Güvenlik-baseline Unit 3: "araç düzgün çalışmadı" exit kodları (örn. semgrep
+    // fatal/bozuk-kural=2, gitleaks eski-sürüm bilinmeyen-komut=126) → BULGU değil →
+    // fail değil SKIP. Bozuk custom kural / uyumsuz araç sürümü projeyi yanlış-
+    // bloklamasın (review landmine). Atlama harness-verdict'te securitySkipped→PARTIAL.
+    if (extra.tool_error_codes && extra.tool_error_codes.includes(result.code)) {
+      await appendAudit(opts.state.project_root, {
+        ts: Date.now(),
+        phase: opts.phaseId,
+        event: `${extra.name}-skipped`,
+        caller: "mycl-orchestrator",
+        detail: `tool_error code=${result.code} cmd="${extra.cmd}"`,
+      });
+      emitChatMessage(
+        "system",
+        `⏭ ${extra.name} atlandı — araç düzgün çalışmadı (çıkış kodu ${result.code}; bulgu değil, araç/sürüm sorunu).`,
+      );
+      return "skipped";
+    }
+
     if (result.code === 0) {
       await appendAudit(opts.state.project_root, {
         ts: Date.now(),
