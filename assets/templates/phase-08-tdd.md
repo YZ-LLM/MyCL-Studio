@@ -185,6 +185,59 @@ ErrorBoundary) should write rows with `resolved=0` and `solution_tr=NULL`.
 
 Treat these as ACs and TDD them just like the spec's own ACs.
 
+## Observability — logging + health (MANDATORY when a backend exists)
+
+The error catalog above captures *errors*. Observability also requires the app
+to say what it is *doing* and whether it is *up*. If the project is
+frontend-only (static SPA / library / CLI with no server) → SKIP this section
+and note "no backend → observability skipped" in your summary. Do NOT add a
+server or any dependency just to satisfy it.
+
+When a backend exists, treat these as ACs and TDD them (RED first):
+
+1. **Structured logging — minimal-dep.** No bare `console.log("...")`. Use ONE
+   thin logger module emitting machine-readable lines with `level`, `msg`, `ts`,
+   and (when available) a `requestId`:
+   ```js
+   // logger.js (.ts if TS) — zero-dep structured logger
+   function log(level, msg, fields = {}) {
+     process.stdout.write(JSON.stringify({ ts: Date.now(), level, msg, ...fields }) + "\n");
+   }
+   export const logger = { info:(m,f)=>log("info",m,f), warn:(m,f)=>log("warn",m,f), error:(m,f)=>log("error",m,f) };
+   ```
+   `pino` is allowed ONLY if the spec explicitly asks for heavy structured logs —
+   otherwise the zero-dep wrapper is the default (no winston / Sentry / OTel).
+   Python: stdlib `logging` (a `Formatter` subclass for JSON) — never `print()`.
+   Correlate with a request id: read `x-request-id` or `crypto.randomUUID()` in a
+   middleware/hook (Express/Fastify/Nest) or at the top of a Next route handler.
+   Log to stdout/stderr (12-factor); never hardcode an absolute log-file path.
+
+2. **Health endpoint — `GET /health` (or `/healthz`).** No auth. Returns HTTP
+   200 + `{ "status": "ok" }`. Read-only, no side effects (no DB writes, no
+   downstream chains). Stack: Express/Fastify route, Nest controller, Next
+   `app/health/route.ts` or `pages/api/health.ts`, FastAPI/Flask route, Django
+   view. (Optional: a light `SELECT 1` returning 503 `{status:"degraded"}` on
+   failure — but the minimum is 200/ok.)
+
+3. **Central error handler → reuse the error catalog, do not duplicate.** The
+   single error middleware/handler from the Error catalog section above must
+   (a) call `recordError(...)`, (b) log via the structured `logger` at `error`
+   level, and (c) return a generic 500 — the stack trace / internal message MUST
+   NOT leak to the client (`res.send(err.stack)` / `res.json({error: err.message})`
+   are forbidden). One place, not two systems.
+
+Silent-catch stays forbidden (the tech-debt scan flags bare empty catches):
+every `catch`/`except` logs, rethrows, or carries a one-line comment stating why
+the swallow is safe. A commented best-effort catch is fine.
+
+**TDD these (RED first, in-process — do NOT boot a long-running server):**
+- `GET /health` → 200 with `status: "ok"` (your route, not a framework default).
+- A dummy throw route → response is 500 AND the body contains NO stack/internal
+  message (leak test).
+- `logger` as a pure function: `info/warn/error` produce a record with the right
+  `level` + fields (inject a `sink`/`write` so the test can assert without
+  capturing global stdout).
+
 ## Rationalizations → rebuttals (do NOT fall for these)
 
 | You might think… | Reality |

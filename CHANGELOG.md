@@ -6,6 +6,21 @@
 
 ## 2026-06-04
 
+- **feat(WP2) [observability]:** Üretilen uygulamaya gözlemlenebilirlik — codegen guidance
+  (design+adversaryal workflow, wf_7eee4df7). Adversaryal inceleme 3 gerçek tuzak yakaladı, hepsi
+  doğrulanıp uygulandı: **(a) yeni semgrep silent-catch kuralı YAZILMADI** — `tech-debt-scanner.ts`
+  empty_catch zaten Faz 8/9'da yakalıyor (yorumlu/best-effort catch'i meşru bırakacak şekilde ayarlı;
+  daha geniş kural JSON.parse-fallback/retry/cleanup'ı yanlış yakalar = FP-fırtınası). **(b) Faz 13'e
+  KOYULMADI** — orada her -fail blocking (observability güvenlik değil, app'i kırmaz). **(c) yeni
+  hata-izleme guidance YAZILMADI** — errors.db/recordError/ErrorBoundary/log-error/Hata-Kodları uçtan
+  uca zaten var (duplikasyon olurdu). Net katkı yalnız GERÇEKTEN eksik iki parça (templates'te logger/
+  pino/winston/health hiç geçmiyordu — doğrulandı): **yapısal logging** (sıfır-dep console-wrapper;
+  pino opsiyonel; stack-nötr React/Vue/Svelte/Express/Fastify/Nest/Next/FastAPI/Flask/Django) +
+  **health endpoint** (`GET /health`→200, backend-koşullu; static SPA'da üretilmez). phase-05-ui.md
+  (frontend logging + silent-catch, mevcut ErrorBoundary'ye bağlanır) + phase-08-tdd.md (backend
+  logging + health + merkezi hata-handler recordError'a bağlanır + stack-sızıntı testi, TDD-RED).
+  Mekanik gate EKLENMEDİ (mevcut empty_catch yeterli — over-engineering'den kaçınıldı). `npm run check`
+  yeşil (858 test). Not: e2e harness çıktısında WP1'in `pipeline_end` event'i (verdict:PASS) görünüyor.
 - **fix(WP1) [katman-denetimi]:** Tüm katmanların gerçekten kaliteli çalıştığını doğrulama programı
   (Ümit: "tüm katmanların kaliteli çalıştığını kontrol et"). 5-ajanlı adversaryal denetim 6 GERÇEK
   bug buldu (kanıtlı) → hepsi düzeltildi + regresyon testi + `npm run check` yeşil (858 test):

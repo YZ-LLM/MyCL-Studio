@@ -158,6 +158,37 @@ Implementation requirements:
 - The page itself uses the global ErrorBoundary + fetch wrapper (the page
   showing errors must not itself crash silently if the API fails).
 
+## Observability — logging (do NOT reinvent error tracking)
+
+The global ErrorBoundary + `/api/log-error` fetch wrapper + Hata Kodları page
+already cover *error tracking* (Phase 8 builds the backend, this phase wires the
+UI). Bind to them — do NOT add a second error sink or rewrite the boundary
+(duplicate-file rule). Observability adds two things on top:
+
+1. **Structured, contextual logging — no heavy deps.** Replace bare
+   `console.log("error")` with context-carrying calls. Use a thin zero-dep
+   wrapper at `src/lib/log.ts` (no winston / Sentry / pino unless the spec asks):
+   ```ts
+   type Ctx = Record<string, unknown>;
+   const fmt = (scope: string, msg: string, ctx?: Ctx) =>
+     [`[${scope}] ${msg}`, ctx ? JSON.stringify(ctx) : ""].filter(Boolean).join(" ");
+   export const log = {
+     info:  (s: string, m: string, c?: Ctx) => console.info(fmt(s, m, c)),
+     warn:  (s: string, m: string, c?: Ctx) => console.warn(fmt(s, m, c)),
+     error: (s: string, m: string, c?: Ctx) => console.error(fmt(s, m, c)),
+   };
+   ```
+   Log meaningful events (network failure, validation reject, unexpected state)
+   with a scope + relevant values — not every render/click. Keep `error` in all
+   environments; gate `info/warn` behind `import.meta.env.DEV` if noisy. Other
+   stacks (Vue/Svelte/Solid): the same util, same interface.
+
+2. **Silent-catch forbidden.** Every `catch` logs (`log.error/warn`, plus the
+   existing `/api/log-error` POST where it matters), rethrows, or carries a
+   one-line comment stating why the swallow is safe. A commented best-effort
+   catch (e.g. private-mode `localStorage`) is fine; a bare `catch {}` is not
+   (the tech-debt scan flags it).
+
 ## Rationalizations → rebuttals (do NOT fall for these)
 
 | You might think… | Reality |
