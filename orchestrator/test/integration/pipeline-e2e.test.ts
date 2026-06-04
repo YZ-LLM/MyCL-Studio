@@ -90,6 +90,7 @@ import {
 import { loadOrInit, save as saveState } from "../../src/state.js";
 import { appendAudit, readAuditLog, readDecisions, readCosts } from "../../src/audit.js";
 import { recordTokenUsage } from "../../src/ipc.js";
+import { computeVerdict } from "../../src/harness-verdict.js";
 import type { MyclConfig } from "../../src/config.js";
 import type { AuditEvent } from "../../src/types.js";
 
@@ -271,6 +272,12 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     const costs = await readCosts(projectRoot);
     expect(costs.length).toBeGreaterThanOrEqual(1);
     expect(costs.every((c) => c.input_tokens > 0)).toBe(true);
+    // Headless harness verdict'i: tüm gate'ler yeşil (mock exec code 0) → PASS.
+    // Bu, harness-verdict'in GERÇEK pipeline audit'i üzerinde doğru çalıştığının kanıtı.
+    const v = computeVerdict(events);
+    expect(v.verdict, JSON.stringify(v.gateFailures)).toBe("PASS");
+    expect(v.completed).toBe(true);
+    expect(v.exitCode).toBe(0);
   }, 65_000);
 
   it("codegen-dahil: Faz 5 (UI) + Faz 8 (TDD) gerçekten koşar (Phase 5 fix doğrulanır)", async () => {

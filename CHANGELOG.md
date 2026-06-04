@@ -6,6 +6,16 @@
 
 ## 2026-06-04
 
+- **feat(headless-harness) [program 1/8]:** Tam pipeline'ı GUI'siz, terminalden koşup
+  **dürüst verdict** üreten harness — kanıt katmanı. Yeni `harness-verdict.ts` (SAF):
+  audit.log → PASS (17-complete + sıfır gate-fail) / PARTIAL (17-complete AMA ≥1 gate-fail) /
+  FAIL (complete yok), exit 0/2/1. **Kritik:** mekanik gate'ler SOFT (`soft_complete_after_fail`)
+  → "TAMAMLANDI" diyordu; harness artık PARTIAL ile gerçeği yüzeye çıkarır (ekranındaki
+  Faz13/14/15/16-fail-ama-tamamlandı kokusu görünür olur). Yeni `harness.mjs`: orchestrator'ı
+  alt-process başlatıp stdin/stdout NDJSON ile sürer (Tauri ile aynı kanal), askq'ları oto-cevaplar,
+  audit'ten verdict + exit code. `npm run e2e` (gerçek koşu, kanıt için; maliyetli → check'te değil).
+  CI tarafı: pipeline-e2e mock koşusu artık `computeVerdict===PASS` assert eder + 6 saf verdict testi.
+  (8'lik programın 1.'si; headless-harness → ben/CI uçtan uca doğrularım.)
 - **feat(auto-answer) [saha-3/5]:** Composer'da "Orkestrator" yanına "Oto-cevap" checkbox'ı.
   Tikliyken: bir önerisi (suggested_answer) olan NETLEŞTİRME askq'ları otomatik o öneriyle
   yanıtlanır (görünür "🤖 Oto-cevap" notu) → daha hızlı + kaliteli iterasyon. Onaylar
