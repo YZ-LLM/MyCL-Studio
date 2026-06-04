@@ -6,6 +6,31 @@
 
 ## 2026-06-04
 
+- **feat(WP4) [DAST]:** Composer'da 🛡️ **Güvenlik Taraması** butonu — çalışan localhost uygulamasına
+  onay-gated aktif DAST (nuclei). YENİ ÖZELLİK (Ümit: "composer'ın altında buton, basınca açıkla + emin
+  misin?"). design+SERT-adversaryal-güvenlik workflow (wf_3ebf64a7, verdict: rework → bu güvenli sentez).
+  İnceleme 3 güvenlik-kritik tuzak yakaladı; hepsi kapatıldı:
+  - **Onay-baypası imkânsız:** buton DOĞRUDAN taramaz — `handleRunDastRequest` yalnız açıklama+onay askq'ı
+    açar; `runDast` TEK yerden (handleAskqAnswer `pendingDast` branch, KATI eşleşme `askqId===id &&
+    selected==="🛡️ Başlat"`, branch'e girince hemen `pendingDast=null` → çift-tık/re-entrancy kapalı)
+    çağrılır. emitAskq DOĞRUDAN (qa-askq/auto-answer yolundan GEÇMEZ → Oto-cevap bu onayı otomatikleyemez;
+    doğrulandı: askApproval zaten `suggested=null` ile auto-answer'ı tetiklemiyor).
+  - **Localhost-kaçağı kapalı:** saf `isLocalhostTarget()` (WHATWG URL parse + literal allowlist
+    localhost/127.0.0.0-8/::1 + IPv6-bracket-strip; userinfo/http-dışı-protokol/0.0.0.0/suffix-host
+    `localhost.evil.com` → fail-closed RED). decimal/hex/octal IP WHATWG'de 127.0.0.1'e normalize (gerçekten
+    loopback → güvenli). Hedef URL'i BİZ kurarız (`http://localhost:PORT`, host config'ten okunmaz); gate
+    defansif son-kapı. 12 saldırı-vektörü testi.
+  - **Hang/orphan/DoS yok:** spawn detached (process-group) + sabit 120s timeout → `killProcessTree` (tree-kill,
+    orphan yok); muhafazakar non-destructive nuclei (`-rate-limit 10 -timeout 5 -exclude-tags intrusive,dos,fuzz
+    -no-interactsh -severity low..critical`); maxBuffer cap; bulgular chat'e sanitize edilerek (markdown/log
+    injection) basılır.
+  - **Araç-eksik fail-closed:** nuclei oto-İNDİRİLMEZ (raw-binary supply-chain riski) — `command -v nuclei`
+    yoksa GÖRÜNÜR hata + kurulum talimatı + DUR (sessiz-skip/sahte-yeşil YOK). Platform mac+linux; win32 →
+    görünür "desteklenmiyor".
+  Yeni `dast-runner.ts` (saf isLocalhostTarget+parseNucleiJsonl test-edilebilir) + run_dast IPC + ChatPanel
+  butonu + App.tsx. Spinner mevcut phase_running/idle banner'ından türetilir (yeni frontend state yok).
+  `npm run check` yeşil (871 test). nuclei flag-uyumu ilk gerçek koşumda doğrulanmalı (fail-closed: yanlış
+  flag → görünür hata, kilitlenme değil).
 - **feat(WP3) [kalite-boyutları]:** a11y + i18n + contract + resilience (design+adversaryal workflow,
   wf_b73b3b8f). 5-ajanlı inceleme her boyutu süzdü; memory kurallarıyla (yokluk-tespiti=FP tuzağı,
   minimal-dep, duplikasyon-yok) uyumlu net karar:

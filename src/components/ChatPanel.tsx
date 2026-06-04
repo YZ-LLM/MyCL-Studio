@@ -170,6 +170,11 @@ interface Props {
   onGuideClick?: () => void;
   /** v15.11: Kılavuz içeriği mevcut mu (buton aktif/pasif görünümü). */
   guideAvailable?: boolean;
+  /** WP4 DAST: 🛡️ Güvenlik Taraması butonu — backend açıklama+onay askq'ı açar
+   *  (buton DOĞRUDAN taramaz). Yalnız çalışan localhost app'ine. */
+  onDastClick?: () => void;
+  /** WP4 DAST: tarama sürüyor mu — buton spinner + disabled (çift-tetik koruması). */
+  dastRunning?: boolean;
 }
 
 export function ChatPanel({
@@ -193,6 +198,8 @@ export function ChatPanel({
   onAutoAnswerToggle,
   onGuideClick,
   guideAvailable,
+  onDastClick,
+  dastRunning,
 }: Props) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -466,6 +473,43 @@ export function ChatPanel({
           >
             <span className="intent-pill-emoji" aria-hidden>➕</span>
             <span className="intent-pill-label">İş Ekle</span>
+          </button>
+        )}
+        {/* WP4 DAST: 🛡️ Güvenlik Taraması — buton backend onay askq'ı açar (doğrudan
+            taramaz). Spinner sticky banner'dan (dastRunning) türetilir. */}
+        {onDastClick && (
+          <button
+            type="button"
+            className="intent-pill"
+            onClick={onDastClick}
+            disabled={dastRunning}
+            title={
+              dastRunning
+                ? "Güvenlik taraması sürüyor…"
+                : "Çalışan localhost uygulamana aktif güvenlik taraması (DAST) — önce açıklar + onay sorar"
+            }
+          >
+            <span className="intent-pill-emoji" aria-hidden>🛡️</span>
+            <span className="intent-pill-label">
+              Güvenlik Taraması
+              {dastRunning && (
+                <span
+                  className="agent-busy-spinner"
+                  aria-label="tarama çalışıyor"
+                  style={{
+                    display: "inline-block",
+                    marginLeft: 6,
+                    width: 10,
+                    height: 10,
+                    border: "2px solid var(--fg-dim)",
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    verticalAlign: "middle",
+                    animation: "mycl-spin 0.8s linear infinite",
+                  }}
+                />
+              )}
+            </span>
           </button>
         )}
       </div>

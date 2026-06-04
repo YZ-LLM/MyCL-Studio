@@ -38,6 +38,7 @@ import {
 import { computeVerdict, type HarnessVerdict } from "./harness-verdict.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import { detectInterruptedPhase2To9Pure } from "./resume-detection.js";
+import { runDast } from "./dast-runner.js";
 import { setRecordContext } from "./record-context.js";
 import {
   appendTask,
@@ -183,6 +184,11 @@ interface OrchestratorRuntime {
   // handleAskqAnswer bu kaydı id ile eşleyip "Çöz" / "İş listesine kaydet" /
   // "Tekrar analiz et" dalını işler. null → açık analiz-askq'ı yok.
   pendingErrorAnalysis: PendingErrorAnalysis | null;
+  // WP4 DAST (2026-06-04): 🛡️ buton emitAskq onay kartı açtı; "Başlat"/"İptal"
+  // cevabı bekleniyor. null → açık DAST onay-askq'ı yok. handleAskqAnswer KATI
+  // eşleşmeyle (askqId === id && selected === Başlat) işler; tarama yalnız buradan
+  // tetiklenir (tek çağrı-noktası → onay-baypası imkânsız).
+  pendingDast: { askqId: string } | null;
 }
 
 const runtime: OrchestratorRuntime = {
@@ -194,7 +200,13 @@ const runtime: OrchestratorRuntime = {
   pendingMemoryProposal: null,
   pendingPhaseScope: null,
   pendingErrorAnalysis: null,
+  pendingDast: null,
 };
+
+// WP4 DAST: onay-askq seçenek etiketi + "çalışıyor" banner etiketi. handleAskqAnswer
+// taramayı YALNIZ selected === DAST_START_LABEL iken çalıştırır (kesin string eşleşme).
+const DAST_START_LABEL = "🛡️ Başlat";
+const DAST_RUNNING_LABEL = "🛡️ Güvenlik Taraması (DAST)";
 
 /**
  * TEST-ONLY seam (v15.8): runtime.state/config'i set eder + history root bağlar,
@@ -208,6 +220,7 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.controller = null;
   runtime.pendingPhaseScope = null;
   runtime.pendingErrorAnalysis = null;
+  runtime.pendingDast = null;
   setHistoryRoot(state.project_root);
   setRecordContext({ phase: state.current_phase ?? 0 });
 }
@@ -2427,6 +2440,43 @@ function handleListPhases(): void {
   log.info("orchestrator", "phases listed", { count: phases.length });
 }
 
+/**
+ * WP4 DAST: 🛡️ buton handler'ı. SADECE açıklama + onay askq'ı açar — taramayı
+ * BAŞLATMAZ (runDast'a referans yok). Tarama yalnız handleAskqAnswer'ın pendingDast
+ * branch'inde "Başlat" seçilince çalışır → onay-baypası imkânsız. emitAskq doğrudan
+ * çağrılır (qa-askq/auto-answer yolundan GEÇMEZ → Oto-cevap bu onayı otomatikleyemez).
+ */
+async function handleRunDastRequest(): Promise<void> {
+  if (!runtime.state) {
+    emitChatMessage(
+      "error",
+      "Önce bir proje aç — güvenlik taraması için çalışan bir uygulama gerekli.",
+    );
+    return;
+  }
+  if (runtime.pendingDast) {
+    emitChatMessage("system", "Zaten bir güvenlik-tarama onayı bekleniyor.");
+    return;
+  }
+  const askqId = `dast_confirm_${randomUUID()}`;
+  runtime.pendingDast = { askqId };
+  emitChatMessage(
+    "assistant",
+    "🛡️ **Güvenlik Taraması (DAST)**: çalışan uygulamana AKTİF güvenlik testleri " +
+      "(nuclei) gönderir — gerçek istekler atıp davranışı zorlayarak açık arar. " +
+      "**Yalnız localhost/127.0.0.1** hedeflenir; üretim veya uzak sunucuya ASLA " +
+      "çalışmaz. Aktif test olduğu için uygulamada geçici yük / yan etki olabilir " +
+      "(geliştirme ortamında çalıştır). Onaylıyor musun?",
+  );
+  emitAskq({
+    id: askqId,
+    question: "Aktif güvenlik taraması (yalnız localhost) — emin misin?",
+    options: [DAST_START_LABEL, "İptal"],
+    allow_other: false,
+    multi_select: false,
+  });
+}
+
 export async function handleAskqAnswer(
   id: string,
   selected: string | string[],
@@ -2486,6 +2536,59 @@ export async function handleAskqAnswer(
     await saveState(runtime.state);
     emitChatMessage("system", `Kapsam onaylandı: ${label}. Akış devam ediyor.`);
     await advanceToNextPhase(3);
+    return;
+  }
+
+  // WP4 DAST (2026-06-04): aktif güvenlik-tarama onay cevabı. GÜVENLİK-KRİTİK —
+  // KATI üçlü eşleşme (pendingDast set + askqId === id + selected === Başlat); branch'e
+  // girer girmez pendingDast=null (çift-tık/re-entrancy kapanır). runDast TEK buradan
+  // çağrılır → onay-baypası imkânsız. "İptal"/başka → sessiz no-op (chat'e not).
+  if (runtime.pendingDast && runtime.pendingDast.askqId === id) {
+    runtime.pendingDast = null; // tek-kullanımlık: çift-cevap re-tetikleyemez
+    const sel = (Array.isArray(selected) ? selected[0] : selected) ?? "";
+    if (sel !== DAST_START_LABEL) {
+      emitChatMessage("system", "Güvenlik taraması iptal edildi.");
+      return;
+    }
+    if (!runtime.state) {
+      emitChatMessage("error", "Proje kapandı — güvenlik taraması yapılamadı.");
+      return;
+    }
+    const st = runtime.state;
+    // Sticky "çalışıyor" banner'ı (buton spinner bundan türetilir) — try/finally
+    // ile ZORUNLU kapanış (takılı spinner yok).
+    emit("phase_running", {
+      label: DAST_RUNNING_LABEL,
+      detail: "nuclei — yalnız localhost",
+      ts: Date.now(),
+    });
+    try {
+      await appendAuditModule(st.project_root, {
+        ts: Date.now(),
+        phase: st.current_phase,
+        event: "dast-run-start",
+        caller: "user",
+      }).catch(() => {});
+      const res = await runDast(st);
+      emitChatMessage(res.ok ? "system" : "error", res.summary_tr);
+      await appendAuditModule(st.project_root, {
+        ts: Date.now(),
+        phase: st.current_phase,
+        event: res.ok ? "dast-run-complete" : "dast-run-failed",
+        caller: "mycl-orchestrator",
+        detail:
+          res.findings_count !== undefined
+            ? `findings=${res.findings_count}`
+            : (res.error ?? ""),
+      }).catch(() => {});
+    } catch (err) {
+      emitChatMessage(
+        "error",
+        `Güvenlik taraması başarısız: ${String(err).slice(0, 200)}`,
+      );
+    } finally {
+      emit("phase_idle", { ts: Date.now() });
+    }
     return;
   }
 
@@ -3552,6 +3655,11 @@ ipcRouter.register("command_direct", async (data: unknown) => {
 ipcRouter.register("phase_run_request", async (data: unknown) => {
   const d = data as { id?: number } | undefined;
   await emitPhaseRunAskq(Number(d?.id ?? 0));
+});
+// WP4 DAST: 🛡️ buton — yalnız açıklama+onay askq'ı açar (handleRunDastRequest);
+// tarama onay sonrası handleAskqAnswer pendingDast branch'inde çalışır.
+ipcRouter.register("run_dast", async () => {
+  await handleRunDastRequest();
 });
 // v15.7 (2026-05-25): intent_direct IPC kaldırıldı — frontend sidebar
 // intent button'ları artık yok, bu handler dead code'tu.

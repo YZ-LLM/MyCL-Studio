@@ -379,6 +379,9 @@ export type OrchestratorCommand =
     }
   /** Sol sidebar — faz tıklaması: backend askq açar (Çalıştır / Vazgeç — v15.7 deterministik). */
   | { kind: "phase_run_request"; data: { id: PhaseId } }
+  /** WP4 DAST: 🛡️ buton — backend açıklama + onay askq'ı açar; tarama ONAYDAN sonra
+   *  (handleAskqAnswer pendingDast branch) çalışır. Buton doğrudan TARAMAZ. */
+  | { kind: "run_dast" }
   // v15.7 (2026-05-25): intent_direct kaldırıldı — classifier ve sidebar
   // intent button'ları yok artık.
   | {

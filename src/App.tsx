@@ -698,6 +698,11 @@ function App() {
     setProcessedCount(orch.events.length);
   }, [orch.events, processedCount, orch]);
 
+  // WP4 DAST: 🛡️ buton → backend açıklama+onay askq'ı açar (buton doğrudan taramaz).
+  const sendRunDast = () => {
+    void orch.send({ kind: "run_dast" });
+  };
+
   const handleSaveApiKeys = (
     translator: string,
     main: string,
@@ -1184,6 +1189,8 @@ function App() {
           onAutoAnswerToggle={handleAutoAnswerToggle}
           onGuideClick={() => setGuideModalOpen(true)}
           guideAvailable={userGuide.trim().length > 0}
+          onDastClick={sendRunDast}
+          dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
         />
         {rightPanelsOpen && (
           <>
