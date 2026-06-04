@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildErrorAnalysisAskq,
+  OPT_ACCEPT_CONTINUE,
   OPT_QUEUE,
   OPT_REANALYZE,
   OPT_SOLVE,
@@ -175,6 +176,27 @@ describe("parseErrorAnalysisBlock — malformed / savunmacı", () => {
     );
     expect(r).not.toBeNull();
     expect(r!.blocking).toBe(false);
+  });
+});
+
+describe("buildErrorAnalysisAskq — allowAcceptContinue (güvenlik gate, Unit 2)", () => {
+  it("blocking + allowAcceptContinue → çözümler + 'Kabul et, devam et' + 'Tekrar analiz et' (OPT_QUEUE YOK)", () => {
+    const { options } = buildErrorAnalysisAskq(["CSP ekle", "helmet kur"], true, {
+      allowAcceptContinue: true,
+    });
+    expect(labels(options)).toEqual(["CSP ekle", "helmet kur", OPT_ACCEPT_CONTINUE, OPT_REANALYZE]);
+    expect(labels(options)).not.toContain(OPT_QUEUE);
+  });
+
+  it("blocking + allowAcceptContinue + çözüm YOK → 'Çöz' + 'Kabul et, devam et' + 'Tekrar analiz et'", () => {
+    // Solve yolu garanti (debug tetiklenebilsin) + kabul-et-devam override + reanaliz.
+    const { options } = buildErrorAnalysisAskq([], true, { allowAcceptContinue: true });
+    expect(labels(options)).toEqual([OPT_SOLVE, OPT_ACCEPT_CONTINUE, OPT_REANALYZE]);
+  });
+
+  it("allowAcceptContinue=false (varsayılan) → 'Kabul et, devam et' EKLENMEZ", () => {
+    const { options } = buildErrorAnalysisAskq(["X"], true);
+    expect(labels(options)).not.toContain(OPT_ACCEPT_CONTINUE);
   });
 });
 

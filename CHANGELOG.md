@@ -6,6 +6,21 @@
 
 ## 2026-06-04
 
+- **feat(security-baseline/Unit 2) [program 3/8]:** Faz 13 (Güvenlik) artık **BLOCKING** —
+  "TAMAMLANDI deme" (Ümit kararı; MEDIUM dahil bloklar). Güvenlik gate fail olunca
+  soft-complete (`soft_complete_after_fail`) YAZILMAZ; F1 `analyzeAndAskError` askq'ına
+  yönlendirilir (Çöz / **Kabul et, devam et** / Tekrar analiz) — "takılma yok": kullanıcı
+  bulguyu kabul edip override edebilir. Kabul → `phase-13-complete` (detail
+  `security_accepted_by_user`, soft-fail DEĞİL) + `advanceToNextPhase(13)`; ama runner'ın
+  `security-fail` event'i durduğu için harness verdict yine PARTIAL (asla çıplak PASS).
+  API modunda (orkestratör CLI değil, analiz yapılamaz) dead-end YOK: LLM'siz doğrudan
+  blocking karar askq'ı. error-analysis: `OPT_ACCEPT_CONTINUE` + `buildErrorAnalysisAskq`
+  `allowAcceptContinue` param + `analyzeAndAskError` blocking'e zorlar. **harness-verdict
+  false-green fix:** bir güvenlik tarayıcısı atlandıysa (csp-evaluator/secret-scan/semgrep/
+  phase-13 `-skipped`) PASS değil PARTIAL ("tam tarandı sayılmaz") — yeni `securitySkipped`
+  alanı. Test: +10 (allowAcceptContinue option setleri, skip→PARTIAL, accepted-by-user,
+  accept-continue wiring → akış ilerler). `npm run check` yeşil. Yalnız Faz 13 blocking
+  (10-12,14-17 soft kalır — CHANGELOG kuralı). Unit 3 (gitleaks + semgrep YAML) sıradaki.
 - **feat(security-baseline/Unit 1) [program 3/8]:** Faz 13'e **CSP değerlendirme** eklendi —
   Google `csp_evaluator` lib'i (Chrome "CSP Evaluator" extension'ının headless/otomatik
   karşılığı). Yeni `orchestrator/csp-check.mjs` (harness.mjs gibi kök .mjs): web-UI tespiti

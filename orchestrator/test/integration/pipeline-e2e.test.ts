@@ -93,7 +93,7 @@ import { loadOrInit, save as saveState } from "../../src/state.js";
 import { appendAudit, readAuditLog, readDecisions, readCosts } from "../../src/audit.js";
 import { recordTokenUsage } from "../../src/ipc.js";
 import { computeVerdict } from "../../src/harness-verdict.js";
-import { OPT_QUEUE, OPT_REANALYZE } from "../../src/error-analysis.js";
+import { OPT_ACCEPT_CONTINUE, OPT_QUEUE, OPT_REANALYZE } from "../../src/error-analysis.js";
 import { readTasks } from "../../src/task-queue/store.js";
 import type { MyclConfig } from "../../src/config.js";
 import type { AuditEvent } from "../../src/types.js";
@@ -365,5 +365,35 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     await handleAskqAnswer("agent_clarify_unrelated", "Vazgeç");
     expect(__getPendingErrorAnalysisForTest()).toEqual(pending);
     expect(await readTasks(projectRoot)).toHaveLength(0);
+  });
+
+  it("güvenlik Unit 2: 'Kabul et, devam et' → phase-13-complete(security_accepted_by_user) + akış ilerler", async () => {
+    const state = await loadOrInit(projectRoot);
+    state.current_phase = 13;
+    state.stack = "node-npm"; // mekanik faz 14 komutu çözülsün (mocked exec → pass)
+    await saveState(state);
+    __initRuntimeForTest(state, apiConfig());
+    __setPendingErrorAnalysisForTest({
+      id: "error_analysis_acc",
+      phase: 13,
+      blocking: true,
+      options: [OPT_ACCEPT_CONTINUE, OPT_REANALYZE],
+      solutions_tr: [],
+      acceptContinuePhase: 13,
+    });
+    // handleAskqAnswer "Kabul et, devam et" → advanceToNextPhase(13)'ü await eder
+    // (mekanik 14+ mocked exec ile koşar). Promise içi hataları yut (teardown yarışı yok).
+    await handleAskqAnswer("error_analysis_acc", OPT_ACCEPT_CONTINUE).catch((e) =>
+      console.error("ACCEPT-CONTINUE REJECT:", e),
+    );
+    expect(__getPendingErrorAnalysisForTest()).toBeNull();
+    const events = await readAuditLog(projectRoot);
+    // (a) güvenlik kabulü soft-complete DEĞİL, security_accepted_by_user olarak yazıldı.
+    const accepted = events.find(
+      (e) => e.event === "phase-13-complete" && e.detail === "security_accepted_by_user",
+    );
+    expect(accepted, "phase-13-complete(security_accepted_by_user) yazılmalı").toBeTruthy();
+    // (b) advanceToNextPhase(13) tetiklendi → akış Faz 14'e ilerledi (takılma yok).
+    expect(events.some((e) => e.phase === 14), "Faz 14'e ilerlemeli").toBe(true);
   });
 });

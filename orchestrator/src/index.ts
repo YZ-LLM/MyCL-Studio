@@ -62,6 +62,7 @@ import {
 import {
   analyzeAndAskError,
   type ErrorContext,
+  OPT_ACCEPT_CONTINUE,
   OPT_QUEUE,
   OPT_REANALYZE,
   type PendingErrorAnalysis,
@@ -2292,6 +2293,50 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = next;
         continue;
       }
+      // Güvenlik-baseline Unit 2: Faz 13 (Güvenlik) BLOCKING — soft-complete YAZMA.
+      // Ümit kararı: güvenlik-gate-fail "TAMAMLANDI" demesin (MEDIUM dahil bloklar).
+      // F1 analiz askq'ına yönlendir (Çöz / Kabul et devam / Tekrar analiz). security-fail
+      // / csp-evaluator-fail / semgrep-*-fail event'lerini runner zaten yazdı → harness
+      // bunları *-fail görür. Akış DURUR; "Kabul et, devam et" cevabı handleAskqAnswer'da
+      // phase-13-complete (security_accepted_by_user) yazıp advanceToNextPhase(13) ile
+      // sürdürür (takılma yok — kullanıcı override edebilir).
+      if (next === 13) {
+        emitPhaseChanged(13, 13, "error");
+        let pending: PendingErrorAnalysis | null = null;
+        if (runtime.state && runtime.config) {
+          pending = await analyzeAndAskError(runtime.state, runtime.config, {
+            phase: 13,
+            message: "Faz 13 (Güvenlik) gate'i başarısız — çözülmeden tamamlandı sayılmaz.",
+            detail: outcome.stderr,
+            allowAcceptContinue: true,
+            acceptContinuePhase: 13,
+          }).catch(() => null);
+        }
+        if (!pending) {
+          // Analiz yapılamadı (örn. API modu — orkestratör rolü CLI değil). Dead-end YOK:
+          // LLM'siz doğrudan blocking karar askq'ı (Kabul et devam / Tekrar analiz).
+          const fallbackId = `error_analysis_${randomUUID()}`;
+          pending = {
+            id: fallbackId,
+            phase: 13,
+            blocking: true,
+            options: [OPT_ACCEPT_CONTINUE, OPT_REANALYZE],
+            solutions_tr: [],
+            acceptContinuePhase: 13,
+          };
+          emitChatMessage(
+            "error",
+            "🔒 Faz 13 (Güvenlik) gate'i başarısız — çözülmeden TAMAMLANDI sayılmaz. Detay yukarıda.",
+          );
+          emitAskq({
+            id: fallbackId,
+            question: "Faz 13 güvenlik gate'i başarısız. Nasıl ilerleyelim?",
+            options: [OPT_ACCEPT_CONTINUE, OPT_REANALYZE],
+          });
+        }
+        runtime.pendingErrorAnalysis = pending;
+        return;
+      }
       // Gerçek başarısızlık (örn. gerçek lint hatası) — akışı KIRMA. Her faz
       // ziyaret edilir; başarısızlık yumuşak uyarı olarak işlenir, akış sonu
       // özeti başarısızlıkları toplar. Mesajı runner zaten Türkçe yazdı.
@@ -2447,6 +2492,27 @@ export async function handleAskqAnswer(
         "system",
         "📋 Hata iş listesine kaydedildi — çözmeden devam edebilirsin.",
       );
+      return;
+    }
+    // Güvenlik-baseline Unit 2: "Kabul et, devam et" (blocking gate override). Kullanıcı
+    // güvenlik bulgusunu bilerek kabul edip akışı sürdürür. phase-N-complete yazılır
+    // ama detail "security_accepted_by_user" → soft_complete_after_fail DEĞİL (harness
+    // bunu fail saymaz; ancak runner'ın yazdığı *-fail event'leri durduğu için verdict
+    // yine PARTIAL = "tamamlandı ama güvenlik kabul edildi", asla çıplak PASS değil).
+    if (sel === OPT_ACCEPT_CONTINUE && cached.acceptContinuePhase !== undefined) {
+      const p = cached.acceptContinuePhase as PhaseId;
+      await appendAuditModule(runtime.state.project_root, {
+        ts: Date.now(),
+        phase: p,
+        event: `phase-${p}-complete`,
+        caller: "user",
+        detail: "security_accepted_by_user",
+      }).catch((e) => log.warn("orchestrator", "accept-continue audit fail", e));
+      emitChatMessage(
+        "system",
+        `⚠️ Faz ${p} güvenlik bulgusu kullanıcı tarafından kabul edildi — akış devam ediyor (bu iş "mükemmel" sayılmaz).`,
+      );
+      await advanceToNextPhase(p);
       return;
     }
     // Diğer her seçim ("Çöz" jeneriği veya somut bir çözüm metni) → mevcut debug

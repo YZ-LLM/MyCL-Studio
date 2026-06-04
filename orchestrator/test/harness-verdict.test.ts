@@ -74,5 +74,39 @@ describe("harness-verdict · computeVerdict", () => {
     const r = computeVerdict(events);
     expect(r.verdict).toBe("PASS");
     expect(r.gateFailures).toEqual([]);
+    expect(r.securitySkipped).toEqual([]);
+  });
+
+  it("güvenlik tarayıcısı ATLANDI (csp-evaluator-skipped) → false-green değil, PARTIAL", () => {
+    // Gate patlamadı ama CSP taranamadı (tool eksik) → "tam tarandı" denemez.
+    const events = [...cleanRun(), ev(13, "csp-evaluator-skipped", "missing_command")];
+    const r = computeVerdict(events);
+    expect(r.verdict).toBe("PARTIAL");
+    expect(r.exitCode).toBe(2);
+    expect(r.gateFailures).toEqual([]);
+    expect(r.securitySkipped).toContain("csp-evaluator-skipped");
+    expect(r.summary).toMatch(/güvenlik taraması atlandı/);
+  });
+
+  it("güvenlik-DIŞI skip (lint/test) PARTIAL yapMAZ → PASS", () => {
+    // Yalnız güvenlik scan skip'i PARTIAL'a katar; faz 10/14 skip'i değil.
+    const events = [...cleanRun(), ev(10, "phase-10-skipped", "missing_command")];
+    const r = computeVerdict(events);
+    expect(r.verdict).toBe("PASS");
+    expect(r.securitySkipped).toEqual([]);
+  });
+
+  it("kullanıcı güvenlik bulgusunu kabul etti (security_accepted_by_user) → security-fail durduğu için PARTIAL", () => {
+    // Unit 2: "Kabul et, devam et" → phase-13-complete(security_accepted_by_user) yazılır
+    // (soft_complete_after_fail DEĞİL) ama runner'ın security-fail'i durur → PARTIAL.
+    const events = [
+      ...cleanRun(),
+      ev(13, "security-fail", "csp HIGH bulgusu"),
+      ev(13, "phase-13-complete", "security_accepted_by_user"),
+    ];
+    const r = computeVerdict(events);
+    expect(r.verdict).toBe("PARTIAL");
+    expect(r.gateFailures.map((g) => g.phase)).toContain(13);
+    expect(r.gateFailures[0]!.event).toBe("security-fail");
   });
 });

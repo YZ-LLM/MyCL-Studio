@@ -21,12 +21,33 @@ export interface HarnessVerdict {
   completed: boolean;
   /** Başarısız gate'ler (faz başına bir kayıt). */
   gateFailures: GateFailure[];
+  /**
+   * Atlanan GÜVENLİK taramaları (örn. csp-evaluator-skipped, semgrep-skipped,
+   * phase-13-skipped). Boş değilse: tool eksikti → "tarandı" denemez → false-green
+   * koruması (PASS yerine PARTIAL).
+   */
+  securitySkipped: string[];
   /** Süreç çıkış kodu: 0=PASS, 2=PARTIAL, 1=FAIL. */
   exitCode: 0 | 1 | 2;
   summary: string;
 }
 
 const COMPLETE_EVENTS = new Set(["phase-17-complete", "phase-20-complete"]);
+
+/**
+ * Güvenlik-baseline Unit 2 (false-green koruması): bir güvenlik tarayıcısı atlandıysa
+ * (tool eksik / komut yok) sonuç "yeşil" sayılamaz — taranmadı. Lint/test skip'i
+ * (faz 10/14...) güvenlik değil; yalnız güvenlik scan'lerini yakala (regex'siz, sade).
+ */
+function isSecuritySkip(event: string): boolean {
+  if (!event.endsWith("-skipped")) return false;
+  return (
+    event === "phase-13-skipped" ||
+    event.startsWith("csp-evaluator") ||
+    event.startsWith("secret-scan") ||
+    event.startsWith("semgrep")
+  );
+}
 
 /**
  * SAF: audit event'lerinden hüküm. completed + gate-fail yok → PASS; completed ama
@@ -51,27 +72,37 @@ export function computeVerdict(events: AuditEvent[]): HarnessVerdict {
   }
   const gateFailures = [...failByPhase.values()].sort((a, b) => a.phase - b.phase);
 
+  // false-green koruması: atlanan güvenlik taramaları (dedup).
+  const securitySkipped = [
+    ...new Set(events.filter((e) => isSecuritySkip(e.event)).map((e) => e.event)),
+  ];
+
   let verdict: Verdict;
   let exitCode: 0 | 1 | 2;
+  let summary: string;
   if (!completed) {
     verdict = "FAIL";
     exitCode = 1;
+    summary = "Pipeline TAMAMLANMADI (phase-17-complete yok / hard hata).";
   } else if (gateFailures.length > 0) {
     verdict = "PARTIAL";
     exitCode = 2;
+    summary = `Pipeline tamamlandı AMA ${gateFailures.length} gate başarısız: ${gateFailures
+      .map((g) => `Faz ${g.phase}`)
+      .join(", ")}.`;
+  } else if (securitySkipped.length > 0) {
+    // Gate'ler patlamadı AMA en az bir güvenlik tarayıcısı atlandı (tool eksik) →
+    // "tarandı" denemez → çıplak PASS değil PARTIAL (mükemmel/dürüst hedefi).
+    verdict = "PARTIAL";
+    exitCode = 2;
+    summary = `Pipeline tamamlandı ve gate'ler patlamadı AMA güvenlik taraması atlandı (${securitySkipped.join(
+      ", ",
+    )}) — "tam tarandı" sayılmaz.`;
   } else {
     verdict = "PASS";
     exitCode = 0;
+    summary = "Pipeline tamamlandı; tüm gate'ler yeşil.";
   }
 
-  const summary =
-    verdict === "PASS"
-      ? "Pipeline tamamlandı; tüm gate'ler yeşil."
-      : verdict === "PARTIAL"
-        ? `Pipeline tamamlandı AMA ${gateFailures.length} gate başarısız: ${gateFailures
-            .map((g) => `Faz ${g.phase}`)
-            .join(", ")}.`
-        : "Pipeline TAMAMLANMADI (phase-17-complete yok / hard hata).";
-
-  return { verdict, completed, gateFailures, exitCode, summary };
+  return { verdict, completed, gateFailures, securitySkipped, exitCode, summary };
 }

@@ -28,6 +28,18 @@ export interface ErrorContext {
   message: string;
   /** Opsiyonel ham hata detayı (stderr/exception) — prompt'a beslenir. */
   detail?: string;
+  /**
+   * Güvenlik-baseline Unit 2: BLOCKING gate (örn. Faz 13 güvenlik). true ise askq
+   * "Kabul et, devam et" (OPT_ACCEPT_CONTINUE) seçeneği EKLER + blocking'e zorlar —
+   * "TAMAMLANDI deme" (soft→blocking) ama "takılma yok" (kullanıcı override edebilir).
+   */
+  allowAcceptContinue?: boolean;
+  /**
+   * "Kabul et, devam et" seçilirse hangi fazın `phase-N-complete`
+   * (detail:"security_accepted_by_user") yazılıp advanceToNextPhase(N) çağrılacağı.
+   * allowAcceptContinue=true iken set edilmeli (yoksa accept-continue dalı no-op).
+   */
+  acceptContinuePhase?: number;
 }
 
 /** Ajanın döndüğü analiz bloğu (parse + doğrulama sonrası). */
@@ -49,6 +61,12 @@ export interface PendingErrorAnalysis {
   options: string[];
   /** Ajanın önerdiği çözümler (TR). "Çöz" → debug akışına bunlar bağlam olur. */
   solutions_tr: string[];
+  /**
+   * Güvenlik-baseline Unit 2: "Kabul et, devam et" seçilirse phase-N-complete
+   * (detail:"security_accepted_by_user") yazılıp advanceToNextPhase(N) çağrılacak faz.
+   * undefined → accept-continue seçeneği sunulmadı (normal hata akışı).
+   */
+  acceptContinuePhase?: number;
 }
 
 // Sabit seçenek etiketleri (TR — orkestrator çıktısı UI'da gösterilir).
@@ -57,6 +75,8 @@ export interface PendingErrorAnalysis {
 export const OPT_SOLVE = "Çöz";
 export const OPT_REANALYZE = "Tekrar analiz et";
 export const OPT_QUEUE = "İş listesine kaydet, çözmeden devam et";
+// Güvenlik-baseline Unit 2: blocking gate'te kullanıcı override (bulguyu kabul edip devam).
+export const OPT_ACCEPT_CONTINUE = "Kabul et, devam et";
 
 /**
  * SAF: analiz çıktısından askq seçeneklerini kur (test edilebilir, yan etki yok).
@@ -72,7 +92,9 @@ export const OPT_QUEUE = "İş listesine kaydet, çözmeden devam et";
 export function buildErrorAnalysisAskq(
   solutions_tr: string[],
   blocking: boolean,
+  opts?: { allowAcceptContinue?: boolean },
 ): { options: AskqOption[] } {
+  const allowAcceptContinue = opts?.allowAcceptContinue === true;
   const seen = new Set<string>();
   const solutions: string[] = [];
   for (const s of solutions_tr) {
@@ -89,11 +111,17 @@ export function buildErrorAnalysisAskq(
   }
   if (solutions.length > 0) {
     options.push(...solutions);
-  } else if (!blocking) {
-    // Non-blocking + çözüm üretilemedi → jenerik "Çöz" (debug akışı tetiklensin).
+  } else if (!blocking || allowAcceptContinue) {
+    // Çözüm üretilemedi → jenerik "Çöz" (debug akışı tetiklensin). Non-blocking'de
+    // ya da blocking-ama-accept-continue (güvenlik gate) durumunda bir solve yolu şart.
     options.push(OPT_SOLVE);
   }
-  // Her iki şekilde de en sonda yeniden analiz.
+  if (allowAcceptContinue) {
+    // Güvenlik-baseline Unit 2: blocking gate'te kullanıcı bulguyu kabul edip
+    // devam edebilir (override). "İş listesine kaydet" değil — bu blocking, kabul+devam.
+    options.push(OPT_ACCEPT_CONTINUE);
+  }
+  // Her şekilde en sonda yeniden analiz.
   options.push(OPT_REANALYZE);
 
   return { options };
@@ -217,13 +245,18 @@ export async function analyzeAndAskError(
       return await fail("Hata analizi bloğu üretilemedi.", "no valid {kind:error_analysis} block");
     }
 
-    const { options } = buildErrorAnalysisAskq(analysis.solutions_tr, analysis.blocking);
+    // Güvenlik-baseline Unit 2: allowAcceptContinue (blocking gate) → blocking'e zorla
+    // (LLM "non-blocking" dese bile gate bloklayıcı; askq "Kabul et, devam et" sunar).
+    const blocking = errCtx.allowAcceptContinue ? true : analysis.blocking;
+    const { options } = buildErrorAnalysisAskq(analysis.solutions_tr, blocking, {
+      allowAcceptContinue: errCtx.allowAcceptContinue,
+    });
     const optionLabels = options.map((o) => (typeof o === "string" ? o : o.label));
 
     // UI'da özet (orkestratör TR çıktısı). Bloklayıcı durumu ayrıca yüzeye çıkar.
     emitChatMessage(
       "assistant",
-      analysis.blocking
+      blocking
         ? `${analysis.summary_tr}\nBu hata çözülmeden ilerlemek mümkün değil. Nasıl ilerleyelim?`
         : `${analysis.summary_tr}\nNasıl ilerleyelim?`,
     );
@@ -232,7 +265,7 @@ export async function analyzeAndAskError(
     // askq emit → OS bildirimi mevcut askq yolundan OTOMATİK tetiklenir.
     emitAskq({
       id,
-      question: analysis.blocking
+      question: blocking
         ? `Faz ${errCtx.phase} hatası — çözülmeden ilerlenemez. Nasıl ilerleyelim?`
         : `Faz ${errCtx.phase} hatası. Nasıl ilerleyelim?`,
       options,
@@ -243,15 +276,16 @@ export async function analyzeAndAskError(
       phase: errCtx.phase,
       event: "error-analysis",
       caller: "mycl-orchestrator",
-      detail: `blocking=${analysis.blocking} solutions=${analysis.solutions_tr.length}`,
+      detail: `blocking=${blocking} solutions=${analysis.solutions_tr.length}`,
     }).catch(() => {});
 
     return {
       id,
       phase: errCtx.phase,
-      blocking: analysis.blocking,
+      blocking,
       options: optionLabels,
       solutions_tr: analysis.solutions_tr,
+      acceptContinuePhase: errCtx.acceptContinuePhase,
     };
   } catch (err) {
     // Hiçbir koşulda ana akışı bozma — görünür hata + log (sessiz değil).
