@@ -6,6 +6,16 @@
 
 ## 2026-06-04
 
+- **feat(ultracode) [program 7/8]:** ultracode artık **İKİ MODDA** uygulanıyor. CLI tarafı
+  zaten alıyordu (`cli-run`/`cli-session`: `effort==="ultracode"` → `--settings {ultracode}`).
+  **Yeni: API tarafı** (`claude-api.ts runTurn`) — ultracode seçiliyse extended-thinking
+  (`thinking:{type:"enabled",budget_tokens:16000}`) + system reminder. Saf
+  `thinkingConfigFor(effort,toolChoice,maxTokens)` (test edilebilir). **Güvenlik/regresyon:**
+  (a) extended-thinking forced tool_choice (any/tool) ile UYUMSUZ → yalnız auto/undefined'da
+  enable (classifier/extractor call'ları thinking'siz, davranış aynı); (b) budget<max_tokens
+  zorunlu → max_tokens budget+4096'ya yükselir; (c) thinking aktifken temperature unset
+  (API kuralı); (d) **ultracode-DIŞI effort'ta plan boş → davranış BİREBİR korunur** (regresyon
+  yok, blast-radius yalnız ultracode+API opt-in yolu). Test: 11. `npm run check` yeşil.
 - **feat(prototype-cache) [program 4/8]:** Stack başına golden scaffold cache
   (`~/.mycl/prototypes/<stack>/`) — "sağlam + hızlı başlangıç". Yeni `prototype-cache.ts`.
   **Küratörleme = doğrulanmış koşudan oto-anlık-görüntü** (Ümit kararı): pipeline YEŞİL

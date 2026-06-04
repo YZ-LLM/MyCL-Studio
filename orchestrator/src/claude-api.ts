@@ -175,12 +175,49 @@ export class ClaudeApiError extends Error {
   override readonly name = "ClaudeApiError";
 }
 
+/** Ultracode API modunda extended-thinking budget (token). Yüksek = derin akıl yürütme. */
+export const ULTRACODE_THINKING_BUDGET = 16000;
+
+export interface ThinkingPlan {
+  thinking?: { type: "enabled"; budget_tokens: number };
+  /** Effektif max_tokens (thinking varsa budget+tampon). */
+  max_tokens: number;
+  /** Extended thinking temperature unset/1 ister → caller temperature GÖNDERMEZ. */
+  dropTemperature: boolean;
+}
+
+/**
+ * SAF (test edilebilir): effort + tool_choice'tan API extended-thinking planı.
+ * "ultracode" iki modda da uygulanır (CLI --settings; API burada thinking-budget).
+ * KISIT: extended-thinking forced tool_choice (any/tool) ile UYUMSUZ → API reddeder;
+ * bu yüzden thinking yalnız forced-OLMAYAN (auto/undefined) call'larda enable edilir
+ * (classifier/extractor'lar forced → thinking'siz, davranış aynı). budget_tokens
+ * max_tokens'tan KÜÇÜK olmalı → max_tokens'ı budget+4096'ya yükselt. ultracode DIŞI
+ * effort'larda plan boştur → davranış birebir korunur (regresyon yok).
+ */
+export function thinkingConfigFor(
+  effort: string | undefined,
+  toolChoice: { type: string } | undefined,
+  baseMaxTokens: number,
+): ThinkingPlan {
+  const forced = toolChoice?.type === "any" || toolChoice?.type === "tool";
+  if (effort === "ultracode" && !forced) {
+    const budget = ULTRACODE_THINKING_BUDGET;
+    return {
+      thinking: { type: "enabled", budget_tokens: budget },
+      max_tokens: Math.max(baseMaxTokens, budget + 4096),
+      dropTemperature: true,
+    };
+  }
+  return { max_tokens: baseMaxTokens, dropTemperature: false };
+}
+
 /**
  * Tek bir API turunu stream eder. Tool_use yayılırsa caller tool_result
  * yazıp aynı conversation history ile tekrar çağırarak multi-turn devam eder.
  */
 export async function runTurn(
-  _config: MyclConfig,
+  config: MyclConfig,
   apiKey: string,
   opts: RunTurnOptions,
   onEvent: StreamHandler,
@@ -225,6 +262,25 @@ export async function runTurn(
       ) as unknown as Anthropic.Tool[])
     : undefined;
 
+  // Ultracode (item 7, iki mod): CLI tarafı --settings {ultracode} alıyor; API'de
+  // burada extended-thinking budget + reminder uygulanır. ultracode DIŞI effort'ta plan
+  // boş + reminder yok → davranış BİREBİR korunur (regresyon yok). Forced tool_choice
+  // (any/tool) thinking ile uyumsuz → thinkingConfigFor onu zaten thinking'siz bırakır.
+  const effort = config.claude_code_flags?.effort;
+  const thinkingPlan = thinkingConfigFor(effort, opts.tool_choice, opts.max_tokens ?? 4096);
+  const systemEffective: Array<Anthropic.TextBlockParam> =
+    effort === "ultracode"
+      ? [
+          ...systemParam,
+          {
+            type: "text" as const,
+            text:
+              "Ultracode mode is ON: reason deeply and exhaustively before acting. " +
+              "Prefer thoroughness, correctness, and full edge-case coverage over speed.",
+          },
+        ]
+      : systemParam;
+
   // Retry loop: transient hatalar (overloaded, rate_limit, api_error, network)
   // exponential backoff ile yeniden denenir. Translator pattern'ı (translator.ts
   // attempts:1 log'da görünür) ile tutarlı. Relevance call'ları için kritik:
@@ -239,14 +295,16 @@ export async function runTurn(
     try {
       const stream = client.messages.stream({
         model: opts.model,
-        max_tokens: opts.max_tokens ?? 4096,
-        temperature: opts.temperature,
-        system: systemParam,
+        max_tokens: thinkingPlan.max_tokens,
+        // Extended thinking aktifken temperature unset (API kuralı: 1/unset).
+        temperature: thinkingPlan.dropTemperature ? undefined : opts.temperature,
+        system: systemEffective,
         messages: opts.messages,
         tools: toolsParam,
         tool_choice: opts.tool_choice as
           | Anthropic.MessageCreateParams["tool_choice"]
           | undefined,
+        ...(thinkingPlan.thinking ? { thinking: thinkingPlan.thinking } : {}),
       });
 
       // Stream event'lerini handler'a feed et.
