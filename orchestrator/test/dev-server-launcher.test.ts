@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import {
   buildDevServerFailMessage,
   isProcessAlive,
+  stopActiveDevServer,
 } from "../src/dev-server-launcher.js";
 
 describe("dev-server-launcher · isProcessAlive", () => {
@@ -104,5 +106,55 @@ describe("dev-server-launcher · buildDevServerFailMessage", () => {
     const msg = await buildDevServerFailMessage(projectRoot, 0, 5173, 15_000);
     expect(msg).toContain('"devam et"');
     expect(msg).toContain("Faz 5 yeniden başlar");
+  });
+});
+
+// stopActiveDevServer: tek doğruluk kaynağı — kill + watcher detach + pid temizle.
+// Regresyon: iterasyon-reset / Faz-2-abandon / Faz-5-respawn site'leri pid'i
+// SADECE undefined yapıyordu → eski process orphan kalıyordu (port çakışması).
+describe("dev-server-launcher · stopActiveDevServer", () => {
+  // Gerçek detached child spawn et (process-group lideri) → kill -pid çalışsın.
+  function spawnSleeper(): number {
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 60000)"],
+      { detached: true, stdio: "ignore" },
+    );
+    child.unref();
+    return child.pid!;
+  }
+
+  async function waitDead(pid: number, timeoutMs = 3000): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (!isProcessAlive(pid)) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return !isProcessAlive(pid);
+  }
+
+  it("canlı pid → process öldürülür + state.dev_server_pid temizlenir", async () => {
+    const pid = spawnSleeper();
+    // spawn anında canlı (kill(pid,0) OS pid'i görür görmez true).
+    expect(isProcessAlive(pid)).toBe(true);
+    const state: { dev_server_pid?: number } = { dev_server_pid: pid };
+    stopActiveDevServer(state);
+    expect(state.dev_server_pid).toBeUndefined();
+    expect(await waitDead(pid)).toBe(true);
+  });
+
+  it("pid yok → no-op, throw etmez, pid undefined kalır", () => {
+    const state: { dev_server_pid?: number } = {};
+    expect(() => stopActiveDevServer(state)).not.toThrow();
+    expect(state.dev_server_pid).toBeUndefined();
+  });
+
+  it("idempotent — iki kez çağrı throw etmez", async () => {
+    const pid = spawnSleeper();
+    const state: { dev_server_pid?: number } = { dev_server_pid: pid };
+    stopActiveDevServer(state);
+    expect(() => stopActiveDevServer(state)).not.toThrow();
+    expect(state.dev_server_pid).toBeUndefined();
+    expect(await waitDead(pid)).toBe(true);
   });
 });

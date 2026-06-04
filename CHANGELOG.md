@@ -6,6 +6,31 @@
 
 ## 2026-06-04
 
+- **fix(WP1) [katman-denetimi]:** Tüm katmanların gerçekten kaliteli çalıştığını doğrulama programı
+  (Ümit: "tüm katmanların kaliteli çalıştığını kontrol et"). 5-ajanlı adversaryal denetim 6 GERÇEK
+  bug buldu (kanıtlı) → hepsi düzeltildi + regresyon testi + `npm run check` yeşil (858 test):
+  - **(1) Test izolasyon kaçağı (kanıt: gerçek hasar):** `agent-memory/store.test.ts` credential-warning
+    bloğu `MYCL_HOME` izole etmiyordu → her test koşusunda GERÇEK `~/.mycl/agent-memory-general.jsonl`'e
+    sahte `sk-ant-…` + `password=…` satırları yazıyordu (618 satır birikmiş; orkestratör recall'ına
+    sızıyordu). Kirli dosya yedeklenip temizlendi; teste temp-`MYCL_HOME` izolasyonu eklendi.
+  - **(2) Dev-server orphan:** 3 nokta (yeni-iterasyon reset / Faz-2-abandon / Faz-5-respawn) eski
+    `dev_server_pid`'i sadece `undefined` yapıyordu → process orphan + port çakışması. Tek doğruluk
+    kaynağı `stopActiveDevServer(state)` helper'ı (kill+watcher-detach) eklendi; 3 site + smoke-test'in
+    2 kopyası ona indirgendi. +3 test (gerçek detached child spawn → kill doğrulanır).
+  - **(3) Gate-fail dürüstlük (Ümit'in #1 endişesi "sessizce TAMAMLANDI deme"):** mekanik gate'ler SOFT
+    olduğundan akış-sonu özeti gate patlasa bile "Akış tamamlandı" diyebiliyordu. `computeVerdict`
+    audit'ten gerçek hükmü çıkarıyor → saf `pipeline-end-summary.ts` (gate-fail fazlarını listeler +
+    güvenlik-skip + "KISMÎ/BAŞARISIZ — doğrulandığını söyleyemem"). Yeni `pipeline_end` event'i frontend'e
+    taşır: PhaseSidebar başarısız gate'lere ordinal ✅ yerine ⚠️ basar; AppHeader kısmî/başarısız çipi.
+    +9 test.
+  - **(4) Deferred Faz 6 boot-resume:** boot-resume `advanceToNextPhase(5)` Faz-5 dev-server spawn'ını
+    atlıyordu → Faz 6 hem "dev server çalışmıyor" hem "tarayıcıda açıldı" çelişkili mesajı veriyordu.
+    Phase6Controller artık canlılık kontrolü yapıp ölüyse `restartDevServerSimple` (eskiden atıl) ile
+    yeniden başlatır + mesajı dürüstleştirir; güncel pid persist edilir.
+  - **(5) Resume scope tail-bağımlılığı:** `detectInterruptedPhase2To9` audit tail'i (son 300) uzun
+    iterasyonda `iteration-N-start`'ı kaçırınca scope=0'a düşüp önceki iterasyonun complete'ini "tamamlandı"
+    sayıp resume'u atlıyordu (deferred Faz 6 takılırdı). `state.iteration_started_at` persist edildi;
+    karar mantığı saf `resume-detection.ts`'e çıkarıldı (audit fallback eski state'ler için). +6 test.
 - **feat(security) [tamamlık-2]:** Kalan dedicated güvenlik kontrolleri (Ümit: "herşey tam olsun,
   güvenlik ciddi"). (1) `assets/security-rules/web-security.yml` (semgrep, validate+fixture'lı):
   **CORS** wildcard (`*`/`origin:true`/`Access-Control-Allow-Origin:*`) + **cookie** güvensiz

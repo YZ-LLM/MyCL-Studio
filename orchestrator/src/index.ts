@@ -31,9 +31,13 @@ import {
   appendCost,
   readCosts,
   extractSpecSection,
+  readAuditLog,
   readAuditLogTail,
   wasPipelineCompleted,
 } from "./audit.js";
+import { computeVerdict, type HarnessVerdict } from "./harness-verdict.js";
+import { buildPipelineEndLines } from "./pipeline-end-summary.js";
+import { detectInterruptedPhase2To9Pure } from "./resume-detection.js";
 import { setRecordContext } from "./record-context.js";
 import {
   appendTask,
@@ -117,6 +121,7 @@ import {
 import { verifyFeatureHandler } from "./verify-feature.js";
 import { loadProfile } from "./profile-loader.js";
 import { isProcessAlive } from "./process-utils.js";
+import { stopActiveDevServer } from "./dev-server-launcher.js";
 import { loadI18n, t } from "./i18n.js";
 import { log } from "./logger.js";
 import { readFile as fsReadFile } from "node:fs/promises";
@@ -618,28 +623,16 @@ async function detectInterruptedPhase1(
 async function detectInterruptedPhase2To9(
   state: State,
 ): Promise<{ phaseId: PhaseId } | null> {
-  const cp = state.current_phase;
-  if (cp < 2 || cp > 9) return null;
+  // Ucuz erken-çıkış — audit okumadan (saf modülde de aynı guard var, IO'dan kaçın).
+  if (state.current_phase < 2 || state.current_phase > 9) return null;
   let audit;
   try {
     audit = await readAuditLogTail(state.project_root, 300);
   } catch {
     return null;
   }
-  // Bu iterasyon başlangıcından sonra phase-N-complete oldu mu?
-  const iterCount = state.iteration_count ?? 1;
-  let scopeStartTs = 0;
-  if (iterCount > 1) {
-    const startEvent = audit.find(
-      (e) => e.event === `iteration-${iterCount}-start`,
-    );
-    scopeStartTs = startEvent?.ts ?? 0;
-  }
-  const completed = audit.some(
-    (e) => e.ts > scopeStartTs && e.event === `phase-${cp}-complete`,
-  );
-  if (completed) return null;
-  return { phaseId: cp };
+  // Karar mantığı saf modülde (resume-detection.ts) — orchestrator vitest'te test edilebilir.
+  return detectInterruptedPhase2To9Pure(state, audit);
 }
 
 /**
@@ -1509,6 +1502,9 @@ async function executeDispatchedIntent(
       caller: "user",
       detail: `previous pipeline complete; new intent: ${text.slice(0, 100)}`,
     });
+    // Yeni iterasyon önceki dev server'ı bırakmamalı — pid'i undefined yapmak
+    // process'i ÖLDÜRMEZ (orphan + port çakışması). Temiz kapat (kill+detach).
+    stopActiveDevServer(runtime.state);
     // State reset — pipeline alanları sıfırlanır; kalıcı kimlik korunur.
     // v15.7 (2026-05-27): pending_backend_fix + pending_migrations +
     // pending_diagnostic da reset listesine alındı (R2-01 QC bulgusu) — yeni
@@ -1537,6 +1533,9 @@ async function executeDispatchedIntent(
       needed_phases: undefined,
       needed_phases_proposed: undefined,
       iteration_count: newIter,
+      // Boot-resume scope sınırı — bu iterasyonun başlangıcı (audit tail'e bağlı
+      // kalmadan detectInterruptedPhase2To9 doğru scope hesaplasın).
+      iteration_started_at: Date.now(),
       updated_at: Date.now(),
     };
     await saveState(runtime.state);
@@ -1831,6 +1830,8 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
           caller: "user",
           detail: reason.slice(0, 200),
         });
+        // Niyet vazgeçildi — varsa ayakta dev server'ı temiz kapat (orphan önle).
+        stopActiveDevServer(state);
         // v15.7 (2026-05-27): R2-01 — pending_* alanları reset listesine
         // alındı. Phase 2 abandon → Phase 1'e döner ama eski iterasyon'dan
         // pending_ui_tweak/backend_fix/migrations/diagnostic sızabilir.
@@ -2024,8 +2025,15 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       const r = await p6.run();
       runtime.controller = null;
       log.info("orchestrator", "phase 6 end", { result: r });
-      // r === "deferred" — state.current_phase=7 zaten outer loop tarafından
-      // set edildi. Header'a "YANIT BEKLENİYOR" durumunu yansıt + frontend
+      // Phase 6 dev server'ı (boot-resume'da Faz 5 spawn atlandığı için ölü
+      // olabilir) yeniden başlatmış olabilir → güncel dev_server_pid'i persist
+      // et. Deferred yol normalde state kaydetmez; statePatch boşsa no-op.
+      if (Object.keys(p6.statePatch).length > 0) {
+        state = { ...state, ...p6.statePatch };
+        runtime.state = state;
+        await saveState(state);
+      }
+      // r === "deferred" — Header'a "YANIT BEKLENİYOR" durumunu yansıt + frontend
       // running banner'ı kapansın (waiting → banner null reducer'da).
       void r;
       emitPhaseChanged(6, 6, "waiting");
@@ -3479,52 +3487,37 @@ async function emitPhase16HonestyNote(state: State): Promise<void> {
 async function emitPipelineEndSummary(state: State): Promise<void> {
   try {
     const intent = (state.intent_summary ?? "").trim();
-    const v = await assessPhase16Verification(state.project_root);
-    const lines: string[] = ["📋 **Akış özeti**"];
-    lines.push(
-      intent
-        ? `• İstediğin: ${intent.slice(0, 200)}`
-        : "• İstediğin: (kayıtlı bir niyet özeti yok)",
-    );
-    const uyarilar: string[] = [];
-    if (v.smokeKind === "placeholder") {
-      uyarilar.push(
-        "E2E testi genel bir sayfa kontrolüydü; istediğin özellik **özel olarak test edilmedi**.",
-      );
-    }
-    if (v.authStatus === "placeholder") {
-      uyarilar.push("Giriş yapılmadı (giriş bilgisi yer tutucu).");
-    }
-    if (uyarilar.length > 0) {
-      lines.push("• ⚠ Dürüst uyarı: " + uyarilar.join(" "));
-      lines.push(
-        "• Sonuç: Akış sonuna kadar ilerledi, ama yukarıdaki nedenle işin **gerçekten doğrulandığını söyleyemem**.",
-      );
-    } else {
-      lines.push("• Sonuç: Akış tamamlandı.");
-    }
-    // v15.8 (2026-05-31): token gözlemi — toplam + per-faz döküm (regresyon görünür).
+    const v16 = await assessPhase16Verification(state.project_root);
+    // DÜRÜST hüküm (Ümit'in #1 endişesi: "sessizce TAMAMLANDI deme"). Mekanik
+    // gate'ler (Faz 10-17) SOFT — patlasa bile orkestratör `phase-N-complete`
+    // (soft_complete_after_fail) yazıp devam eder. computeVerdict audit'ten
+    // gerçeği çıkarır: gate-fail veya güvenlik-skip varsa hüküm PASS değildir.
+    let verdict: HarnessVerdict | null = null;
     try {
-      const costs = await readCosts(state.project_root);
-      if (costs.length > 0) {
-        const inTok = costs.reduce((s, c) => s + c.input_tokens, 0);
-        const outTok = costs.reduce((s, c) => s + c.output_tokens, 0);
-        const cacheRead = costs.reduce((s, c) => s + c.cache_read_input_tokens, 0);
-        const turns = costs.reduce((s, c) => s + c.turns, 0);
-        const k = (n: number) => `${Math.round(n / 1000)}k`;
-        lines.push(
-          `• 🧮 Token: ${k(inTok)} giriş / ${k(outTok)} çıkış · ${turns} tur · cache okuma ${k(cacheRead)}`,
-        );
-        const perPhase = costs
-          .filter((c) => c.input_tokens + c.output_tokens > 0)
-          .map((c) => `Faz ${c.phase}=${k(c.input_tokens + c.output_tokens)}`)
-          .join(", ");
-        if (perPhase) lines.push(`   ${perPhase}`);
-      }
+      verdict = computeVerdict(await readAuditLog(state.project_root));
+    } catch (err) {
+      log.warn("orchestrator", "verdict compute failed (non-blocking)", err);
+    }
+    // Token okuma kendi içinde fail-safe — okunamazsa boş döküm (özet yine çıkar).
+    let costs: Awaited<ReturnType<typeof readCosts>> = [];
+    try {
+      costs = await readCosts(state.project_root);
     } catch (err) {
       log.warn("orchestrator", "cost summary failed (non-blocking)", err);
     }
-    emitChatMessage("system", lines.join("\n"));
+    emitChatMessage(
+      "system",
+      buildPipelineEndLines({ intent, v16, verdict, costs }).join("\n"),
+    );
+    // Frontend'e yapılandırılmış hüküm — sidebar başarısız gate'lere ⚠️ bassın,
+    // header kısmî/başarısız çipi göstersin (ordinal ✅ "sessiz yeşil" yalanını düzeltir).
+    if (verdict) {
+      emit("pipeline_end", {
+        verdict: verdict.verdict,
+        gateFailures: verdict.gateFailures.map((g) => g.phase),
+        securitySkipped: verdict.securitySkipped,
+      });
+    }
   } catch (err) {
     log.warn("orchestrator", "pipeline end summary failed", err);
   }

@@ -14,8 +14,8 @@ import { join } from "node:path";
 import type { MyclConfig } from "./config.js";
 import {
   buildDevServerFailMessage,
-  killProcessTree,
   openBrowser,
+  stopActiveDevServer,
   tryDevServerChain,
   waitForDevServer,
 } from "./dev-server-launcher.js";
@@ -28,10 +28,7 @@ import {
 } from "./intent-router/handlers/command.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
-import {
-  detachActiveWatcher,
-  replaceActiveWatcher,
-} from "./runtime-error-watcher.js";
+import { replaceActiveWatcher } from "./runtime-error-watcher.js";
 import { safeEnv } from "./safe-env.js";
 import type { State } from "./types.js";
 
@@ -164,11 +161,7 @@ export async function restartDevServerForPhase7(
   state: State,
   config: MyclConfig,
 ): Promise<RestartResult> {
-  detachActiveWatcher();
-  if (state.dev_server_pid) {
-    killProcessTree(state.dev_server_pid);
-    state.dev_server_pid = undefined;
-  }
+  stopActiveDevServer(state);
   const stack = detectStack(state.project_root);
   const scripts = readNodeScripts(state.project_root);
   const cmds = commandsFor(stack, "run", scripts);
@@ -230,11 +223,7 @@ export async function restartDevServerSimple(
   state: State,
   config: MyclConfig,
 ): Promise<RestartResult> {
-  detachActiveWatcher();
-  if (state.dev_server_pid) {
-    killProcessTree(state.dev_server_pid);
-    state.dev_server_pid = undefined;
-  }
+  stopActiveDevServer(state);
   const stack = detectStack(state.project_root);
   const scripts = readNodeScripts(state.project_root);
   const cmds = commandsFor(stack, "run", scripts);

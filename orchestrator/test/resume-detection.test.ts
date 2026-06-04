@@ -1,0 +1,70 @@
+// resume-detection — boot-resume faz tespiti (saf). Regresyon: audit tail'i
+// iteration-N-start'ı kaçırsa bile resume scope'u state'ten doğru hesaplanmalı.
+
+import { describe, expect, it } from "vitest";
+import { detectInterruptedPhase2To9Pure } from "../src/resume-detection.js";
+import type { AuditEvent, State } from "../src/types.js";
+
+function ev(ts: number, event: string): AuditEvent {
+  return { ts, phase: 0, event, caller: "mycl-orchestrator" };
+}
+
+type S = Pick<
+  State,
+  "current_phase" | "iteration_count" | "iteration_started_at"
+>;
+
+describe("resume-detection · detectInterruptedPhase2To9Pure", () => {
+  it("faz 1 / 10+ → null (kapsam dışı)", () => {
+    expect(detectInterruptedPhase2To9Pure({ current_phase: 1 } as S, [])).toBeNull();
+    expect(detectInterruptedPhase2To9Pure({ current_phase: 10 } as S, [])).toBeNull();
+  });
+
+  it("iter 1, phase-6-complete YOK → resume {phaseId:6}", () => {
+    const s: S = { current_phase: 6, iteration_count: 1 };
+    const audit = [ev(100, "phase-5-complete")];
+    expect(detectInterruptedPhase2To9Pure(s, audit)).toEqual({ phaseId: 6 });
+  });
+
+  it("iter 1, phase-6-complete VAR → null (resume yok)", () => {
+    const s: S = { current_phase: 6, iteration_count: 1 };
+    const audit = [ev(100, "phase-5-complete"), ev(200, "phase-6-complete")];
+    expect(detectInterruptedPhase2To9Pure(s, audit)).toBeNull();
+  });
+
+  // ASIL BUG: uzun iter-2'de iteration-2-start audit tail'i dışında kalmış +
+  // tail'de ÖNCEKİ iterasyonun (iter-1) phase-6-complete'i duruyor. State'te
+  // iteration_started_at YOKSA scopeStartTs=0 → eski complete "tamamlandı"
+  // sanılır → resume YANLIŞLIKLA atlanırdı.
+  it("iter 2, iteration-start tail dışında + state.iteration_started_at VAR → doğru resume", () => {
+    const s: S = {
+      current_phase: 6,
+      iteration_count: 2,
+      iteration_started_at: 5000, // iter-2 başlangıcı
+    };
+    // Tail'de SADECE iter-1'in eski phase-6-complete'i var (ts=100 < 5000);
+    // iter-2'nin phase-6-complete'i YOK → yarıda → resume olmalı.
+    const audit = [ev(100, "phase-6-complete"), ev(5100, "phase-5-complete")];
+    expect(detectInterruptedPhase2To9Pure(s, audit)).toEqual({ phaseId: 6 });
+  });
+
+  it("iter 2, iteration_started_at VAR + bu iterasyonda phase-6-complete VAR → null", () => {
+    const s: S = {
+      current_phase: 6,
+      iteration_count: 2,
+      iteration_started_at: 5000,
+    };
+    const audit = [ev(100, "phase-6-complete"), ev(5200, "phase-6-complete")];
+    expect(detectInterruptedPhase2To9Pure(s, audit)).toBeNull();
+  });
+
+  it("iter 2, state.iteration_started_at YOK (eski state) → audit iteration-2-start fallback", () => {
+    const s: S = { current_phase: 6, iteration_count: 2 };
+    const audit = [
+      ev(100, "phase-6-complete"), // iter-1 eski complete
+      ev(4000, "iteration-2-start"),
+      ev(5100, "phase-5-complete"), // iter-2'de phase-6-complete YOK
+    ];
+    expect(detectInterruptedPhase2To9Pure(s, audit)).toEqual({ phaseId: 6 });
+  });
+});

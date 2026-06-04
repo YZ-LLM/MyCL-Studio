@@ -140,14 +140,27 @@ describe("agent-memory/store · decision log", () => {
 
 // v15.6 (2026-05-24): genel hafıza cross-project sızıntı koruması.
 // Credential pattern yakalandığında log.warn'a düşmeli ama write block olmamalı.
+//
+// İZOLASYON (2026-06-04): appendGeneralMemory global yola yazar
+// (globalConfigFile → MYCL_HOME). MYCL_HOME'u temp dir'e sabitlemezsek bu test
+// GERÇEK ~/.mycl/agent-memory-general.jsonl'i kirletir (sahte sk-ant key +
+// password=... satırları → orkestratör recall'ına sızar). MYCL_HOME ile izole et.
 describe("agent-memory/store · general memory credential warning (v15.6)", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
+  let homeDir: string;
+  let prevHome: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    prevHome = process.env.MYCL_HOME;
+    homeDir = await mkdtemp(join(tmpdir(), "mycl-genmem-"));
+    process.env.MYCL_HOME = homeDir;
     warnSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
   });
-  afterEach(() => {
+  afterEach(async () => {
     warnSpy.mockRestore();
+    if (prevHome === undefined) delete process.env.MYCL_HOME;
+    else process.env.MYCL_HOME = prevHome;
+    await rm(homeDir, { recursive: true, force: true });
   });
 
   it("temiz entry → warn YOK + write OK", async () => {

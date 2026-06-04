@@ -52,6 +52,7 @@ export type OrchestratorEvent =
   | PhaseRunningEvent
   | PhaseIdleEvent
   | PhaseChangedEvent
+  | PipelineEndEvent
   | ClaudeStreamEvent
   | ModelsListEvent
   | SelectedModelsEvent
@@ -249,6 +250,18 @@ export interface PhaseChangedEvent {
     from: PhaseId;
     to: PhaseId;
     status: PhaseStatus;
+  };
+}
+
+/** Akış sonu DÜRÜST hüküm (backend computeVerdict). Sidebar başarısız gate'lere
+ *  ⚠️ basar, header kısmî/başarısız çipi gösterir — "sessizce TAMAMLANDI" yalanını
+ *  önler. gateFailures = soft-complete olsa da gate'i patlayan fazlar. */
+export interface PipelineEndEvent {
+  kind: "pipeline_end";
+  data: {
+    verdict: "PASS" | "PARTIAL" | "FAIL";
+    gateFailures: PhaseId[];
+    securitySkipped: string[];
   };
 }
 

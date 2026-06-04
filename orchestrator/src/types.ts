@@ -327,6 +327,14 @@ export interface State {
    */
   iteration_count?: number;
   /**
+   * Bu iterasyonun başlangıç timestamp'i (Date.now). Boot-resume'da hangi
+   * audit event'lerinin BU iterasyona ait olduğunu belirler — audit tail'i
+   * (son 300) iteration-N-start'ı kaçırırsa bile resume scope'u doğru kalır
+   * (uzun iterasyonda önceki koşunun phase-complete'ini yanlış saymaz). iter=1'de
+   * gereksiz (scope 0'dan başlar); yeni iterasyon reset'inde set edilir.
+   */
+  iteration_started_at?: number;
+  /**
    * Phase 6'de kullanıcı UI tweak isterse Claude `request_ui_tweak` tool'una
    * verdiği description burada saklanır. Outer loop Phase 5'ya döner; Phase 5
    * tweak mode'da bu alanı okur ve statePatch'inde temizler.

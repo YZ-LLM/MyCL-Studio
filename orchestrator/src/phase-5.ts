@@ -16,6 +16,7 @@ import type { MyclConfig } from "./config.js";
 import {
   buildDevServerFailMessage,
   openBrowser,
+  stopActiveDevServer,
   tryDevServerChain,
 } from "./dev-server-launcher.js";
 import {
@@ -279,6 +280,14 @@ export class Phase5Controller {
       );
       log.info("phase-5", "tweak complete (dev server skipped)");
       return "complete";
+    }
+
+    // Boot-resume / Faz-6-deferred re-entry: Faz 5 yeniden çalışıyor ve state'te
+    // eski bir dev_server_pid kalmış olabilir. Yeni spawn'dan ÖNCE eski process'i
+    // temiz kapat — aksi halde orphan + port çakışması (tweak yolu yukarıda zaten
+    // skip etti, buraya yalnız gerçek (re-)spawn gerektiğinde gelinir).
+    if (this.state.dev_server_pid !== undefined) {
+      stopActiveDevServer(this.state);
     }
 
     // Dev server'ı arka planda başlat + tarayıcıyı aç. Faz 6 (UI Review) bu

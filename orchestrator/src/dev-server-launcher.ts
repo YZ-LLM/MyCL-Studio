@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { log } from "./logger.js";
 import { isProcessAliveSync } from "./process-utils.js";
 import { safeEnv } from "./safe-env.js";
+import { detachActiveWatcher } from "./runtime-error-watcher.js";
 
 export interface DevServerHandle {
   pid: number;
@@ -206,6 +207,24 @@ export function killProcessTree(pid: number): void {
     } catch {
       /* ignore */
     }
+  }
+}
+
+/**
+ * Aktif dev server'ı TEMİZ kapat: runtime-error watcher'ı detach et + process
+ * ağacını öldür + `state.dev_server_pid`'i sıfırla. Tek doğruluk kaynağı —
+ * yeniden-spawn / iterasyon-reset / niyet-vazgeçme / Faz 2 abandon öncesi
+ * çağrılır. Aksi halde eski process orphan kalır (port çakışması + zombi pid).
+ *
+ * Idempotent: pid yoksa yalnız watcher detach (no-op kill). `state` referans ile
+ * mutasyona uğrar (pid=undefined) — controller/engine aynı state nesnesini
+ * paylaştığından fail/complete yollarının ikisinde de tutarlı kalır.
+ */
+export function stopActiveDevServer(state: { dev_server_pid?: number }): void {
+  detachActiveWatcher();
+  if (state.dev_server_pid !== undefined) {
+    killProcessTree(state.dev_server_pid);
+    state.dev_server_pid = undefined;
   }
 }
 

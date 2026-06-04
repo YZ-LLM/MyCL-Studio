@@ -24,6 +24,7 @@ import type {
   PhaseId,
   PhaseStatus,
   PhaseSummary,
+  PipelineEndEvent,
   TaskQueueItem,
 } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
@@ -117,6 +118,9 @@ interface MainState {
   /** Token-timeline — faz-bazında token harcaması (cost.jsonl). cost_phase canlı
    *  upsert eder, cost_history (load_costs yanıtı) tümünü değiştirir. */
   costTimeline: CostRecord[];
+  /** Akış sonu DÜRÜST hüküm (pipeline_end). null = henüz akış bitmedi / yeni akış.
+   *  PARTIAL/FAIL ise sidebar başarısız gate'lere ⚠️ basar, header çip gösterir. */
+  pipelineVerdict: PipelineEndEvent["data"] | null;
 }
 
 const INITIAL_STATE: MainState = {
@@ -143,6 +147,7 @@ const INITIAL_STATE: MainState = {
     api_calls: 0,
   },
   costTimeline: [],
+  pipelineVerdict: null,
 };
 
 function reduce(state: MainState, ev: OrchestratorEvent): MainState {
@@ -287,13 +292,21 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       (ev.data.status === "complete" ||
         ev.data.status === "error" ||
         ev.data.status === "waiting");
+    // Yeni akış/iterasyon Faz 1'de "running" ile başlar → eski hüküm rozetlerini
+    // temizle (önceki koşunun ⚠️'leri yeni akışa sızmasın).
+    const freshRun = ev.data.to === 1 && ev.data.status === "running";
     return {
       ...state,
       phase: ev.data.to,
       phaseStatus: ev.data.status,
       pendingAskq: null,
       runningBanner: closeBanner ? null : state.runningBanner,
+      pipelineVerdict: freshRun ? null : state.pipelineVerdict,
     };
+  }
+  if (ev.kind === "pipeline_end") {
+    // Akış sonu DÜRÜST hüküm — sidebar/header bu sayede gate-fail'i gösterir.
+    return { ...state, pipelineVerdict: ev.data };
   }
   if (ev.kind === "history_chunk") {
     const d = ev.data;
@@ -1130,6 +1143,7 @@ function App() {
         onTokenBadgeClick={() => setTokenTimelineOpen((o) => !o)}
         onPhaseIndicatorClick={() => setErrorDrawerOpen((o) => !o)}
         errorCount={errorEntries.length}
+        pipelineVerdict={mainState.pipelineVerdict?.verdict ?? null}
       />
       <div
         className={
@@ -1145,6 +1159,7 @@ function App() {
               currentPhase={mainState.phase}
               disabled={buttonsDisabled}
               onPhaseClick={sendPhaseRunRequest}
+              gateFailures={mainState.pipelineVerdict?.gateFailures}
             />
             <div className="divider" />
           </>

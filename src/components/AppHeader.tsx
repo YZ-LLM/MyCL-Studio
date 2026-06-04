@@ -38,7 +38,16 @@ interface Props {
   onPhaseIndicatorClick?: () => void;
   /** Hata sayısı — badge'de küçük rozet olarak görünür (0 ise gizli). */
   errorCount?: number;
+  /** Akış sonu DÜRÜST hüküm. PARTIAL/FAIL ise faz göstergesinin yanında çip
+   *  ("⚠ kısmî" / "✕ başarısız") — pipeline "sessizce tamamlandı" demesin. */
+  pipelineVerdict?: "PASS" | "PARTIAL" | "FAIL" | null;
 }
+
+/** Hüküm çipi metni — geliştiricinin dilinde (TR). PASS/null → çip yok. */
+const VERDICT_CHIP: Record<"PARTIAL" | "FAIL", string> = {
+  PARTIAL: "⚠ kısmî",
+  FAIL: "✕ başarısız",
+};
 
 const STATUS_LABEL: Record<PhaseStatus, string> = {
   running: "çalışıyor",
@@ -65,7 +74,12 @@ export function AppHeader({
   onTokenBadgeClick,
   onPhaseIndicatorClick,
   errorCount,
+  pipelineVerdict,
 }: Props) {
+  const verdictChip =
+    pipelineVerdict === "PARTIAL" || pipelineVerdict === "FAIL"
+      ? VERDICT_CHIP[pipelineVerdict]
+      : null;
   return (
     <header className="app-header" data-tauri-drag-region>
       <span className="app-title" data-tauri-drag-region>MyCL Studio</span>
@@ -104,6 +118,14 @@ export function AppHeader({
         >
           {phase === 0 ? "MyCL · Debug" : `MyCL · Faz ${phase}`}
           {status !== "running" && ` — ${STATUS_LABEL[status]}`}
+        </span>
+      )}
+      {verdictChip && (
+        <span
+          className={`app-verdict-chip ${pipelineVerdict === "FAIL" ? "fail" : "partial"}`}
+          title="Akış sonu dürüst hüküm: en az bir kalite-gate'i geçemedi / güvenlik taraması atlandı — sonuç tam doğrulanmadı. Detay: chat akış özeti + soldaki ⚠️ fazlar."
+        >
+          {verdictChip}
         </span>
       )}
       {onToggleLeftClick && (

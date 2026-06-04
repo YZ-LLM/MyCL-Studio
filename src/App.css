@@ -344,6 +344,27 @@ select:focus {
   line-height: 1;
 }
 
+/* Akış sonu hüküm çipi — pipeline "sessizce tamamlandı" demesin (gate-fail / güvenlik-skip). */
+.app-verdict-chip {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: default;
+}
+.app-verdict-chip.partial {
+  color: var(--warning);
+  background: rgba(210, 153, 34, 0.14);
+  border: 1px solid var(--warning);
+}
+.app-verdict-chip.fail {
+  color: var(--error);
+  background: rgba(248, 81, 73, 0.14);
+  border: 1px solid var(--error);
+}
+
 /* ===== ErrorDrawer (v15.7, 2026-05-27) ===== */
 .error-drawer {
   position: fixed;
@@ -734,6 +755,11 @@ select:focus {
 .phase-item:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* Gate başarısız (soft-complete olsa da) — ⚠️ rozet + sol kenar uyarı rengi. */
+.phase-item.gate-failed {
+  border-left: 3px solid var(--warning);
+  padding-left: 9px;
 }
 /* Faz 0 (Hata Ayıklama) — pipeline DIŞI standalone; kalın ayraçla pipeline'dan ayrılır. */
 .phase-item.standalone {

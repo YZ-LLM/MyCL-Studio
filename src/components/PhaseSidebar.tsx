@@ -23,6 +23,22 @@ interface Props {
   currentPhase: PhaseId;
   disabled: boolean;
   onPhaseClick: (id: PhaseId) => void;
+  /** Akış sonu hüküm: gate'i patlayan fazlar (soft-complete olsa da). Bu fazlar
+   *  yeşil ✅ yerine ⚠️ gösterir — "sessiz yeşil" yalanını önler. */
+  gateFailures?: PhaseId[];
+}
+
+/**
+ * SAF: faz rozeti. gate başarısızsa ⚠️ (ordinal ✅'yi ezer — soft-complete olsa
+ * da gate patladıysa yeşil DEME). Aksi halde ordinal: geçmiş ✅, current 🔵, ileri 🔘.
+ */
+export function phaseBadge(
+  id: PhaseId,
+  currentPhase: PhaseId,
+  gateFailed: boolean,
+): string {
+  if (gateFailed) return "⚠️";
+  return id < currentPhase ? "✅" : id === currentPhase ? "🔵" : "🔘";
 }
 
 export function PhaseSidebar({
@@ -30,8 +46,10 @@ export function PhaseSidebar({
   currentPhase,
   disabled,
   onPhaseClick,
+  gateFailures,
 }: Props) {
   const byId = new Map(phases.map((p) => [p.id, p]));
+  const failedSet = new Set(gateFailures ?? []);
   return (
     <aside className="phase-sidebar">
       <div className="phase-sidebar-header">Fazlar</div>
@@ -63,8 +81,8 @@ export function PhaseSidebar({
         })()}
         {VISIBLE_PHASES.map((id) => {
           const p = byId.get(id);
-          const badge =
-            id < currentPhase ? "✅" : id === currentPhase ? "🔵" : "🔘";
+          const gateFailed = failedSet.has(id);
+          const badge = phaseBadge(id, currentPhase, gateFailed);
           const name = p?.name_tr ?? p?.name_en ?? `Faz ${id}`;
           const typeLabel = p?.type ?? "";
           const isCurrent = id === currentPhase;
@@ -73,10 +91,10 @@ export function PhaseSidebar({
             <button
               key={id}
               type="button"
-              className={`phase-item${isCurrent ? " current" : ""}${isRequired ? " required" : ""}`}
+              className={`phase-item${isCurrent ? " current" : ""}${isRequired ? " required" : ""}${gateFailed ? " gate-failed" : ""}`}
               disabled={disabled}
               onClick={() => onPhaseClick(id)}
-              title={`Faz ${id} — ${typeLabel}${isRequired ? " (zorunlu)" : " (opsiyonel)"}`}
+              title={`Faz ${id} — ${typeLabel}${isRequired ? " (zorunlu)" : " (opsiyonel)"}${gateFailed ? " — ⚠ bu gate başarısız (akış soft devam etti, sonuç tam doğrulanmadı)" : ""}`}
             >
               <span className="phase-badge" aria-hidden>
                 {badge}
