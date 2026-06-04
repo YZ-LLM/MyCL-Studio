@@ -6,6 +6,28 @@
 
 ## 2026-06-04
 
+- **feat(WP3) [kalite-boyutları]:** a11y + i18n + contract + resilience (design+adversaryal workflow,
+  wf_b73b3b8f). 5-ajanlı inceleme her boyutu süzdü; memory kurallarıyla (yokluk-tespiti=FP tuzağı,
+  minimal-dep, duplikasyon-yok) uyumlu net karar:
+  - **a11y → ENTEGRE (tek mekanik kazanç, pozitif-check):** `@axe-core/playwright` (Deque resmi) Faz 16
+    Playwright smoke spec'ine enjekte (`playwright-setup.ts` `renderSmokeSpec`) — çalışan DOM'u WCAG ile
+    tarar. YALNIZ critical+serious fail (minor/moderate rapor-only, FP-fırtınası önlenir). Paket yoksa
+    değişken-specifier dynamic import + try/catch → görünür-skip (compile/runtime kırılmaz). Faz 16 SOFT
+    → projeyi kırmaz; has_ui+project_type otomatik gating. ensurePlaywrightInstalled axe'ı Playwright ile
+    BİRLİKTE kurar + idempotency artık İKİ paketi de kontrol eder (eski "axe hiç kurulmaz" bug'ı). Scaffold
+    marker v15.8→v15.9 (eski smoke'lar refresh). + phase-05-ui.md a11y guidance (semantic-HTML/ARIA-son-çare/
+    klavye/form/kontrast, stack-nötr). +1 test.
+  - **resilience → ENTEGRE (guidance-only, mekanik check YOK — yokluk-tespiti FP-prone):** phase-08-tdd.md
+    (timeout/bounded-retry/graceful-degradation/input-validation, WP2 hata-handler'ına bağlanır, IDE-ölçek
+    DEĞİL chaos-eng) + phase-05-ui.md (her async UI için loading/error/empty üç-durum + retry affordance,
+    mevcut ErrorBoundary'ye bağlanır).
+  - **contract → guidance-only güçlendirme:** phase-08-tdd.md'deki mevcut "API contract" satırı somutlaştı
+    (request/response-shape, status-code matrisi 201/400/401/403/404, error-envelope tutarlılığı, OpenAPI
+    yalnız dosya varsa). Yeni dep/runner YOK — mevcut integration testine yazılır (Faz 15 koşar).
+  - **i18n → mekanik DROP (hardcoded-string check yokluk-tespiti FP-tuzağı; react-i18next dayatma minimal-dep
+    ihlali):** sadece hafif koşullu guidance (phase-05-ui.md) — merkezi metin (t("key")), Intl ile biçimleme,
+    RTL-hijyeni, "iskelet değil çeviri" + tek-dil ise framework EKLEME.
+  `npm run check` yeşil (859 test). Yeni dep yalnız @axe-core/playwright (üretilen UI projelerinde, dev-dep).
 - **feat(WP2) [observability]:** Üretilen uygulamaya gözlemlenebilirlik — codegen guidance
   (design+adversaryal workflow, wf_7eee4df7). Adversaryal inceleme 3 gerçek tuzak yakaladı, hepsi
   doğrulanıp uygulandı: **(a) yeni semgrep silent-catch kuralı YAZILMADI** — `tech-debt-scanner.ts`

@@ -238,6 +238,69 @@ the swallow is safe. A commented best-effort catch is fine.
   `level` + fields (inject a `sink`/`write` so the test can assert without
   capturing global stdout).
 
+## Resilience — anticipate failure, don't just record it (when external calls exist)
+
+Error catalog + Observability make a failure *visible*; resilience keeps one flaky
+dependency from taking the request — or the app — down. This is IDE-scale
+defensive coding, NOT chaos engineering (no fault-injection harness, no extra
+dependency). If the backend makes no outbound / cross-process calls (pure
+in-process logic) → note "no external dependencies → resilience N/A" and skip.
+When it calls anything it does not own (HTTP API, DB, cache, queue, FS under
+load), apply these and TDD the observable ones:
+
+1. **Timeout every outbound call.** No timeout = blocks forever and exhausts the
+   pool. Bounded deadline: `AbortController` + `signal` for `fetch`; the client's
+   native timeout for DB/SDK; `timeout=` for Python `httpx`/`requests`. Never
+   unbounded.
+2. **Retry only transient, idempotent failures — bounded.** Network error / 5xx /
+   429 with a small cap (2-3) + exponential backoff + jitter. NEVER retry 4xx;
+   NEVER blindly retry a non-idempotent write. A ~10-line helper, not a framework
+   (`p-retry` only if the spec already pulls it in).
+3. **Graceful degradation — a dependency being down is not a 500.** When a
+   non-critical dependency fails after timeout+retry, return a meaningful reduced
+   result (cached/stale, empty-but-valid, documented partial), not an opaque
+   error. A critical dependency may still 500 — but through the central error
+   handler (recordError + log), never a raw crash. State which deps are critical
+   vs degradable in your summary.
+4. **Validate input at the boundary** so bad input returns 400, not a 500 from a
+   deeper crash. One validation layer (shared with the security "validate inputs"
+   rule), not two.
+
+Bind to the Observability handler/logger — retry/degradation logs through the same
+`logger`; the final unrecoverable error flows through the same one error handler.
+Do NOT add a second error sink. A `catch` doing backoff/fallback is a *handled*
+catch (it logs the attempt); a swallow still fails the tech-debt scan.
+
+**TDD (RED first, in-process — inject a fake dependency that fails/times out; do
+NOT hit a real network):**
+- A handler whose dependency times out returns the degraded result (or a clean 500
+  through the central handler), never an unhandled rejection.
+- The retry helper stops at the cap and does NOT retry a 4xx (assert attempt count
+  with a stub call counter).
+- Malformed/oversized input → 400 from validation, not a 500 from a deeper crash.
+
+## API contract testing — make the "API contract" valuable-test concrete
+
+The valuable-test list above names "API contract" as a target; here is HOW. No new
+dependency or runner — write these into the existing integration tests (Phase 15
+runs `test:integration`), using whatever schema lib the project already has
+(`zod` / `pydantic` / builtin) or plain assertions. Skip entirely if there is no
+backend.
+
+1. **Request/response shape.** For each endpoint, assert the response body matches
+   the spec's contract — required fields present, types correct, no unexpected
+   field leaking. Test the happy path AND a missing/extra-field body.
+2. **Status-code matrix.** Assert the codes the spec defines, not just 200: create
+   → 201, validation error → 400/422, unauthenticated → 401, forbidden → 403, not
+   found → 404. Map each to the spec'd behavior; do not test framework defaults.
+3. **Error-envelope consistency.** Error bodies follow one shape (e.g.
+   `{ error: { code, message } }`) produced by the central error handler from the
+   Error catalog / Observability sections — not two formats, and never leaking a
+   stack/internal message.
+4. **OpenAPI (opportunistic — only if a file already exists).** If the repo already
+   ships `openapi.yaml`/`openapi.json`/`swagger.json`, validate responses against
+   it too. Do NOT create one — not every backend needs OpenAPI.
+
 ## Rationalizations → rebuttals (do NOT fall for these)
 
 | You might think… | Reality |

@@ -46,10 +46,16 @@ interface PackageJson {
 }
 
 const PLAYWRIGHT_PKG = "@playwright/test";
+// WP3 a11y (2026-06-04): @axe-core/playwright (Deque RESMİ paketi) — Faz 16 smoke
+// spec'i çalışan app'i WCAG kurallarıyla tarar (POZİTİF check, FP-düşük). Playwright
+// ile BİRLİKTE kurulur; eksikse smoke spec'i değişken-specifier dynamic import +
+// try/catch ile a11y bloğunu ATLAR (fail-closed değil, görünür-skip — smoke çalışmaya devam).
+const AXE_PKG = "@axe-core/playwright";
 
 /**
  * Stack id → install komut + browser komut. node dışındaki stack'lerde
  * "unsupported" döner (kullanıcının zaten Playwright kullanmaması beklenir).
+ * Install komutu Playwright + axe'ı birlikte kurar (tek install turu).
  */
 function commandsForStack(
   stack: string | undefined,
@@ -57,22 +63,22 @@ function commandsForStack(
   switch (stack) {
     case "node-npm":
       return {
-        install: `npm install -D ${PLAYWRIGHT_PKG}`,
+        install: `npm install -D ${PLAYWRIGHT_PKG} ${AXE_PKG}`,
         browser: "npx playwright install chromium",
       };
     case "node-pnpm":
       return {
-        install: `pnpm add -D ${PLAYWRIGHT_PKG}`,
+        install: `pnpm add -D ${PLAYWRIGHT_PKG} ${AXE_PKG}`,
         browser: "pnpm exec playwright install chromium",
       };
     case "node-yarn":
       return {
-        install: `yarn add -D ${PLAYWRIGHT_PKG}`,
+        install: `yarn add -D ${PLAYWRIGHT_PKG} ${AXE_PKG}`,
         browser: "yarn playwright install chromium",
       };
     case "node-bun":
       return {
-        install: `bun add -d ${PLAYWRIGHT_PKG}`,
+        install: `bun add -d ${PLAYWRIGHT_PKG} ${AXE_PKG}`,
         browser: "bunx playwright install chromium",
       };
     default:
@@ -80,13 +86,17 @@ function commandsForStack(
   }
 }
 
+// İdempotency: HER İKİ paket de (Playwright + axe) kurulu olmalı. Yalnız
+// Playwright'a bakmak, Playwright'ı önceden kurmuş projelerde axe'ın hiç
+// kurulmamasına yol açardı (eski idempotency bug'ı). Biri eksikse install turu
+// (komut ikisini de kurar; zaten-var olan paket no-op).
 async function hasPackageJsonEntry(projectRoot: string): Promise<boolean> {
   try {
     const raw = await readFile(join(projectRoot, "package.json"), "utf-8");
     const pkg = JSON.parse(raw) as PackageJson;
-    return Boolean(
-      pkg.dependencies?.[PLAYWRIGHT_PKG] ?? pkg.devDependencies?.[PLAYWRIGHT_PKG],
-    );
+    const has = (p: string) =>
+      Boolean(pkg.dependencies?.[p] ?? pkg.devDependencies?.[p]);
+    return has(PLAYWRIGHT_PKG) && has(AXE_PKG);
   } catch {
     return false;
   }
@@ -95,6 +105,7 @@ async function hasPackageJsonEntry(projectRoot: string): Promise<boolean> {
 async function hasNodeModulesEntry(projectRoot: string): Promise<boolean> {
   try {
     await access(join(projectRoot, "node_modules", "@playwright", "test", "package.json"));
+    await access(join(projectRoot, "node_modules", "@axe-core", "playwright", "package.json"));
     return true;
   } catch {
     return false;
@@ -145,7 +156,7 @@ export async function ensurePlaywrightInstalled(
     return {
       ok: true,
       action: "already",
-      message: "Playwright zaten kurulu.",
+      message: "Playwright + axe (a11y) zaten kurulu.",
     };
   }
 
@@ -193,7 +204,7 @@ export async function ensurePlaywrightInstalled(
   return {
     ok: true,
     action: "installed",
-    message: "Playwright kuruldu (Chromium dahil).",
+    message: "Playwright + axe (a11y) kuruldu (Chromium dahil).",
   };
 }
 
@@ -354,7 +365,9 @@ export async function checkPlaywrightScaffold(
 //   v15.7) imzalı scaffold da MyCL-sahipli sayılıp güncel şablona refresh edilir.
 //   Sadece exact-v15.8 ararsak eski imzalı dosya "user-written" sanılıp
 //   güncellenmiyordu (auth-aware smoke yenilenmiyordu).
-const MYCL_SCAFFOLD_MARKER = "// MyCL scaffold v15.8";
+// v15.9 (2026-06-04): smoke spec'e axe a11y bloğu eklendi → marker bump ki eski
+// v15.8 imzalı smoke dosyaları güncel (a11y'li) şablona refresh edilsin.
+const MYCL_SCAFFOLD_MARKER = "// MyCL scaffold v15.9";
 const MYCL_MARKER_PREFIX = "// MyCL scaffold v";
 
 function renderPlaywrightConfig(defaultPort: number): string {
@@ -526,6 +539,33 @@ test('smoke: app loads (auth-aware) with content and no console errors', async (
   // Console error toleransı: 0 ideal; rapor için yazılır
   if (consoleErrors.length > 0) {
     console.log('Console errors detected:', consoleErrors.slice(0, 5));
+  }
+
+  // a11y (WP3, 2026-06-04): yüklenmiş (gerekiyorsa login sonrası) sayfayı axe ile
+  // tara — ÇALIŞAN DOM'u WCAG kurallarıyla denetler (pozitif-check, FP-düşük).
+  // @axe-core/playwright opsiyonel: 'string'-tipli specifier ile dynamic import →
+  // TS modülü statik resolve etmez (paket yoksa compile kırılmaz) + runtime'da
+  // görünür-skip. Yalnız critical + serious ihlaller fail eder (minor/moderate
+  // gürültüsü rapor-only — FP-fırtınası önlenir). Faz 16 SOFT → projeyi kırmaz.
+  interface AxeViolation { id: string; impact?: string }
+  type AxeCtor = new (opts: { page: unknown }) => { analyze(): Promise<{ violations: AxeViolation[] }> };
+  const axePkg: string = '@axe-core/playwright';
+  let AxeBuilder: AxeCtor | null = null;
+  try {
+    const mod = await import(axePkg);
+    AxeBuilder = (mod.AxeBuilder ?? mod.default?.AxeBuilder ?? null) as AxeCtor | null;
+  } catch {
+    console.log('[MyCL] @axe-core/playwright kurulu değil — a11y taraması atlandı (npm i -D @axe-core/playwright ile etkinleşir).');
+  }
+  if (AxeBuilder) {
+    const results = await new AxeBuilder({ page }).analyze();
+    const blocking = results.violations.filter(
+      (v) => v.impact === 'critical' || v.impact === 'serious',
+    );
+    if (blocking.length > 0) {
+      console.log('a11y ihlalleri (critical/serious):', blocking.map((v) => v.id).join(', '));
+    }
+    expect(blocking, 'critical/serious a11y ihlali (WCAG)').toHaveLength(0);
   }
 });
 `;

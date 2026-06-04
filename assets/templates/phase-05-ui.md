@@ -189,6 +189,82 @@ UI). Bind to them — do NOT add a second error sink or rewrite the boundary
    catch (e.g. private-mode `localStorage`) is fine; a bare `catch {}` is not
    (the tech-debt scan flags it).
 
+## Accessibility (a11y) — the UI must be usable by everyone
+
+Build accessibility in from the start (retrofitted ARIA is brittle). Stack-neutral
+(React/Vue/Svelte/Solid/Angular and server-rendered HTML all compile to the same
+DOM); if the framework ships a11y helpers (Headless UI, Radix, Vuetify), use them.
+
+1. **Semantic HTML first, ARIA last.** Use the right element: `<button>` for
+   actions, `<a href>` for navigation, `<h1>`–`<h6>` in order, `<ul>/<ol>` for
+   lists, real `<input>/<select>/<textarea>` for fields. Never `<div onclick>` —
+   you lose semantics, keyboard, and focus. Page skeleton with landmarks
+   (`<header> <nav> <main> <footer>`, exactly one `<main>`).
+2. **ARIA only to fill a gap (over-ARIA is an anti-pattern).** If a native element
+   already conveys it, do NOT add ARIA (`role="button"` on a `<button>` is
+   harmful). Use ARIA only for patterns with no native equivalent: custom
+   dropdown/tabs/modal/accordion (`aria-expanded`, `aria-controls`,
+   `role="dialog"`, `aria-modal`), live updates (`aria-live`), icon-only buttons
+   (`aria-label`). "Wrong ARIA is worse than no ARIA."
+3. **Keyboard navigation — everything works without a mouse.** Interactive
+   elements reachable via Tab in a logical order (never positive `tabindex`),
+   triggerable with Enter/Space. Keep a visible focus ring — if you set
+   `outline: none`, add a clear `:focus-visible` style. Trap focus inside an open
+   modal/dropdown, return it to the trigger on close, close on Escape.
+4. **Forms.** Every field has a programmatic label (`<label for>` ↔ `id`, or wrap
+   in `<label>`). Placeholder is NOT a label. Tie errors to the field with
+   `aria-describedby` and mark invalid fields `aria-invalid="true"`.
+5. **Color & contrast.** Text/background contrast meets WCAG AA (normal ≥ 4.5:1,
+   large ≥ 3:1). Never convey meaning by color alone — pair with icon/text.
+6. **Images.** Meaningful `alt` on every `<img>`; `alt=""` for decorative images.
+
+Phase 16 runs axe on the live app and fails on critical/serious WCAG violations —
+get these right up front and that scan passes clean.
+
+## i18n readiness — don't hardcode user-facing text (skeleton, not translation)
+
+You are NOT translating the app. Keep text in an i18n-ready shape so a later locale
+pack drops in without a rewrite. If the spec requires multiple languages, build
+those bundles; otherwise just keep the skeleton below. Do NOT add a heavy i18n
+framework for a single-language app.
+
+- **Centralize user-facing strings** — a `t("key")` lookup over one message map,
+  not literals scattered through the markup. One place to swap text is the
+  deliverable. A zero-dep `t()` over a single default-locale object is enough when
+  the spec names one language; `react-i18next` / `vue-i18n` / `svelte-i18n` only
+  when it asks for several.
+- **Locale-aware formatting via the built-in `Intl` API** (zero-dep) — not
+  hand-rolled date/number/currency strings: `Intl.NumberFormat`,
+  `Intl.DateTimeFormat`. (Fixed audit formats like the Hata Kodları timestamp stay
+  as specified.)
+- **RTL hygiene (don't implement, don't block):** prefer logical CSS
+  (`margin-inline-start` over `margin-left`, `text-align: start`) so a future RTL
+  locale isn't a rewrite.
+
+Ship exactly one locale (the spec's primary language); the structure makes a
+second language additive, not a refactor. Don't invent languages the spec didn't
+ask for.
+
+## Resilience — every async surface survives slow / failed / empty (frontend)
+
+The ErrorBoundary + fetch wrapper above catch and record an error *after* it
+happens; resilience keeps the UI usable *while* a request is slow, failed, or
+empty. IDE-scale, no new dependency. For EVERY component that fetches/awaits data,
+render all three states explicitly:
+
+1. **Loading** — a visible indicator (spinner/skeleton) while in flight, never a
+   blank region that looks broken.
+2. **Error** — on failure show a human message AND a retry affordance ("Tekrar
+   dene" that re-fires the request); don't strand the user on a spinner. (The
+   fetch wrapper records to `/api/log-error`; this is the recovery.)
+3. **Empty** — on a successful but empty result show a distinct empty-state line
+   (like the Hata Kodları "Henüz kayıt yok."), not the loading or error view.
+
+A two-state component (loading + success only) is the bug: a failed fetch spins
+forever and an empty result looks like loading. Bind to the existing ErrorBoundary
+— do not add a second boundary (duplicate-file rule). A `catch` that flips the
+component into its error+retry state is a handled catch; a bare `catch {}` is not.
+
 ## Rationalizations → rebuttals (do NOT fall for these)
 
 | You might think… | Reality |

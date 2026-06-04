@@ -195,16 +195,39 @@ describe("playwright-setup · ensurePlaywrightScaffold", () => {
     const fs = await import("node:fs/promises");
     const specPath = join(projectRoot, "tests", "smoke.spec.ts");
     const cur = await fs.readFile(specPath, "utf-8");
-    expect(cur).toContain("// MyCL scaffold v15.8"); // önkoşul: güncel imza yazıldı
+    expect(cur).toContain("// MyCL scaffold v15.9"); // önkoşul: güncel imza yazıldı
     // Marker'ı eski sürüme düşür → güncel şablondan farklı, imza hâlâ MyCL.
-    await fs.writeFile(specPath, cur.replace("v15.8", "v15.7"), "utf-8");
+    await fs.writeFile(specPath, cur.replace("v15.9", "v15.7"), "utf-8");
 
     const r2 = await ensurePlaywrightScaffold(projectRoot, 5173);
     // Fix öncesi: isMyclScaffolded false → "already" (refresh atlanırdı). Fix sonrası: refresh.
     expect(r2.action).toBe("scaffolded");
     const refreshed = await fs.readFile(specPath, "utf-8");
-    expect(refreshed).toContain("// MyCL scaffold v15.8");
+    expect(refreshed).toContain("// MyCL scaffold v15.9");
     expect(refreshed).not.toContain("v15.7");
+  });
+
+  it("smoke spec a11y (axe) bloğu içerir — guard'lı + critical/serious filtresi (WP3)", async () => {
+    await ensurePlaywrightScaffold(projectRoot, 5173);
+    const fs = await import("node:fs/promises");
+    const spec = await fs.readFile(
+      join(projectRoot, "tests", "smoke.spec.ts"),
+      "utf-8",
+    );
+    // axe paketi referansı (dynamic import specifier).
+    expect(spec).toContain("@axe-core/playwright");
+    // POZİTİF-check: çalışan sayfayı tarar.
+    expect(spec).toContain("AxeBuilder");
+    expect(spec).toContain(".analyze()");
+    // FP-fırtınası önleme: yalnız critical + serious fail eder.
+    expect(spec).toContain("'critical'");
+    expect(spec).toContain("'serious'");
+    // axe yoksa kırılmamalı: dynamic import try/catch ile sarılı + görünür-skip.
+    expect(spec).toContain("try {");
+    expect(spec).toContain("a11y taraması atlandı");
+    // Statik import OLMAMALI (paket yoksa compile/runtime kırılır) — değişken specifier.
+    expect(spec).not.toContain("import { AxeBuilder }");
+    expect(spec).not.toContain("from '@axe-core/playwright'");
   });
 
   it("Line ending farkı (CRLF↔LF) refresh tetiklemez (normalize)", async () => {
@@ -258,13 +281,13 @@ test('smoke: app loads and has a non-empty title', async ({ page }) => {
     expect(r.action).toBe("scaffolded");
     expect(r.message).toMatch(/güncellendi|imzalı/i);
 
-    // Yeni içerik MyCL marker + headless:false içermeli
+    // Yeni içerik MyCL marker (güncel sürüm) + headless:false içermeli
     const refreshedConfig = await fs.readFile(join(projectRoot, "playwright.config.ts"), "utf-8");
-    expect(refreshedConfig).toContain("MyCL scaffold v15.8");
+    expect(refreshedConfig).toContain("MyCL scaffold v15.9");
     expect(refreshedConfig).toContain("headless: false");
 
     const refreshedSmoke = await fs.readFile(join(projectRoot, "tests", "smoke.spec.ts"), "utf-8");
-    expect(refreshedSmoke).toContain("MyCL scaffold v15.8");
+    expect(refreshedSmoke).toContain("MyCL scaffold v15.9");
     expect(refreshedSmoke).toContain("consoleErrors");
   });
 
