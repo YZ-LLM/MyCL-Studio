@@ -38,6 +38,17 @@ export function profilePath(name: string): string {
   return join(ASSETS_ROOT, "profiles", name);
 }
 
+/**
+ * Güvenlik-baseline gömülü araçları (örn. csp-check.mjs) orchestrator KÖKÜNDE
+ * durur (harness.mjs gibi — .mjs, tsc derlemez). Mekanik runner extra_scan'i
+ * HEDEF-PROJE cwd'sinde koşar → MUTLAK yol gerekir (aksi halde script bulunamaz).
+ * __dirname = orchestrator/dist (runtime) veya orchestrator/src (vitest); ".." →
+ * orchestrator kökü. Script csp_evaluator'ı orchestrator/node_modules'tan import eder.
+ */
+function securityToolPath(name: string): string {
+  return resolve(__dirname, "..", name);
+}
+
 export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
   0: {
     id: 0,
@@ -293,6 +304,16 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
       // v15.9: scoped_cmd_template — changedScope doluysa semgrep yalnız değişen
       // dosyalara koşar (semgrep dosya/path listesi kabul eder); aksi → src/ (tüm).
       extra_scans: [
+        {
+          // Güvenlik-baseline (Unit 1): CSP değerlendirme (Google csp_evaluator —
+          // Chrome "CSP Evaluator" extension'ının headless/otomatik karşılığı).
+          // Web-UI olmayan projede self-skip; kaynak-tabanlı (index.html meta);
+          // statik bulunamayan CSP → görünür atlama (false-fail YOK). MUTLAK yol:
+          // runner cwd=hedef-proje, script csp_evaluator'ı orchestrator/node_modules'tan
+          // import eder. Eşik severity<=40 blocking ("MEDIUM da bloklasın" — 2026-06-04).
+          name: "csp-evaluator",
+          cmd: `node "${securityToolPath("csp-check.mjs")}"`,
+        },
         {
           name: "semgrep",
           cmd: "semgrep --config auto src/ --error --quiet",

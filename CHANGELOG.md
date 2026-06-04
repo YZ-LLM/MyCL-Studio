@@ -6,6 +6,22 @@
 
 ## 2026-06-04
 
+- **feat(security-baseline/Unit 1) [program 3/8]:** Faz 13'e **CSP değerlendirme** eklendi —
+  Google `csp_evaluator` lib'i (Chrome "CSP Evaluator" extension'ının headless/otomatik
+  karşılığı). Yeni `orchestrator/csp-check.mjs` (harness.mjs gibi kök .mjs): web-UI tespiti
+  (web framework / index.html) → değilse self-skip; kaynak-tabanlı (index.html meta CSP);
+  statik bulunamayan CSP (helmet/runtime) → **görünür atlama, false-fail YOK** (kesin
+  header-tabanlı değerlendirme Unit 2'de). Eşik **severity ≤ 40** blocking (HIGH/SYNTAX/
+  MEDIUM/HIGH_MAYBE — Ümit kararı "MEDIUM da bloklasın"); STRICT_CSP(45)/INFO(60) öneri/uyarı
+  (inverted-threshold tuzağına düşmeden — review yakaladı). Fail-closed: `csp_evaluator`
+  import edilemezse exit 2 (sessiz yeşil değil). phase-registry Faz 13 extra_scans'a MUTLAK
+  yolla (`securityToolPath`) eklendi; runner cwd=hedef-proje olduğu için zorunlu.
+  `csp_evaluator` orchestrator dep'i (CJS, mac+linux saf-JS). Test: 6 (exit-kodu sözleşmesi).
+  Bu Unit 1 — reports-only, pipeline kontrol-akışına dokunmaz. Unit 2 (soft→blocking +
+  F1 "Kabul et devam" + harness skip→PARTIAL), Unit 3 (gitleaks secret-scan + custom semgrep
+  YAML) sıradaki. CSRF/CORS/cookie statik-tarama yanlış-pozitifi nedeniyle ERTELENDİ (review).
+  11-ajan tasarım workflow'u + adversaryal inceleme 7 landmine yakaladı (detay:
+  hafıza `project_security_baseline_plan`).
 - **feat(error-analysis/F1) [program 2/8]:** Bir faz HATA verince MyCL artık sessiz kalmıyor:
   orkestratör rolüyle (ana ajan değil) tek-atışlık LLM analizi yapıp **karar askq'ı** açıyor +
   (F5'in mevcut askq yolundan) OS bildirimi gidiyor; FINAL kararı kullanıcı veriyor. Yeni
