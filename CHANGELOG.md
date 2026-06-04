@@ -6,6 +6,17 @@
 
 ## 2026-06-04
 
+- **feat(orchestrator/recall) [doğru-karar A]:** Orkestratör karar anında "doğru geri-çağırma"
+  güçlendirildi (doğru karar = depolama + **doğru geri-çağırma** + iyi muhakeme). İki katman:
+  (1) son-N limitleri artırıldı (context-builder.ts: audit 10→30, ADR 3→8, proje hafıza 10→15,
+  genel 5→8; conversation-context: son 3→5 user mesajı). (2) **Relevance-tabanlı geri-çağırma**:
+  yeni `buildRelevantOrchestratorContext` (relevance/injectors.ts) — kullanıcının ŞİMDİKİ mesajına
+  en İLGİLİ geçmiş audit + vazgeçmeler (recency değil, mevcut relevance-engine ile skorlanır) karar
+  prompt'una eklenir → son-N pencerelerinin kaçırdığı eski-ama-ilgili kayıt yüzeye çıkar (tutarlı
+  karar + aynı şeyi tekrar sorMAMA). userMessage `buildAgentSystemPrompt`'a thread edildi (agent.ts
+  zaten userText'i taşıyordu). Triviyal query (kısa onay "evet"/"tamam") → relevance call ATLA;
+  boş/fail → "" (bölüm eklenmez, karar bloklanmaz — fail-safe, abonelik modunda da graceful).
+  Test: 2. `npm run check` yeşil. (Part B: proaktif risk-sorma sıradaki.)
 - **feat(ultracode) [program 7/8]:** ultracode artık **İKİ MODDA** uygulanıyor. CLI tarafı
   zaten alıyordu (`cli-run`/`cli-session`: `effort==="ultracode"` → `--settings {ultracode}`).
   **Yeni: API tarafı** (`claude-api.ts runTurn`) — ultracode seçiliyse extended-thinking

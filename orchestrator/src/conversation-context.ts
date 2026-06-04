@@ -1,4 +1,4 @@
-// conversation-context — Konuşma bağlamı: son 3 user mesajı + öncekilerin özeti.
+// conversation-context — Konuşma bağlamı: son 5 user mesajı + öncekilerin özeti.
 //
 // v15.7 (2026-05-26) — Kullanıcı kuralı:
 //   "orkestra ajanı: herşeyi bilir.
@@ -23,8 +23,8 @@ import { log } from "./logger.js";
 import { translate } from "./translator.js";
 import type { State } from "./types.js";
 
-const RECENT_LIMIT = 3;
-const SUMMARY_TRIGGER = 5; // 5+ user mesajı varsa özet üret
+const RECENT_LIMIT = 5; // Doğru-karar/recall (2026-06-04): 3→5 (daha derin konuşma bağlamı)
+const SUMMARY_TRIGGER = 7; // 7+ user mesajı varsa özet üret (RECENT_LIMIT'in üstünde kalmalı)
 const HISTORY_LOOKBACK = 50; // history.log'tan son N event oku
 const SUMMARY_MAX_TOKENS = 200;
 

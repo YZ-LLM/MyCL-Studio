@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readAuditLogTail, readDecisions } from "../audit.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
+import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
 import {
   readProjectMemory,
   readGeneralMemory,
@@ -101,7 +102,7 @@ export interface AgentContextSnapshot {
 }
 
 /**
- * State → context snapshot. Audit log son 10 event ile zenginleştirilir.
+ * State → context snapshot. Audit log son 30 event ile zenginleştirilir.
  * Agent bunu okuyup `current_phase`'e göre doğru karar verir.
  */
 export async function buildAgentContext(
@@ -114,7 +115,9 @@ export async function buildAgentContext(
   // birikti): wasCompleted false döner → agent "yeni iş bekleniyor" der;
   // hatalı true'dan daha az zararlı.
   const auditAll = await readAuditLogTail(state.project_root, 500);
-  const recent = auditAll.slice(-10).map((e) => ({
+  // Doğru-karar/recall (2026-06-04): son-10 → son-30. Orkestratör daha derin geçmiş
+  // görür (önceki iterasyonun faz geçişleri/onayları); render kısa (phase/event/caller).
+  const recent = auditAll.slice(-30).map((e) => ({
     ts: e.ts,
     phase: typeof e.phase === "number" ? e.phase : 0,
     event: e.event,
@@ -149,13 +152,15 @@ export async function buildAgentContext(
   // v15.7 (2026-05-26): General memory `currentStack` ile filtrelenir —
   // cross-project leak koruması. state.stack bilinmiyorsa filter atlanır
   // (geriye-uyumlu).
+  // Doğru-karar/recall (2026-06-04): proje 10→15, genel 5→8, ADR 3→8. Daha derin
+  // "ne yapmıştık / neden böyle karar vermiştik" bağlamı (limitler defansif kalır).
   const [projectMemory, generalMemory] = await Promise.all([
-    readProjectMemory(state.project_root, 10).catch(() => []),
-    readGeneralMemory(5, state.stack).catch(() => []),
+    readProjectMemory(state.project_root, 15).catch(() => []),
+    readGeneralMemory(8, state.stack).catch(() => []),
   ]);
   const recentDecisions = (
     await readDecisions(state.project_root).catch(() => [])
-  ).slice(-3);
+  ).slice(-8);
   // v15.11: features.md başlık-indeksi (ucuz; full body değil — token bütçesi).
   const featureHeadings = (
     await extractFeatureChunks(state.project_root).catch(() => [])
@@ -318,13 +323,19 @@ function renderActiveAskqSection(askq: ActiveAskqSnapshot | null): string {
 export async function buildAgentSystemPrompt(
   state: State,
   config: MyclConfig,
+  userMessage?: string,
 ): Promise<string> {
   const staticPart = await loadStaticSystemPrompt();
-  const [ctx, conv] = await Promise.all([
+  // Doğru-karar/recall: userMessage varsa relevance-tabanlı geri-çağırmayı da paralel
+  // çek (ekstra gecikme gizlenir). Boş/triviyal → "" (bölüm eklenmez). Fail-safe.
+  const [ctx, conv, relevantRecall] = await Promise.all([
     buildAgentContext(state),
     buildConversationContext(config, state),
+    userMessage
+      ? buildRelevantOrchestratorContext(config, state, userMessage).catch(() => "")
+      : Promise.resolve(""),
   ]);
   const askqSection = renderActiveAskqSection(getActiveAskq());
   const convSection = renderConversationSection(conv);
-  return `${staticPart}\n${renderContextSection(ctx)}${convSection}${askqSection}`;
+  return `${staticPart}\n${renderContextSection(ctx)}${convSection}${relevantRecall}${askqSection}`;
 }

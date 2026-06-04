@@ -247,6 +247,35 @@ export async function buildRelevantProjectContext(
 }
 
 /**
+ * Doğru-karar/recall (2026-06-04): ORKESTRATÖR karar anında, kullanıcının ŞİMDİKİ
+ * mesajına en İLGİLİ geçmiş audit event'leri + vazgeçmeleri (recency değil, RELEVANCE)
+ * geri-çağırır. buildAgentContext'in son-N pencereleri (audit-30/ADR-8/hafıza-15)
+ * DIŞINDA kalan eski-ama-ilgili kaydı yüzeye çıkarır → tutarlı karar + aynı şeyi
+ * tekrar sorMAMA. Sources audit+abandoned (ikisi de gatherChunks'ta tam destekli;
+ * history faz-kapsamlı/uygun değil, agent-decisions gatherChunks'ta yok).
+ *
+ * Triviyal query (kısa onay: "evet"/"tamam") → relevance LLM call ATLA ("" döner,
+ * bölüm eklenmez). Boş sonuç → "". getRelevantChunks zaten fail-safe (abonelik modu /
+ * classifier fail → []); ekstra .catch defansif. Karar ASLA bloklanmaz.
+ */
+export async function buildRelevantOrchestratorContext(
+  config: MyclConfig,
+  state: State,
+  userMessage: string,
+): Promise<string> {
+  const q = userMessage.trim();
+  if (q.length < 8) return ""; // triviyal onay → gereksiz relevance call yok
+  const chunks = await getRelevantChunks(config, state, {
+    sources: ["audit", "abandoned"],
+    intent: q,
+    max_chunks: 6,
+    min_score: 6,
+  }).catch(() => [] as ScoredChunk[]);
+  if (chunks.length === 0) return "";
+  return `\n\n---\n\n## CURRENT REQUEST'E EN İLGİLİ GEÇMİŞ (relevance)\n\n${formatProjectContextGroups(chunks)}\n`;
+}
+
+/**
  * Pure formatter — ScoredChunk[] listesini source bazlı gruplara böler ve
  * her grup için markdown sub-section üretir. Phase 1 prompt'unda Claude'un
  * "spec'te şu var, audit'te şu yapıldı" gibi ayrıştırılmış görmesi için.

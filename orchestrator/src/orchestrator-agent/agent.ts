@@ -59,7 +59,8 @@ export async function buildOrchestratorSystemPrompt(
   // v15.6: Pre-call recurring topic detection. agent-decisions.jsonl semantic
   // karşılaştırma → 2. confirmation tetikleyici notu sistem prompt'una eklenir.
   const recurring = await detectRecurringTopic(config, state.project_root, userText);
-  let systemPrompt = await buildAgentSystemPrompt(state, config);
+  // Doğru-karar/recall: userText'i geçir → relevance-tabanlı "en ilgili geçmiş" recall.
+  let systemPrompt = await buildAgentSystemPrompt(state, config, userText);
   if (recurring.recurring) {
     systemPrompt +=
       `\n\n---\n\n## BU KONU TEKRAR EDİYOR (v15.6 dedup)\n\n` +
