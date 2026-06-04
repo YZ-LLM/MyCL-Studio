@@ -32,6 +32,8 @@ interface Props {
     cache_read_input_tokens: number;
     api_calls: number;
   };
+  /** Token-timeline: token badge'ine tıklanınca faz-bazında zaman çizelgesi drawer'ı toggle. */
+  onTokenBadgeClick?: () => void;
   /** v15.7 (2026-05-27): Faz/durum badge'i tıklayınca alt hata çekmecesi toggle. */
   onPhaseIndicatorClick?: () => void;
   /** Hata sayısı — badge'de küçük rozet olarak görünür (0 ise gizli). */
@@ -60,6 +62,7 @@ export function AppHeader({
   taskQueueOpen,
   taskQueueCount,
   tokenTotals,
+  onTokenBadgeClick,
   onPhaseIndicatorClick,
   errorCount,
 }: Props) {
@@ -195,8 +198,10 @@ export function AppHeader({
       </button>
       <UpdateButton />
       {tokenTotals && tokenTotals.api_calls > 0 && (
-        <span
-          title={`Bu oturum: ${tokenTotals.api_calls} API çağrısı\n• input: ${tokenTotals.input_tokens.toLocaleString()}\n• output: ${tokenTotals.output_tokens.toLocaleString()}\n• cache read: ${tokenTotals.cache_read_input_tokens.toLocaleString()}\n• cache create: ${tokenTotals.cache_creation_input_tokens.toLocaleString()}`}
+        <button
+          type="button"
+          onClick={onTokenBadgeClick}
+          title={`Bu oturum: ${tokenTotals.api_calls} API çağrısı\n• input: ${tokenTotals.input_tokens.toLocaleString()}\n• output: ${tokenTotals.output_tokens.toLocaleString()}\n• cache read: ${tokenTotals.cache_read_input_tokens.toLocaleString()}\n• cache create: ${tokenTotals.cache_creation_input_tokens.toLocaleString()}${onTokenBadgeClick ? "\n\n(tıkla: faz-bazında token zaman çizelgesi)" : ""}`}
           style={{
             fontSize: 11,
             fontFamily: "var(--font-mono)",
@@ -206,10 +211,11 @@ export function AppHeader({
             padding: "3px 8px",
             borderRadius: 4,
             whiteSpace: "nowrap",
+            cursor: onTokenBadgeClick ? "pointer" : "default",
           }}
         >
           Σ {(tokenTotals.input_tokens + tokenTotals.output_tokens).toLocaleString()}t · {tokenTotals.api_calls}c
-        </span>
+        </button>
       )}
       {onSettingsClick && (
         <button

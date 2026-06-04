@@ -1656,7 +1656,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     // Mekanik/atlanan fazlar token üretmez → kova boş → yazılmaz.
     const prevCost = takePhaseCost();
     if (prevCost && (prevCost.turns > 0 || prevCost.input_tokens > 0)) {
-      await appendCost(state.project_root, {
+      const costRec = {
         ts: Date.now(),
         phase: prevCost.phase as PhaseId,
         iteration: prevCost.iteration,
@@ -1665,7 +1665,12 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         output_tokens: prevCost.output_tokens,
         cache_read_input_tokens: prevCost.cache_read_input_tokens,
         cache_creation_input_tokens: prevCost.cache_creation_input_tokens,
-      }).catch((err) => log.warn("orchestrator", "cost write failed (non-blocking)", err));
+      };
+      await appendCost(state.project_root, costRec).catch((err) =>
+        log.warn("orchestrator", "cost write failed (non-blocking)", err),
+      );
+      // Token-timeline: faz cost'unu frontend'e CANLI yolla (realtime timeline paneli).
+      emit("cost_phase", costRec);
     }
 
     const next = PHASE_TRANSITIONS[cur];
@@ -3604,6 +3609,21 @@ ipcRouter.register("load_messages", async (data: unknown) => {
   await handleLoadMessages(
     data as { since_ts: number; until_ts?: number; limit: number },
   );
+});
+// Token-timeline: proje açılışında/yenilemede tüm faz-cost geçmişini frontend'e ver
+// (cost_phase canlı emit'i yalnız BU session'ın fazlarını taşır; load_costs geçmişi de getirir).
+ipcRouter.register("load_costs", async () => {
+  if (!runtime.state?.project_root) {
+    emit("cost_history", { costs: [] });
+    return;
+  }
+  try {
+    const costs = await readCosts(runtime.state.project_root);
+    emit("cost_history", { costs });
+  } catch (err) {
+    log.warn("orchestrator", "load_costs failed", err);
+    emit("cost_history", { costs: [] });
+  }
 });
 ipcRouter.register("shutdown", () => {
   process.exit(0);

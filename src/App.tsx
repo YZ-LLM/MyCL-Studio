@@ -18,6 +18,7 @@ import { ClaudeSimulator, type CCEvent } from "./components/ClaudeSimulator";
 import { useOrchestrator } from "./hooks/useOrchestrator";
 import type {
   AgentBackends,
+  CostRecord,
   ModelInfo,
   OrchestratorEvent,
   PhaseId,
@@ -26,6 +27,7 @@ import type {
   TaskQueueItem,
 } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
+import { TokenTimelinePanel } from "./components/TokenTimelinePanel";
 import { ErrorDrawer } from "./components/ErrorDrawer";
 import {
   isPermissionGranted,
@@ -112,6 +114,9 @@ interface MainState {
     cache_read_input_tokens: number;
     api_calls: number;
   };
+  /** Token-timeline — faz-bazında token harcaması (cost.jsonl). cost_phase canlı
+   *  upsert eder, cost_history (load_costs yanıtı) tümünü değiştirir. */
+  costTimeline: CostRecord[];
 }
 
 const INITIAL_STATE: MainState = {
@@ -137,6 +142,7 @@ const INITIAL_STATE: MainState = {
     cache_read_input_tokens: 0,
     api_calls: 0,
   },
+  costTimeline: [],
 };
 
 function reduce(state: MainState, ev: OrchestratorEvent): MainState {
@@ -230,6 +236,23 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
   }
   if (ev.kind === "token_totals") {
     return { ...state, tokenTotals: ev.data };
+  }
+  if (ev.kind === "cost_phase") {
+    // Token-timeline: canlı faz-cost. Aynı (phase, iteration) varsa GÜNCELLE, yoksa EKLE
+    // (faz yeniden koşarsa duplike olmasın); ts'e göre sıralı kalsın.
+    const rec = ev.data;
+    const idx = state.costTimeline.findIndex(
+      (c) => c.phase === rec.phase && c.iteration === rec.iteration,
+    );
+    const costTimeline =
+      idx >= 0
+        ? state.costTimeline.map((c, i) => (i === idx ? rec : c))
+        : [...state.costTimeline, rec];
+    return { ...state, costTimeline };
+  }
+  if (ev.kind === "cost_history") {
+    // load_costs yanıtı — geçmiş tüm faz-cost'u (proje açılışı). Tümünü değiştir.
+    return { ...state, costTimeline: ev.data.costs };
   }
   if (ev.kind === "askq_resolved") {
     // v15.7 (2026-05-26): Backend askq cevap işledi (kapı bekçisi answer_askq
@@ -546,6 +569,7 @@ function App() {
   const [guideModalOpen, setGuideModalOpen] = useState(false);
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
+  const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
   // v15.7 (2026-05-25): Feature flags (Playwright vb.). Backend read_features → features_value event ile dolur.
   const [features, setFeatures] = useState<{
     playwright_enabled: boolean;
@@ -801,6 +825,9 @@ function App() {
         .catch(() => {
           historyRequestedRef.current = false; // retry mümkün
         });
+      // Token-timeline: proje açılışında tüm faz-cost geçmişini de iste (cost_history
+      // yanıtı costTimeline'ı doldurur; sonra cost_phase canlı upsert eder).
+      void orch.send({ kind: "load_costs" }).catch(() => {});
     }
   }, [configStatus.state, projectPath, mainState.historyLoaded, orch]);
 
@@ -1100,6 +1127,7 @@ function App() {
         taskQueueOpen={taskQueueOpen}
         taskQueueCount={mainState.taskQueue.length}
         tokenTotals={mainState.tokenTotals}
+        onTokenBadgeClick={() => setTokenTimelineOpen((o) => !o)}
         onPhaseIndicatorClick={() => setErrorDrawerOpen((o) => !o)}
         errorCount={errorEntries.length}
       />
@@ -1180,6 +1208,11 @@ function App() {
         onClose={() => setTaskQueueOpen(false)}
         onItemApply={handleTaskApply}
         onItemDelete={handleTaskDelete}
+      />
+      <TokenTimelinePanel
+        open={tokenTimelineOpen}
+        costs={mainState.costTimeline}
+        onClose={() => setTokenTimelineOpen(false)}
       />
       <ErrorDrawer
         open={errorDrawerOpen}

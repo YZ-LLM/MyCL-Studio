@@ -6,6 +6,16 @@
 
 ## 2026-06-04
 
+- **feat(token-timeline) [program 8/8]:** Faz-bazında token harcaması **zaman çizelgesi UI**
+  paneli. Cost altyapısı zaten vardı (cost.jsonl + PhaseCostBucket); eksik olan görselleştirmeydi.
+  Backend: faz-sonu cost-flush'ta `emit("cost_phase", rec)` (CANLI) + yeni `load_costs` IPC handler
+  → `readCosts` → `emit("cost_history", {costs})` (proje açılışında geçmiş). Frontend: yeni
+  `TokenTimelinePanel.tsx` (sağ drawer, kendi-içinde inline-styled) — her faz: input/output/cache
+  token + tur + toplam'a oranlı bar + grand-total; event tipleri (CostRecord/CostPhaseEvent/
+  CostHistoryEvent), MainState.costTimeline + reducer (cost_phase upsert by phase+iteration,
+  cost_history replace), boot'ta load_costs isteği, AppHeader token-badge'i tıklanabilir (panel
+  toggle). İzole (gözlemlenebilirlik; kritik karar/pipeline yoluna dokunmaz). `npm run check` yeşil.
+  **8-iş programı: 6/8 + doğru-karar; kalan modül-stoğu + F4-PDF + ertelenen güvenlik.**
 - **feat(orchestrator/proaktif-risk) [doğru-karar B]:** Orkestratör artık **interaktif + proaktif**
   — riski sessizce tahmin etmek yerine kullanıcıya SOMUT seçeneklerle sorar (Ümit: "risk gördüğü
   kısımlarda bana sorsun"; yalnız sürekli orkestratör-içi, sabit faz-kapısı yok). (1) `ask_clarify`

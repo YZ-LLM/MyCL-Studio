@@ -46,6 +46,8 @@ export type OrchestratorEvent =
   | AskqEvent
   | AskqResolvedEvent
   | TokenTotalsEvent
+  | CostPhaseEvent
+  | CostHistoryEvent
   | RuntimeErrorEvent
   | PhaseRunningEvent
   | PhaseIdleEvent
@@ -250,6 +252,31 @@ export interface PhaseChangedEvent {
   };
 }
 
+/** Token-timeline: tek bir fazın token harcaması (cost.jsonl satırı). Backend
+ *  CostRecord'un frontend kopyası. */
+export interface CostRecord {
+  ts: number;
+  phase: PhaseId;
+  iteration: number;
+  turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
+/** Token-timeline: faz tamamlanınca CANLI yayınlanan tek-faz cost (realtime). */
+export interface CostPhaseEvent {
+  kind: "cost_phase";
+  data: CostRecord;
+}
+
+/** Token-timeline: load_costs yanıtı — proje açılışında tüm faz-cost geçmişi. */
+export interface CostHistoryEvent {
+  kind: "cost_history";
+  data: { costs: CostRecord[] };
+}
+
 export interface ClaudeUsage {
   input_tokens: number;
   output_tokens: number;
@@ -366,6 +393,7 @@ export type OrchestratorCommand =
       kind: "load_messages";
       data: { since_ts: number; until_ts?: number; limit: number };
     }
+  | { kind: "load_costs" }
   | { kind: "shutdown" }
   | { kind: "task_queue_add"; data: { text: string } }
   | { kind: "task_queue_remove"; data: { id: string } }
