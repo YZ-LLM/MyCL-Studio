@@ -86,11 +86,15 @@ import {
   advanceToNextPhase,
   handleAskqAnswer,
   __initRuntimeForTest,
+  __setPendingErrorAnalysisForTest,
+  __getPendingErrorAnalysisForTest,
 } from "../../src/index.js";
 import { loadOrInit, save as saveState } from "../../src/state.js";
 import { appendAudit, readAuditLog, readDecisions, readCosts } from "../../src/audit.js";
 import { recordTokenUsage } from "../../src/ipc.js";
 import { computeVerdict } from "../../src/harness-verdict.js";
+import { OPT_QUEUE, OPT_REANALYZE } from "../../src/error-analysis.js";
+import { readTasks } from "../../src/task-queue/store.js";
 import type { MyclConfig } from "../../src/config.js";
 import type { AuditEvent } from "../../src/types.js";
 
@@ -299,4 +303,67 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
       expect(hasIn(events, `phase-${n}-skipped-by-scope`), `phase-${n}-skipped-by-scope`).toBe(true);
     }
   }, 65_000);
+
+  // F1 (2026-06-04): faz-fail → analiz → karar askq'ı wiring'i. Saf option/parse
+  // mantığı error-analysis.test.ts'te; burada handleAskqAnswer branch ROUTING'i
+  // (pending eşleme + side-effect) sürülür. API backend → analyzeAndAskError
+  // CLI-guard'dan null döner (gerçek claude spawn YOK, flake yok).
+  const apiConfig = () =>
+    ({
+      selected_models: { translator: "m", main: "m", orchestrator: "m", relevance: "m" },
+      api_keys: { translator: "k", main: "k", orchestrator: "k", relevance: "k" },
+      claude_code_flags: { betas: [], effort: "high" },
+      agent_backends: { orchestrator: "api", translator: "api", main: "api" },
+      features: { claude_code_cli_enabled: false },
+    }) as unknown as MyclConfig;
+
+  it("F1: 'İş listesine kaydet' → task kuyruğa yazılır + pending temizlenir", async () => {
+    const state = await loadOrInit(projectRoot);
+    __initRuntimeForTest(state, apiConfig());
+    __setPendingErrorAnalysisForTest({
+      id: "error_analysis_q",
+      phase: 13,
+      blocking: false,
+      options: [OPT_QUEUE, "Bağımlılığı kur", OPT_REANALYZE],
+      solutions_tr: ["Bağımlılığı kur", "Sürümü sabitle"],
+    });
+    await handleAskqAnswer("error_analysis_q", OPT_QUEUE);
+    expect(__getPendingErrorAnalysisForTest()).toBeNull();
+    const tasks = await readTasks(projectRoot);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]!.text).toContain("Faz 13");
+  });
+
+  it("F1: 'Tekrar analiz et' API modunda pending=null + claude spawn yok + task yazmaz", async () => {
+    const state = await loadOrInit(projectRoot);
+    __initRuntimeForTest(state, apiConfig());
+    __setPendingErrorAnalysisForTest({
+      id: "error_analysis_r",
+      phase: 9,
+      blocking: true,
+      options: ["Çözüm A", OPT_REANALYZE],
+      solutions_tr: ["Çözüm A"],
+    });
+    await handleAskqAnswer("error_analysis_r", OPT_REANALYZE);
+    // analyzeAndAskError CLI-guard'dan null → pending null, throw yok.
+    expect(__getPendingErrorAnalysisForTest()).toBeNull();
+    expect(await readTasks(projectRoot)).toHaveLength(0);
+  });
+
+  it("F1: id eşleşmezse error-analysis branch'i pending'i DEĞİŞTİRMEZ (id-gate)", async () => {
+    const state = await loadOrInit(projectRoot);
+    __initRuntimeForTest(state, apiConfig());
+    const pending = {
+      id: "error_analysis_keep",
+      phase: 4 as const,
+      blocking: false,
+      options: [OPT_QUEUE, OPT_REANALYZE],
+      solutions_tr: ["X"],
+    };
+    __setPendingErrorAnalysisForTest(pending);
+    // Alakasız bir askq id'si → branch atlanır (id !== pending.id), pending korunur.
+    await handleAskqAnswer("agent_clarify_unrelated", "Vazgeç");
+    expect(__getPendingErrorAnalysisForTest()).toEqual(pending);
+    expect(await readTasks(projectRoot)).toHaveLength(0);
+  });
 });

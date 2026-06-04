@@ -59,6 +59,13 @@ import {
   appendHistory,
   loadMessages as loadHistoryMessages,
 } from "./history-loader.js";
+import {
+  analyzeAndAskError,
+  type ErrorContext,
+  OPT_QUEUE,
+  OPT_REANALYZE,
+  type PendingErrorAnalysis,
+} from "./error-analysis.js";
 import { listModels } from "./models.js";
 import { Phase0Controller } from "./phase-0.js";
 import {
@@ -162,6 +169,11 @@ interface OrchestratorRuntime {
     askqId: string;
     proposed: number[];
   } | null;
+  // F1 (2026-06-04): Faz-fail sonrası LLM hata analizi askq'ı bekleniyor.
+  // failPhase → analyzeAndAskError askq emit etti; cevap geldiğinde
+  // handleAskqAnswer bu kaydı id ile eşleyip "Çöz" / "İş listesine kaydet" /
+  // "Tekrar analiz et" dalını işler. null → açık analiz-askq'ı yok.
+  pendingErrorAnalysis: PendingErrorAnalysis | null;
 }
 
 const runtime: OrchestratorRuntime = {
@@ -172,6 +184,7 @@ const runtime: OrchestratorRuntime = {
   pendingAgentDecision: null,
   pendingMemoryProposal: null,
   pendingPhaseScope: null,
+  pendingErrorAnalysis: null,
 };
 
 /**
@@ -185,8 +198,21 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.config = config;
   runtime.controller = null;
   runtime.pendingPhaseScope = null;
+  runtime.pendingErrorAnalysis = null;
   setHistoryRoot(state.project_root);
   setRecordContext({ phase: state.current_phase ?? 0 });
+}
+
+/**
+ * TEST-ONLY seam (F1, 2026-06-04): handleAskqAnswer'ın error-analysis branch'ini
+ * sürebilmek için runtime.pendingErrorAnalysis'i set/oku. Production akışı bunu
+ * ÇAĞIRMAZ (failPhase üretir, handleAskqAnswer tüketir).
+ */
+export function __setPendingErrorAnalysisForTest(p: PendingErrorAnalysis | null): void {
+  runtime.pendingErrorAnalysis = p;
+}
+export function __getPendingErrorAnalysisForTest(): PendingErrorAnalysis | null {
+  return runtime.pendingErrorAnalysis;
 }
 
 // v15.7 (2026-05-25): INTENT_TR_LABEL kaldırıldı (classifier confirm askq yok).
@@ -229,6 +255,27 @@ function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): stri
     return `Faz ${phaseNum} tamamlanamadı: ${reason.slice(0, 200)}`;
   }
   return `Faz ${phaseNum} tamamlanamadı (detay ~/.mycl/orchestrator.log).`;
+}
+
+/**
+ * F1 (2026-06-04): Faz N başarısız olduğunda TEK nokta. Hata mesajını emit eder,
+ * faz durumunu "error" yapar, sonra NON-BLOCKING LLM hata analizini tetikler
+ * (orkestratör rolü; askq açar, OS bildirimi mevcut askq yolundan otomatik gider).
+ * Asla throw ETMEZ — analiz patlasa bile faz-fail akışı bozulmaz (fail-closed:
+ * analiz null dönerse askq açılmamıştır, branch hiç tetiklenmez). Çağıran kalıbı
+ * korur: loop içinde `await failPhase(n, pX); return;`.
+ */
+async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
+  const message = phaseFailMessage(n, ctrl);
+  emitChatMessage("error", message);
+  emitPhaseChanged(n, n, "error");
+  if (!runtime.state || !runtime.config) return;
+  const errCtx: ErrorContext = { phase: n, message, detail: ctrl?.lastFailReason };
+  runtime.pendingErrorAnalysis = await analyzeAndAskError(
+    runtime.state,
+    runtime.config,
+    errCtx,
+  ).catch(() => null);
 }
 
 /** Config'i yüklemeyi dener, durumu UI'a yollar. */
@@ -627,8 +674,7 @@ async function restartPhase1WithIntent(intentText: string): Promise<void> {
     await saveState(runtime.state);
     await advanceToNextPhase(1);
   } else {
-    emitChatMessage("error", phaseFailMessage(1, p1));
-    emitPhaseChanged(1, 1, "error");
+    await failPhase(1, p1);
   }
 }
 
@@ -1533,8 +1579,7 @@ async function executeDispatchedIntent(
     // Sonraki faz: P1 → P2 (ardışık akış).
     await advanceToNextPhase(1);
   } else {
-    emitChatMessage("error", phaseFailMessage(1, p1));
-    emitPhaseChanged(1, 1, "error");
+    await failPhase(1, p1);
   }
 }
 
@@ -1790,8 +1835,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         emitPhaseChanged(2, 1, "complete");
         return;
       } else {
-        emitChatMessage("error", phaseFailMessage(2, p2));
-        emitPhaseChanged(2, 2, "error");
+        await failPhase(2, p2);
         return;
       }
     }
@@ -1836,8 +1880,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = 3;
         continue;
       } else {
-        emitChatMessage("error", phaseFailMessage(3, p3));
-        emitPhaseChanged(3, 3, "error");
+        await failPhase(3, p3);
         return;
       }
     }
@@ -1855,8 +1898,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = 4;
         continue;
       } else {
-        emitChatMessage("error", phaseFailMessage(4, p4));
-        emitPhaseChanged(4, 4, "error");
+        await failPhase(4, p4);
         return;
       }
     }
@@ -1911,8 +1953,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = 5;
         continue;
       } else {
-        emitChatMessage("error", phaseFailMessage(5, p5));
-        emitPhaseChanged(5, 5, "error");
+        await failPhase(5, p5);
         return;
       }
     }
@@ -2006,8 +2047,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = 7;
         continue;
       } else {
-        emitChatMessage("error", phaseFailMessage(7, p7));
-        emitPhaseChanged(7, 7, "error");
+        await failPhase(7, p7);
         return;
       }
     }
@@ -2032,8 +2072,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = 8;
         continue;
       } else {
-        emitChatMessage("error", phaseFailMessage(8, p8));
-        emitPhaseChanged(8, 8, "error");
+        await failPhase(8, p8);
         return;
       }
     }
@@ -2048,8 +2087,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         cur = 9;
         continue;
       } else {
-        emitChatMessage("error", phaseFailMessage(9, p9));
-        emitPhaseChanged(9, 9, "error");
+        await failPhase(9, p9);
         return;
       }
     }
@@ -2368,6 +2406,69 @@ export async function handleAskqAnswer(
     await saveState(runtime.state);
     emitChatMessage("system", `Kapsam onaylandı: ${label}. Akış devam ediyor.`);
     await advanceToNextPhase(3);
+    return;
+  }
+
+  // F1 (2026-06-04): Faz-fail sonrası LLM hata analizi askq cevabı.
+  // runtime.pendingErrorAnalysis ile eşleşir (id="error_analysis_..."). Bu branch
+  // controller-fallback'tan ("no active controller", aşağıda) ÖNCE gelmeli: loop
+  // seam'inde runtime.controller fail'den ÖNCE null'a set edilir → cevap geldiğinde
+  // controller null; pending eşlemesi olmasaydı "no active controller" hatası düşerdi.
+  // Seçenek etiketleri error-analysis.ts'ten import edilen sabitler (string drift yok).
+  if (
+    runtime.pendingErrorAnalysis &&
+    runtime.pendingErrorAnalysis.id === id &&
+    runtime.state &&
+    runtime.config
+  ) {
+    const cached = runtime.pendingErrorAnalysis;
+    runtime.pendingErrorAnalysis = null;
+    const sel = (Array.isArray(selected) ? selected[0] : selected) ?? "";
+    if (sel === OPT_REANALYZE) {
+      const errCtx: ErrorContext = {
+        phase: cached.phase,
+        message: `Faz ${cached.phase} hatası için yeniden analiz istendi.`,
+        detail: cached.solutions_tr.join("\n"),
+      };
+      runtime.pendingErrorAnalysis = await analyzeAndAskError(
+        runtime.state,
+        runtime.config,
+        errCtx,
+      ).catch(() => null);
+      return;
+    }
+    if (sel === OPT_QUEUE) {
+      await appendTask(runtime.state.project_root, {
+        id: randomUUID(),
+        ts: Date.now(),
+        text: `Faz ${cached.phase} hatası (çözülmeden ertelendi): ${cached.solutions_tr[0] ?? "—"}`,
+      }).catch((e) => log.warn("orchestrator", "error-analysis task append fail", e));
+      emitChatMessage(
+        "system",
+        "📋 Hata iş listesine kaydedildi — çözmeden devam edebilirsin.",
+      );
+      return;
+    }
+    // Diğer her seçim ("Çöz" jeneriği veya somut bir çözüm metni) → mevcut debug
+    // akışı (Faz 0 / debug_triage). bugReport = hata + seçilen yön + öneriler.
+    emitChatMessage(
+      "system",
+      `🔧 Çözüm uygulanıyor: **${sel}** — debug akışı (Faz 0) başlatılıyor.`,
+    );
+    const bugReport =
+      `Faz ${cached.phase} başarısız oldu.\nSeçilen çözüm yönü: ${sel}` +
+      (cached.solutions_tr.length > 0
+        ? `\nÖnerilen çözümler:\n${cached.solutions_tr.join("\n")}`
+        : "");
+    const fakeOutcome: DispatchOutcome = {
+      handled: false,
+      action: "debug_triage",
+      intent: {
+        kind: "debug",
+        reasoning: "(error-analysis) kullanıcı çözüm seçti",
+      },
+    };
+    await executeDispatchedIntent(bugReport, fakeOutcome);
     return;
   }
 

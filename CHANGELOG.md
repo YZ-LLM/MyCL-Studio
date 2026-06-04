@@ -6,6 +6,21 @@
 
 ## 2026-06-04
 
+- **feat(error-analysis/F1) [program 2/8]:** Bir faz HATA verince MyCL artık sessiz kalmıyor:
+  orkestratör rolüyle (ana ajan değil) tek-atışlık LLM analizi yapıp **karar askq'ı** açıyor +
+  (F5'in mevcut askq yolundan) OS bildirimi gidiyor; FINAL kararı kullanıcı veriyor. Yeni
+  `error-analysis.ts` (SAF `buildErrorAnalysisAskq`/`parseErrorAnalysisBlock`/prompt + impure
+  `analyzeAndAskError`, living-docs deseni: CLI/abonelik modunda `runClaudeCli`, API modunda
+  görünür not + null = sessiz fallback YOK). **Şiddet-duyarlı seçenekler:** bloklayıcı →
+  [çözümler, "Tekrar analiz et"] (çözmeden ilerlemek yok); bloklayıcı değil → ["İş listesine
+  kaydet, çözmeden devam et", çözümler, "Tekrar analiz et"]. index.ts: 9 tekrar eden faz-fail
+  noktası (Faz 1×2, 2,3,4,5,7,8,9) tek `failPhase(n, ctrl)` helper'ına alındı (NON-BLOCKING,
+  throw etmez, fail-closed: analiz null → askq açılmaz); `handleAskqAnswer`'a controller-fallback'tan
+  ÖNCE branch ("Çöz" → mevcut debug_triage/Faz 0; "Kaydet" → `appendTask`; "Tekrar analiz et" →
+  yeniden analiz). Seçenek etiketleri modülden export edilen sabitler (TR string drift'i imkânsız).
+  Test: 24 saf birim + 3 wiring (pipeline-e2e: kaydet/reanaliz/id-gate). `npm run check` yeşil.
+  (Workflow ile paralel taslak + adversaryal inceleme; entegrasyonu elle yaptım — recipe'nin
+  fonksiyon-yeniden-tanımı çakışmasını inceleme yakaladı, modülden import edildi.)
 - **feat(headless-harness) [program 1/8]:** Tam pipeline'ı GUI'siz, terminalden koşup
   **dürüst verdict** üreten harness — kanıt katmanı. Yeni `harness-verdict.ts` (SAF):
   audit.log → PASS (17-complete + sıfır gate-fail) / PARTIAL (17-complete AMA ≥1 gate-fail) /
