@@ -33,6 +33,13 @@
   kalıcı vs modal) ve architect↔data (optimistik tempId vs server-id) çatışmaları kademeli/hibrit çözümle uzlaştı
   (design.md 12KB'a zenginleşti; ~8dk/2 çatışma = opt-in maliyet). TeamCreate+SendMessage+TeamDelete headless
   çalışıyor. Yeni: `negotiateConflicts` + `design-negotiate.md` + cli-run `extraEnv` + config `agent_teams_optin`.
+- **feat(auto-model) [yapılacak işe göre model + auto-agent — Ümit isteği]:** Fan-out alt-ajan modelleri artık
+  OTOMATİK iş-seviyesine göre: config `model_tiers` (strong/balanced/cheap — TAM model id, kullanıcı Settings'te
+  seçer → hardcoded SÜRÜM yok) + MyCL rolleri tier'a dağıtır (architect/synthesizer/verifier→strong; ux/security/
+  data/hypothesis→balanced). `subagentModelId` çözüm sırası: `subagent_models[role]` açık override > `model_tiers[tier]`
+  (otomatik, işe göre) > `main` (regresyon yok). Agent Teams müzakeresinde lead, teammate'leri OTOMATİK seçer +
+  her birine işine göre model atar (deep/arbitration→strong, advocacy→balanced; `design-negotiate.md` talimatı).
+  Kullanıcı 3 katman modelini BİR kez seçer, MyCL her rolü işine göre otomatik atar. +3 test → 901 yeşil.
 
 ## 2026-06-04
 

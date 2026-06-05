@@ -109,6 +109,14 @@ export interface SelectedModels {
     hypothesis?: string;
     verifier?: string;
   };
+  /**
+   * v15.13 (auto-model — "yapılacak işe göre model seç"): iş-seviyesi katmanları. Fan-out
+   * rolleri OTOMATİK olarak iş-seviyelerine göre bu katmanlara dağıtılır (architect/synthesizer/
+   * verifier → strong; ux/security/data/hypothesis → balanced). Tam model id'leri kullanıcı
+   * Settings'te seçer → MyCL hardcoded SÜRÜM koymaz, dağıtımı otomatik yapar. Çözüm önceliği:
+   * subagent_models[role] (açık override) > model_tiers[rolün tier'ı] > main.
+   */
+  model_tiers?: { strong?: string; balanced?: string; cheap?: string };
 }
 
 export interface FeatureFlags {
@@ -331,15 +339,35 @@ export type SubagentRole =
   | "hypothesis"
   | "verifier";
 
+/** v15.13 (auto-model): rolün İŞ-SEVİYESİ → model katmanı. Derin akıl yürütme / sentez /
+ *  eleme(verifier) = strong; geniş-ama-sığ perspektif / araştırma(hypothesis) = balanced.
+ *  (cheap şu an atanmıyor ama desen hazır — ileride sınıflandırma/özet gibi hafif işler için.) */
+export type WorkTier = "strong" | "balanced" | "cheap";
+const ROLE_TIER: Record<SubagentRole, WorkTier> = {
+  architect: "strong",
+  synthesizer: "strong",
+  verifier: "strong",
+  ux: "balanced",
+  security: "balanced",
+  data: "balanced",
+  hypothesis: "balanced",
+};
+
 /**
- * v15.13: Fan-out alt-ajan rolü için model id — opsiyonel subagent_models'te o
- * rol set değilse **main** model fallback (relevanceModelId/orchestratorModelId
- * deseni). MyCL hardcoded alias KOYMAZ; kullanıcı Settings'te her rolü seçer,
- * yoksa main. İş seviyesine göre model tavsiyesi (zorunlu değil): architect/
- * synthesizer/verifier → güçlü (Opus), ux/security/data/hypothesis → dengeli.
+ * v15.13 (auto-model — "yapılacak işe göre model"): Fan-out alt-ajan rolü için model id'sini
+ * OTOMATİK seçer (rolün iş-seviyesine göre). Çözüm sırası:
+ *   1) subagent_models[role] — kullanıcının açık per-rol override'ı (en öncelikli).
+ *   2) model_tiers[ROLE_TIER[role]] — iş-seviyesine göre OTOMATİK; MyCL rolü tier'a dağıtır,
+ *      tam model id kullanıcının Settings'te seçtiği değer (hardcoded sürüm YOK).
+ *   3) main — hiçbiri yoksa güvenli fallback (mevcut davranış birebir korunur).
+ * Kullanıcı 3 katman modelini BİR kez seçer; MyCL her rolü işine göre otomatik atar.
  */
 export function subagentModelId(models: SelectedModels, role: SubagentRole): string {
-  return models.subagent_models?.[role] ?? models.main;
+  const explicit = models.subagent_models?.[role];
+  if (explicit) return explicit;
+  const tierModel = models.model_tiers?.[ROLE_TIER[role]];
+  if (tierModel) return tierModel;
+  return models.main;
 }
 
 function resolveSelectedModels(file: ConfigFile): SelectedModels {
@@ -357,6 +385,7 @@ function resolveSelectedModels(file: ConfigFile): SelectedModels {
     ...(sel.relevance ? { relevance: sel.relevance } : {}),
     ...(sel.orchestrator ? { orchestrator: sel.orchestrator } : {}),
     ...(sel.subagent_models ? { subagent_models: sel.subagent_models } : {}),
+    ...(sel.model_tiers ? { model_tiers: sel.model_tiers } : {}),
   };
 }
 
