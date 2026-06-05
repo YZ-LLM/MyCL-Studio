@@ -4,6 +4,26 @@
 > Amaç: eski kararları/kuralları unutup bozmamak; bir işi değiştirmeden önce buraya bak.
 > Eski bir işi değiştirmek/silmek gerekiyorsa ÖNCE Ümit'e sor (kural, 2026-06-03).
 
+## 2026-06-05
+
+- **feat(Faz 5 tasarım paneli) [Workflow/Agent Teams entegrasyonu — Faz A]:** Çok-perspektifli DETERMİNİSTİK
+  tasarım fan-out'u. CREATE (ilk iterasyon) + `claude_code_flags.design_workflow` ("off" default → geriye uyum;
+  "create-only"/"always") açıkken, Faz 5 codegen'den ÖNCE: architect/ux/security/data perspektifleri PARALEL
+  (read-only akıl yürütme), her biri `subagent_models`'ten rol-modeliyle (yoksa main; `subagentModelId` helper) →
+  synthesizer TEK tasarım planı + `conflicts[]` üretir → `.mycl/design.md` yazılır + audit `ui-design-synthesized`;
+  codegen "design.md'yi oku + uygula" ekiyle devam. **İki mod (parite):** API = Anthropic `messages.create`,
+  abonelik = `runClaudeCli` (`backendForRole("main")` dispatch; auto limitliyken API'ye düşer). Çıktı text-JSON
+  (`extractKindBlock "design_plan"` — forced-tool/CLI asimetrisi yok). **Dürüst fallback:** <2 perspektif veya
+  sentez başarısız → görünür mesaj + tek-ajan tasarımıyla devam (sessiz değil; flag "off"ta hiç çalışmaz = regresyon
+  YOK). **Mimari karar** (tasarım-paneli workflow wf_308567f0 + 2 referans video): MyCL-native fan-out = Workflow
+  Tool'un DETERMİNİZM gücü (en güçlü/kontrollü hâl; `claude-agent-sdk` kurulu DEĞİL → literal Workflow Tool
+  `agent()` API'si yok, MyCL-native daha deterministik); gerçek Agent Teams'in İLETİŞİM gücü = çatışma-çözümü
+  (Layer B — sonraki: `conflicts[]` + CLI → TeamCreate peer-müzakere; API'de cross-critique turu). Agent Teams
+  paralel-YAZAR değil (büyük-dev tek-yazar TDD kalır). Yeni: `design-fanout.ts` (saf `parseConflicts`/
+  `parseDesignPlan` + test), `assets/templates/design-{architect,ux,security,data,synthesizer}.md`, config
+  `design_workflow` + `subagent_models` + `subagentModelId`. +6 test → 896 yeşil. Etkinleştirme (Layer B): env
+  `CLAUDE_CODE_WORKFLOWS=1` (Workflow tool) + `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (claudeSpawnEnv, koşullu).
+
 ## 2026-06-04
 
 - **fix(dev-server) [E2E-bulgusu]:** **Port false-match** — Faz 5 dev-server tespiti, beklenen portta

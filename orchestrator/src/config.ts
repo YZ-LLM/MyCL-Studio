@@ -40,6 +40,15 @@ export interface ClaudeCodeFlags {
    * sandbox kapalı (eski davranış — acil geri-alma). Bkz agent-sandbox.ts.
    */
   agent_sandbox_policy?: "enforce" | "warn" | "off";
+  /**
+   * v15.13: Faz 5 (UI) tasarım fan-out'u — çok-perspektifli tasarım paneli
+   * (architect/ux/security/data → synthesizer) MyCL-native paralel ile koşar
+   * (E1: API'de runTurn, abonelikte cli-run; iki modda da, deterministik).
+   * "off" (default): mevcut tek-ajan davranışı (geriye uyum). "create-only":
+   * yalnız yeni proje (CREATE, iteration 1) Faz 5'inde. "always": her Faz 5'te
+   * (tweak hariç). Settings'ten seçilir.
+   */
+  design_workflow?: "off" | "create-only" | "always";
 }
 
 export interface ApiKeys {
@@ -77,6 +86,21 @@ export interface SelectedModels {
    * onu kullanır (default).
    */
   orchestrator?: string;
+  /**
+   * v15.13: Fan-out alt-ajan (subagent) rolleri için model id'leri. Her biri
+   * opsiyonel — yoksa main model fallback (subagentModelId helper). Settings'te
+   * kullanıcı seçer (örn. architect→Opus, ux/security/data→Sonnet). İş seviyesine
+   * göre model. MyCL hardcoded alias KOYMAZ.
+   */
+  subagent_models?: {
+    architect?: string;
+    ux?: string;
+    security?: string;
+    data?: string;
+    synthesizer?: string;
+    hypothesis?: string;
+    verifier?: string;
+  };
 }
 
 export interface FeatureFlags {
@@ -153,6 +177,9 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
   betas: ["context-1m-2025-08-07", "prompt-caching-2024-07-31"],
   // GÜVENLİK varsayılanı: ajanı projeye hapset, sandbox yoksa fail-closed.
   agent_sandbox_policy: "enforce",
+  // v15.13: tasarım fan-out'u default KAPALI (opt-in, geriye uyum). Settings'te
+  // "create-only" / "always" ile açılır.
+  design_workflow: "off",
 };
 
 const DEFAULT_TIMEOUTS = {
@@ -284,6 +311,27 @@ export function orchestratorModelId(models: SelectedModels): string {
   return models.orchestrator ?? models.main;
 }
 
+/** v15.13: Fan-out alt-ajan rolleri (Faz 5 tasarım paneli + Faz 0 kök-neden fan-out). */
+export type SubagentRole =
+  | "architect"
+  | "ux"
+  | "security"
+  | "data"
+  | "synthesizer"
+  | "hypothesis"
+  | "verifier";
+
+/**
+ * v15.13: Fan-out alt-ajan rolü için model id — opsiyonel subagent_models'te o
+ * rol set değilse **main** model fallback (relevanceModelId/orchestratorModelId
+ * deseni). MyCL hardcoded alias KOYMAZ; kullanıcı Settings'te her rolü seçer,
+ * yoksa main. İş seviyesine göre model tavsiyesi (zorunlu değil): architect/
+ * synthesizer/verifier → güçlü (Opus), ux/security/data/hypothesis → dengeli.
+ */
+export function subagentModelId(models: SelectedModels, role: SubagentRole): string {
+  return models.subagent_models?.[role] ?? models.main;
+}
+
 function resolveSelectedModels(file: ConfigFile): SelectedModels {
   const sel = file.selected_models;
   if (!sel || !sel.translator || !sel.main) {
@@ -298,6 +346,7 @@ function resolveSelectedModels(file: ConfigFile): SelectedModels {
     main: sel.main,
     ...(sel.relevance ? { relevance: sel.relevance } : {}),
     ...(sel.orchestrator ? { orchestrator: sel.orchestrator } : {}),
+    ...(sel.subagent_models ? { subagent_models: sel.subagent_models } : {}),
   };
 }
 

@@ -11,6 +11,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { appendAudit, readAuditLog } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
+import { runDesignFanout } from "./design-fanout.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
@@ -135,9 +136,57 @@ export class Phase5Controller {
       buildCmd = resolveCommand(profile, "build") ?? buildCmd;
     }
 
+    // v15.13: Tasarım fan-out — çok-perspektifli tasarım paneli (architect/ux/security/data →
+    // synthesizer → .mycl/design.md). YALNIZ CREATE (ilk iterasyon) + design_workflow flag açık +
+    // tweak DEĞİL. Codegen design.md'yi okuyarak uygular. Başarısız/atlanırsa designInjection=""
+    // → mevcut tek-ajan davranışı birebir korunur (regresyon yok). Open/Closed: createCodegenBackend
+    // yolu DEĞİŞMEZ; yalnız ÖNCESİNE branch + normal initialUserMessage'a opsiyonel ek.
+    let designInjection = "";
+    const designFlag = this.config.claude_code_flags.design_workflow ?? "off";
+    const isCreateIteration = (this.state.iteration_count ?? 1) <= 1;
+    if (!isTweakMode && designFlag !== "off" && (designFlag === "always" || isCreateIteration)) {
+      try {
+        const specContent = await readFile(
+          join(this.state.project_root, ".mycl", "spec.md"),
+          "utf-8",
+        );
+        emitChatMessage(
+          "system",
+          "🎨 Tasarım paneli: architect/ux/security/data perspektifleri paralel çalışıyor → sentez…",
+        );
+        const design = await runDesignFanout(this.config, this.state.project_root, specContent);
+        if (design.ok) {
+          await appendAudit(this.state.project_root, {
+            ts: Date.now(),
+            phase: 5,
+            event: "ui-design-synthesized",
+            caller: "mycl-orchestrator",
+            detail: `perspectives=${design.perspectivesUsed}/4 conflicts=${design.conflicts.length}`,
+          });
+          designInjection =
+            "\n\nA multi-perspective design plan has been written to .mycl/design.md. Read that file FIRST and implement the UI according to it.";
+          emitChatMessage(
+            "system",
+            `✅ Tasarım paneli tamam (${design.perspectivesUsed}/4 perspektif). \`.mycl/design.md\` yazıldı.` +
+              (design.conflicts.length
+                ? ` ⚠️ ${design.conflicts.length} çelişki sentezleyicide geçici karara bağlandı (Agent Teams müzakeresi sonraki sürümde).`
+                : ""),
+          );
+        } else {
+          emitChatMessage(
+            "system",
+            `⚠ Tasarım paneli atlandı (${design.reason}) — tek-ajan tasarımıyla devam.`,
+          );
+        }
+      } catch (err) {
+        log.warn("phase-5", "design fan-out error", err);
+        emitChatMessage("system", "⚠ Tasarım paneli hata verdi — tek-ajan tasarımıyla devam.");
+      }
+    }
+
     const initialUserMessage = isTweakMode
       ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. Backend paths are denied. Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`
-      : `Begin Phase 5: build the UI. Backend paths are denied. Write UI files, run \`${installCmd}\` if needed, and run \`${buildCmd}\` to verify. Stop when build succeeds.`;
+      : `Begin Phase 5: build the UI. Backend paths are denied. Write UI files, run \`${installCmd}\` if needed, and run \`${buildCmd}\` to verify. Stop when build succeeds.${designInjection}`;
 
     this.base = createCodegenBackend({
       tag: "phase-5",
