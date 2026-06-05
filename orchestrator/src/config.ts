@@ -49,6 +49,14 @@ export interface ClaudeCodeFlags {
    * (tweak hariç). Settings'ten seçilir.
    */
   design_workflow?: "off" | "create-only" | "always";
+  /**
+   * v15.13 (Layer B): Faz 5 tasarım çatışmalarını GERÇEK Agent Teams peer-müzakeresiyle çöz.
+   * false (default): synthesizer'ın provizyon kararı kullanılır (Faz A davranışı korunur). true:
+   * design_workflow açık + conflicts[] varsa → abonelik (CLI) modunda kısa-ömürlü Agent Team
+   * (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) çelişkileri müzakere eder; API modunda MyCL-simüle
+   * cross-critique turu. ~2.5-5x token → opt-in.
+   */
+  agent_teams_optin?: boolean;
 }
 
 export interface ApiKeys {
@@ -180,6 +188,8 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
   // v15.13: tasarım fan-out'u default KAPALI (opt-in, geriye uyum). Settings'te
   // "create-only" / "always" ile açılır.
   design_workflow: "off",
+  // v15.13 (Layer B): çatışma → gerçek Agent Teams müzakeresi default KAPALI (opt-in, maliyet).
+  agent_teams_optin: false,
 };
 
 const DEFAULT_TIMEOUTS = {

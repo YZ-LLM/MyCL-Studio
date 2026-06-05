@@ -23,6 +23,16 @@
   `parseDesignPlan` + test), `assets/templates/design-{architect,ux,security,data,synthesizer}.md`, config
   `design_workflow` + `subagent_models` + `subagentModelId`. +6 test → 896 yeşil. Etkinleştirme (Layer B): env
   `CLAUDE_CODE_WORKFLOWS=1` (Workflow tool) + `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (claudeSpawnEnv, koşullu).
+- **feat(Faz 5 Layer B) [Agent Teams çatışma-müzakeresi]:** Faz A synthesizer'ının döndürdüğü `conflicts[]` +
+  `agent_teams_optin` (default false) açıksa: abonelik (CLI) modunda **GERÇEK Agent Teams** (env
+  `CLAUDE_CODE_WORKFLOWS=1` + `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, cli-run yeni `extraEnv` ile enjekte)
+  çelişen-rol savunucularını **peer-müzakereyle** (SendMessage) uzlaştırır → güncellenmiş `.mycl/design.md` +
+  audit `ui-design-negotiated`; API modunda MyCL-simüle cross-critique turu (aynı `design-negotiate.md` template,
+  tek-tur muhakeme). Başarısızsa synthesizer'ın provizyon kararı kalır (görünür mesaj, sessiz değil). **Headless
+  Agent Teams hem raw hem MyCL-sandbox altında CANLI doğrulandı**: ux↔security (silme: geri-al-toast+gecikmeli-
+  kalıcı vs modal) ve architect↔data (optimistik tempId vs server-id) çatışmaları kademeli/hibrit çözümle uzlaştı
+  (design.md 12KB'a zenginleşti; ~8dk/2 çatışma = opt-in maliyet). TeamCreate+SendMessage+TeamDelete headless
+  çalışıyor. Yeni: `negotiateConflicts` + `design-negotiate.md` + cli-run `extraEnv` + config `agent_teams_optin`.
 
 ## 2026-06-04
 

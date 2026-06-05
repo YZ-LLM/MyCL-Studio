@@ -31,6 +31,13 @@ export interface CliRunOpts {
   onText?: (text: string) => void;
   /** Her tool_use için (review-yoğun fazların aktivitesini yüzeye çıkarır). */
   observer?: (toolUse: { name: string; input: Record<string, unknown> }) => void;
+  /**
+   * v15.13: claudeSpawnEnv ÜSTÜNE eklenecek ekstra env değişkenleri (örn. Agent Teams /
+   * Workflow flag'leri: CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, CLAUDE_CODE_WORKFLOWS). MyCL
+   * tarafından enjekte edilir (process.env'den değil) → safe-env filtresi etkilemez. Yalnız
+   * ilgili çağrıda set edilir → diğer çağrıların davranışı değişmez.
+   */
+  extraEnv?: Record<string, string>;
 }
 
 export interface CliRunResult {
@@ -117,7 +124,9 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     const claudeBin = resolveClaudePath() ?? "claude";
     const child = spawn(claudeBin, args, {
       cwd: opts.cwd,
-      env: claudeSpawnEnv(), // API key YOK → abonelik; PATH zenginleştirilir
+      // API key YOK → abonelik; PATH zenginleştirilir. extraEnv (varsa) ÜSTE eklenir
+      // (Agent Teams/Workflow flag'leri için; yoksa davranış birebir korunur).
+      env: opts.extraEnv ? { ...claudeSpawnEnv(), ...opts.extraEnv } : claudeSpawnEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
 

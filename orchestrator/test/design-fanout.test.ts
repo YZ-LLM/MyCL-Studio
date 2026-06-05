@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseConflicts, parseDesignPlan } from "../src/design-fanout.js";
+import { conflictsToText, parseConflicts, parseDesignPlan } from "../src/design-fanout.js";
 
 describe("design-fanout · parseConflicts", () => {
   it("geçerli çatışma dizisi → tüm alanlar", () => {
@@ -66,5 +66,20 @@ describe("design-fanout · parseDesignPlan", () => {
   it("design_markdown eksik/boş → null (boş tasarım kabul edilmez)", () => {
     expect(parseDesignPlan(`{"kind":"design_plan","conflicts":[]}`)).toBeNull();
     expect(parseDesignPlan(`{"kind":"design_plan","design_markdown":"   ","conflicts":[]}`)).toBeNull();
+  });
+});
+
+// Layer B: çatışma → Agent Teams müzakere girdisi
+describe("design-fanout · conflictsToText (Layer B müzakere girdisi)", () => {
+  it("çatışmaları numaralı + rol-etiketli satırlara çevirir", () => {
+    const t = conflictsToText([
+      { topic: "Silme onayı", between: "ux vs security", summary: "modal vs toast" },
+      { topic: "Add id", between: "architect vs data", summary: "server vs tempId" },
+    ]);
+    expect(t).toContain("1. [ux vs security] Silme onayı: modal vs toast");
+    expect(t).toContain("2. [architect vs data] Add id: server vs tempId");
+  });
+  it("between boşsa '?' kullanır", () => {
+    expect(conflictsToText([{ topic: "X", between: "", summary: "y" }])).toContain("[?] X: y");
   });
 });

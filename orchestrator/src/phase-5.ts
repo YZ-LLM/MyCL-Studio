@@ -11,7 +11,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { appendAudit, readAuditLog } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
-import { runDesignFanout } from "./design-fanout.js";
+import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
@@ -167,11 +167,54 @@ export class Phase5Controller {
             "\n\nA multi-perspective design plan has been written to .mycl/design.md. Read that file FIRST and implement the UI according to it.";
           emitChatMessage(
             "system",
-            `✅ Tasarım paneli tamam (${design.perspectivesUsed}/4 perspektif). \`.mycl/design.md\` yazıldı.` +
-              (design.conflicts.length
-                ? ` ⚠️ ${design.conflicts.length} çelişki sentezleyicide geçici karara bağlandı (Agent Teams müzakeresi sonraki sürümde).`
-                : ""),
+            `✅ Tasarım paneli tamam (${design.perspectivesUsed}/4 perspektif). \`.mycl/design.md\` yazıldı.`,
           );
+          // Layer B: çatışma + opt-in → GERÇEK Agent Teams (abonelik) / cross-critique (API) müzakere.
+          if (design.conflicts.length > 0 && (this.config.claude_code_flags.agent_teams_optin ?? false)) {
+            emitChatMessage(
+              "system",
+              `🤝 ${design.conflicts.length} tasarım çatışması müzakereye gidiyor: ${design.conflicts.map((c) => c.topic).join("; ").slice(0, 140)}…`,
+            );
+            try {
+              const nego = await negotiateConflicts(
+                this.config,
+                this.state.project_root,
+                design.designMarkdown ?? "",
+                design.conflicts,
+              );
+              if (nego.ok) {
+                await appendAudit(this.state.project_root, {
+                  ts: Date.now(),
+                  phase: 5,
+                  event: "ui-design-negotiated",
+                  caller: "mycl-orchestrator",
+                  detail: `mode=${nego.mode} conflicts=${design.conflicts.length}`,
+                });
+                emitChatMessage(
+                  "system",
+                  nego.mode === "team"
+                    ? "✅ Çatışmalar GERÇEK Agent Teams peer-müzakeresiyle çözüldü; `.mycl/design.md` güncellendi."
+                    : "✅ Çatışmalar cross-critique turuyla çözüldü (API modu); `.mycl/design.md` güncellendi.",
+                );
+              } else {
+                emitChatMessage(
+                  "system",
+                  `ℹ️ Müzakere uygulanamadı (${nego.reason}) — sentezleyicinin provizyon kararı kullanılıyor.`,
+                );
+              }
+            } catch (err) {
+              log.warn("phase-5", "design negotiate error", err);
+              emitChatMessage(
+                "system",
+                "ℹ️ Müzakere hata verdi — sentezleyicinin provizyon kararı kullanılıyor.",
+              );
+            }
+          } else if (design.conflicts.length > 0) {
+            emitChatMessage(
+              "system",
+              `ℹ️ ${design.conflicts.length} çelişki sentezleyicide provizyon karara bağlandı (gerçek müzakere için: Settings → agent_teams_optin).`,
+            );
+          }
         } else {
           emitChatMessage(
             "system",

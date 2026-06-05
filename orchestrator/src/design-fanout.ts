@@ -215,3 +215,87 @@ export async function runDesignFanout(
     perspectivesUsed: perspectives.length,
   };
 }
+
+// ───────────────── Layer B: çatışma → gerçek Agent Teams peer-müzakere ─────────────────
+// runDesignFanout conflicts[] döndürdüyse + agent_teams_optin açıksa: abonelik (CLI) modunda
+// GERÇEK Agent Team (CLAUDE_CODE_WORKFLOWS + CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS env, extraEnv ile)
+// çelişen-rol savunucularını peer-müzakereyle uzlaştırır → güncellenmiş design.md. API modunda
+// (gerçek Agent Teams yok) MyCL-simüle cross-critique turu (aynı template, tek-tur muhakeme). İkisi de
+// görünür (sessiz değil); başarısızsa synthesizer'ın provizyon kararı kalır (Faz A davranışı).
+
+const NEGOTIATE_TIMEOUT_MS = 300_000; // takım müzakeresi uzun sürebilir (idle-bazlı)
+
+export interface NegotiateResult {
+  ok: boolean;
+  designMarkdown?: string;
+  mode: "team" | "cross-critique";
+  reason?: string;
+}
+
+export function conflictsToText(conflicts: DesignConflict[]): string {
+  return conflicts
+    .map((c, i) => `${i + 1}. [${c.between || "?"}] ${c.topic}: ${c.summary}`)
+    .join("\n");
+}
+
+export async function negotiateConflicts(
+  config: MyclConfig,
+  projectRoot: string,
+  designMarkdown: string,
+  conflicts: DesignConflict[],
+): Promise<NegotiateResult> {
+  const backend = backendForRole(config, "main");
+  const mode: NegotiateResult["mode"] = backend === "cli" ? "team" : "cross-critique";
+  if (conflicts.length === 0) return { ok: false, mode, reason: "çatışma yok" };
+
+  let template: string;
+  try {
+    template = await readFile(templatePath("design-negotiate.md"), "utf-8");
+  } catch (err) {
+    return { ok: false, mode, reason: `negotiate template yüklenemedi: ${String(err)}` };
+  }
+  const userMsg =
+    `Current design plan:\n\n${designMarkdown}\n\n---\nUnresolved conflicts to resolve:\n${conflictsToText(conflicts)}`;
+  const synthModel = subagentModelId(config.selected_models, "synthesizer");
+
+  let text: string;
+  if (backend === "cli") {
+    // GERÇEK Agent Teams (abonelik): lead, çelişen-rol savunucularından kısa-ömürlü takım kurar
+    // (env flag'leri extraEnv ile), peer müzakereyle uzlaşır, güncellenmiş design_plan döner.
+    const res = await runClaudeCli({
+      systemPrompt: template,
+      userMessage: userMsg,
+      modelId: synthModel,
+      cwd: projectRoot,
+      disallowedTools: ["Write", "Edit", "Bash(rm *)", "Bash(git push *)"],
+      extraEnv: { CLAUDE_CODE_WORKFLOWS: "1", CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1" },
+      timeoutMs: NEGOTIATE_TIMEOUT_MS,
+    });
+    if (!res.ok) return { ok: false, mode, reason: res.error ?? "takım müzakeresi başarısız" };
+    text = res.text.trim();
+  } else {
+    // API (gerçek Agent Teams YOK): MyCL-simüle cross-critique — synthesizer çelişkileri tek-tur
+    // muhakemeyle (her iki tarafı steel-man) çözer. Aynı template; "teams yoksa kendin akıl yürüt" der.
+    const client = new Anthropic({ apiKey: config.api_keys.main });
+    const response = await client.messages.create({
+      model: synthModel,
+      max_tokens: SYNTH_MAX_TOKENS,
+      system: template,
+      messages: [{ role: "user", content: userMsg }],
+    });
+    text = response.content
+      .filter((c): c is Anthropic.TextBlock => c.type === "text")
+      .map((c) => c.text)
+      .join("")
+      .trim();
+  }
+
+  const parsed = parseDesignPlan(text);
+  if (!parsed) return { ok: false, mode, reason: "müzakere geçerli design_plan döndürmedi" };
+  try {
+    await writeFile(join(projectRoot, ".mycl", "design.md"), parsed.designMarkdown + "\n", "utf-8");
+  } catch (err) {
+    return { ok: false, mode, reason: `design.md güncellenemedi: ${String(err)}` };
+  }
+  return { ok: true, designMarkdown: parsed.designMarkdown, mode };
+}
