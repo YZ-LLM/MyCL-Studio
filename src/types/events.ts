@@ -153,6 +153,15 @@ export interface AgentBackends {
   main: AgentBackend;
 }
 
+/** v15.13 (auto-model): iş-seviyesi model katmanları. Fan-out rolleri bunlara otomatik dağıtılır. */
+export interface ModelTiers {
+  strong?: string;
+  balanced?: string;
+  cheap?: string;
+}
+/** v15.13: Faz 5 çok-ajanlı tasarım fan-out kapsamı. */
+export type DesignWorkflowMode = "off" | "create-only" | "always";
+
 export interface SelectedModelsEvent {
   kind: "selected_models";
   data: {
@@ -160,6 +169,12 @@ export interface SelectedModelsEvent {
     effort?: string;
     /** v15.8: rol-backend'leri — Modeller sekmesindeki seçiciler için. */
     backends?: AgentBackends;
+    /** v15.13 (auto-model): iş-seviyesi model katmanları — fan-out rolleri için. */
+    model_tiers?: ModelTiers;
+    /** v15.13: çok-ajanlı tasarım fan-out kapsamı. */
+    design_workflow?: DesignWorkflowMode;
+    /** v15.13: çatışma → gerçek Agent Teams müzakeresi opt-in. */
+    agent_teams_optin?: boolean;
   };
 }
 
@@ -399,6 +414,12 @@ export type OrchestratorCommand =
         effort?: string;
         /** v15.8: rol başına backend (api/cli) — modellerle birlikte kaydedilir. */
         backends?: Partial<AgentBackends>;
+        /** v15.13 (auto-model): iş-seviyesi model katmanları — fan-out rolleri için. */
+        model_tiers?: ModelTiers;
+        /** v15.13: çok-ajanlı tasarım fan-out kapsamı. */
+        design_workflow?: DesignWorkflowMode;
+        /** v15.13: çatışma → gerçek Agent Teams müzakeresi opt-in. */
+        agent_teams_optin?: boolean;
       };
     }
   | { kind: "read_selected_models" }

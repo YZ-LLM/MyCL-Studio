@@ -785,7 +785,12 @@ async function handleSaveApiKeys(keys: ApiKeys): Promise<void> {
 }
 
 async function handleSaveSelectedModels(
-  payload: SelectedModels & { effort?: string; backends?: Partial<AgentBackends> },
+  payload: SelectedModels & {
+    effort?: string;
+    backends?: Partial<AgentBackends>;
+    design_workflow?: ClaudeCodeFlags["design_workflow"];
+    agent_teams_optin?: boolean;
+  },
 ): Promise<void> {
   log.info("orchestrator", "save_selected_models", payload);
   if (!payload || !payload.translator || !payload.main) {
@@ -793,14 +798,26 @@ async function handleSaveSelectedModels(
     return;
   }
   try {
-    const { effort, backends, ...sel } = payload;
+    // v15.13: tasarım flag'lerini (design_workflow/agent_teams_optin) modellerden ayır;
+    // gerisi (translator/main/orchestrator/model_tiers) selected_models'e gider.
+    const { effort, backends, design_workflow, agent_teams_optin, ...sel } = payload;
     await persistSelectedModels(sel as SelectedModels);
-    // v15.8 (2026-05-30): Efor seçici Modeller sekmesinde — modellerle birlikte
-    // kaydedilir. CLI backend aktifse `--effort` olarak kullanılır.
+    // v15.8: Efor + v15.13: tasarım fan-out flag'leri — Modeller sekmesinde modellerle
+    // birlikte kaydedilir. CLI backend aktifse efor `--effort` olarak kullanılır.
+    const flagsPatch: Partial<ClaudeCodeFlags> = {};
     const validEfforts = ["low", "medium", "high", "xhigh", "max", "ultracode"];
     if (effort && validEfforts.includes(effort)) {
+      flagsPatch.effort = effort as ClaudeCodeFlags["effort"];
+    }
+    if (design_workflow === "off" || design_workflow === "create-only" || design_workflow === "always") {
+      flagsPatch.design_workflow = design_workflow;
+    }
+    if (typeof agent_teams_optin === "boolean") {
+      flagsPatch.agent_teams_optin = agent_teams_optin;
+    }
+    if (Object.keys(flagsPatch).length > 0) {
       const { persistClaudeCodeFlags } = await import("./config.js");
-      await persistClaudeCodeFlags({ effort: effort as ClaudeCodeFlags["effort"] });
+      await persistClaudeCodeFlags(flagsPatch);
     }
     // v15.8: rol başına backend (API/Abonelik) — Modeller sekmesinde modellerle
     // birlikte kaydedilir. Geçerli değerler "api"|"cli"|"auto"; gerisi yok sayılır.
@@ -918,6 +935,10 @@ async function handleReadSelectedModels(): Promise<void> {
       selected: sel ?? null,
       effort: flags.effort ?? "max",
       backends,
+      // v15.13: auto-model katmanları + tasarım fan-out flag'leri — Settings seçicileri için.
+      model_tiers: sel?.model_tiers,
+      design_workflow: flags.design_workflow ?? "off",
+      agent_teams_optin: flags.agent_teams_optin ?? false,
     });
   } catch (err) {
     log.error("orchestrator", "read_selected_models failed", err);

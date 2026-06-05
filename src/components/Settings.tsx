@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { t as i18nT } from "../i18n";
-import type { ModelInfo, AgentBackend, AgentBackends } from "../types/events";
+import type { ModelInfo, AgentBackend, AgentBackends, ModelTiers, DesignWorkflowMode } from "../types/events";
 import { isAutoUpdateOnBootEnabled } from "./UpdateButton";
 
 /**
@@ -57,6 +57,9 @@ interface Props {
     orchestrator?: string,
     effort?: string,
     backends?: AgentBackends,
+    modelTiers?: ModelTiers,
+    designWorkflow?: DesignWorkflowMode,
+    agentTeamsOptIn?: boolean,
   ) => void;
   /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
   currentBackends?: AgentBackends;
@@ -70,6 +73,12 @@ interface Props {
   onSaveFeatures?: (features: { playwright_enabled?: boolean }) => void;
   /** v15.8 (2026-05-30): Main model efor seçimi (CLI backend için). */
   effort?: string;
+  /** v15.13 (auto-model): mevcut iş-seviyesi model katmanları (seçiciler için). */
+  currentModelTiers?: ModelTiers;
+  /** v15.13: mevcut çok-ajanlı tasarım fan-out kapsamı. */
+  currentDesignWorkflow?: DesignWorkflowMode;
+  /** v15.13: mevcut Agent Teams müzakere opt-in. */
+  currentAgentTeamsOptIn?: boolean;
 }
 
 function ModelDropdown({
@@ -203,6 +212,9 @@ export function Settings({
   onSaveFeatures,
   effort,
   currentBackends,
+  currentModelTiers,
+  currentDesignWorkflow,
+  currentAgentTeamsOptIn,
 }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [translatorSel, setTranslatorSel] = useState<string>(
@@ -226,6 +238,16 @@ export function Settings({
   );
   const setBackend = (role: keyof AgentBackends, v: AgentBackend) =>
     setBackends((prev) => ({ ...prev, [role]: v }));
+  // v15.13 (auto-model + çok-ajanlı tasarım): iş-seviyesi model katmanları + tasarım flag'leri.
+  const [modelTiersSel, setModelTiersSel] = useState<ModelTiers>(currentModelTiers ?? {});
+  const setTier = (tier: keyof ModelTiers, v: string) =>
+    setModelTiersSel((prev) => ({ ...prev, [tier]: v || undefined }));
+  const [designWorkflowSel, setDesignWorkflowSel] = useState<DesignWorkflowMode>(
+    currentDesignWorkflow ?? "off",
+  );
+  const [agentTeamsOptInSel, setAgentTeamsOptInSel] = useState<boolean>(
+    currentAgentTeamsOptIn ?? false,
+  );
 
   // API Keys form state
   const [apiKeyTranslator, setApiKeyTranslator] = useState("");
@@ -446,6 +468,73 @@ export function Settings({
                   <strong> ultracode</strong> = xhigh + dinamik iş akışları; yalnızca Opus 4.7/4.8.
                 </p>
               </div>
+              {/* v15.13: Çok-ajanlı tasarım (deneysel) — Faz 5 tasarım paneli + auto-model katmanları. */}
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+                <label
+                  style={{
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: "var(--fg-dim)",
+                    display: "block",
+                    marginBottom: 4,
+                  }}
+                >
+                  Çok-ajanlı tasarım (deneysel)
+                </label>
+                <select
+                  value={designWorkflowSel}
+                  onChange={(e) => setDesignWorkflowSel(e.target.value as DesignWorkflowMode)}
+                  style={{ width: "100%" }}
+                >
+                  <option value="off">Tasarım paneli: kapalı</option>
+                  <option value="create-only">Tasarım paneli: yalnız yeni proje (önerilen)</option>
+                  <option value="always">Tasarım paneli: her Faz 5</option>
+                </select>
+                <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "4px 0 0" }}>
+                  Faz 5'te architect/ux/security/data perspektifleri paralel → sentez → tasarım planı (.mycl/design.md).
+                </p>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={agentTeamsOptInSel}
+                    onChange={(e) => setAgentTeamsOptInSel(e.target.checked)}
+                  />
+                  Tasarım çatışmalarını gerçek Agent Teams müzakeresiyle çöz (abonelik; ek maliyet)
+                </label>
+                <p
+                  style={{
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: "var(--fg-dim)",
+                    margin: "8px 0 4px",
+                  }}
+                >
+                  İş-seviyesi modelleri (boş = main)
+                </p>
+                {(["strong", "balanced", "cheap"] as const).map((tier) => (
+                  <div key={tier} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, width: 72, color: "var(--fg-dim)" }}>{tier}</span>
+                    <select
+                      value={modelTiersSel[tier] ?? ""}
+                      onChange={(e) => setTier(tier, e.target.value)}
+                      style={{ flex: 1 }}
+                    >
+                      <option value="">(main)</option>
+                      {modelsMain.models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.display_name || m.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+                <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "2px 0 0" }}>
+                  Fan-out rolleri işe göre OTOMATİK dağıtılır: architect/synthesizer/verifier→strong,
+                  ux/security/data→balanced.
+                </p>
+              </div>
               <button
                 type="button"
                 className="primary"
@@ -457,6 +546,9 @@ export function Settings({
                     orchestratorSel.trim() || undefined,
                     effortSel,
                     backends,
+                    modelTiersSel,
+                    designWorkflowSel,
+                    agentTeamsOptInSel,
                   )
                 }
               >

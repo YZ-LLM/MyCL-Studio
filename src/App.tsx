@@ -18,6 +18,8 @@ import { ClaudeSimulator, type CCEvent } from "./components/ClaudeSimulator";
 import { useOrchestrator } from "./hooks/useOrchestrator";
 import type {
   AgentBackends,
+  ModelTiers,
+  DesignWorkflowMode,
   CostRecord,
   ModelInfo,
   OrchestratorEvent,
@@ -597,6 +599,10 @@ function App() {
   const [modelsTranslator, setModelsTranslator] = useState<ModelsList>(EMPTY_LIST);
   const [modelsMain, setModelsMain] = useState<ModelsList>(EMPTY_LIST);
   const [currentSelected, setCurrentSelected] = useState<{ translator?: string; main?: string } | null>(null);
+  // v15.13 (auto-model + çok-ajanlı tasarım): Settings seçicileri için mevcut değerler.
+  const [currentModelTiers, setCurrentModelTiers] = useState<ModelTiers | undefined>(undefined);
+  const [currentDesignWorkflow, setCurrentDesignWorkflow] = useState<DesignWorkflowMode | undefined>(undefined);
+  const [currentAgentTeamsOptIn, setCurrentAgentTeamsOptIn] = useState<boolean | undefined>(undefined);
   /**
    * Boot history load guard: request yolda iken effect re-fire ederse 2.
    * send'i bloklar. onProjectSelected'ta reset (yeni proje = fresh request).
@@ -668,6 +674,10 @@ function App() {
         setCurrentSelected(ev.data.selected ?? null);
         if (ev.data.effort) setCurrentEffort(ev.data.effort);
         if (ev.data.backends) setCurrentBackends(ev.data.backends);
+        if (ev.data.model_tiers) setCurrentModelTiers(ev.data.model_tiers);
+        if (ev.data.design_workflow) setCurrentDesignWorkflow(ev.data.design_workflow);
+        if (typeof ev.data.agent_teams_optin === "boolean")
+          setCurrentAgentTeamsOptIn(ev.data.agent_teams_optin);
       } else if (ev.kind === "phases_list") {
         setPhasesList(ev.data.phases);
       } else if (ev.kind === "features_value") {
@@ -723,10 +733,16 @@ function App() {
     orchestrator?: string,
     effort?: string,
     backends?: AgentBackends,
+    modelTiers?: ModelTiers,
+    designWorkflow?: DesignWorkflowMode,
+    agentTeamsOptIn?: boolean,
   ) => {
     setSavingModels(true);
     if (effort) setCurrentEffort(effort);
     if (backends) setCurrentBackends(backends);
+    if (modelTiers) setCurrentModelTiers(modelTiers);
+    if (designWorkflow) setCurrentDesignWorkflow(designWorkflow);
+    if (typeof agentTeamsOptIn === "boolean") setCurrentAgentTeamsOptIn(agentTeamsOptIn);
     void orch.send({
       kind: "save_settings",
       data: {
@@ -735,6 +751,9 @@ function App() {
         ...(orchestrator ? { orchestrator } : {}),
         ...(effort ? { effort } : {}),
         ...(backends ? { backends } : {}),
+        ...(modelTiers ? { model_tiers: modelTiers } : {}),
+        ...(designWorkflow ? { design_workflow: designWorkflow } : {}),
+        ...(typeof agentTeamsOptIn === "boolean" ? { agent_teams_optin: agentTeamsOptIn } : {}),
       },
     });
     // config_status sonrası modal kapanır
@@ -1029,6 +1048,9 @@ function App() {
       }
       currentSelected={currentSelected}
       currentBackends={currentBackends}
+      currentModelTiers={currentModelTiers}
+      currentDesignWorkflow={currentDesignWorkflow}
+      currentAgentTeamsOptIn={currentAgentTeamsOptIn}
       modelsTranslator={modelsTranslator}
       modelsMain={modelsMain}
       onFetchModels={handleFetchModels}

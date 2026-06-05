@@ -40,6 +40,13 @@
   (otomatik, işe göre) > `main` (regresyon yok). Agent Teams müzakeresinde lead, teammate'leri OTOMATİK seçer +
   her birine işine göre model atar (deep/arbitration→strong, advocacy→balanced; `design-negotiate.md` talimatı).
   Kullanıcı 3 katman modelini BİR kez seçer, MyCL her rolü işine göre otomatik atar. +3 test → 901 yeşil.
+- **feat(Settings UI) [çok-ajanlı tasarım kontrolleri]:** Modeller sekmesine "Çok-ajanlı tasarım (deneysel)"
+  bölümü — `design_workflow` seçici (off/create-only/always) + `agent_teams_optin` toggle + iş-seviyesi model
+  katmanı (strong/balanced/cheap) seçicileri. Mevcut `save_settings`/`selected_models` IPC genişletildi (YENİ
+  handler/event YOK): `handleSaveSelectedModels` flag'leri `persistClaudeCodeFlags`'e, `model_tiers`'ı (sel'de)
+  `persistSelectedModels`'e yazar; read-event üçünü de geri döndürür. Frontend: events.ts (`ModelTiers`/
+  `DesignWorkflowMode` tipleri) + App.tsx (state + reducer + save payload) + Settings.tsx (UI + state). Artık
+  config.json elle düzenlemeden GUI'den ayarlanır. frontend typecheck temiz, 901 test yeşil.
 
 ## 2026-06-04
 
