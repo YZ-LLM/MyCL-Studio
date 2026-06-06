@@ -14,7 +14,9 @@ import { runClaudeCli } from "./cli-run.js";
 import type { MyclConfig } from "./config.js";
 import { isSubscriptionMode } from "./subscription-mode.js";
 import { log } from "./logger.js";
-import type { ProjectType } from "./types.js";
+import type { ProjectType, UiComplexity } from "./types.js";
+
+const VALID_UI_COMPLEXITY: readonly UiComplexity[] = ["simple", "moderate", "complex"] as const;
 
 const VALID_TYPES: readonly ProjectType[] = [
   "web",
@@ -32,6 +34,7 @@ const SYSTEM_PROMPT = `You are a project type classifier.
 Read the user's intent / enriched spec summary and decide:
 1. The project type (one of the categories below)
 2. Whether the project needs a persistent database (SQLite/Postgres/Mongo/etc)
+3. The UI complexity tier (only meaningful for projects WITH a user interface)
 
 Categories (pick exactly one for project_type):
 - web: browser UI application (React/Vue/Svelte/Angular/Next/etc)
@@ -49,7 +52,16 @@ has_database guidance:
 - false: stateless (pure compute, in-memory cache, no migrations, e.g. simple CLI or static SPA)
 - If uncertain, lean true (Faz 7 zaten skip-on-missing-spec'i destekler).
 
-Call classify_project_type with both fields. Do not output any other text.`;
+ui_complexity guidance (only for UI types — web/desktop/mobile; for non-UI types use "simple"):
+- simple: one screen or a few static views; standard form/list/CRUD UI; no real-time or rich client-side
+  interaction (e.g. a todo app, a landing page, a basic dashboard)
+- moderate: multiple interacting views, client-side routing, non-trivial state management, some custom
+  interactions (e.g. a multi-step wizard, a settings-heavy app)
+- complex: rich/interactive UI — real-time updates, drag-and-drop, canvas/visualization, collaborative
+  editing, heavy animation, or a design-system-level component surface (e.g. a kanban board, a diagram editor)
+- If uncertain, lean "moderate" (only "simple" skips the multi-perspective design panel; moderate/complex keep it).
+
+Call classify_project_type with all fields. Do not output any other text.`;
 
 const TOOL_DEF = {
   name: "classify_project_type",
@@ -64,6 +76,10 @@ const TOOL_DEF = {
       },
       has_database: {
         type: "boolean",
+      },
+      ui_complexity: {
+        type: "string",
+        enum: ["simple", "moderate", "complex"],
       },
     },
   },
@@ -81,6 +97,12 @@ export interface ProjectClassification {
   project_type: ProjectType;
   /** undefined olabilir — API fail durumunda fallback'a düşülür. */
   has_database?: boolean;
+  /**
+   * v15.13 spec gate: UI karmaşıklık seviyesi (yalnız UI tipleri için anlamlı).
+   * undefined → fan-out KOŞAR (regresyon-güvenli varsayılan). Faz 5 tasarım
+   * paneli gate'i: yalnız "simple" fan-out'u atlar.
+   */
+  ui_complexity?: UiComplexity;
 }
 
 // CLI (abonelik) modunda forced-tool yoktur → ajan tek bir JSON bloğu yazar.
@@ -89,7 +111,14 @@ const CLI_JSON_INSTRUCTION = `
 ## OUTPUT — CLI mode (no tools)
 Do NOT call any tool and do NOT investigate. Decide from the summary only. Your
 ENTIRE reply must be exactly one JSON block and nothing else:
-{"kind":"project_type","project_type":"<one category>","has_database":<true|false>}`;
+{"kind":"project_type","project_type":"<one category>","has_database":<true|false>,"ui_complexity":"<simple|moderate|complex>"}`;
+
+/** ui_complexity'i fail-soft çıkarır — geçersiz/eksikse undefined (fan-out KOŞAR). */
+function parseUiComplexity(raw: unknown): UiComplexity | undefined {
+  return typeof raw === "string" && (VALID_UI_COMPLEXITY as readonly string[]).includes(raw)
+    ? (raw as UiComplexity)
+    : undefined;
+}
 
 /**
  * Abonelik modu sınıflandırma — text-JSON CLI (forced-tool yerine). Çıktıyı
@@ -119,15 +148,17 @@ async function classifyViaCli(
     }
     const raw = block.project_type;
     const hasDb = typeof block.has_database === "boolean" ? block.has_database : undefined;
+    const uiComplexity = parseUiComplexity(block.ui_complexity);
     if (typeof raw === "string" && (VALID_TYPES as readonly string[]).includes(raw)) {
       log.info("project-type-classifier", "classified (cli)", {
         project_type: raw,
         has_database: hasDb,
+        ui_complexity: uiComplexity,
       });
-      return { project_type: raw as ProjectType, has_database: hasDb };
+      return { project_type: raw as ProjectType, has_database: hasDb, ui_complexity: uiComplexity };
     }
     log.warn("project-type-classifier", "cli: invalid project_type (fail-soft)", { raw });
-    return { project_type: "unknown", has_database: hasDb };
+    return { project_type: "unknown", has_database: hasDb, ui_complexity: uiComplexity };
   } catch (err) {
     log.error("project-type-classifier", "cli threw (fail-soft)", err);
     return { project_type: "unknown" };
@@ -178,20 +209,23 @@ export async function classifyProjectType(
         const input = block.input as {
           project_type?: string;
           has_database?: boolean;
+          ui_complexity?: string;
         };
         const raw = input.project_type;
         const hasDb =
           typeof input.has_database === "boolean" ? input.has_database : undefined;
+        const uiComplexity = parseUiComplexity(input.ui_complexity);
         if (typeof raw === "string" && (VALID_TYPES as readonly string[]).includes(raw)) {
           log.info("project-type-classifier", "classified", {
             project_type: raw,
             has_database: hasDb,
+            ui_complexity: uiComplexity,
             elapsed_ms: Date.now() - startTs,
           });
-          return { project_type: raw as ProjectType, has_database: hasDb };
+          return { project_type: raw as ProjectType, has_database: hasDb, ui_complexity: uiComplexity };
         }
         log.warn("project-type-classifier", "invalid output", { raw });
-        return { project_type: "unknown", has_database: hasDb };
+        return { project_type: "unknown", has_database: hasDb, ui_complexity: uiComplexity };
       }
     }
     log.warn("project-type-classifier", "no tool_use in response");

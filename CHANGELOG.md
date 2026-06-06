@@ -6,6 +6,17 @@
 
 ## 2026-06-06
 
+- **feat(spec gate: ui_complexity tier) [WS3; ultracode-3]:** Faz 2 sınıflandırıcısı artık projeyi UI
+  karmaşıklığına göre de etiketler (`simple`/`moderate`/`complex`) — `has_database` desenini birebir izler:
+  TOOL_DEF.input_schema'ya `ui_complexity` enum (required'a EKLENMEDİ = geriye-uyumlu) + SYSTEM_PROMPT guidance
+  + CLI text-JSON instruction + `ProjectClassification.ui_complexity` + hem CLI hem API extract (fail-soft
+  `parseUiComplexity` → geçersiz/eksik = undefined). `phase-2.ts` koşullu-merge ile `state.ui_complexity`'e
+  yazar. `types.ts` `UiComplexity` tipi + `State.ui_complexity`. `state-migrations.ts` v3→v4 no-op migrator
+  (eski state'ler undefined kalır). **Faz 5 tasarım paneli gate'i:** karar saf `design-panel-gate.ts`
+  `designPanelDecision` → "run"/"skip-simple"/"off"; yalnız `ui_complexity==="simple"` → çok-perspektifli panel
+  ATLANIR (tek-ajan tasarım + görünür bilgi mesajı), undefined/moderate/complex → panel KOŞAR. **Regresyon yok:**
+  flag "off" → "off"; ui_complexity undefined → "run" = eski davranış birebir (yalnız "simple" yeni dal).
+  +14 test (classifier extract/fail-soft, v3→v4 migration, design-panel-gate 9 durum). 919 test yeşil.
 - **fix(agent-sandbox denyRead dir-only + brace-trap belgele) [WS1; ampirik /tmp testleri]:** macOS'ta
   `buildAgentSandboxSettings` denyRead'i **dir-only** yapar — Seatbelt subpath semantiği bir dizini reddederken
   içeriğini de reddeder (V3: dir-only "secret" → "secret/data.txt" engellendi), `/**` REDUNDANT → atlamak profili

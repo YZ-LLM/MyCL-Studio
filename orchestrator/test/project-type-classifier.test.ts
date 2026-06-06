@@ -91,6 +91,40 @@ describe("classifyProjectType (abonelik / CLI text-JSON)", () => {
     expect(r.project_type).toBe("unknown");
     expect(r.has_database).toBe(true);
   });
+
+  it("ui_complexity geçerli → çıkarılır", async () => {
+    cliMock.mockResolvedValueOnce({
+      ok: true,
+      text: `{"kind":"project_type","project_type":"web","has_database":false,"ui_complexity":"complex"}`,
+      toolUses: [],
+      turns: 1,
+    });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.ui_complexity).toBe("complex");
+  });
+
+  it("ui_complexity geçersiz değer → undefined (fail-soft; fan-out KOŞAR)", async () => {
+    cliMock.mockResolvedValueOnce({
+      ok: true,
+      text: `{"kind":"project_type","project_type":"web","has_database":false,"ui_complexity":"super-hard"}`,
+      toolUses: [],
+      turns: 1,
+    });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.project_type).toBe("web");
+    expect(r.ui_complexity).toBeUndefined();
+  });
+
+  it("ui_complexity eksik → undefined (geriye uyum)", async () => {
+    cliMock.mockResolvedValueOnce({
+      ok: true,
+      text: `{"kind":"project_type","project_type":"web","has_database":false}`,
+      toolUses: [],
+      turns: 1,
+    });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.ui_complexity).toBeUndefined();
+  });
 });
 
 describe("shouldSkipUiPhases", () => {

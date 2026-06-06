@@ -67,6 +67,9 @@ describe("state-migrations", () => {
     // has_database undefined kalır (v1→v2 migrator default değer atamaz —
     // Phase 2 classifier'dan gelecek; eski state'ler heuristic fallback'e düşer).
     expect(migrated.has_database).toBeUndefined();
+    // ui_complexity undefined kalır (v3→v4 no-op; Phase 2 classifier'dan gelecek;
+    // eski state'lerde tasarım paneli fan-out KOŞAR = regresyon-güvenli).
+    expect(migrated.ui_complexity).toBeUndefined();
     // Mevcut alanlar korunmuş + v3 phase renumber: 7 → 6 (faz 5 silindi, 6+ shift)
     expect(migrated.current_phase).toBe(6);
     expect(migrated.session_id).toBe("test-session");
@@ -119,6 +122,29 @@ describe("state-migrations", () => {
     };
     const migrated = await applyMigrations(oldState, projectRoot, statePath, undefined);
     expect(migrated.current_phase).toBe(17);
+  });
+
+  it("v3 → v4: ui_complexity no-op + schema bump (eski state fan-out korur)", async () => {
+    const v3State = {
+      schema_version: 3,
+      current_phase: 5 as const,
+      session_id: "v3-session",
+      project_root: projectRoot,
+      created_at: 1,
+      updated_at: 1,
+    };
+    const migrated = await applyMigrations(v3State, projectRoot, statePath, undefined);
+    expect(migrated.schema_version).toBe(4);
+    // no-op: ui_complexity atanmaz (undefined → Faz 5 paneli KOŞAR = regresyon-güvenli).
+    expect(migrated.ui_complexity).toBeUndefined();
+    // diğer alanlar değişmez (current_phase 5 zaten v3 formatında → dokunulmaz).
+    expect(migrated.current_phase).toBe(5);
+    expect(migrated.session_id).toBe("v3-session");
+  });
+
+  it("getMigratorVersions v4 migrator'ı içerir", () => {
+    expect(getMigratorVersions()).toContain(4);
+    expect(CURRENT_SCHEMA_VERSION).toBe(4);
   });
 
   it("applyMigrations creates backup when migrating real file", async () => {

@@ -50,6 +50,13 @@ export type ProjectType =
   | "unknown";
 
 /**
+ * UI karmaşıklık seviyesi (v15.13 spec gate). Faz 2 sınıflandırıcı üretir;
+ * Faz 5 tasarım paneli gate'i kullanır. Yalnız UI tipleri için anlamlı.
+ * undefined → fan-out KOŞAR (regresyon-güvenli; yalnız "simple" atlar).
+ */
+export type UiComplexity = "simple" | "moderate" | "complex";
+
+/**
  * Frontend build tool — Phase 5 sonrası runtime injector seçimi için.
  * v15.0'da sadece "vite" implement; diğerleri v15.1+ mini sprint'lerde.
  */
@@ -293,6 +300,13 @@ export interface State {
    * fallback'i devreye girer. Eski state'ler undefined kalır (backward-compat).
    */
   has_database?: boolean;
+  /**
+   * UI karmaşıklık seviyesi (v15.13 spec gate). Phase 2 classifier üretir;
+   * Faz 5 tasarım paneli gate'i kullanır (yalnız "simple" → çok-perspektifli
+   * fan-out ATLANIR, tek-ajan tasarım). undefined/moderate/complex → fan-out
+   * KOŞAR. Eski state'ler undefined kalır (backward-compat; regresyon yok).
+   */
+  ui_complexity?: UiComplexity;
   current_phase: PhaseId;
   session_id: string;                 // UUIDv4
   spec_approved: boolean;

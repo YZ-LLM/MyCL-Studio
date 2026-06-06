@@ -292,6 +292,7 @@ export class Phase2Controller {
     const classification = await classifyProjectType(this.config, enriched);
     const projectType = classification.project_type;
     const hasDatabase = classification.has_database;
+    const uiComplexity = classification.ui_complexity;
     const skipUi = shouldSkipUiPhases(projectType);
     // QC C: "unknown" durumunda kullanıcı sessiz miscategorization fark
     // etmesin — net uyarı mesajı. Diğer tipler için tespit + skip kararı bildir.
@@ -321,6 +322,7 @@ export class Phase2Controller {
       project_type: projectType,
       skip_ui_phases: skipUi,
       has_database: hasDatabase,
+      ui_complexity: uiComplexity,
     });
 
     this.statePatch = {
@@ -328,12 +330,14 @@ export class Phase2Controller {
       project_type: projectType,
       skip_ui_phases: skipUi,
       ...(hasDatabase !== undefined ? { has_database: hasDatabase } : {}),
+      ...(uiComplexity !== undefined ? { ui_complexity: uiComplexity } : {}),
     };
     log.info("phase-2", "complete", {
       enriched_len: enriched.length,
       dim_count: dimensions.length,
       project_type: projectType,
       has_database: hasDatabase,
+      ui_complexity: uiComplexity,
     });
     return "complete";
   }

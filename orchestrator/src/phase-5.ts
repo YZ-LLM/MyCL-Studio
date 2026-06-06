@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { appendAudit, readAuditLog } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
+import { designPanelDecision } from "./design-panel-gate.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
@@ -144,7 +145,23 @@ export class Phase5Controller {
     let designInjection = "";
     const designFlag = this.config.claude_code_flags.design_workflow ?? "off";
     const isCreateIteration = (this.state.iteration_count ?? 1) <= 1;
-    if (!isTweakMode && designFlag !== "off" && (designFlag === "always" || isCreateIteration)) {
+    // v15.13 spec gate: kararı saf designPanelDecision'a devret (tek-doğruluk-kaynağı, izole test).
+    // "simple" → panel atlanır (tek-ajan tasarım); undefined/moderate/complex → panel KOŞAR
+    // (regresyon-güvenli). designInjection="" → mevcut tek-ajan codegen yolu birebir korunur.
+    const panelDecision = designPanelDecision({
+      designFlag,
+      isTweakMode,
+      isCreateIteration,
+      uiComplexity: this.state.ui_complexity,
+    });
+    if (panelDecision === "skip-simple") {
+      emitChatMessage(
+        "system",
+        "🎨 UI karmaşıklığı **basit** → tek-ajan tasarım (çok-perspektifli panel atlandı).",
+      );
+      log.info("phase-5", "design panel skipped (ui_complexity=simple)");
+    }
+    if (panelDecision === "run") {
       try {
         const specContent = await readFile(
           join(this.state.project_root, ".mycl", "spec.md"),

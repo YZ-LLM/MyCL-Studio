@@ -21,7 +21,7 @@ import { detectStack } from "./intent-router/handlers/command.js";
 import type { PhaseId, State } from "./types.js";
 
 /** Mevcut şema versiyonu. Yeni migrator eklendiğinde bump. */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 /** Saf migrator imzası — input state'in shallow copy'sini döndürür. */
 type Migrator = (state: Partial<State>, projectRoot: string) => Partial<State>;
@@ -93,6 +93,17 @@ const MIGRATORS: Record<number, Migrator> = {
       schema_version: 3,
     };
   },
+  /**
+   * v3 → v4 (2026-06-06): `ui_complexity` field eklendi (v15.13 spec gate).
+   * Eski state'lerde undefined kalır → Faz 5 tasarım paneli fan-out'u KOŞAR
+   * (yalnız "simple" atlar; undefined = regresyon-güvenli). Yeni projeler
+   * Phase 2 classifier'dan değer alır. Migrator no-op (undefined assignment,
+   * has_database v2 deseni); sadece schema_version bump.
+   */
+  4: (state) => ({
+    ...state,
+    schema_version: 4,
+  }),
 };
 
 /**
