@@ -135,11 +135,18 @@ export interface FeatureFlags {
    * effort` CLI'a `--effort` olarak geçer.
    */
   claude_code_cli_enabled: boolean;
+  /**
+   * v15.13 (Ümit isteği): MyCL açılışında claude CLI'yı otomatik güncelle (`claude update`,
+   * non-blocking). `true` (default): her açılışta arka planda günceller. `false`: kapalı.
+   * Resmi + güvenli işlem; hata yutulur, boot'u bloklamaz. Bkz claude-updater.ts.
+   */
+  auto_update_claude?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
   playwright_enabled: true,
   claude_code_cli_enabled: false,
+  auto_update_claude: true,
 };
 
 /**

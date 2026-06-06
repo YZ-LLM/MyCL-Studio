@@ -14,6 +14,7 @@
 import * as readline from "node:readline";
 import { emit, emitError } from "./ipc.js";
 import { log } from "./logger.js";
+import { autoUpdateClaude } from "./claude-updater.js";
 
 /**
  * Inbound IPC mesaj formatı. `data` çoğu handler için `any` (eski runtime
@@ -97,6 +98,10 @@ export class App {
       node: process.version,
     });
     void this.deps.emitConfigStatus();
+    // v15.13 (Ümit isteği): açılışta claude CLI'yı otomatik güncelle. Non-blocking (boot'u
+    // geciktirmez), feature-flag'li (default açık), hata yutulur. Yalnız gerçekten güncellenince
+    // görünür mesaj. Sürekli yeni sürüm geldiği için her açılışta güncel kalır.
+    void autoUpdateClaude();
 
     const rl = readline.createInterface({
       input: process.stdin,

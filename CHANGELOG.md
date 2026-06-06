@@ -4,6 +4,19 @@
 > Amaç: eski kararları/kuralları unutup bozmamak; bir işi değiştirmeden önce buraya bak.
 > Eski bir işi değiştirmek/silmek gerekiyorsa ÖNCE Ümit'e sor (kural, 2026-06-03).
 
+## 2026-06-06
+
+- **feat(claude oto-güncelleme) [Ümit isteği: "her açıldığında güncellesin otomatik"]:** MyCL açılışında
+  (App.start) claude CLI'yı arka planda otomatik günceller — yeni `claude-updater.ts` (`autoUpdateClaude`):
+  non-blocking (boot'u geciktirmez), feature flag `features.auto_update_claude` (default AÇIK), test/CI/harness'ta
+  guard'lı (VITEST/CI/NODE_ENV=test/MYCL_DISABLE_AUTO_UPDATE → çalışmaz; yan etki/non-determinizm yok), yalnız
+  GERÇEKTEN güncellenince görünür mesaj, hata yutulur. Saf `interpretUpdateOutput` (exit+çıktı → updated/current/
+  failed; "exit 0 ama belirsiz → current" = yanlış mesaj verme) + 4 test. `claude update` resmi+güvenli işlem.
+- **feat(orkestratör yetenek farkındalığı) [Ümit isteği: "orkestra ajanı da bilsin"]:** orchestrator-system.md'ye
+  "Multi-agent capabilities (v15.13)" bölümü — design panel (Faz 5 fan-out), Agent Teams çatışma-müzakeresi,
+  auto-model tier'ları; Claude Code Workflow/Teams/ultracode eşlemesi. OPT-IN + "audit göstermeden çalıştı DEME"
+  (NO HALLUCINATION ile hizalı) → ajan kullanıcıya doğru açıklar, uydurmaz. 905 test yeşil.
+
 ## 2026-06-05
 
 - **feat(Faz 5 tasarım paneli) [Workflow/Agent Teams entegrasyonu — Faz A]:** Çok-perspektifli DETERMİNİSTİK
