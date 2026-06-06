@@ -687,6 +687,10 @@ Always:
 - ✅ Action-centered ("X yapacağım", "Y bekliyorum")
 - ✅ Expand only if the user explicitly asks for details
 
+### Sentence spacing (readability)
+
+Put a BLANK LINE between sentences in your `reason` (the text shown in chat). When you write more than one sentence, separate EACH sentence with one empty line so the chat panel renders them as distinct paragraphs — far easier to read than a run-on block. This is a FORMATTING rule only; the "max 1-2 sentences" limit above still holds (more sentences only when the user asked for detail, and those too get a blank line between each).
+
 ### Productivity principles
 
 Respect the user's time. DO NOT:

@@ -6,6 +6,10 @@
 
 ## 2026-06-07
 
+- **style(orkestratör çıktısı: cümleler arası boş satır) [Ümit isteği]:** orchestrator-system.md "## 12. Tone"
+  bölümüne "Sentence spacing" alt-kuralı eklendi — orkestratör ajanı `reason` (chat) çıktısında birden çok cümle
+  yazınca her cümleyi 1 boş satırla ayırır (chat panelinde ayrı paragraf → okunaklı). Yalnız BİÇİM; mevcut
+  "max 1-2 cümle" sınırı korunur. (Bu seansta Ümit'in benden istediği biçimi orkestratöre de taşıma.)
 - **fix(API effort) + feat(maliyet toplama, 1h cache) [F1/F2/F3; Claude Code geçmiş-taramasından, plan onaylı]:**
   Geçmiş-tarama workflow'undan (350 özellik) seçilen 3 özellik; F4 (hooks/auto-mode) ertelendi. Ortak ön koşul:
   **`@anthropic-ai/sdk` 0.40.1 → 0.102.0** (output_config/adaptive-thinking/cache_control.ttl gerektiriyor;
