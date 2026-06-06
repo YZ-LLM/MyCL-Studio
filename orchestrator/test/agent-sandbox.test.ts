@@ -110,10 +110,15 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS denyRead", () => {
   });
   const denyRead = deny(settings);
 
-  it("korunan kullanıcı verisini reddeder (path + path/**)", () => {
+  it("korunan veriyi reddeder; darwin DIR-ONLY (subpath → içerik kapsanır, /** redundant=E2BIG için atlanır)", () => {
+    const permDeny = (settings.permissions as { deny?: string[] })?.deny ?? [];
     for (const name of ["Music", "Pictures", "Documents", "Desktop", "Downloads", ".ssh", ".aws"]) {
       expect(denyRead).toContain(`${HOME}/${name}`);
-      expect(denyRead).toContain(`${HOME}/${name}/**`);
+      // darwin: /** REDUNDANT (Seatbelt subpath semantiği — V3 ampirik) → çekirdek denyRead'den çıkarıldı.
+      expect(denyRead).not.toContain(`${HOME}/${name}/**`);
+      // Prompt-katmanı (defense-in-depth, E2BIG'i etkilemez) HER İKİ formu korur.
+      expect(permDeny).toContain(`Read(/${HOME}/${name})`);
+      expect(permDeny).toContain(`Read(/${HOME}/${name}/**)`);
     }
   });
 
@@ -128,8 +133,8 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS denyRead", () => {
     }
   });
 
-  it("denyCount = reddedilen girdi × 2 (9 girdi: 5 medya + .ssh + .aws + 2 proje)", () => {
-    expect(denyCount).toBe(9 * 2);
+  it("denyCount = reddedilen girdi (9: 5 medya + .ssh + .aws + 2 proje) — darwin dir-only, /** yok", () => {
+    expect(denyCount).toBe(9);
   });
 });
 
@@ -253,6 +258,8 @@ describe("agent-sandbox · defense-in-depth: permissions.deny paritesi (macOS)",
     const denyRead = deny(settings);
     const permDeny = (settings.permissions as { deny: string[] }).deny;
     expect(permDeny).toContain(`Read(/${HOME}/Music)`);
-    expect(permDeny.length).toBe(denyRead.length);
+    expect(permDeny).toContain(`Read(/${HOME}/Music/**)`); // prompt-katmanı HER İKİ formu korur
+    // darwin: çekirdek denyRead dir-only (/** redundant, E2BIG için), permDeny iki-form → 2×.
+    expect(permDeny.length).toBe(denyRead.length * 2);
   });
 });

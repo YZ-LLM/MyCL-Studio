@@ -6,6 +6,15 @@
 
 ## 2026-06-06
 
+- **fix(agent-sandbox denyRead dir-only + brace-trap belgele) [WS1; ampirik /tmp testleri]:** macOS'ta
+  `buildAgentSandboxSettings` denyRead'i **dir-only** yapar — Seatbelt subpath semantiği bir dizini reddederken
+  içeriğini de reddeder (V3: dir-only "secret" → "secret/data.txt" engellendi), `/**` REDUNDANT → atlamak profili
+  ~2x küçültür. Linux (bwrap) subpath semantiği doğrulanmadı → `/**` KORUNUR. `permissions.deny` (prompt-katmanı,
+  defense-in-depth) HER İKİ formu korur (yeni ayrı `permDeny` listesi; E2BIG'i etkilemez). **Güvenlik kritik bulgu
+  kodda belgelendi:** brace-glob `{a,b}` Seatbelt'te GENİŞLEMEZ (V2 sızdırdı) → denyRead'i glob-compress ETME
+  (sessiz açık). **DÜRÜST sınır:** harness'te claude'un per-Bash E2BIG'i (sandbox-exec profil boyutu) bununla TAM
+  kapanmaz (harness-özgü — sandbox KAPATINCA Bash çalışıyor; ÜRETİM zaten çalışıyor); WS2 canlı doğrulaması için
+  harness'te `agent_sandbox_policy="off"`, üretim "enforce" kalır.
 - **feat(claude oto-güncelleme) [Ümit isteği: "her açıldığında güncellesin otomatik"]:** MyCL açılışında
   (App.start) claude CLI'yı arka planda otomatik günceller — yeni `claude-updater.ts` (`autoUpdateClaude`):
   non-blocking (boot'u geciktirmez), feature flag `features.auto_update_claude` (default AÇIK), test/CI/harness'ta

@@ -213,14 +213,28 @@ export function buildAgentSandboxSettings(params: {
   }
 
   const allow = runtimeAllowFor(platform);
+  // İKİ AYRI liste (v15.13, ampirik doğrulama — /tmp testleri):
+  //  - denyRead = ÇEKİRDEK sandbox (claude bunu her Bash çağrısında sandbox-exec/bwrap profil
+  //    argv'sine çevirir → BÜYÜRSE "spawn E2BIG: argument list too long"). Bu yüzden DARWIN'de
+  //    `/**`'i ATLA: Seatbelt subpath semantiği → bir dizini reddetmek İÇERİĞİNİ de reddeder
+  //    (V3: dir-only "secret" → "secret/data.txt" engellendi) → `/**` REDUNDANT, atlamak güvenli +
+  //    profili ~2x küçültür. Linux (bwrap) subpath semantiği doğrulanmadı → `/**`'i KORU.
+  //    DİKKAT: brace-glob `{a,b}` Seatbelt'te GENİŞLEMİYOR (V2: sızdırdı) → glob-compress GÜVENLİ DEĞİL.
+  //  - permDeny = prompt-katmanı (defense-in-depth, E2BIG'i ETKİLEMEZ) → her iki formu KORU.
   const denyRead: string[] = [];
+  const permDeny: string[] = [];
   for (const name of homeEntries) {
     if (allow.has(name)) continue;
     const entry = pathPosix.join(home, name);
     // Proje bu girdiyse veya ALTINDAYSA → DENYLEME (proje okunur kalır). path.sep
     // ile (hardcoded '/' değil) — POSIX'te '/'; çapraz-platform doğru.
     if (projectRoot === entry || projectRoot.startsWith(entry + pathPosix.sep)) continue;
-    denyRead.push(entry, `${entry}/**`);
+    if (platform === "darwin") {
+      denyRead.push(entry); // subpath → içerik de reddedilir; /** redundant (E2BIG için bırakıldı)
+    } else {
+      denyRead.push(entry, `${entry}/**`);
+    }
+    permDeny.push(`Read(/${entry})`, `Read(/${entry}/**)`);
   }
   const settings: Record<string, unknown> = {
     ...base,
@@ -231,7 +245,7 @@ export function buildAgentSandboxSettings(params: {
       filesystem: { denyRead },
     },
     // Defense-in-depth: Read tool'unu da (prompt katmanı) reddet — `//abs` mutlak yol.
-    permissions: { deny: denyRead.map((d) => `Read(/${d})`) },
+    permissions: { deny: permDeny },
   };
   return { settings, denyCount: denyRead.length };
 }
