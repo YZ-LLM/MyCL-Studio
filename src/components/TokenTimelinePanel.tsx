@@ -23,6 +23,15 @@ function fmt(n: number): string {
   return n.toLocaleString("tr-TR");
 }
 
+function fmtUsd(n: number): string {
+  return "$" + n.toFixed(4);
+}
+
+/** "claude-opus-4-8" → "opus-4-8" (kompakt gösterim). */
+function shortModel(m: string): string {
+  return m.replace(/^claude-/, "");
+}
+
 export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
   if (!open) return null;
 
@@ -33,6 +42,12 @@ export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
   const grandOut = sorted.reduce((s, c) => s + c.output_tokens, 0);
   const grandCacheRead = sorted.reduce((s, c) => s + c.cache_read_input_tokens, 0);
   const grandTurns = sorted.reduce((s, c) => s + c.turns, 0);
+  // F1: gerçek $ yalnız CLI fazlarından gelir (API'de undefined). Karışık session →
+  // toplamın "yalnız CLI fazları" olduğunu görünür belirt (uydurma $ yok).
+  const usdRecs = sorted.filter((c) => typeof c.total_cost_usd === "number");
+  const grandUsd = usdRecs.reduce((s, c) => s + (c.total_cost_usd ?? 0), 0);
+  const hasUsd = usdRecs.length > 0;
+  const mixedUsd = hasUsd && usdRecs.length < sorted.length;
 
   return (
     <aside
@@ -101,6 +116,12 @@ export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
             <div>
               ↧ giriş {fmt(grandIn)} · ↥ çıkış {fmt(grandOut)} · cache-read {fmt(grandCacheRead)}
             </div>
+            {hasUsd && (
+              <div>
+                💵 <strong>{fmtUsd(grandUsd)}</strong>
+                {mixedUsd ? " (yalnız CLI fazları; API fazları $ vermez)" : ""}
+              </div>
+            )}
           </div>
           <ul style={{ listStyle: "none", margin: 0, padding: 8, overflowY: "auto", flex: 1 }}>
             {sorted.map((c, i) => {
@@ -116,7 +137,10 @@ export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
                       Faz {c.phase}
                       {c.iteration > 1 ? ` (iter ${c.iteration})` : ""} · {c.turns} tur
                     </span>
-                    <span style={{ color: "var(--fg-dim, #aaa)" }}>{fmt(total)} t</span>
+                    <span style={{ color: "var(--fg-dim, #aaa)" }}>
+                      {fmt(total)} t
+                      {typeof c.total_cost_usd === "number" ? ` · ${fmtUsd(c.total_cost_usd)}` : ""}
+                    </span>
                   </div>
                   <div
                     style={{
@@ -137,7 +161,15 @@ export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
                   <div style={{ fontSize: 10, color: "var(--fg-dim, #888)", marginTop: 2 }}>
                     ↧ {fmt(c.input_tokens)} · ↥ {fmt(c.output_tokens)}
                     {c.cache_read_input_tokens > 0 ? ` · cache ${fmt(c.cache_read_input_tokens)}` : ""}
+                    {c.model ? ` · ${shortModel(c.model)}` : ""}
                   </div>
+                  {c.model_usage && Object.keys(c.model_usage).length > 1 && (
+                    <div style={{ fontSize: 9, color: "var(--fg-dim, #777)", marginTop: 1 }}>
+                      {Object.entries(c.model_usage)
+                        .map(([m, u]) => `${shortModel(m)}: ${fmt(u.input_tokens + u.output_tokens)}`)
+                        .join(" · ")}
+                    </div>
+                  )}
                 </li>
               );
             })}

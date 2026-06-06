@@ -60,6 +60,13 @@ export interface ClaudeCodeFlags {
    * görüşünü önler). Yani "gerçek çok-ajanlı derinlik" umbrella flag'i: tasarım müzakeresi + debug.
    */
   agent_teams_optin?: boolean;
+  /**
+   * v15.14 (F2): Prompt cache ömrü. "5m" (default): mevcut davranış (Anthropic
+   * varsayılanı). "1h": uzun pipeline koşularında cache-hit'i artırır → maliyet
+   * düşer (1h cache-write 2x, cache-read 0.1x). API yolu: `cache_control.ttl:"1h"`.
+   * CLI/abonelik yolu: `ENABLE_PROMPT_CACHING_1H=1` env. Settings'ten seçilir.
+   */
+  cache_ttl?: "5m" | "1h";
 }
 
 export interface ApiKeys {
@@ -208,6 +215,8 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
   design_workflow: "off",
   // v15.13 (Layer B): çatışma → gerçek Agent Teams müzakeresi default KAPALI (opt-in, maliyet).
   agent_teams_optin: false,
+  // v15.14 (F2): prompt cache ömrü default 5dk (mevcut davranış; geriye uyum). "1h" opt-in.
+  cache_ttl: "5m",
 };
 
 const DEFAULT_TIMEOUTS = {

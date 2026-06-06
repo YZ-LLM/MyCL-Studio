@@ -104,6 +104,7 @@ import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
+import { setCacheTtl } from "./codegen/cli-backend.js";
 import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
@@ -127,7 +128,7 @@ import { loadI18n, t } from "./i18n.js";
 import { log } from "./logger.js";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join as pathJoin } from "node:path";
-import type { PhaseId, PhaseSpec, State } from "./types.js";
+import type { CostRecord, PhaseId, PhaseSpec, State } from "./types.js";
 import type { MyclConfig } from "./config.js";
 
 /**
@@ -357,6 +358,8 @@ async function handleOpenProject(path: string): Promise<void> {
     // v15.11 GÜVENLİK: ajan sandbox politikasını config'ten set et (spawn'lar okur).
     if (runtime.config) {
       setSandboxPolicy(runtime.config.claude_code_flags.agent_sandbox_policy ?? "enforce");
+      // F2: CLI/abonelik spawn'larında 1h prompt cache (ENABLE_PROMPT_CACHING_1H) için.
+      setCacheTtl(runtime.config.claude_code_flags.cache_ttl);
     }
     // v15.11: Açılışta mevcut UI kullanma kılavuzunu "Kılavuz" sekmesine push
     // et (varsa). Yoksa sessiz — bootstrap arka planda üretip sonra emit eder.
@@ -790,6 +793,7 @@ async function handleSaveSelectedModels(
     backends?: Partial<AgentBackends>;
     design_workflow?: ClaudeCodeFlags["design_workflow"];
     agent_teams_optin?: boolean;
+    cache_ttl?: ClaudeCodeFlags["cache_ttl"];
   },
 ): Promise<void> {
   log.info("orchestrator", "save_selected_models", payload);
@@ -800,7 +804,7 @@ async function handleSaveSelectedModels(
   try {
     // v15.13: tasarım flag'lerini (design_workflow/agent_teams_optin) modellerden ayır;
     // gerisi (translator/main/orchestrator/model_tiers) selected_models'e gider.
-    const { effort, backends, design_workflow, agent_teams_optin, ...sel } = payload;
+    const { effort, backends, design_workflow, agent_teams_optin, cache_ttl, ...sel } = payload;
     await persistSelectedModels(sel as SelectedModels);
     // v15.8: Efor + v15.13: tasarım fan-out flag'leri — Modeller sekmesinde modellerle
     // birlikte kaydedilir. CLI backend aktifse efor `--effort` olarak kullanılır.
@@ -815,9 +819,14 @@ async function handleSaveSelectedModels(
     if (typeof agent_teams_optin === "boolean") {
       flagsPatch.agent_teams_optin = agent_teams_optin;
     }
+    if (cache_ttl === "5m" || cache_ttl === "1h") {
+      flagsPatch.cache_ttl = cache_ttl;
+    }
     if (Object.keys(flagsPatch).length > 0) {
       const { persistClaudeCodeFlags } = await import("./config.js");
       await persistClaudeCodeFlags(flagsPatch);
+      // F2: CLI spawn env'i hemen güncelle (yeniden başlatmaya gerek kalmadan).
+      if (flagsPatch.cache_ttl) setCacheTtl(flagsPatch.cache_ttl);
     }
     // v15.8: rol başına backend (API/Abonelik) — Modeller sekmesinde modellerle
     // birlikte kaydedilir. Geçerli değerler "api"|"cli"|"auto"; gerisi yok sayılır.
@@ -939,6 +948,7 @@ async function handleReadSelectedModels(): Promise<void> {
       model_tiers: sel?.model_tiers,
       design_workflow: flags.design_workflow ?? "off",
       agent_teams_optin: flags.agent_teams_optin ?? false,
+      cache_ttl: flags.cache_ttl ?? "5m",
     });
   } catch (err) {
     log.error("orchestrator", "read_selected_models failed", err);
@@ -1691,7 +1701,16 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     // Mekanik/atlanan fazlar token üretmez → kova boş → yazılmaz.
     const prevCost = takePhaseCost();
     if (prevCost && (prevCost.turns > 0 || prevCost.input_tokens > 0)) {
-      const costRec = {
+      // F1: birincil model = en çok token üreten (model_usage'tan); yalnız TANIMLI
+      // alanları kopyala (USD yoksa undefined → panel token-only; uydurma $ yok).
+      const mu = prevCost.model_usage;
+      const primaryModel = mu
+        ? Object.entries(mu).sort(
+            (a, b) =>
+              b[1].input_tokens + b[1].output_tokens - (a[1].input_tokens + a[1].output_tokens),
+          )[0]?.[0]
+        : undefined;
+      const costRec: CostRecord = {
         ts: Date.now(),
         phase: prevCost.phase as PhaseId,
         iteration: prevCost.iteration,
@@ -1700,6 +1719,11 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         output_tokens: prevCost.output_tokens,
         cache_read_input_tokens: prevCost.cache_read_input_tokens,
         cache_creation_input_tokens: prevCost.cache_creation_input_tokens,
+        ...(prevCost.total_cost_usd !== undefined
+          ? { total_cost_usd: prevCost.total_cost_usd }
+          : {}),
+        ...(primaryModel ? { model: primaryModel } : {}),
+        ...(mu ? { model_usage: mu } : {}),
       };
       await appendCost(state.project_root, costRec).catch((err) =>
         log.warn("orchestrator", "cost write failed (non-blocking)", err),

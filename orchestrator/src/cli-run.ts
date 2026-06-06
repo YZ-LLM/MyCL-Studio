@@ -11,6 +11,7 @@ import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import { noteRateLimitEvent, type RateLimitInfo } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import type { TokenUsage } from "./cli-session.js";
+import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 
 export interface CliRunOpts {
@@ -192,6 +193,10 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
             cache_read_input_tokens: Number(u.cache_read_input_tokens ?? 0),
             cache_creation_input_tokens: Number(u.cache_creation_input_tokens ?? 0),
           };
+          // F1: faz-maliyet kovasını CLI modunda da doldur (eskiden yalnız API yolu
+          // doldururdu → CLI'da panel boştu) + gerçek $ + model. Aktif kova yoksa no-op.
+          const costUsd = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
+          recordTokenUsage({ ...usage, total_cost_usd: costUsd, model: opts.modelId });
         }
       }
     });

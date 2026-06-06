@@ -32,7 +32,7 @@ import { guardSandboxOrWarn, sandboxSettingsArgs } from "../agent-sandbox.js";
 import { noteRateLimitEvent, type RateLimitInfo } from "../cli-rate-limit.js";
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
 import type { CodegenBackend } from "./backend.js";
-import { emitChatMessage, emitClaudeStream } from "../ipc.js";
+import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "../ipc.js";
 import { log } from "../logger.js";
 import { globalConfigDir } from "../paths.js";
 import { safeEnv } from "../safe-env.js";
@@ -106,6 +106,14 @@ export function isClaudeAvailable(): boolean {
  * konumları PATH'in başına eklenir → claude kendi alt-process'lerini (node, rg)
  * ve kendini bulabilsin. API key ENJEKTE EDİLMEZ → abonelik (oauthAccount).
  */
+// v15.14 (F2): prompt cache ömrü — modül-singleton (setSandboxPolicy deseni). index.ts
+// config yüklenince setCacheTtl ile set eder; claudeSpawnEnv "1h"de ENABLE_PROMPT_CACHING_1H
+// enjekte eder (CLI/abonelik yolu; 3 spawn noktası bu env'i kullanır → tek nokta, threadleme yok).
+let _cacheTtl: "5m" | "1h" = "5m";
+export function setCacheTtl(ttl: "5m" | "1h" | undefined): void {
+  _cacheTtl = ttl === "1h" ? "1h" : "5m";
+}
+
 export function claudeSpawnEnv(): NodeJS.ProcessEnv {
   const base = safeEnv();
   const home = homedir();
@@ -119,7 +127,13 @@ export function claudeSpawnEnv(): NodeJS.ProcessEnv {
     "/bin",
   ].filter(Boolean);
   const prev = base.PATH ?? "";
-  return { ...base, PATH: [...extras, prev].filter(Boolean).join(":"), LC_ALL: "C" };
+  return {
+    ...base,
+    PATH: [...extras, prev].filter(Boolean).join(":"),
+    LC_ALL: "C",
+    // F2: 1 saatlik prompt cache (yalnız "1h"de; aksi env'e KOYMA = 5dk varsayılan).
+    ...(_cacheTtl === "1h" ? { ENABLE_PROMPT_CACHING_1H: "1" } : {}),
+  };
 }
 
 /**
@@ -315,15 +329,16 @@ export class CliCodegenBackend implements CodegenBackend {
       const cost = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
       const usage = ev.usage as Record<string, unknown> | undefined;
       if (usage) {
-        emitClaudeStream({
-          sub: "token_usage",
-          usage: {
-            input_tokens: Number(usage.input_tokens ?? 0),
-            output_tokens: Number(usage.output_tokens ?? 0),
-            cache_read_input_tokens: Number(usage.cache_read_input_tokens ?? 0),
-            cache_creation_input_tokens: Number(usage.cache_creation_input_tokens ?? 0),
-          },
-        });
+        const u = {
+          input_tokens: Number(usage.input_tokens ?? 0),
+          output_tokens: Number(usage.output_tokens ?? 0),
+          cache_read_input_tokens: Number(usage.cache_read_input_tokens ?? 0),
+          cache_creation_input_tokens: Number(usage.cache_creation_input_tokens ?? 0),
+        };
+        emitClaudeStream({ sub: "token_usage", usage: u });
+        // F1: codegen fazının faz-maliyet kovasını doldur + gerçek $ + model (eskiden
+        // cost yalnız loglanıp atılıyordu; kova hiç dolmuyordu). Aktif kova yoksa no-op.
+        recordTokenUsage({ ...u, total_cost_usd: cost, model: this.opts.modelId });
       }
       if (cost !== undefined) {
         log.info("cli-backend", "run cost", { cost_usd: cost, turns });

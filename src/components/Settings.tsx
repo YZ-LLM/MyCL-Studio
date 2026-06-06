@@ -60,6 +60,7 @@ interface Props {
     modelTiers?: ModelTiers,
     designWorkflow?: DesignWorkflowMode,
     agentTeamsOptIn?: boolean,
+    cacheTtl?: "5m" | "1h",
   ) => void;
   /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
   currentBackends?: AgentBackends;
@@ -79,6 +80,8 @@ interface Props {
   currentDesignWorkflow?: DesignWorkflowMode;
   /** v15.13: mevcut Agent Teams müzakere opt-in. */
   currentAgentTeamsOptIn?: boolean;
+  /** v15.14 (F2): mevcut prompt cache ömrü (5m/1h). */
+  currentCacheTtl?: "5m" | "1h";
 }
 
 function ModelDropdown({
@@ -215,6 +218,7 @@ export function Settings({
   currentModelTiers,
   currentDesignWorkflow,
   currentAgentTeamsOptIn,
+  currentCacheTtl,
 }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [translatorSel, setTranslatorSel] = useState<string>(
@@ -248,6 +252,8 @@ export function Settings({
   const [agentTeamsOptInSel, setAgentTeamsOptInSel] = useState<boolean>(
     currentAgentTeamsOptIn ?? false,
   );
+  // v15.14 (F2): prompt cache ömrü (5m/1h).
+  const [cacheTtlSel, setCacheTtlSel] = useState<"5m" | "1h">(currentCacheTtl ?? "5m");
 
   // API Keys form state
   const [apiKeyTranslator, setApiKeyTranslator] = useState("");
@@ -534,6 +540,28 @@ export function Settings({
                   Fan-out rolleri işe göre OTOMATİK dağıtılır: architect/synthesizer/verifier→strong,
                   ux/security/data→balanced.
                 </p>
+                <p
+                  style={{
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: "var(--fg-dim)",
+                    margin: "8px 0 4px",
+                  }}
+                >
+                  Prompt cache ömrü
+                </p>
+                <select
+                  value={cacheTtlSel}
+                  onChange={(e) => setCacheTtlSel(e.target.value as "5m" | "1h")}
+                  style={{ width: "100%" }}
+                >
+                  <option value="5m">5 dakika (varsayılan)</option>
+                  <option value="1h">1 saat (uzun koşularda maliyet ↓)</option>
+                </select>
+                <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "4px 0 0" }}>
+                  1 saat: tekrar eden istem önekleri daha uzun cache'te kalır (cache-write 2x, cache-read 0.1x).
+                </p>
               </div>
               <button
                 type="button"
@@ -549,6 +577,7 @@ export function Settings({
                     modelTiersSel,
                     designWorkflowSel,
                     agentTeamsOptInSel,
+                    cacheTtlSel,
                   )
                 }
               >

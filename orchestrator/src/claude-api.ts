@@ -175,32 +175,85 @@ export class ClaudeApiError extends Error {
   override readonly name = "ClaudeApiError";
 }
 
-/** Ultracode API modunda extended-thinking budget (token). Yüksek = derin akıl yürütme. */
+/** Legacy (adaptive-öncesi model) ultracode API modunda extended-thinking budget (token). */
 export const ULTRACODE_THINKING_BUDGET = 16000;
+/** Adaptive yolda max_tokens tabanı — derin düşünmeye yer aç (yalnız TAVAN; üretilmeyen token ücretsiz). */
+export const ADAPTIVE_MAX_TOKENS_FLOOR = 32000;
+
+type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+const EFFORT_LEVELS = new Set<string>(["low", "medium", "high", "xhigh", "max"]);
 
 export interface ThinkingPlan {
-  thinking?: { type: "enabled"; budget_tokens: number };
-  /** Effektif max_tokens (thinking varsa budget+tampon). */
+  /** Adaptive (Opus 4.7+) VEYA enabled-budget (eski model ultracode). */
+  thinking?: { type: "adaptive" } | { type: "enabled"; budget_tokens: number };
+  /** Yalnız adaptive yolda — output effort seviyesi (thinking:adaptive ile etkili). */
+  output_config?: { effort: EffortLevel };
+  /** Effektif max_tokens. */
   max_tokens: number;
-  /** Extended thinking temperature unset/1 ister → caller temperature GÖNDERMEZ. */
+  /** Extended/adaptive thinking temperature unset/1 ister → caller temperature GÖNDERMEZ. */
   dropTemperature: boolean;
 }
 
 /**
- * SAF (test edilebilir): effort + tool_choice'tan API extended-thinking planı.
- * "ultracode" iki modda da uygulanır (CLI --settings; API burada thinking-budget).
- * KISIT: extended-thinking forced tool_choice (any/tool) ile UYUMSUZ → API reddeder;
- * bu yüzden thinking yalnız forced-OLMAYAN (auto/undefined) call'larda enable edilir
- * (classifier/extractor'lar forced → thinking'siz, davranış aynı). budget_tokens
- * max_tokens'tan KÜÇÜK olmalı → max_tokens'ı budget+4096'ya yükselt. ultracode DIŞI
- * effort'larda plan boştur → davranış birebir korunur (regresyon yok).
+ * Model adaptive-thinking + output_config.effort destekliyor mu (Opus 4.7+).
+ * Opus 4.8 (MyCL varsayılanı) `thinking:{type:"enabled",budget_tokens}`'i 400 ile REDDEDER →
+ * adaptive ZORUNLU. Eski modeller (opus 4.6/4.5/.., sonnet, haiku) budget_tokens'ı kabul eder →
+ * legacy yol (mevcut davranış korunur). İleriye-dönük: opus-4-(7+) regex + mythos preview.
+ */
+export function modelSupportsAdaptive(model: string): boolean {
+  const m = (model ?? "").toLowerCase();
+  if (m.includes("mythos")) return true;
+  const opus = m.match(/opus-4-(\d+)/);
+  if (opus) return Number(opus[1]) >= 7;
+  return false;
+}
+
+/**
+ * SAF (test edilebilir): prompt cache_control bloğu (F2). flags.cache_ttl="1h" → 1 saatlik
+ * TTL (uzun koşularda cache-hit ↑, maliyet ↓); aksi → 5dk (varsayılan, ttl alanı yok = mevcut
+ * davranış). SDK 0.102+ `cache_control.ttl: "5m"|"1h"` destekler (beta header gerekmez).
+ */
+export function buildCacheControl(flags?: {
+  cache_ttl?: "5m" | "1h";
+}): { type: "ephemeral"; ttl?: "1h" } {
+  return flags?.cache_ttl === "1h"
+    ? { type: "ephemeral", ttl: "1h" }
+    : { type: "ephemeral" };
+}
+
+/**
+ * SAF (test edilebilir): effort + tool_choice + model'den API thinking/effort planı.
+ * ADAPTIVE (Opus 4.7+): forced-OLMAYAN call'larda `thinking:{type:"adaptive"}` + `output_config.effort`
+ *   (ultracode → "max"); FORCED (classifier/extractor) → İKİSİ DE YOK (mevcut davranış = 0 risk; effort
+ *   zaten yalnız adaptive ile etkili, forced'ta adaptive yasak). max_tokens tavanı yükseltilir (ücretsiz).
+ * LEGACY (eski model): mevcut davranış BİREBİR — ultracode+!forced → budget_tokens enabled; aksi boş.
  */
 export function thinkingConfigFor(
   effort: string | undefined,
   toolChoice: { type: string } | undefined,
   baseMaxTokens: number,
+  supportsAdaptive: boolean,
 ): ThinkingPlan {
   const forced = toolChoice?.type === "any" || toolChoice?.type === "tool";
+
+  if (supportsAdaptive) {
+    if (forced) return { max_tokens: baseMaxTokens, dropTemperature: false };
+    const eff: EffortLevel | undefined =
+      effort === "ultracode"
+        ? "max"
+        : effort && EFFORT_LEVELS.has(effort)
+          ? (effort as EffortLevel)
+          : undefined;
+    if (!eff) return { max_tokens: baseMaxTokens, dropTemperature: false };
+    return {
+      thinking: { type: "adaptive" },
+      output_config: { effort: eff },
+      max_tokens: Math.max(baseMaxTokens, ADAPTIVE_MAX_TOKENS_FLOOR),
+      dropTemperature: true,
+    };
+  }
+
+  // Legacy (adaptive-öncesi modeller) — mevcut davranış korunur (regresyon yok).
   if (effort === "ultracode" && !forced) {
     const budget = ULTRACODE_THINKING_BUDGET;
     return {
@@ -246,7 +299,7 @@ export async function runTurn(
         {
           type: "text" as const,
           text: opts.system,
-          cache_control: { type: "ephemeral" as const },
+          cache_control: buildCacheControl(config.claude_code_flags),
         },
       ]
     : opts.system;
@@ -257,17 +310,22 @@ export async function runTurn(
   const toolsParam: Anthropic.Tool[] | undefined = opts.tools && opts.tools.length > 0
     ? (opts.tools.map((t, i) =>
         i === opts.tools!.length - 1
-          ? { ...t, cache_control: { type: "ephemeral" as const } }
+          ? { ...t, cache_control: buildCacheControl(config.claude_code_flags) }
           : t,
       ) as unknown as Anthropic.Tool[])
     : undefined;
 
-  // Ultracode (item 7, iki mod): CLI tarafı --settings {ultracode} alıyor; API'de
-  // burada extended-thinking budget + reminder uygulanır. ultracode DIŞI effort'ta plan
-  // boş + reminder yok → davranış BİREBİR korunur (regresyon yok). Forced tool_choice
-  // (any/tool) thinking ile uyumsuz → thinkingConfigFor onu zaten thinking'siz bırakır.
+  // Effort/thinking (F3): Opus 4.7+ → adaptive thinking + output_config.effort (eski
+  // budget_tokens yolu Opus 4.8'de 400 verir); eski modeller → legacy budget yolu. Forced
+  // tool_choice (any/tool) → thinking YOK (mevcut davranış). ultracode → effort:"max" + reminder.
+  // ultracode DIŞI effort ARTIK API'ye geçer (eskiden sessizce düşüyordu).
   const effort = config.claude_code_flags?.effort;
-  const thinkingPlan = thinkingConfigFor(effort, opts.tool_choice, opts.max_tokens ?? 4096);
+  const thinkingPlan = thinkingConfigFor(
+    effort,
+    opts.tool_choice,
+    opts.max_tokens ?? 4096,
+    modelSupportsAdaptive(opts.model),
+  );
   const systemEffective: Array<Anthropic.TextBlockParam> =
     effort === "ultracode"
       ? [
@@ -304,6 +362,7 @@ export async function runTurn(
         tool_choice: opts.tool_choice as
           | Anthropic.MessageCreateParams["tool_choice"]
           | undefined,
+        ...(thinkingPlan.output_config ? { output_config: thinkingPlan.output_config } : {}),
         ...(thinkingPlan.thinking ? { thinking: thinkingPlan.thinking } : {}),
       });
 
@@ -350,7 +409,9 @@ export async function runTurn(
         model: opts.model,
       });
       // v15.7 (2026-05-26): Session-wide token totals accumulator (madde 13).
-      recordTokenUsage(usage);
+      // F1: model ekle (per-model döküm). API yolu USD vermez → total_cost_usd undefined
+      // (uydurma $ yok). cache token'ları zaten usage'da.
+      recordTokenUsage({ ...usage, model: opts.model });
 
       // Tool_use blocklarını topla.
       for (const block of finalMessage.content) {

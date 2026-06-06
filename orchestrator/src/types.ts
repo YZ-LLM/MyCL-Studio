@@ -473,11 +473,23 @@ export interface DecisionRecord {
   reason: string;                     // gerekçe (needed_optional_phases_reason / risk özeti / "")
 }
 
+/** Tek model için faz-içi token dökümü (CostRecord.model_usage değeri). */
+export interface ModelTokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
 /**
  * Per-faz token gözlemi — `.mycl/cost.jsonl` (append-only, audit/decisions kardeşi).
  * Faz tamamlanınca o fazın tüm turn'lerinin token toplamı yazılır. Maliyet
- * regresyonu (örn. Faz 0'ın 185k→90k optimizasyonu) bu kayıttan görünür. $ değil
- * TOKEN tutulur (deterministik; fiyat tablosu yok, fiyat zamanla kayar).
+ * regresyonu (örn. Faz 0'ın 185k→90k optimizasyonu) bu kayıttan görünür.
+ *
+ * v15.14 (F1): TOKEN her zaman; `total_cost_usd` yalnız CLI/abonelik result'tan gelir
+ * (API yolu USD vermez → undefined; uydurma $ yok). `model`/`model_usage` per-model
+ * döküm için (recordTokenUsage akışından birikir). Tümü opsiyonel → JSONL additive,
+ * eski kayıtlarda undefined (migration yok).
  */
 export interface CostRecord {
   ts: number;
@@ -488,6 +500,12 @@ export interface CostRecord {
   output_tokens: number;
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
+  /** Gerçek $ — yalnız CLI result'tan; API/eksikse undefined (token-only gösterilir). */
+  total_cost_usd?: number;
+  /** Bu fazda en çok token üreten (birincil) model — kısa gösterim için. */
+  model?: string;
+  /** Per-model token dökümü (faz birden çok model kullanabilir). */
+  model_usage?: Record<string, ModelTokenUsage>;
 }
 
 // Saf gate fonksiyonu — yan etki yok, sadece karar.

@@ -13,7 +13,7 @@
     "e2e": "npm run build && node harness.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.40.0",
+    "@anthropic-ai/sdk": "^0.102.0",
     "csp_evaluator": "^1.1.8",
     "playwright": "^1.60.0",
     "typescript": "~5.8.3"

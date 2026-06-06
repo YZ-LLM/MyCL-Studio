@@ -175,6 +175,8 @@ export interface SelectedModelsEvent {
     design_workflow?: DesignWorkflowMode;
     /** v15.13: çatışma → gerçek Agent Teams müzakeresi opt-in. */
     agent_teams_optin?: boolean;
+    /** v15.14 (F2): prompt cache ömrü (5m/1h). */
+    cache_ttl?: "5m" | "1h";
   };
 }
 
@@ -280,8 +282,17 @@ export interface PipelineEndEvent {
   };
 }
 
+/** Tek model için faz-içi token dökümü (CostRecord.model_usage değeri). */
+export interface ModelTokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
 /** Token-timeline: tek bir fazın token harcaması (cost.jsonl satırı). Backend
- *  CostRecord'un frontend kopyası. */
+ *  CostRecord'un frontend kopyası. v15.14 (F1): total_cost_usd yalnız CLI'dan (API'de
+ *  undefined → $ gösterilmez); model/model_usage per-model döküm için (hepsi opsiyonel). */
 export interface CostRecord {
   ts: number;
   phase: PhaseId;
@@ -291,6 +302,9 @@ export interface CostRecord {
   output_tokens: number;
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
+  total_cost_usd?: number;
+  model?: string;
+  model_usage?: Record<string, ModelTokenUsage>;
 }
 
 /** Token-timeline: faz tamamlanınca CANLI yayınlanan tek-faz cost (realtime). */
@@ -420,6 +434,8 @@ export type OrchestratorCommand =
         design_workflow?: DesignWorkflowMode;
         /** v15.13: çatışma → gerçek Agent Teams müzakeresi opt-in. */
         agent_teams_optin?: boolean;
+        /** v15.14 (F2): prompt cache ömrü (5m/1h). */
+        cache_ttl?: "5m" | "1h";
       };
     }
   | { kind: "read_selected_models" }

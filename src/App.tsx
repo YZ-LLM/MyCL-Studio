@@ -603,6 +603,7 @@ function App() {
   const [currentModelTiers, setCurrentModelTiers] = useState<ModelTiers | undefined>(undefined);
   const [currentDesignWorkflow, setCurrentDesignWorkflow] = useState<DesignWorkflowMode | undefined>(undefined);
   const [currentAgentTeamsOptIn, setCurrentAgentTeamsOptIn] = useState<boolean | undefined>(undefined);
+  const [currentCacheTtl, setCurrentCacheTtl] = useState<"5m" | "1h" | undefined>(undefined);
   /**
    * Boot history load guard: request yolda iken effect re-fire ederse 2.
    * send'i bloklar. onProjectSelected'ta reset (yeni proje = fresh request).
@@ -678,6 +679,7 @@ function App() {
         if (ev.data.design_workflow) setCurrentDesignWorkflow(ev.data.design_workflow);
         if (typeof ev.data.agent_teams_optin === "boolean")
           setCurrentAgentTeamsOptIn(ev.data.agent_teams_optin);
+        if (ev.data.cache_ttl) setCurrentCacheTtl(ev.data.cache_ttl);
       } else if (ev.kind === "phases_list") {
         setPhasesList(ev.data.phases);
       } else if (ev.kind === "features_value") {
@@ -736,6 +738,7 @@ function App() {
     modelTiers?: ModelTiers,
     designWorkflow?: DesignWorkflowMode,
     agentTeamsOptIn?: boolean,
+    cacheTtl?: "5m" | "1h",
   ) => {
     setSavingModels(true);
     if (effort) setCurrentEffort(effort);
@@ -743,6 +746,7 @@ function App() {
     if (modelTiers) setCurrentModelTiers(modelTiers);
     if (designWorkflow) setCurrentDesignWorkflow(designWorkflow);
     if (typeof agentTeamsOptIn === "boolean") setCurrentAgentTeamsOptIn(agentTeamsOptIn);
+    if (cacheTtl) setCurrentCacheTtl(cacheTtl);
     void orch.send({
       kind: "save_settings",
       data: {
@@ -754,6 +758,7 @@ function App() {
         ...(modelTiers ? { model_tiers: modelTiers } : {}),
         ...(designWorkflow ? { design_workflow: designWorkflow } : {}),
         ...(typeof agentTeamsOptIn === "boolean" ? { agent_teams_optin: agentTeamsOptIn } : {}),
+        ...(cacheTtl ? { cache_ttl: cacheTtl } : {}),
       },
     });
     // config_status sonrası modal kapanır
@@ -1051,6 +1056,7 @@ function App() {
       currentModelTiers={currentModelTiers}
       currentDesignWorkflow={currentDesignWorkflow}
       currentAgentTeamsOptIn={currentAgentTeamsOptIn}
+      currentCacheTtl={currentCacheTtl}
       modelsTranslator={modelsTranslator}
       modelsMain={modelsMain}
       onFetchModels={handleFetchModels}

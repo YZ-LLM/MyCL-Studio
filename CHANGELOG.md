@@ -4,6 +4,32 @@
 > Amaç: eski kararları/kuralları unutup bozmamak; bir işi değiştirmeden önce buraya bak.
 > Eski bir işi değiştirmek/silmek gerekiyorsa ÖNCE Ümit'e sor (kural, 2026-06-03).
 
+## 2026-06-07
+
+- **fix(API effort) + feat(maliyet toplama, 1h cache) [F1/F2/F3; Claude Code geçmiş-taramasından, plan onaylı]:**
+  Geçmiş-tarama workflow'undan (350 özellik) seçilen 3 özellik; F4 (hooks/auto-mode) ertelendi. Ortak ön koşul:
+  **`@anthropic-ai/sdk` 0.40.1 → 0.102.0** (output_config/adaptive-thinking/cache_control.ttl gerektiriyor;
+  kurulum sonrası 3-tip .d.ts gate'i + tsc temiz doğrulandı).
+  - **F3 (DOĞRULANMIŞ BUG FIX):** Opus 4.8 (varsayılan model) `thinking:{type:"enabled",budget_tokens}`'i artık
+    **400 ile reddediyor** → geçen hafta gönderdiğimiz ultracode-API yolu API modunda KIRIKTI. `claude-api.ts`
+    `thinkingConfigFor` model-koşullu yeniden yazıldı + yeni saf `modelSupportsAdaptive` (Opus 4.7+): adaptive
+    modeller → `thinking:{type:"adaptive"}` + `output_config:{effort}` (forced tool_choice'ta İKİSİ DE yok = 0
+    risk; ultracode→effort:"max"); eski modeller → legacy budget_tokens (mevcut davranış korunur). **Yan etki:**
+    ultracode-DIŞI effort (low..max) artık API'ye GEÇİYOR — eskiden sessizce düşüyordu; effort=max default'u API'de
+    artık onurlanır (maliyet ↑ olabilir, Settings'ten düşürülebilir). 12 test.
+  - **F1 (DOĞRULANMIŞ BOŞLUK + USD):** `recordTokenUsage` yalnız API yolundan çağrılıyordu → abonelik/CLI modunda
+    faz-maliyet kovası HİÇ dolmuyordu (panel boştu). Üç CLI koşucusu (`cli-run`/`cli-session`/`codegen/cli-backend`)
+    artık result'ta `recordTokenUsage`'ı `total_cost_usd` (gerçek $) + `model` ile çağırır. `CostRecord` += opsiyonel
+    `total_cost_usd`/`model`/`model_usage` (JSONL additive, migration yok). API yolu USD vermez → undefined (uydurma $
+    yok). `TokenTimelinePanel` $ + model + per-model dökümü gösterir (karışık session'da "yalnız CLI fazları" notu).
+    **CANLI doğrulandı** (abonelik gerçek $0.115 döndürdü). 5 test.
+  - **F2 (opt-in 1h cache):** `claude_code_flags.cache_ttl` ("5m" default | "1h"). API: saf `buildCacheControl` →
+    `cache_control.ttl:"1h"`. CLI: `setCacheTtl` modül-singleton (setSandboxPolicy deseni) → `claudeSpawnEnv`
+    `ENABLE_PROMPT_CACHING_1H=1`. Settings'te "Prompt cache ömrü" seçici. 5 test.
+  - **NOT (scope):** API yolu (adaptive/output_config/1h-ttl gerçek kabulü) CLI-only test düzenimizde canlı
+    doğrulanamadı (no-API-test kuralı) → model-koşullu + konservatif (forced→thinking yok) + tip/test güvencesi.
+  - 934 test yeşil; SDK majör sıçraması mevcut çağrıları kırmadı (tsc temiz).
+
 ## 2026-06-06
 
 - **feat(Faz 0 Bash-inceleme: kanıta-dayalı hipotezler) [WS2; ultracode-3, minimal varyant A]:** `agent_teams_optin`
