@@ -6,6 +6,19 @@
 
 ## 2026-06-06
 
+- **feat(Faz 0 Bash-inceleme: kanıta-dayalı hipotezler) [WS2; ultracode-3, minimal varyant A]:** `agent_teams_optin`
+  açık + main backend **CLI/abonelik** iken, Faz 0 D1'den ÖNCE çok-perspektifli kök-neden **İNCELEMESİ** koşar —
+  yeni `hypothesis-investigation.ts` `runHypothesisInvestigations`: 3 mercek (state-data/async-timing/integration,
+  `HYPOTHESIS_ANGLES` design-fanout'tan reuse) PARALEL `runClaudeCli` ile, her biri `allowedTools:[Read,Grep,Glob,
+  Bash]` + `disallowedTools:[Write,Edit,MultiEdit,NotebookEdit]` → kodu GERÇEKTEN okur/arar (akıl-yürütme fan-out'unun
+  Bash'li kardeşi; saf kuzeni Bash YOK). Çıktı text-JSON `{kind:"hypothesis"}` → D1 user message'ına enjekte; **D1 yine
+  NORMAL koşar** (report_root_cause/D2 değişmez = regresyon-güvenli). **API modu** mevcut saf-akıl-yürütme fan-out'unu
+  KORUR (parite; backend-branch). MyCL-native fan-out (Promise.allSettled × N) — claude'un kendi Agent Teams'i değil.
+  Maliyet guardrail: gate + N=3 + per-inceleme idle-timeout. **CANLI doğrulandı** (abonelik, sandbox-off harness;
+  16.6s'de 3 mercek de buggy `counter.js`'i tam satır numarasıyla buldu — `notify()` count++'tan önce çağrılıyor;
+  E2BIG YOK). +5 test, 924 yeşil. **Not:** harness'te enforce-sandbox E2BIG'i (WS1) yüzünden canlı test sandbox-off
+  ile yapıldı; ÜRETİM "enforce" kalır (kullanıcıda claude Bash çalışıyor). Pure-CLI'da rate-limit+API-key yoksa
+  inceleme zarifçe atlanır (<2 → D1 normal).
 - **feat(spec gate: ui_complexity tier) [WS3; ultracode-3]:** Faz 2 sınıflandırıcısı artık projeyi UI
   karmaşıklığına göre de etiketler (`simple`/`moderate`/`complex`) — `has_database` desenini birebir izler:
   TOOL_DEF.input_schema'ya `ui_complexity` enum (required'a EKLENMEDİ = geriye-uyumlu) + SYSTEM_PROMPT guidance

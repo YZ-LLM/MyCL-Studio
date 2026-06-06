@@ -307,7 +307,7 @@ export async function negotiateConflicts(
 // mekanizma). Bu adaylar D1'in user message'ına enjekte edilir; D1 araştırarak doğrular/çürütür
 // (tünel-görüşünü önler). Tam paralel-İNCELEME (gerçek Workflow tool, Bash'li) ileride.
 
-const HYPOTHESIS_ANGLES: ReadonlyArray<{ key: string; angle: string }> = [
+export const HYPOTHESIS_ANGLES: ReadonlyArray<{ key: string; angle: string }> = [
   {
     key: "state-data",
     angle:

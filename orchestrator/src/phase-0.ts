@@ -23,6 +23,7 @@ import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
 import { runHypothesisFanout } from "./design-fanout.js";
+import { runHypothesisInvestigations } from "./hypothesis-investigation.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { ensureErrorCatalog } from "./errors-db.js";
 import { buildReverseImportGraph, getAffected } from "./fix/dep-graph/index.js";
@@ -301,22 +302,32 @@ export class Phase0Controller {
       .join("\n\n");
 
     // v15.13 (debug fan-out): agent_teams_optin açıksa D1'den ÖNCE çok-perspektifli kök-neden
-    // hipotezleri üret (state/async/integration; saf-akıl-yürütme, kanıt üzerine — Bash YOK) →
-    // D1 araştırmasına rehber (tünel-görüşünü önler). Başarısız/azsa sessizce atla; D1 yine normal
-    // koşar (regresyon yok). Tam paralel-İNCELEME (Bash'li, gerçek Workflow tool) ileride.
+    // hipotezleri üret (state/async/integration) → D1 araştırmasına rehber (tünel-görüşünü önler).
+    // İKİ MOD: CLI/abonelik → GERÇEK İNCELEME (Read/Grep/Glob/Bash ile kodu araştırır → kanıta-dayalı);
+    // API → saf-akıl-yürütme fan-out (parite; Bash'li forced-tool asimetrisinden kaçınır). Her ikisi de
+    // aynı contextWithHypotheses'e enjekte; D1 yine NORMAL koşar (başarısız/azsa sessizce atla = regresyon yok).
     let contextWithHypotheses = contextSuffix;
     if (this.config.claude_code_flags.agent_teams_optin) {
       try {
-        const hyps = await runHypothesisFanout(
-          this.config,
-          this.state.project_root,
-          bugReportEn,
-          contextSuffix,
-        );
+        const useInvestigation = backendForRole(this.config, "main") === "cli";
+        const hyps = useInvestigation
+          ? await runHypothesisInvestigations(
+              this.config,
+              this.state.project_root,
+              bugReportEn,
+              contextSuffix,
+            )
+          : await runHypothesisFanout(
+              this.config,
+              this.state.project_root,
+              bugReportEn,
+              contextSuffix,
+            );
         if (hyps.length >= 2) {
+          const modeTr = useInvestigation ? "İNCELEME — Bash'li" : "akıl-yürütme";
           emitChatMessage(
             "system",
-            `🔬 ${hyps.length} kök-neden hipotezi (çok-perspektifli) üretildi → D1 araştırmasına rehber.`,
+            `🔬 ${hyps.length} kök-neden hipotezi (çok-perspektifli ${modeTr}) üretildi → D1 araştırmasına rehber.`,
           );
           const block =
             "## Candidate root-cause hypotheses (multi-perspective — confirm or refute each during investigation)\n" +
@@ -327,7 +338,7 @@ export class Phase0Controller {
             phase: 0,
             event: "debug-hypotheses-generated",
             caller: "mycl-orchestrator",
-            detail: `count=${hyps.length}`,
+            detail: `count=${hyps.length} mode=${useInvestigation ? "investigation" : "reasoning"}`,
           });
         }
       } catch (err) {
