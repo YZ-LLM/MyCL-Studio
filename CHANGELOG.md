@@ -6,6 +6,17 @@
 
 ## 2026-06-07
 
+- **security(least-privilege: yalnız gerekli Tauri izinleri) [Ümit isteği: "sadece gerekli izinleri istesin"]:**
+  `src-tauri/capabilities/default.json` plugin izinleri `:default` setlerinden frontend'in GERÇEKTEN çağırdığı
+  alt-izinlere daraltıldı (kaynak doğrulandı): `dialog:default`→`dialog:allow-open` (yalnız Splash dosya seçici);
+  `opener:default`→`opener:allow-open-url`+`allow-default-urls` (ChatPanel openUrl; scope http/https localhost
+  dev linkleri); `notification:default`→yalnız `notification:allow-is-permission-granted`. **Kritik bulgu:**
+  `requestPermission`/`sendNotification` Tauri komutu DEĞİL, web Notification API'si (`window.Notification`)
+  kullanıyor → Tauri izni gerekmez (kaynak okundu). DROP: dialog save/message/ask/confirm, opener
+  open-path/reveal-item-in-dir, notification notify/request-permission/channels/listeners/cancel/get-active vb.
+  (15+ kullanılmayan izin). core:* (window/webview/app/path/resources/event) çerçeve tabanı korundu (düşük-
+  hassasiyet, çerçeve gereği). **`cargo check` ile gerçek Tauri ACL resolver'ında doğrulandı** (npm run check
+  ACL'yi doğrulamaz). Yeni izin istemiyor, mevcutları kısıyor → kullanıcı işlevselliği aynı, saldırı yüzeyi daraldı.
 - **style(orkestratör çıktısı: cümleler arası boş satır) [Ümit isteği]:** orchestrator-system.md "## 12. Tone"
   bölümüne "Sentence spacing" alt-kuralı eklendi — orkestratör ajanı `reason` (chat) çıktısında birden çok cümle
   yazınca her cümleyi 1 boş satırla ayırır (chat panelinde ayrı paragraf → okunaklı). Yalnız BİÇİM; mevcut
