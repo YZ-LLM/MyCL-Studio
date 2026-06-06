@@ -500,7 +500,7 @@ export function Settings({
                     checked={agentTeamsOptInSel}
                     onChange={(e) => setAgentTeamsOptInSel(e.target.checked)}
                   />
-                  Tasarım çatışmalarını gerçek Agent Teams müzakeresiyle çöz (abonelik; ek maliyet)
+                  Gerçek çok-ajanlı derinlik: tasarım çatışma-müzakeresi (Agent Teams) + debug hipotez fan-out (abonelik; ek maliyet)
                 </label>
                 <p
                   style={{

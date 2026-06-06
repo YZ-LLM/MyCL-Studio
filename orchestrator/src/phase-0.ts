@@ -22,6 +22,7 @@ import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js"
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
+import { runHypothesisFanout } from "./design-fanout.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { ensureErrorCatalog } from "./errors-db.js";
 import { buildReverseImportGraph, getAffected } from "./fix/dep-graph/index.js";
@@ -299,6 +300,41 @@ export class Phase0Controller {
       .filter((s): s is string => typeof s === "string" && s.length > 0)
       .join("\n\n");
 
+    // v15.13 (debug fan-out): agent_teams_optin açıksa D1'den ÖNCE çok-perspektifli kök-neden
+    // hipotezleri üret (state/async/integration; saf-akıl-yürütme, kanıt üzerine — Bash YOK) →
+    // D1 araştırmasına rehber (tünel-görüşünü önler). Başarısız/azsa sessizce atla; D1 yine normal
+    // koşar (regresyon yok). Tam paralel-İNCELEME (Bash'li, gerçek Workflow tool) ileride.
+    let contextWithHypotheses = contextSuffix;
+    if (this.config.claude_code_flags.agent_teams_optin) {
+      try {
+        const hyps = await runHypothesisFanout(
+          this.config,
+          this.state.project_root,
+          bugReportEn,
+          contextSuffix,
+        );
+        if (hyps.length >= 2) {
+          emitChatMessage(
+            "system",
+            `🔬 ${hyps.length} kök-neden hipotezi (çok-perspektifli) üretildi → D1 araştırmasına rehber.`,
+          );
+          const block =
+            "## Candidate root-cause hypotheses (multi-perspective — confirm or refute each during investigation)\n" +
+            hyps.map((h, i) => `${i + 1}. ${h}`).join("\n");
+          contextWithHypotheses = contextSuffix ? `${contextSuffix}\n\n${block}` : block;
+          await appendAudit(this.state.project_root, {
+            ts: Date.now(),
+            phase: 0,
+            event: "debug-hypotheses-generated",
+            caller: "mycl-orchestrator",
+            detail: `count=${hyps.length}`,
+          });
+        }
+      } catch (err) {
+        log.warn("phase-0", "hypothesis fan-out failed (non-fatal)", err);
+      }
+    }
+
     const role = this.spec.model_role!;
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
@@ -329,7 +365,7 @@ export class Phase0Controller {
       reportTool = await this.runD1Cli(
         systemPrompt,
         (this.config.selected_models[role] ?? this.config.selected_models.main) as string,
-        contextSuffix,
+        contextWithHypotheses,
       );
     } else {
     this.base = createCodegenBackend({
@@ -342,7 +378,7 @@ export class Phase0Controller {
       apiKey: this.config.api_keys.main,
       initialUserMessage:
         "D1 — Investigation phase. Use Read/Grep/Bash to find the root cause. When ready, call `report_root_cause` with root_cause_en + 2-4 fix_options. Do NOT call any other tool to conclude." +
-        (contextSuffix ? `\n\n${contextSuffix}` : ""),
+        (contextWithHypotheses ? `\n\n${contextWithHypotheses}` : ""),
       tools,
       allowed_tool_names: [
         ...(this.spec.allowed_tools ?? []),

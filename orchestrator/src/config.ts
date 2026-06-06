@@ -55,6 +55,9 @@ export interface ClaudeCodeFlags {
    * design_workflow açık + conflicts[] varsa → abonelik (CLI) modunda kısa-ömürlü Agent Team
    * (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) çelişkileri müzakere eder; API modunda MyCL-simüle
    * cross-critique turu. ~2.5-5x token → opt-in.
+   * v15.13 (Faz 0): AYRICA debug hipotez fan-out'unu açar — Faz 0 D1'den önce 3 mercekten
+   * (state/async/integration) paralel kök-neden hipotezi üretilir + D1'e rehber verilir (tünel-
+   * görüşünü önler). Yani "gerçek çok-ajanlı derinlik" umbrella flag'i: tasarım müzakeresi + debug.
    */
   agent_teams_optin?: boolean;
 }

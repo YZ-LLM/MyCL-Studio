@@ -299,3 +299,79 @@ export async function negotiateConflicts(
   }
   return { ok: true, designMarkdown: parsed.designMarkdown, mode };
 }
+
+// ───────────────── Faz 0 (FIX): çok-perspektifli kök-neden hipotez fan-out ─────────────────
+// Debug'da tek ajan tek-ize takılabilir. D1 araştırmasından ÖNCE, toplanan DETERMİNİSTİK kanıt
+// (errors.db + git blame + dep-graph + probe) üzerine 3 farklı mercekten (state/async/integration)
+// PARALEL hipotez üretilir (saf-akıl-yürütme, Bash YOK → tasarım paneliyle aynı doğrulanabilir
+// mekanizma). Bu adaylar D1'in user message'ına enjekte edilir; D1 araştırarak doğrular/çürütür
+// (tünel-görüşünü önler). Tam paralel-İNCELEME (gerçek Workflow tool, Bash'li) ileride.
+
+const HYPOTHESIS_ANGLES: ReadonlyArray<{ key: string; angle: string }> = [
+  {
+    key: "state-data",
+    angle:
+      "state management & data flow (stale/incorrect state, missing update, wrong data shape, mutation)",
+  },
+  {
+    key: "async-timing",
+    angle:
+      "async / timing / lifecycle (await ordering, race conditions, effect dependencies, premature render)",
+  },
+  {
+    key: "integration-contract",
+    angle:
+      "integration & contract (API/DB contract mismatch, types, config/env, boundary/null errors)",
+  },
+];
+const HYPOTHESIS_MAX_TOKENS = 1200;
+
+function hypothesisSystemPrompt(angle: string): string {
+  return (
+    "You are a debugging hypothesis agent. READ-ONLY: reason ONLY on the provided bug report + evidence; " +
+    "do not investigate or run anything.\n" +
+    `Your lens: ${angle}.\n` +
+    "Propose the SINGLE most likely root-cause hypothesis FROM YOUR LENS, citing the specific evidence that " +
+    "supports it (name files / functions / values from the evidence). If your lens clearly does NOT fit this " +
+    'bug, say so in one line ("Not a <lens> issue: <why>"). Be concrete and specific to THIS bug; 2-4 sentences. ' +
+    "Your hypothesis feeds a follow-up investigation that will confirm or refute it."
+  );
+}
+
+/**
+ * Faz 0 D1 ÖNCESİ hipotez fan-out. Bug + kanıt üzerine 3 mercek paralel → aday kök-neden
+ * hipotezleri (etiketli metin dizisi). Backend-dispatch + per-rol model (hypothesis→balanced)
+ * runReasoningTurn ile (design fan-out ile aynı). Başarısız mercek atlanır; caller <2 ise atlar.
+ */
+export async function runHypothesisFanout(
+  config: MyclConfig,
+  projectRoot: string,
+  bugReport: string,
+  evidence: string,
+): Promise<string[]> {
+  const userMsg =
+    `Bug report:\n${bugReport}\n\n---\nDeterministic evidence (error catalog, git blame, dependency graph, UI probe):\n` +
+    (evidence && evidence.trim() ? evidence : "(none gathered)");
+  const settled = await Promise.allSettled(
+    HYPOTHESIS_ANGLES.map((h) =>
+      runReasoningTurn(
+        config,
+        hypothesisSystemPrompt(h.angle),
+        userMsg,
+        "hypothesis",
+        HYPOTHESIS_MAX_TOKENS,
+        projectRoot,
+      ),
+    ),
+  );
+  const out: string[] = [];
+  settled.forEach((r, i) => {
+    if (r.status === "fulfilled" && r.value) {
+      out.push(`[${HYPOTHESIS_ANGLES[i].key}] ${r.value}`);
+    } else {
+      const reason = r.status === "rejected" ? String(r.reason) : "boş çıktı";
+      log.warn("hypothesis-fanout", "hipotez başarısız", { angle: HYPOTHESIS_ANGLES[i].key, reason });
+    }
+  });
+  return out;
+}

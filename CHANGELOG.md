@@ -16,6 +16,15 @@
   "Multi-agent capabilities (v15.13)" bölümü — design panel (Faz 5 fan-out), Agent Teams çatışma-müzakeresi,
   auto-model tier'ları; Claude Code Workflow/Teams/ultracode eşlemesi. OPT-IN + "audit göstermeden çalıştı DEME"
   (NO HALLUCINATION ile hizalı) → ajan kullanıcıya doğru açıklar, uydurmaz. 905 test yeşil.
+- **feat(Faz 0 debug hipotez fan-out) [competing-hypotheses]:** `agent_teams_optin` açıkken Faz 0 D1
+  araştırmasından ÖNCE 3 mercekten (state-data / async-timing / integration-contract) PARALEL kök-neden
+  hipotezi üretilir (MyCL-native saf-akıl-yürütme, toplanan deterministik kanıt üzerine — Bash YOK;
+  hypothesis→balanced tier) → adaylar D1 user message'ına enjekte (audit `debug-hypotheses-generated`); D1
+  araştırarak doğrular/çürütür (tünel-görüşünü önler). CANLI doğrulandı (abonelik, 23s, 3 farklı somut
+  hipotez; async-timing merceği tek-ajanın kaçırabileceği effect-race'i yakaladı). `agent_teams_optin` artık
+  "gerçek çok-ajanlı derinlik" umbrella'sı (tasarım müzakeresi + debug fan-out). Tam paralel-İNCELEME (Bash'li,
+  gerçek Workflow tool) harness'te E2BIG yüzünden doğrulanamadığından ileriye bırakıldı. Yeni: design-fanout.ts
+  `runHypothesisFanout` + phase-0 wiring.
 
 ## 2026-06-05
 
