@@ -131,6 +131,13 @@ export function claudeSpawnEnv(): NodeJS.ProcessEnv {
     ...base,
     PATH: [...extras, prev].filter(Boolean).join(":"),
     LC_ALL: "C",
+    // v15.14 (macOS izin pencereleri): claude'un IDE/tarayıcı oto-bağlanma taraması
+    // (DevToolsActivePort: Chrome/Brave/Edge + kurulu-uygulama enumerasyonu) macOS TCC'de
+    // "başka uygulama verisi / Downloads / Apple Music" izinlerini tetikliyordu. MyCL claude'u
+    // HEADLESS sürüyor — IDE'ye bağlanmaya/gereksiz trafiğe İHTİYACI YOK → ikisini de kapat
+    // (claude env'le sorunsuz çalışıyor, doğrulandı). Tarama olmadan TCC prompt'u çıkmaz.
+    CLAUDE_CODE_AUTO_CONNECT_IDE: "0",
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     // F2: 1 saatlik prompt cache (yalnız "1h"de; aksi env'e KOYMA = 5dk varsayılan).
     ...(_cacheTtl === "1h" ? { ENABLE_PROMPT_CACHING_1H: "1" } : {}),
   };

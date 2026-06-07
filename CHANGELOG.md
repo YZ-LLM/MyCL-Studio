@@ -6,6 +6,15 @@
 
 ## 2026-06-07
 
+- **fix(macOS izin pencerelerinin GERÇEK kaynağı: claude IDE oto-bağlanma taraması) [Ümit: "indirilenler + apple music izni istedi"]:**
+  Whack-a-mole çözüldü: claude binary'sinde **ComputerUseSwift** + IDE oto-bağlanma var — `InstalledApps`
+  (kurulu uygulama enum → "Apple Music"), Chrome/Brave/Edge `DevToolsActivePort`, DESKTOP/DOCUMENTS/DOWNLOADS
+  tarıyor → macOS her korumalı kaynak için ayrı TCC izni soruyor (önce tarayıcı, sonra Downloads, sonra Music...).
+  Bu claude'un KENDİ taraması — MyCL'in `--settings` sandbox'ı kapsamıyor + her deploy ad-hoc imzayı değiştirip
+  TCC'yi sıfırlıyordu. **Çözüm:** `claudeSpawnEnv`'e `CLAUDE_CODE_AUTO_CONNECT_IDE=0` + `CLAUDE_CODE_DISABLE_
+  NONESSENTIAL_TRAFFIC=1` eklendi — MyCL claude'u HEADLESS sürüyor, IDE'ye bağlanma/gereksiz trafiğe ihtiyacı yok →
+  tarama yapılmaz → TCC prompt'u çıkmaz. claude'un bu env'lerle sorunsuz çalıştığı doğrulandı (ENVTEST_OK).
+  (binary strings ile teşhis: AUTO_CONNECT_IDE gate + InstalledApps/DevToolsActivePort.)
 - **fix(görünür hataları temizle: graceful degradation + A2 geri-al) [Ümit: "hala aynı sorunlar... sorunu aşartır"]:**
   Kullanıcı Cmd+Q ile tam yeniden başlattı → relevance fix aktif ama hata sürüyor → deployed-bağlamda claude-CLI
   çağrısının kendisi düşüyor (exit=1 / parse-edilemez; harness'te üretilemedi). Relevance NON-kritik (bağlamsız
