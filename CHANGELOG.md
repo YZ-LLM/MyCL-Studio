@@ -6,6 +6,14 @@
 
 ## 2026-06-07
 
+- **fix(macOS izin pencerelerinin ASIL kaynağı: `claude update` claudeSpawnEnv'i baypas ediyordu) [Ümit: "claude bunları istemiyor, başka bir sorun var, onu bul"]:**
+  Ümit'in içgörüsü doğru çıktı: claude'u terminalde çalıştırınca izin çıkmıyor ama MyCL'de çıkıyordu →
+  kaynak FAZ-1 claude'u değil. [claude-updater.ts:67](orchestrator/src/claude-updater.ts) startup'ta
+  `spawn(claudeBin, ["update"])`'i **`env: claudeSpawnEnv()` OLMADAN** çağırıyordu → disable bayraklarım
+  (AUTO_CONNECT_IDE/DISABLE_ATTACHMENTS) bu spawn'a HİÇ ulaşmadı; üstelik `claude update` claude'u tam modda
+  (headless `-p` değil) başlatıp TÜM taramaları (IDE/tarayıcı/klasör/medya→Apple Music) yapıyordu. **Fix:**
+  updater spawn'ına `env: claudeSpawnEnv()` eklendi (NONESSENTIAL_TRAFFIC çıkarıldı ki güncelleme ağı çalışsın).
+  Artık startup-update de taramasız → izin pencereleri kaynağında kesilir.
 - **fix(macOS izin pencereleri 2: klasör taramasını da kapat — DISABLE_ATTACHMENTS) [Ümit: "gereksiz izin istemesin, sürekli istemesin"]:**
   AUTO_CONNECT_IDE=0 IDE/tarayıcı taramasını kestiyse de "Belgeler/İndirilenler" izinleri sürdü — ayrı yol:
   claude'un `KR7` fonksiyonu `{HOME/Desktop/Documents/Downloads}` haritasını kurup **dosya-ekleme (attachment)**

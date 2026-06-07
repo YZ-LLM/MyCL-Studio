@@ -4,7 +4,7 @@
 // `claude update` resmi + güvenli bir işlemdir (agent-skills auto-clone gibi supply-chain riski yok).
 
 import { spawn } from "node:child_process";
-import { resolveClaudePath } from "./codegen/cli-backend.js";
+import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 
@@ -64,7 +64,16 @@ export async function autoUpdateClaude(): Promise<void> {
       clearTimeout(timer);
       resolve();
     };
-    const child = spawn(claudeBin, ["update"], { stdio: ["ignore", "pipe", "pipe"] });
+    // KRİTİK (macOS izin pencereleri): `claude update`'i de claudeSpawnEnv ile spawn et — yoksa
+    // disable bayrakları (AUTO_CONNECT_IDE/ATTACHMENTS → IDE/klasör/medya taraması) buna ulaşmaz ve
+    // startup'taki `claude update` tüm taramaları yapıp "Belgeler/Apple Music/..." izinlerini tetikler.
+    // NONESSENTIAL_TRAFFIC'i ÇIKAR: o güncelleme ağ çağrısını engelleyebilir, update'in çalışması lazım.
+    const updaterEnv = { ...claudeSpawnEnv() };
+    delete updaterEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC;
+    const child = spawn(claudeBin, ["update"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: updaterEnv,
+    });
     const timer = setTimeout(() => {
       try { child.kill("SIGTERM"); } catch { /* zaten bitti */ }
       log.warn("claude-updater", "update zaman aşımı (görmezden gelindi)");
