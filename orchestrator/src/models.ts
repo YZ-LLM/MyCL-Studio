@@ -55,7 +55,10 @@ export async function listModels(
 
   log.info("models", "fetching from API", { force });
   const startTs = Date.now();
-  const client = new Anthropic({ apiKey });
+  // v15.14: AÇIK timeout + retry — SDK varsayılan timeout'u (0.102) geçici ağ/API
+  // yavaşlığında models.list'i "Request timed out" ile patlatabiliyordu (transient).
+  // SDK timeout/429/5xx'te otomatik retry yapar → geçici hata sessizce atlatılır.
+  const client = new Anthropic({ apiKey, timeout: 20_000, maxRetries: 3 });
 
   const all: ModelEntry[] = [];
   try {

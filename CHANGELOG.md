@@ -6,6 +6,12 @@
 
 ## 2026-06-07
 
+- **fix(list_models "Request timed out" — SDK 0.102 timeout regresyonu) [Ümit: "yaptıklarını bozuyorsun"]:**
+  SDK yükseltmesinden (0.40→0.102) sonra startup'ta `list_models failed: Request timed out` çıkıyordu
+  (`client.models.list()` geçici API/ağ yavaşlığında 0.102'nin daha kısa varsayılan timeout'uyla patlıyordu;
+  0.40 toleranslıydı). `models.list()` aslında çalışıyor (test: 10 model 1.1s) — sorun transient timeout. **Fix:**
+  `models.ts` Anthropic client'ına AÇIK `timeout: 20_000` + `maxRetries: 3` → SDK timeout/429/5xx'te otomatik
+  retry yapar, geçici hata sessizce atlatılır. (SDK bump regresyonunun düzeltmesi.)
 - **fix(relevance CLI prompt-çelişkisi → "no valid relevance_scores block") [Ümit: "kırmızı hata"]:** Abonelik/CLI
   modunda relevance classifier hata veriyordu (trace.log: `cli classifier: no valid relevance_scores block`).
   **Kök neden:** `classifier.ts` SYSTEM_PROMPT'u "Output via the score_chunks **tool**" diyordu (API için), CLI
