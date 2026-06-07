@@ -127,25 +127,14 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS denyRead", () => {
     expect(denyRead).toContain(`${HOME}/other-project`);
   });
 
-  it("runtime girdilerini ASLA reddetmez (.config + Library ROOT dahil — Caches/Playwright için)", () => {
+  it("runtime girdilerini ASLA reddetmez (.config + Library dahil)", () => {
     for (const rt of [".claude", ".claude.json", "Library", ".cache", ".npm", ".nvm", ".config"]) {
       expect(denyRead).not.toContain(`${HOME}/${rt}`);
     }
   });
 
-  it("macOS 'başka uygulama verisi' (App Data) TCC yollarını reddeder (Library ROOT açık kalır)", () => {
-    const permDeny = (settings.permissions as { deny?: string[] })?.deny ?? [];
-    for (const sub of ["Library/Containers", "Library/Application Support", "Library/Group Containers"]) {
-      expect(denyRead).toContain(`${HOME}/${sub}`);
-      expect(permDeny).toContain(`Read(/${HOME}/${sub})`);
-    }
-    // Library KÖKÜ reddedilmez (Caches/Preferences agent araçları için açık) — yalnız 3 alt-yol.
-    expect(denyRead).not.toContain(`${HOME}/Library`);
-    expect(denyRead).not.toContain(`${HOME}/Library/Caches`);
-  });
-
-  it("denyCount = 12 (5 medya + .ssh + .aws + 2 proje + 3 macOS App-Data alt-yolu) — darwin dir-only", () => {
-    expect(denyCount).toBe(12);
+  it("denyCount = reddedilen girdi (9: 5 medya + .ssh + .aws + 2 proje) — darwin dir-only, /** yok", () => {
+    expect(denyCount).toBe(9);
   });
 });
 

@@ -236,19 +236,6 @@ export function buildAgentSandboxSettings(params: {
     }
     permDeny.push(`Read(/${entry})`, `Read(/${entry}/**)`);
   }
-  // macOS "başka uygulama verisine erişim" (App Data) TCC prompt'unu önle: ~/Library/{Containers,
-  // Application Support, Group Containers} BAŞKA uygulamaların verisini barındırır → bunlara dokunmak
-  // "MyCL diğer uygulamalardaki verilere erişmek istiyor" prompt'u çıkarır. "Library" runtime-allow'da
-  // (Caches/Preferences agent araçları için lazım — örn. Playwright ~/Library/Caches/ms-playwright) ama
-  // bu 3 alt-yola agent'ın İHTİYACI YOK → reddet (darwin'e özel; agent kendi verisini ~/.claude'da tutar).
-  if (platform === "darwin") {
-    for (const sub of ["Library/Containers", "Library/Application Support", "Library/Group Containers"]) {
-      const p = pathPosix.join(home, sub);
-      if (projectRoot === p || projectRoot.startsWith(p + pathPosix.sep)) continue; // proje altıysa denyleme
-      denyRead.push(p);
-      permDeny.push(`Read(/${p})`, `Read(/${p}/**)`);
-    }
-  }
   const settings: Record<string, unknown> = {
     ...base,
     sandbox: {

@@ -915,7 +915,9 @@ async function handleListModels(
       }
     }
     if (!apiKey) {
-      emitError("list_models: api key missing", { which });
+      // v15.14: NON-kritik — abonelik modunda API anahtarı yok → model dropdown'ı boş kalır;
+      // kırmızı banner ile alarma sokma (yapılandırılmış modeller çalışmaya devam eder).
+      log.warn("orchestrator", "list_models: api key yok (dropdown boş, non-fatal)", { which });
       return;
     }
     const result = await listModels(apiKey, force);
@@ -926,8 +928,9 @@ async function handleListModels(
       cached: result.cached,
     });
   } catch (err) {
-    log.error("orchestrator", "list_models failed", err);
-    emitError("list_models failed", String(err));
+    // v15.14: NON-kritik — dropdown boş kalabilir; yapılandırılmış modeller çalışır. Kırmızı banner YOK
+    // (timeout+retry zaten models.ts'te). Settings'ten "Modelleri Yenile" ile yeniden denenebilir.
+    log.warn("orchestrator", "list_models failed (non-fatal, dropdown boş kalabilir)", err);
   }
 }
 

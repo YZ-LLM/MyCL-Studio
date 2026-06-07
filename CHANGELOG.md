@@ -6,6 +6,19 @@
 
 ## 2026-06-07
 
+- **fix(görünür hataları temizle: graceful degradation + A2 geri-al) [Ümit: "hala aynı sorunlar... sorunu aşartır"]:**
+  Kullanıcı Cmd+Q ile tam yeniden başlattı → relevance fix aktif ama hata sürüyor → deployed-bağlamda claude-CLI
+  çağrısının kendisi düşüyor (exit=1 / parse-edilemez; harness'te üretilemedi). Relevance NON-kritik (bağlamsız
+  devam) ama KIRMIZI alarm gösteriyordu. **Değişiklikler:** (1) **A2 geri-alındı** — agent-sandbox darwin App-Data
+  (~/Library/{Containers,Application Support,Group Containers}) denyRead bloğu kaldırıldı: izin penceresini ÇÖZMEDİ
+  (tetik claude'un KENDİ tarayıcı taraması — Chrome/Brave/Edge DevToolsActivePort; claude-içi, sandboxlanamaz) +
+  claude'un kendi ~/Library/Application Support/ClaudeCode verisini riske atıyordu (denyCount 12→9, kanıtlı sandbox).
+  (2) **relevance-engine** başarısızlıkta `emitError` (kırmızı) → yumuşak system notu ("ℹ️ Geçmiş bağlam alınamadı;
+  akış etkilenmez"). (3) **classifier.scoreBatchViaCli** BİR KEZ retry (geçici exit=1/timeout/truncation) + parse
+  hatasında ham çıktının başını log'lar (deployed-bağlam teşhisi). (4) **list_models** iki `emitError` → log.warn
+  (non-kritik dropdown). **İzin penceresi:** claude'un tarayıcı taraması MyCL'den bastırılamıyor → kullanıcı bir kez
+  "İzin Verme" (işlevi bozmaz, macOS hatırlar) + bu SON deploy'dan sonra rebuild durur (ad-hoc imza churn'ü TCC'yi
+  sıfırlıyordu). 940+ test yeşil.
 - **fix(list_models "Request timed out" — SDK 0.102 timeout regresyonu) [Ümit: "yaptıklarını bozuyorsun"]:**
   SDK yükseltmesinden (0.40→0.102) sonra startup'ta `list_models failed: Request timed out` çıkıyordu
   (`client.models.list()` geçici API/ağ yavaşlığında 0.102'nin daha kısa varsayılan timeout'uyla patlıyordu;

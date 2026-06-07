@@ -12,7 +12,7 @@
 
 import { relevanceApiKey, relevanceModelId, type MyclConfig } from "../config.js";
 import { isSubscriptionMode } from "../subscription-mode.js";
-import { emitError } from "../ipc.js";
+import { emitChatMessage } from "../ipc.js";
 import { log } from "../logger.js";
 import type { State } from "../types.js";
 import {
@@ -28,7 +28,6 @@ import {
 } from "./chunk-store.js";
 import { scoreChunks, scoreChunksViaCli } from "./classifier.js";
 import type { Chunk, RelevanceQueryOptions, ScoredChunk } from "./types.js";
-import { RelevanceError } from "./types.js";
 
 // İngilizce stopword'ler (common, basic). Türkçe yok — bilinçli karar:
 // pipeline'da relevance'a giren tüm metinler EN'de (Faz 1 user_intent TR→EN
@@ -174,14 +173,11 @@ export async function getRelevantChunks(
           candidates,
         );
   } catch (err) {
-    // Relevance fail-safe: faz çökmesin; emit hata + log.warn + boş array.
-    // Caller "(no relevant ... found)" sentinel'i kullanır.
+    // Relevance fail-safe: faz çökmesin; YUMUŞAK bilgi notu (KIRMIZI hata DEĞİL) + log.warn + boş array.
+    // Relevance NON-kritik — caller "(no relevant ... found)" sentinel'iyle bağlamsız devam eder; kullanıcıyı
+    // korkutucu kırmızı banner'la alarma sokma (v15.14: emitError → emitChatMessage system). Detay log'da.
     log.warn("relevance/engine", "classifier failed (degraded)", err);
-    if (err instanceof RelevanceError) {
-      emitError("relevance scoring failed (proceeding without context)", err.message);
-    } else {
-      emitError("relevance scoring failed (proceeding without context)", String(err));
-    }
+    emitChatMessage("system", "ℹ️ Geçmiş bağlam alınamadı; bu adım bağlamsız sürüyor (akış etkilenmez).");
     return [];
   }
 

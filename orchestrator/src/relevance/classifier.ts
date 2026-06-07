@@ -297,37 +297,59 @@ async function scoreBatchViaCli(
     .map((c) => `[id=${c.id}]\n${c.text}`)
     .join("\n\n---\n\n");
   const userMessage = `INTENT:\n${intent}\n\nCHUNKS:\n\n${chunksBlock}`;
-  const callTs = Date.now();
-  emitClaudeStream({
-    sub: "init",
-    text: "cli-relevance-classifier",
-    model: modelId,
-    turn: 1,
-    max_turns: 1,
-    ts: callTs,
-  });
-  let res;
-  try {
-    res = await runClaudeCli({
-      // TABAN + CLI text-JSON (tool-mention YOK → çelişki giderildi).
-      systemPrompt: SYSTEM_PROMPT_BASE + CLI_JSON_INSTRUCTION,
-      userMessage,
-      modelId,
-      cwd: process.cwd(), // skorlama yalnız intent+chunks metninden — proje erişimi gerekmez
-      timeoutMs: 120_000,
+
+  // Tek deneme: claude'u çağır + parse et. Hata (exit=1/timeout/parse) → RelevanceError.
+  const attempt = async (): Promise<ScoredChunk[]> => {
+    const callTs = Date.now();
+    emitClaudeStream({
+      sub: "init",
+      text: "cli-relevance-classifier",
+      model: modelId,
+      turn: 1,
+      max_turns: 1,
+      ts: callTs,
     });
+    let res;
+    try {
+      res = await runClaudeCli({
+        // TABAN + CLI text-JSON (tool-mention YOK → çelişki giderildi).
+        systemPrompt: SYSTEM_PROMPT_BASE + CLI_JSON_INSTRUCTION,
+        userMessage,
+        modelId,
+        cwd: process.cwd(), // skorlama yalnız intent+chunks metninden — proje erişimi gerekmez
+        timeoutMs: 120_000,
+      });
+    } catch (err) {
+      throw new RelevanceError(`cli classifier failed: ${String(err)}`);
+    }
+    if (!res.ok) {
+      throw new RelevanceError(`cli classifier failed: ${res.error ?? "unknown"}`);
+    }
+    emitClaudeStream({
+      sub: "relevance_call",
+      model: modelId,
+      text: `scored ${chunks.length} chunks (cli)`,
+    });
+    try {
+      return parseCliScores(res.text, chunks);
+    } catch (err) {
+      // Teşhis (v15.14): ham çıktının başını logla — deployed-bağlamda neden parse-edilemediğini sonra çöz.
+      log.warn("relevance/classifier", "cli parse failed — ham çıktı başı", {
+        head: (res.text ?? "").slice(0, 200),
+      });
+      throw err;
+    }
+  };
+
+  // v15.14: BİR KEZ retry — geçici claude exit=1 / timeout / truncation'ı atlat; sonra caller graceful-degrade.
+  try {
+    return await attempt();
   } catch (err) {
-    throw new RelevanceError(`cli classifier failed: ${String(err)}`);
+    log.warn("relevance/classifier", "cli batch başarısız, bir kez yeniden deneniyor", {
+      error: String(err).slice(0, 160),
+    });
+    return await attempt();
   }
-  if (!res.ok) {
-    throw new RelevanceError(`cli classifier failed: ${res.error ?? "unknown"}`);
-  }
-  emitClaudeStream({
-    sub: "relevance_call",
-    model: modelId,
-    text: `scored ${chunks.length} chunks (cli)`,
-  });
-  return parseCliScores(res.text, chunks);
 }
 
 /**
