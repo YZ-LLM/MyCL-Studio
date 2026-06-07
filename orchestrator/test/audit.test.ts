@@ -1,11 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import {
   appendAudit,
   appendCost,
   appendDecision,
+  appendHandoff,
+  type HandoffRecord,
   AuditError,
   formatDecisions,
   extractSpecSection,
@@ -347,6 +349,43 @@ describe("audit", () => {
       expect(out).toContain("Phase 3 (iter 2)");
       expect(out).toContain("phases [4,8]");
       expect(out).toContain("no UI implied");
+    });
+  });
+
+  describe("handoffs (Missions yapılandırılmış devir)", () => {
+    it("appendHandoff kaydı .mycl/handoffs.jsonl'a yazar (tüm alanlar)", async () => {
+      const rec: HandoffRecord = {
+        ts: 1717000000000,
+        phase: 8,
+        iteration: 2,
+        status: "fail",
+        summary: "AC coverage yetersiz: 2/3 green",
+        discovered: ["testsiz kabul kriterleri: AC3"],
+      };
+      await appendHandoff(projectRoot, rec);
+      const raw = await readFile(
+        join(projectRoot, ".mycl", "handoffs.jsonl"),
+        "utf-8",
+      );
+      expect(JSON.parse(raw.trim())).toEqual(rec);
+    });
+
+    it("append-only (çok kayıt, sıra korunur)", async () => {
+      await appendHandoff(projectRoot, {
+        ts: 1, phase: 8, iteration: 1, status: "complete", summary: "green=3",
+      });
+      await appendHandoff(projectRoot, {
+        ts: 2, phase: 8, iteration: 2, status: "fail", summary: "x",
+      });
+      const raw = await readFile(
+        join(projectRoot, ".mycl", "handoffs.jsonl"),
+        "utf-8",
+      );
+      const lines = raw
+        .trim()
+        .split("\n")
+        .map((l: string) => JSON.parse(l) as HandoffRecord);
+      expect(lines.map((d) => d.status)).toEqual(["complete", "fail"]);
     });
   });
 

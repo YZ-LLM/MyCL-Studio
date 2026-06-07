@@ -12,6 +12,13 @@
   `parseAcIds`/`acCoverage` (SAF, test edil/i); (2) Faz 8 worker prompt'u testleri AC-id ile etiketler
   (`MYCL_TEST_RESULT: green: AC3`); (3) gate'te **ADDITIVE** kapsam raporu — kapsanmayan AC'ler GÖRÜNÜR kılınır.
   +6 saf test. Rapor: MISSIONS-ENJEKSIYON-RAPORU.md.
+- **feat(② validator-katmanı framing + ③ structured handoff — Luke/Missions) [Ümit: "1 2 3"]:**
+  ② Orchestrator-system.md §14'e "doğrulama katmanı" notu: 3 bağımsız adversarial validator (pre-commit-lens=
+  kör-nokta, harness-verdict=scrutiny, verify-feature=user-testing/canlı-davranış) tek disiplin altında; özellik
+  milestone'u bitince davranışsal doğrulamayı (verify-feature) çalıştır ("test ettim" demeden), AC↔test bunların
+  zorladığı sözleşme. (Prompt-düzeyi, kod riski yok.) ③ `appendHandoff` (audit.ts) → AYRI `.mycl/handoffs.jsonl`
+  (gate'in audit.log'unu KİRLETMEZ); Faz 8 complete/fail'de yapılandırılmış devir kaydı (status + green/red/debt/
+  score + keşfedilen testsiz-AC) — resume/uzun-koşu + "doğrulama ilk seferde geçmez → hedefli takip" zemini. +2 test.
 - **feat(keystone ① ENFORCEMENT — Michal "ölçemiyorsan zorlayamazsın") [Ümit: "1 2 3"]:** Faz 8 gate artık
   KOŞULLU zorluyor: worker testleri AC-id ile etiketliyorsa (`acCov.tagged`) VE kapsanmayan AC varsa → gate GEÇMEZ
   (fail-reason'da testsiz AC'ler + nasıl etiketleneceği). Worker hiç etiketlemiyorsa (SDK modu/eski akış) →

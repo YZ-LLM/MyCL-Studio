@@ -11,7 +11,7 @@ import { exec } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { appendAudit, readAuditLogTail } from "./audit.js";
+import { appendAudit, appendHandoff, readAuditLogTail } from "./audit.js";
 import { isMissingCommand, resolveMechanicalCmd } from "./base/mechanical-runner.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
@@ -589,6 +589,18 @@ export class Phase8Controller {
         tdd_compliance_score: score,
         fix_checkpoint_ref: this.checkpointRef ?? undefined,
       };
+      // ③ Structured handoff (Missions): faz devir kaydı (ayrı .mycl/handoffs.jsonl; non-blocking).
+      try {
+        await appendHandoff(this.state.project_root, {
+          ts: Date.now(),
+          phase: 8,
+          iteration: this.state.iteration_count ?? 1,
+          status: "complete",
+          summary: `green=${greens} red=${reds} tech_debt=${techDebtCount} score=${score}`,
+        });
+      } catch (e) {
+        log.warn("phase-8", "handoff write failed (non-blocking)", e);
+      }
       return "complete";
     }
     // Fail nedenini kullanıcıya görünür yap
@@ -613,6 +625,22 @@ export class Phase8Controller {
     );
     this.lastFailReason = `gate fail: ${reasons.join("; ")}`;
     await this.rollbackFixIfNeeded();
+    // ③ Structured handoff (Missions): başarısız devir — durum + neden + keşfedilen (takip zemini).
+    try {
+      await appendHandoff(this.state.project_root, {
+        ts: Date.now(),
+        phase: 8,
+        iteration: this.state.iteration_count ?? 1,
+        status: "fail",
+        summary: reasons.join("; ").slice(0, 300),
+        discovered:
+          acCov.uncovered.length > 0
+            ? [`testsiz kabul kriterleri: ${acCov.uncovered.join(",")}`]
+            : undefined,
+      });
+    } catch (e) {
+      log.warn("phase-8", "handoff write failed (non-blocking)", e);
+    }
     return "fail";
   }
 

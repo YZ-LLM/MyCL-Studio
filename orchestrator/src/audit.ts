@@ -97,6 +97,41 @@ export async function appendDecision(
   }
 }
 
+const HANDOFFS_FILE = "handoffs.jsonl";
+
+/**
+ * Yapılandırılmış faz DEVİR (handoff) kaydı (Missions disiplini): bir faz tamamlanınca / başarısız
+ * olunca durum + yapılan-iş özeti + keşfedilen sorunlar. AYRI dosya (`.mycl/handoffs.jsonl`) — audit.log'u
+ * KİRLETMEZ (gate'lerin `lastEvent`/event-sayım mantığını bozmaz). Zemin: resume + uzun-koşu recall +
+ * "doğrulama ilk denemede nadiren geçer → hedefli takip-özelliği" (yeniden-yazım değil). appendDecision deseni.
+ */
+export interface HandoffRecord {
+  ts: number;
+  phase: number;
+  iteration: number;
+  status: "complete" | "fail" | "aborted";
+  /** Yapılan iş / sonuç özeti (kısa). */
+  summary: string;
+  /** Keşfedilen ama bu fazda kapanmayan sorunlar (sonraki iterasyon/takip için). */
+  discovered?: string[];
+}
+
+export async function appendHandoff(
+  projectRoot: string,
+  rec: HandoffRecord,
+): Promise<void> {
+  const line = JSON.stringify(rec) + "\n";
+  const p = join(projectRoot, MYCL_DIR, HANDOFFS_FILE);
+  await fs.mkdir(dirname(p), { recursive: true });
+  const fh = await openSync(p, "a");
+  try {
+    await fh.write(line);
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+
 /** decisions.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
 export async function readDecisions(
   projectRoot: string,
