@@ -80,7 +80,9 @@ import { generateGuidePdf } from "./guide-pdf.js";
 import {
   setRuntimeHttpTarget,
   startRuntimeHttpServer,
+  stopRuntimeHttpServer,
 } from "./runtime-http-server.js";
+import { detachActiveWatcher } from "./runtime-error-watcher.js";
 import { Phase1Controller } from "./phase-1.js";
 import { Phase2Controller } from "./phase-2.js";
 import { Phase3Controller } from "./phase-3.js";
@@ -250,6 +252,56 @@ type AnyPhaseController =
   | Phase8Controller
   | Phase9Controller;
 // activeController v15.1.1'de runtime.controller olarak taşındı.
+
+/**
+ * Faz controller'ı çalıştır + `runtime.controller`'ı GARANTİLİ temizle (try/finally).
+ * KÖK FİX (kod-analiz 2026-06-07): `runtime.controller = pX; const r = await pX.run();
+ * runtime.controller = null` deseni, `pX.run()` throw ederse (SDK timeout / ağ kopması)
+ * null atamasını ATLIYOR → sistem bundan sonra her şeyi "faz zaten çalışıyor" diye reddedip
+ * KALICI KİLİTLENİYORDU. finally throw'da da controller'ı bırakır. `runPhaseOnce` zaten
+ * bu deseni içeriyordu; yeni faz siteleri de bu helper'ı kullanmalı (regresyonu önler).
+ */
+async function runController<T>(
+  controller: AnyPhaseController,
+  fn: () => Promise<T>,
+): Promise<T> {
+  runtime.controller = controller;
+  try {
+    return await fn();
+  } finally {
+    runtime.controller = null;
+  }
+}
+
+let _shuttingDown = false;
+/**
+ * Tek temizlik noktası: TÜM çıkış yolları (SIGTERM/SIGINT/stdin-close/shutdown-IPC) bunu çağırır.
+ * KÖK FİX (kod-analiz 2026-06-07): eskiden exit yolları doğrudan `process.exit(0)` idi →
+ * `detached:true` dev-server (5173) + runtime HTTP listener + error-watcher arkada ZOMBİ kalıp
+ * sonraki oturumda port çakıştırıyordu. Idempotent (çoklu sinyal güvenli); cleanup'lar fail-safe.
+ */
+function gracefulShutdown(reason: string): never {
+  if (!_shuttingDown) {
+    _shuttingDown = true;
+    log.info("orchestrator", "graceful shutdown", { reason });
+    try {
+      if (runtime.state) stopActiveDevServer(runtime.state);
+    } catch (e) {
+      log.warn("orchestrator", "shutdown: dev-server stop failed", e);
+    }
+    try {
+      stopRuntimeHttpServer();
+    } catch (e) {
+      log.warn("orchestrator", "shutdown: http server stop failed", e);
+    }
+    try {
+      detachActiveWatcher();
+    } catch (e) {
+      log.warn("orchestrator", "shutdown: watcher detach failed", e);
+    }
+  }
+  process.exit(0);
+}
 
 /**
  * Faz N başarısız olduğunda UI'ya gösterilen mesaj. Controller `lastFailReason`
@@ -673,9 +725,7 @@ async function restartPhase1WithIntent(intentText: string): Promise<void> {
     config: runtime.config,
     spec,
   });
-  runtime.controller = p1;
-  const result = await p1.run(intentText);
-  runtime.controller = null;
+  const result = await runController(p1, () => p1.run(intentText));
   if (result === "complete") {
     emitChatMessage("system", "Faz 1 tamamlandı — niyet onaylandı.");
     const summary = p1.approvedSummary ?? runtime.state.intent_summary;
@@ -1614,9 +1664,7 @@ async function executeDispatchedIntent(
     config: runtime.config,
     spec,
   });
-  runtime.controller = p1;
-  const result = await p1.run(text);
-  runtime.controller = null;
+  const result = await runController(p1, () => p1.run(text));
   log.info("orchestrator", "phase 1 end", { result });
   if (result === "complete") {
     emitChatMessage("system", "Faz 1 tamamlandı — niyet onaylandı.");
@@ -1854,9 +1902,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     beginPhaseCost(next, state.iteration_count ?? 1);
     if (next === 2) {
       const p2 = new Phase2Controller({ state, config: cfg, spec });
-      runtime.controller = p2;
-      const r = await p2.run();
-      runtime.controller = null;
+      const r = await runController(p2, () => p2.run());
       log.info("orchestrator", "phase 2 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p2.statePatch };
@@ -1931,9 +1977,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     }
     if (next === 3) {
       const p3 = new Phase3Controller({ state, config: cfg, spec });
-      runtime.controller = p3;
-      const r = await p3.run();
-      runtime.controller = null;
+      const r = await runController(p3, () => p3.run());
       log.info("orchestrator", "phase 3 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p3.statePatch };
@@ -1976,9 +2020,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     }
     if (next === 4) {
       const p4 = new Phase4Controller({ state, config: cfg, spec });
-      runtime.controller = p4;
-      const r = await p4.run();
-      runtime.controller = null;
+      const r = await runController(p4, () => p4.run());
       log.info("orchestrator", "phase 4 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p4.statePatch };
@@ -2032,7 +2074,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         continue;
       }
       const p5 = new Phase5Controller({ state, config: cfg, spec });
-      const r = await p5.run();
+      const r = await runController(p5, () => p5.run());
       log.info("orchestrator", "phase 5 end", { result: r });
       if (r === "complete") {
         // Dev server pid statePatch'inden state'e taşı (zombi koruma için).
@@ -2082,9 +2124,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // outer loop STOP. User'ın bir sonraki composer mesajı router'da Phase 6
       // context'inde işlenir (approve_ui / revise_ui / cancel_pipeline).
       const p6 = new Phase6Controller({ state, config: cfg, spec });
-      runtime.controller = p6;
-      const r = await p6.run();
-      runtime.controller = null;
+      const r = await runController(p6, () => p6.run());
       log.info("orchestrator", "phase 6 end", { result: r });
       // Phase 6 dev server'ı (boot-resume'da Faz 5 spawn atlandığı için ölü
       // olabilir) yeniden başlatmış olabilir → güncel dev_server_pid'i persist
@@ -2135,9 +2175,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         continue;
       }
       const p7 = new Phase7Controller({ state, config: cfg, spec });
-      runtime.controller = p7;
-      const r = await p7.run();
-      runtime.controller = null;
+      const r = await runController(p7, () => p7.run());
       log.info("orchestrator", "phase 7 end", { result: r });
       if (r === "complete") {
         emitChatMessage("system", "Faz 7 tamamlandı — DB tasarımı onaylandı.");
@@ -2154,9 +2192,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         "Faz 8 başlıyor — TDD codegen. Bu uzun sürebilir, maliyetli olabilir.",
       );
       const p8 = new Phase8Controller({ state, config: cfg, spec });
-      runtime.controller = p8;
-      const r = await p8.run();
-      runtime.controller = null;
+      const r = await runController(p8, () => p8.run());
       log.info("orchestrator", "phase 8 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p8.statePatch };
@@ -2175,9 +2211,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     }
     if (next === 9) {
       const p9 = new Phase9Controller({ state, config: cfg, spec });
-      runtime.controller = p9;
-      const r = await p9.run();
-      runtime.controller = null;
+      const r = await runController(p9, () => p9.run());
       log.info("orchestrator", "phase 9 end", { result: r });
       if (r === "complete") {
         emitChatMessage("system", "Faz 9 tamamlandı — risk incelemesi onaylandı.");
@@ -3789,7 +3823,7 @@ ipcRouter.register("load_costs", async () => {
   }
 });
 ipcRouter.register("shutdown", () => {
-  process.exit(0);
+  gracefulShutdown("ipc-shutdown");
 });
 // v15.7 (2026-05-24): iş kuyruğu IPC handler'ları
 ipcRouter.register("task_queue_add", async (data: unknown) => {
@@ -3847,6 +3881,7 @@ async function main(): Promise<void> {
     startRuntimeHttpServer,
     emitConfigStatus,
     dispatch,
+    gracefulShutdown,
   });
   await app.start();
 }

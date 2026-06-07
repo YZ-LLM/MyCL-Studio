@@ -34,6 +34,8 @@ export interface AppDeps {
   emitConfigStatus: () => Promise<boolean>;
   /** IPC mesaj dispatcher — index.ts'de handler switch. */
   dispatch: (cmd: IncomingCommand) => Promise<void>;
+  /** Tek temizlik+çıkış: dev-server/runtime HTTP/error-watcher kapatıp process.exit — orphan önler. */
+  gracefulShutdown: (reason: string) => never;
 }
 
 export class App {
@@ -132,16 +134,13 @@ export class App {
     });
 
     rl.on("close", () => {
-      log.info("orchestrator", "stdin closed, exiting");
-      process.exit(0);
+      this.deps.gracefulShutdown("stdin-close");
     });
     process.on("SIGTERM", () => {
-      log.info("orchestrator", "SIGTERM, exiting");
-      process.exit(0);
+      this.deps.gracefulShutdown("SIGTERM");
     });
     process.on("SIGINT", () => {
-      log.info("orchestrator", "SIGINT, exiting");
-      process.exit(0);
+      this.deps.gracefulShutdown("SIGINT");
     });
   }
 }

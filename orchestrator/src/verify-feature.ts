@@ -24,6 +24,7 @@ import type { MyclConfig } from "./config.js";
 import { tryDevServerChain } from "./dev-server-launcher.js";
 import { isProcessAliveSync } from "./process-utils.js";
 import { clearHistory } from "./history.js";
+import { save as saveState } from "./state.js";
 import {
   commandsFor,
   detectStack,
@@ -279,6 +280,17 @@ export async function verifyFeatureHandler(
       detail: targetFeatureTr.slice(0, 120),
     });
     return {};
+  }
+
+  // KÖK FİX (kod-analiz 2026-06-07): dev-server YENİ başlatıldıysa PID'i HEMEN persist et. Eskiden PID
+  // yalnız fonksiyonun normal dönüşünde (statePatch) yazılırdı; aradaki bir adım (playwright/snapshot/
+  // codegen) throw ederse PID hiç kaydedilmez → dev-server ORPHAN kalırdı (MEMORY smoke_bash_side_effects
+  // ile aynı sınıf). Diskte PID olunca gracefulShutdown / sonraki oturum onu öldürebilir.
+  if (
+    dev.statePatch?.dev_server_pid &&
+    state.dev_server_pid !== dev.statePatch.dev_server_pid
+  ) {
+    await saveState({ ...state, ...dev.statePatch, updated_at: Date.now() });
   }
 
   // 3. Playwright + scaffold + auth (mevcut yardımcılar)

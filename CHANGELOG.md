@@ -6,6 +6,14 @@
 
 ## 2026-06-07
 
+- **fix(kod-analiz B1 — yaşam-döngüsü kilidi + orphan) [18-ajan audit, KOD-ANALIZ-RAPORU.md]:**
+  Kontrol kaybı hissinin #1 yapısal kaynağı. (1) `runController(pX, fn)` helper'ı eklendi; `advanceToNextPhase`'in
+  TÜM faz siteleri (p1/p2/p3/p4/**p5**/p6/p7/p8/p9) + p1 resume siteleri buna geçirildi → controller throw ederse
+  (SDK timeout/ağ) `runtime.controller=null` artık `finally`'de GARANTİLİ; eskiden atlanıp sistem kalıcı "faz zaten
+  çalışıyor" kilitleniyordu. Faz 5 ayrıca hiç `runtime.controller` atamıyordu (abort çalışmıyordu) — düzeldi. (2)
+  `gracefulShutdown(reason)` tek-nokta: SIGTERM/SIGINT/stdin-close/shutdown-IPC artık dev-server + runtime HTTP +
+  error-watcher'ı kapatıp çıkıyor (eskiden düz `process.exit(0)` → 5173 + listener'lar zombi kalıp port çakıştırıyordu).
+  (3) verify-feature: dev-server yeni başlatılınca PID HEMEN persist ediliyor → ara adım throw etse de orphan kalmıyor.
 - **fix(macOS izin pencerelerinin ASIL kaynağı: `claude update` claudeSpawnEnv'i baypas ediyordu) [Ümit: "claude bunları istemiyor, başka bir sorun var, onu bul"]:**
   Ümit'in içgörüsü doğru çıktı: claude'u terminalde çalıştırınca izin çıkmıyor ama MyCL'de çıkıyordu →
   kaynak FAZ-1 claude'u değil. [claude-updater.ts:67](orchestrator/src/claude-updater.ts) startup'ta
