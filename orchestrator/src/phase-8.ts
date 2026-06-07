@@ -41,6 +41,40 @@ export function countAcceptanceCriteria(acSection: string): number {
 }
 
 /**
+ * Keystone ① (kod-analiz 2026-06-07, Cichra+Missions birleşimi): spec.md'den AC ID listesi.
+ * SAF — `- **AC3**: ...` satırlarından AC-id'leri çıkarır (countAcceptanceCriteria ile aynı desen, id yakalar).
+ */
+export function parseAcIds(acSection: string): string[] {
+  const re = /^\s*-\s+\*\*(AC\d+)\*\*:/gm;
+  const ids: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(acSection)) !== null) ids.push(m[1]);
+  return ids;
+}
+
+/**
+ * Keystone ① — AC→test izlenebilirliği (çalıştırılabilir doğrulama-sözleşmesi). SAF.
+ * green-event detail'lerinden AC-id'leri (regex \bAC\d+\b) çıkar; hangi AC kapsandı/kapsanmadı?
+ * `tagged=false` → hiçbir green AC-id taşımıyor (worker etiketlemiyor / SDK modu) → caller SESSİZ kalmalı
+ * (regresyon/gürültü yok). Etiketleme aktifse kapsanmayan AC'ler görünür kılınır (enforcement DEĞİL, rapor).
+ */
+export function acCoverage(
+  acIds: string[],
+  greenDetails: string[],
+): { tagged: boolean; covered: string[]; uncovered: string[] } {
+  const found = new Set<string>();
+  for (const d of greenDetails) {
+    const matches = (d ?? "").match(/\bAC\d+\b/g);
+    if (matches) for (const id of matches) found.add(id);
+  }
+  return {
+    tagged: found.size > 0,
+    covered: acIds.filter((id) => found.has(id)),
+    uncovered: acIds.filter((id) => !found.has(id)),
+  };
+}
+
+/**
  * Fix modu repro-first kontrolü: olay akışında bir `tdd-red` (repro testi
  * başarısız = bug üretildi) ardından DAHA SONRA bir `tdd-green` var mı? Bu sıra
  * "önce bug'ı kırmızıyla üret, sonra yeşil yap" disiplinini objektifleştirir.
@@ -241,6 +275,22 @@ export class Phase8Controller {
     return this.acCountCache;
   }
 
+  /** Keystone ①: AC ID listesi (AC→test kapsam raporu için; cache'li). */
+  private acIdsCache: string[] | null = null;
+  private async getAcIds(): Promise<string[]> {
+    if (this.acIdsCache !== null) return this.acIdsCache;
+    try {
+      const specMd = await readFile(
+        join(this.state.project_root, ".mycl", "spec.md"),
+        "utf-8",
+      );
+      this.acIdsCache = parseAcIds(specMd);
+    } catch {
+      this.acIdsCache = [];
+    }
+    return this.acIdsCache;
+  }
+
   // v15.7 (2026-05-25): countAcsForRetry + countGreensSoFar retry loop ile
   // birlikte kaldırıldı (kullanıcı: "3 kere denemesin").
 
@@ -278,7 +328,8 @@ export class Phase8Controller {
         "\n\n---\n\n## CLI MODU — TEST SONUCU RAPORLAMA (ZORUNLU)\n" +
         "Araçların çıktısı MyCL'e test exit-code'unu taşımaz. Bu yüzden HER test " +
         "koşumundan (`npm test` vb.) SONRA, gördüğün gerçek çıktıya göre TEK satır yaz:\n" +
-        "- Testler GEÇTİYSE (exit 0, PASS): `MYCL_TEST_RESULT: green`\n" +
+        "- Testler GEÇTİYSE (exit 0, PASS): `MYCL_TEST_RESULT: green: <kapsanan AC-id'ler; örn. AC3 veya AC3,AC4>`\n" +
+        "  (AC→test izlenebilirliği: hangi kabul kriterini doğruladığını yaz; bütünsel test birden çok AC kapsıyorsa virgülle.)\n" +
         "- Testler BAŞARISIZSA: `MYCL_TEST_RESULT: red: <kısa neden>`\n" +
         "Test çıktısında PASS görmeden ASLA green deme. MyCL son testi KENDİ de koşup " +
         "doğrular — yanlış green gate'i geçirmez, sadece teknik borç gizler.";
@@ -465,6 +516,26 @@ export class Phase8Controller {
     // AC sayısı bilinmiyorsa 1'e fallback.
     const minGreens =
       acCount > 0 ? Math.max(3, Math.ceil(acCount / 5)) : 1;
+
+    // Keystone ① — AC→test izlenebilirliği (Cichra+Missions: çalıştırılabilir doğrulama-sözleşmesi).
+    // ADDITIVE: gate pass/fail'ini DEĞİŞTİRMEZ. Worker testleri AC-id ile etiketlerse (MYCL_TEST_RESULT:
+    // green: ACx) kapsanmayan AC'ler GÖRÜNÜR olur. Etiket yoksa (SDK modu / etiketlemedi) → sessiz no-op
+    // (regresyon/gürültü yok). Enforcement (blokaj) ayrı bilinçli adım.
+    try {
+      const cov = acCoverage(
+        await this.getAcIds(),
+        p9.filter((e) => e.event === "tdd-green").map((e) => e.detail ?? ""),
+      );
+      if (cov.tagged && cov.uncovered.length > 0) {
+        emitChatMessage(
+          "system",
+          `🔍 Doğrulama-sözleşmesi (AC→test): test ile eşleşmeyen kabul kriterleri → ${cov.uncovered.join(", ")}. ` +
+            "Bütünsel test bunları kapsıyorsa ilgili testi AC ile etiketle (MYCL_TEST_RESULT: green: ACx).",
+        );
+      }
+    } catch (e) {
+      log.warn("phase-8", "AC coverage report failed (non-blocking)", e);
+    }
 
     // Final full-suite: son 10 event içinde en az 1 tdd-green olmalı
     // (Bash test komutu + Claude'un final run'ı). Daha sıkı versiyon

@@ -6,6 +6,13 @@
 
 ## 2026-06-07
 
+- **feat(keystone ① — AC→test izlenebilirliği: çalıştırılabilir doğrulama-sözleşmesi) [4-talk birleşimi raporu]:**
+  Cichra ("çalıştırılabilir şartname") + Missions ("validation-contract-önce-kod") birleşiminin MyCL'deki somut
+  karşılığı. Eskiden Faz 8 gate yalnız `tdd-green` SAYIYORDU; hangi AC'nin testi var bilinmiyordu. **Eklendi:** (1)
+  `parseAcIds`/`acCoverage` (SAF, test edil/i); (2) Faz 8 worker prompt'u testleri AC-id ile etiketler
+  (`MYCL_TEST_RESULT: green: AC3`); (3) gate'te **ADDITIVE** kapsam raporu — kapsanmayan AC'ler GÖRÜNÜR kılınır.
+  KRİTİK: gate pass/fail'i DEĞİŞMEDİ (regresyon yok); worker etiketlemezse sessiz no-op (SDK modu/gürültü yok).
+  Enforcement (blokaj) bilinçli olarak ayrı adıma bırakıldı. +6 saf test. Rapor: MISSIONS-ENJEKSIYON-RAPORU.md.
 - **feat(pre-hoc bağımsız kör-nokta merceği — algoritmanın kalıcı parçası) [Ümit: "her yere lazım"]:**
   Felsefe: odak = çevreyi bilinçsizce paranteze almak (kör nokta). Bunu somut yaşadık — Cichra-notu raporumun
   hatalarını üstüne saldığım zıt-odaklı eleştiri workflow'u yakaladı. Çözüm: kritik bir karar/artefakt KOMİT olmadan
