@@ -375,10 +375,12 @@ export class CliCodegenBackend implements CodegenBackend {
       "--verbose",
       "--permission-mode",
       "acceptEdits",
+      // SPREAD (kod-analiz): `<tools...>` variadic — her tool ayrı argv; join(" ") boşluklu
+      // desenleri (Bash(rm *)) bozuyordu. cli-run/cli-session ile tek konvansiyon.
       "--allowedTools",
-      ALLOWED_TOOLS.join(" "),
+      ...ALLOWED_TOOLS,
       "--disallowedTools",
-      DISALLOWED_TOOLS.join(" "),
+      ...DISALLOWED_TOOLS,
       "--add-dir",
       opts.state.project_root,
       "--no-session-persistence",

@@ -6,6 +6,13 @@
 
 ## 2026-06-07
 
+- **fix(kod-analiz B4 — spawn-env + argv disiplini) [audit]:**
+  (1) **orchestrator-agent Grep/Bash** `execAsync` çağrıları `process.env`'i filtrelemeden miras alıyordu →
+  child ANTHROPIC_API_KEY/AWS/GH_TOKEN görüyordu (tek savunma `validateBashCommand` allowlist'i). Artık
+  `env:{...safeEnv(), LC_ALL:"C"}` (defense-in-depth; diğer 7 spawn'la tutarlı). (2) **`--allowedTools` argv tek
+  konvansiyon (SPREAD):** `claude --help` doğrulandı — `<tools...>` variadic; `cli-run` allowedTools'u `join(" ")`
+  veriyordu (boşluklu desen `Bash(rm *)` bozulur), `cli-backend` ikisini de join. Hepsi cli-session gibi SPREAD'e
+  geçti (her tool ayrı argv) → tool-kısıtı/sandbox yanlış uygulanması giderildi.
 - **fix(kod-analiz B3 — false-pass / "yeşil ama atlanmış" deliklerini kapat) [audit]:**
   (1) **harness-verdict false-green:** `isSecuritySkip` sabit isim-listesi (csp/secret-scan/semgrep)
   `security-headers`/`data-sanitization`/`web-security` skip'lerini KAÇIRIYORDU → güvenlik fazı atlansa bile PASS

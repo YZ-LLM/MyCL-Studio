@@ -27,6 +27,7 @@ import {
 } from "../config.js";
 import { emitAgentEvent } from "../ipc.js";
 import { log } from "../logger.js";
+import { safeEnv } from "../safe-env.js";
 import type { State } from "../types.js";
 import { buildAgentSystemPrompt } from "./context-builder.js";
 import {
@@ -248,7 +249,13 @@ export class OrchestratorAgent {
           // -E extended regex, -n line number, -r recursive (-d skip warning)
           const { stdout, stderr } = await execAsync(
             `grep -rEn ${shellEscape(pattern)} ${shellEscape(v.resolved)}`,
-            { timeout: BASH_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
+            {
+              timeout: BASH_TIMEOUT_MS,
+              maxBuffer: 1024 * 1024,
+              // safe-env (kod-analiz): child'a ANTHROPIC_API_KEY/AWS/GH_TOKEN sızdırma; diğer
+              // 7 spawn da bunu uyguluyor (defense-in-depth — validateBashCommand tek savunma olmasın).
+              env: { ...safeEnv(), LC_ALL: "C" },
+            },
           );
           return stdout || `(no matches)${stderr ? `\nstderr: ${stderr}` : ""}`;
         }
@@ -263,6 +270,8 @@ export class OrchestratorAgent {
             timeout: BASH_TIMEOUT_MS,
             maxBuffer: 1024 * 1024,
             cwd: this.deps.state.project_root,
+            // safe-env (kod-analiz): child process secret'ları (API key/AWS/token) miras almasın.
+            env: { ...safeEnv(), LC_ALL: "C" },
           });
           return stdout + (stderr ? `\nstderr: ${stderr}` : "");
         }

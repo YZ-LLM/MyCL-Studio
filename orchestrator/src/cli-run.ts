@@ -76,8 +76,10 @@ function buildArgs(opts: CliRunOpts): string[] {
     opts.cwd,
     "--no-session-persistence",
   ];
+  // SPREAD (kod-analiz): `--allowedTools <tools...>` variadic — her tool AYRI argv olmalı.
+  // `join(" ")` boşluk içeren desenleri (örn. `Bash(rm *)`) bozuyordu; cli-session zaten spread.
   if (opts.allowedTools && opts.allowedTools.length > 0) {
-    args.push("--allowedTools", opts.allowedTools.join(" "));
+    args.push("--allowedTools", ...opts.allowedTools);
   }
   if (opts.disallowedTools && opts.disallowedTools.length > 0) {
     args.push("--disallowedTools", ...opts.disallowedTools);
