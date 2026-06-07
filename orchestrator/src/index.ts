@@ -1074,7 +1074,28 @@ async function handleCommandDirect(
 // değil"). Yerini D1 ana ajanın `plan_kind` tool field'ı aldı — plan'ı yazan
 // agent kendisi sınıflandırır. Bkz [phase-0.ts](./phase-0.ts) FixPlanKind.
 
+// Re-entrancy guard (kod-analiz 2026-06-07): app.ts `rl.on("line")` dispatch'i AWAIT etmiyordu →
+// kullanıcı faz koşarken ikinci mesaj yazınca İKİ handleUserMessage aynı runtime.state/runtime.controller'ı
+// eşzamanlı okuyup yazabiliyordu (faz-regresyonu/kilitlenme hissinin yapısal kaynaklarından). handleUserMessage
+// tüm fazı await ettiğinden bayrak işlem boyunca tutulur; abort_phase AYRI handler olduğu için bloklanmaz
+// (durdurma çalışmaya devam eder). Sessiz reddetme değil — görünür "işleniyor" mesajı.
+let _handlingUserMessage = false;
 async function handleUserMessage(text: string): Promise<void> {
+  if (_handlingUserMessage) {
+    emitChatMessage(
+      "system",
+      "⏳ Önceki mesaj/faz hâlâ işleniyor — bitmesini bekle ya da üstteki ⏹ ile durdur.",
+    );
+    return;
+  }
+  _handlingUserMessage = true;
+  try {
+    await handleUserMessageInner(text);
+  } finally {
+    _handlingUserMessage = false;
+  }
+}
+async function handleUserMessageInner(text: string): Promise<void> {
   log.info("orchestrator", "user_message", { text_len: text.length });
   if (!runtime.state || !runtime.config) {
     emitError("no active project", null);

@@ -6,6 +6,14 @@
 
 ## 2026-06-07
 
+- **fix(kod-analiz B6 — IPC race-guard + Faz 0 D1 parite) [audit]:**
+  (1) **IPC dispatch race (kontrol kaybının #1 yapısal kaynağı):** `app.ts rl.on("line")` dispatch'i await
+  etmiyordu → kullanıcı faz koşarken ikinci mesaj yazınca İKİ `handleUserMessage` aynı `runtime.state`/
+  `runtime.controller`'ı eşzamanlı yazabiliyordu. `handleUserMessage`'e re-entrancy busy-guard (görünür
+  "işleniyor" mesajı + finally'de bırak); handleUserMessage tüm fazı await ettiğinden bayrak işlem boyunca
+  tutulur, `abort_phase` AYRI handler → durdurma bloklanmaz. (2) **Faz 0 D1 SDK read-only:** D1 salt-araştırma
+  ama SDK yolu `spec.allowed_tools` (=Read/Edit/Write/Bash/Glob/Grep, D3-fix için) veriyordu → API'de ajan
+  teşhiste dosya yazabiliyordu. SDK D1 artık CLI ile simetrik `[Read,Grep,Glob,Bash,report_root_cause]`.
 - **fix(kod-analiz B5 — config kalıcılık merge + list_models stuck-loading) [audit]:**
   (1) **`persistApiKeys` + `persistSelectedModels` artık alan-bazlı MERGE** (`mergeDefinedFields`): eskiden
   tam-üzerine-yazma + UI payload relevance/orchestrator/subagent_models taşımadığından bu key/model'ler sessizce

@@ -391,10 +391,11 @@ export class Phase0Controller {
         "D1 — Investigation phase. Use Read/Grep/Bash to find the root cause. When ready, call `report_root_cause` with root_cause_en + 2-4 fix_options. Do NOT call any other tool to conclude." +
         (contextWithHypotheses ? `\n\n${contextWithHypotheses}` : ""),
       tools,
-      allowed_tool_names: [
-        ...(this.spec.allowed_tools ?? []),
-        "report_root_cause",
-      ],
+      // D1 = SALT-ARAŞTIRMA (kod-analiz 2026-06-07 parite): SDK yolu da CLI (runD1Cli) gibi READ-ONLY
+      // olmalı. Eskiden spec.allowed_tools (=[Read,Edit,Write,Bash,Glob,Grep], D3-fix için) veriliyordu →
+      // API kullanıcısında ajan TEŞHİS turunda dosya yazabiliyor/düzenleyebiliyordu (faz-sınır + parite
+      // ihlali). CLI disallowedTools=[Write,Edit,...] ile aynı etki: araştırma araçları + report_root_cause.
+      allowed_tool_names: ["Read", "Grep", "Glob", "Bash", "report_root_cause"],
       toolContext: toolCtx,
       betas: this.config.claude_code_flags.betas,
       // v15.8 (2026-05-30): Maliyet optimizasyonu — D1 sınırsız keşfe daldı
