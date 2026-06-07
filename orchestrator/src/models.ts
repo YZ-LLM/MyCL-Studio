@@ -9,7 +9,7 @@
 //   - "Modelleri Yenile" butonu force refresh tetikler
 
 import { createHash } from "node:crypto";
-import Anthropic from "@anthropic-ai/sdk";
+import { makeAnthropicClient } from "./claude-api.js";
 import { log } from "./logger.js";
 
 export interface ModelEntry {
@@ -58,7 +58,7 @@ export async function listModels(
   // v15.14: AÇIK timeout + retry — SDK varsayılan timeout'u (0.102) geçici ağ/API
   // yavaşlığında models.list'i "Request timed out" ile patlatabiliyordu (transient).
   // SDK timeout/429/5xx'te otomatik retry yapar → geçici hata sessizce atlatılır.
-  const client = new Anthropic({ apiKey, timeout: 20_000, maxRetries: 3 });
+  const client = makeAnthropicClient(apiKey, { timeoutMs: 20_000, maxRetries: 3 });
 
   const all: ModelEntry[] = [];
   try {

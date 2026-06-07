@@ -10,6 +10,7 @@
 // - Timeout: 30s per attempt, chunked >2000 token
 
 import Anthropic from "@anthropic-ai/sdk";
+import { makeAnthropicClient } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { backendForRole, isAutoMode } from "./config.js";
 import { API_LABEL, CLI_LABEL } from "./cli-rate-limit.js";
@@ -215,7 +216,9 @@ export async function translate(
   // Auto Mode bunu birincil, gerekirse ikincil backend'le çağırır.
   const attempt = async (useCli: boolean): Promise<TranslateResult> => {
     // SDK client yalnızca API yolunda gerekir (CLI'da API key kullanılmaz).
-    const client = useCli ? null : new Anthropic({ apiKey: config.api_keys.translator });
+    const client = useCli
+      ? null
+      : makeAnthropicClient(config.api_keys.translator, { timeoutMs: 60_000 });
     log.info("translator", "request", {
       dir,
       model,

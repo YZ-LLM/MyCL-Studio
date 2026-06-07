@@ -77,13 +77,38 @@ function isTransientError(err: unknown): boolean {
     return true;
   }
   // Anthropic SDK'nın bazen "error" payload'ı olmadan network/timeout hatası
-  // fırlatması mümkün — string match ile yakala (defensive).
+  // fırlatması mümkün — string match ile yakala (defensive). KÖK FİX (kod-analiz 2026-06-07):
+  // SDK 0.102'nin APIConnectionTimeoutError/APIConnectionError'ı + "Request timed out" eklendi;
+  // eskiden bunlar NON-transient sayılıp uzun Opus/ultracode turu attempt 1'de sert fail ediyordu.
   if (
-    /ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed/i.test(raw)
+    /ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|timed out|Request timed out|Connection error|APIConnectionError|APIConnectionTimeoutError/i.test(
+      raw,
+    )
   ) {
     return true;
   }
   return false;
+}
+
+/**
+ * TEK Anthropic SDK client factory'si (kod-analiz 2026-06-07). SDK 0.102'nin kısa-default-timeout
+ * regresyonu list_models'ı (models.ts) vurmuştu ama runTurn/translator/conversation-context hâlâ
+ * açıktı; tek yerde topla ki bir daha yarım yamanmasın. Varsayılan timeout uzun turlar için cömert;
+ * dış retry loop'u olan çağrı (runTurn) `maxRetries:0` geçer (çift-retry önler).
+ */
+export function makeAnthropicClient(
+  apiKey: string,
+  opts?: { timeoutMs?: number; maxRetries?: number; betas?: readonly string[] },
+): Anthropic {
+  return new Anthropic({
+    apiKey,
+    timeout: opts?.timeoutMs ?? 600_000,
+    maxRetries: opts?.maxRetries ?? 3,
+    defaultHeaders:
+      opts?.betas && opts.betas.length > 0
+        ? { "anthropic-beta": opts.betas.join(",") }
+        : undefined,
+  });
 }
 
 // Anthropic API "Overloaded" (529) yoğun günlerde sık görülüyor. Phase 6 fix
@@ -275,11 +300,12 @@ export async function runTurn(
   opts: RunTurnOptions,
   onEvent: StreamHandler,
 ): Promise<TurnResult> {
-  const client = new Anthropic({
-    apiKey,
-    defaultHeaders: opts.betas && opts.betas.length > 0
-      ? { "anthropic-beta": opts.betas.join(",") }
-      : undefined,
+  // Dış retry loop (MAX_RETRY_ATTEMPTS, isTransientError) zaten var → SDK kendi retry'ını
+  // KAPAT (maxRetries:0) ki çift-retry olmasın; timeout uzun Opus/ultracode turları için cömert.
+  const client = makeAnthropicClient(apiKey, {
+    timeoutMs: 600_000,
+    maxRetries: 0,
+    betas: opts.betas,
   });
 
   log.info("claude-api", "runTurn", {

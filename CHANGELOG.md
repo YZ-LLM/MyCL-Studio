@@ -6,6 +6,14 @@
 
 ## 2026-06-07
 
+- **fix(kod-analiz B2 — SDK timeout regresyon sınıfını kapat) [audit]:**
+  list_models'ı vuran SDK 0.102 kısa-default-timeout yalnız `models.ts`'te yamanmıştı; `runTurn` (codegen/
+  orchestrator/relevance/project-type'ın hepsi), `translator`, `conversation-context` hâlâ açıktı. **Tek factory**
+  `makeAnthropicClient(apiKey, {timeoutMs, maxRetries, betas})` (claude-api.ts) eklendi, 4 çağrı yeri ona geçti:
+  runTurn → 600sn timeout + `maxRetries:0` (dış retry loop zaten var → çift-retry önlendi) + betas header; models →
+  20sn; translator/conversation-context → 60sn + SDK retry. Ayrıca `isTransientError`'a SDK timeout deseni
+  (`APIConnectionTimeoutError`/`Request timed out`/`Connection error`) eklendi — eskiden uzun Opus turu timeout'a
+  takılırsa attempt 1'de NON-transient sayılıp faz sert fail ediyordu; artık retry'lanıyor.
 - **fix(kod-analiz B1 — yaşam-döngüsü kilidi + orphan) [18-ajan audit, KOD-ANALIZ-RAPORU.md]:**
   Kontrol kaybı hissinin #1 yapısal kaynağı. (1) `runController(pX, fn)` helper'ı eklendi; `advanceToNextPhase`'in
   TÜM faz siteleri (p1/p2/p3/p4/**p5**/p6/p7/p8/p9) + p1 resume siteleri buna geçirildi → controller throw ederse
