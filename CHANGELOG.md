@@ -6,6 +6,17 @@
 
 ## 2026-06-07
 
+- **fix(rate-limit yanlış-pozitif: "allowed_warning" ≠ bloklu) [Ümit raporu: "limit dolu değil"]:** Kullanıcıda
+  "🔁 abonelik limiti doldu (seven_day) → API'ye geçildi" + ardından "relevance scoring failed" çıkıyordu AMA
+  limit dolu değildi. **Kök neden (web+kod doğrulandı):** Claude Code `rate_limit_event.status` sözlüğü
+  `{allowed, allowed_warning, rejected}` — `allowed_warning` = istek SERVİS EDİLDİ (sadece limite-yaklaşma
+  uyarısı), yalnız `rejected` = bloklandı. `isBlockedStatus` "allowed olmayan her şeyi bloklu" sayıyordu →
+  seven_day `allowed_warning`'i "limit doldu" sanıp gereksiz API'ye düşüyordu → relevance API'de (anahtar yok)
+  patlıyordu (failure'ın DOĞRUDAN sebebi). **Fix** (`cli-rate-limit.ts`): `isBlockedStatus` artık YALNIZ
+  `rejected`'i bloklu sayar; `allowed`/`allowed_warning`/bilinmeyen → bloklanma (bilinmeyen yalnız gözlem-loglanır,
+  yanlış fallback yok). `overageStatus` kullanılmıyor (yanıltıcı). Gerçek `rejected` blok regresyonu korundu
+  (hâlâ fallback + "limit doldu" mesajı). +allowed_warning/bilinmeyen regresyon testleri (28 test). RateLimitInfo
+  yorumu sözlüğe göre güncellendi (seven_day_opus/sonnet dahil).
 - **security(least-privilege: yalnız gerekli Tauri izinleri) [Ümit isteği: "sadece gerekli izinleri istesin"]:**
   `src-tauri/capabilities/default.json` plugin izinleri `:default` setlerinden frontend'in GERÇEKTEN çağırdığı
   alt-izinlere daraltıldı (kaynak doğrulandı): `dialog:default`→`dialog:allow-open` (yalnız Splash dosya seçici);

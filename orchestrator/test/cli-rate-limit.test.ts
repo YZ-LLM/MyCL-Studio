@@ -35,10 +35,18 @@ describe("cli-rate-limit · isBlockedStatus (saf)", () => {
     expect(isBlockedStatus("allowed")).toBe(false);
     expect(isBlockedStatus("ALLOWED")).toBe(false);
   });
-  it("non-allowed status → bloklu (rejected/blocked/exceeded)", () => {
+  it("'allowed_warning' → SERVİS EDİLDİ, bloklu DEĞİL (BU bug'ın regresyon guard'ı)", () => {
+    expect(isBlockedStatus("allowed_warning")).toBe(false);
+    expect(isBlockedStatus("ALLOWED_WARNING")).toBe(false);
+  });
+  it("YALNIZ 'rejected' → bloklu (case-insensitive)", () => {
     expect(isBlockedStatus("rejected")).toBe(true);
-    expect(isBlockedStatus("blocked")).toBe(true);
-    expect(isBlockedStatus("exceeded")).toBe(true);
+    expect(isBlockedStatus("REJECTED")).toBe(true);
+  });
+  it("bilinmeyen status ('blocked'/'exceeded'/'foo') → bloklu DEĞİL (yanlış-pozitif önlenir)", () => {
+    expect(isBlockedStatus("blocked")).toBe(false);
+    expect(isBlockedStatus("exceeded")).toBe(false);
+    expect(isBlockedStatus("foo")).toBe(false);
   });
   it("boş/undefined → bloklu değil (sinyal yok)", () => {
     expect(isBlockedStatus(undefined)).toBe(false);
@@ -97,6 +105,22 @@ describe("cli-rate-limit · noteRateLimitEvent + cliCurrentlyLimited (state)", (
     expect(cliCurrentlyLimited()).toBe(false);
   });
 
+  it("status=allowed_warning (seven_day) → limit set EDİLMEZ — servis edildi (ANA bug senaryosu)", () => {
+    noteRateLimitEvent({
+      status: "allowed_warning",
+      rateLimitType: "seven_day",
+      resetsAt: Math.floor(Date.now() / 1000) + 9999,
+    });
+    expect(getCliLimitedUntilMs()).toBeUndefined();
+    expect(cliCurrentlyLimited()).toBe(false);
+  });
+
+  it("bilinmeyen status → limit set EDİLMEZ (yanlış-pozitif önlenir, yalnız loglanır)", () => {
+    noteRateLimitEvent({ status: "weird_new_status", resetsAt: Math.floor(Date.now() / 1000) + 9999 });
+    expect(getCliLimitedUntilMs()).toBeUndefined();
+    expect(cliCurrentlyLimited()).toBe(false);
+  });
+
   it("status=rejected + gelecek resetsAt → limit set + cliCurrentlyLimited true", () => {
     const resetsAt = Math.floor(Date.now() / 1000) + 3600; // 1 saat sonra
     noteRateLimitEvent({ status: "rejected", resetsAt, rateLimitType: "five_hour" });
@@ -114,7 +138,7 @@ describe("cli-rate-limit · noteRateLimitEvent + cliCurrentlyLimited (state)", (
 
   it("reset geçince cliCurrentlyLimited → false ve state temizlenir", () => {
     const resetsAt = Math.floor(Date.now() / 1000) + 1; // ~1 sn sonra
-    noteRateLimitEvent({ status: "blocked", resetsAt });
+    noteRateLimitEvent({ status: "rejected", resetsAt });
     expect(cliCurrentlyLimited()).toBe(true);
     // until'i geçmişe taşımak için yeniden note (saf isLimited zaten test edildi);
     // burada reset davranışını isLimited üzerinden dolaylı doğruladık.

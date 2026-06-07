@@ -6,10 +6,10 @@
 // çıktısındaki özel event'ten gelir (canlı doğrulandı, claude 2.1.158):
 //
 //   {"type":"rate_limit_event","rate_limit_info":{
-//      "status":"allowed",          // istek servis edildi; limitte "allowed" DEĞİL
+//      "status":"allowed",          // allowed | allowed_warning (İKİSİ DE servis edildi) | rejected (BLOKLANDI)
 //      "resetsAt":1780504200,       // ← Unix epoch SANİYE: pencere ne zaman açılır
-//      "rateLimitType":"five_hour", // 5 saatlik / 7 günlük pencere
-//      "isUsingOverage":false}}
+//      "rateLimitType":"five_hour", // five_hour | seven_day | seven_day_opus | seven_day_sonnet
+//      "isUsingOverage":false}}     // overageStatus ile birlikte YANILTICI — blok kararında kullanma
 //
 // Yani "resets in 1h" metnini parse etmeye gerek yok — resetsAt mutlak timestamp.
 // Bu modül global state tutar (abonelik tüm rollerde ortak); backendForRole "auto"
@@ -19,22 +19,25 @@ import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 
 export interface RateLimitInfo {
+  /** "allowed" | "allowed_warning" (ikisi de SERVİS EDİLDİ) | "rejected" (BLOKLANDI). */
   status?: string;
   resetsAt?: number; // Unix epoch SANİYE
-  rateLimitType?: string;
+  rateLimitType?: string; // five_hour | seven_day | seven_day_opus | seven_day_sonnet
   isUsingOverage?: boolean;
 }
 
 // ───────────────────────── Saf çekirdek (test edilebilir) ─────────────────────────
 
 /**
- * Abonelik isteği servis edildi mi? `status==="allowed"` → servis edildi (limit yok).
- * Başka her (boş olmayan) status → servis EDİLMEDİ = limit doldu. Gözlem: served
- * isteklerde status hep "allowed"; tükenince "rejected"/"blocked" vb. Bilinmeyen
- * non-allowed status loglanır (ileride daraltmak için) ama bloklu sayılır.
+ * Abonelik isteği BLOKLANDI mı (servis EDİLMEDİ)? Claude Code status sözlüğü (doğrulandı):
+ * "allowed" (servis edildi) | "allowed_warning" (servis edildi + "limite yaklaşıyorsun" uyarısı) |
+ * "rejected" (BLOKLANDI). YALNIZ "rejected" = bloklu → API'ye geç. "allowed_warning" SERVİS
+ * EDİLMİŞTİR → API'ye DÜŞME (eski "allowed-olmayan-her-şey-bloklu" mantığı yanlış pozitif
+ * veriyordu: seven_day allowed_warning'i "limit doldu" sanıp gereksiz fallback yapıyordu).
+ * Bilinmeyen status → bloklanma (noteRateLimitEvent gözlem için loglar). overageStatus YANILTICI.
  */
 export function isBlockedStatus(status: string | undefined): boolean {
-  return typeof status === "string" && status.length > 0 && status.toLowerCase() !== "allowed";
+  return typeof status === "string" && status.toLowerCase() === "rejected";
 }
 
 /** resetsAt (saniye) → gelecekteyse limitedUntil (ms); geçmiş/yoksa undefined. */
@@ -103,11 +106,18 @@ export function noteRateLimitEvent(info: RateLimitInfo | undefined): void {
   if (untilCandidate !== undefined) _lastResetsAtMs = untilCandidate;
 
   if (isBlockedStatus(info.status)) {
-    if (info.status?.toLowerCase() !== "rejected" && info.status?.toLowerCase() !== "blocked") {
-      log.warn("cli-rate-limit", "bilinmeyen non-allowed status — bloklu sayıldı", { status: info.status });
-    }
     const until = untilCandidate ?? _lastResetsAtMs ?? nowMs + 15 * 60_000; // reset bilinmiyorsa kısa backoff
     enterLimited(until, info.rateLimitType);
+  } else if (
+    typeof info.status === "string" &&
+    info.status.length > 0 &&
+    info.status.toLowerCase() !== "allowed" &&
+    info.status.toLowerCase() !== "allowed_warning"
+  ) {
+    // Bilinmeyen status (allowed/allowed_warning/rejected dışı) → BLOKLAMA (yanlış-pozitif
+    // riski; servis edilmiş olabilir). Yalnız gözlem için logla — yeni bir hard-block status
+    // çıkarsa burada görülür ve bilinçli eklenir.
+    log.warn("cli-rate-limit", "bilinmeyen status — bloklanmadı (gözlem)", { status: info.status });
   }
 }
 
