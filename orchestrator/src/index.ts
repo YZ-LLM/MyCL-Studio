@@ -1254,12 +1254,13 @@ async function executeAgentDecision(
       return;
     }
     case "cancel_pipeline":
-    case "debug_triage":
-    case "run_phase": {
+    case "debug_triage": {
       // Destructive / maliyetli aksiyonlar için askq korunur:
       // - cancel_pipeline: iş kaybı riski
       // - debug_triage: Phase 0 başlatır (LLM maliyet)
-      // - run_phase: manuel faz tetikleme (kullanıcı güvenliği)
+      // NOT (kod-analiz 2026-06-07): `run_phase` BURADAN kaldırıldı — yukarıdaki ilk
+      // `case "run_phase"` (emitPhaseRunAskq) zaten ele alıyor; JS switch ilk eşleşeni
+      // çalıştırdığından buradaki dal ÖLÜ koddu (eski yorum tersini iddia ediyordu).
       const chatMsg =
         decision.message_to_user
           ? `${decision.reason}\n\n${decision.message_to_user}`

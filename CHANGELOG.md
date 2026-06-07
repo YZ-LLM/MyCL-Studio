@@ -6,6 +6,12 @@
 
 ## 2026-06-07
 
+- **fix(kod-analiz B7 — ölü kod: duplicate run_phase case) [audit]:**
+  `executeAgentDecision` switch'inde `case "run_phase"` İKİ kez vardı; JS ilk eşleşeni (emitPhaseRunAskq)
+  çalıştırdığından ikinci dal (pendingAgentDecision onayı) ÖLÜ koddu + yorum tersini iddia ediyordu. İkinci
+  daldan `run_phase` etiketi kaldırıldı (davranış korunur — ilk dal zaten ele alıyor). NOT: ESLint
+  (`no-duplicate-case`) eklenmesi ayrı bir infra işi olarak ertelendi (31k-satır mevcut kodda çok sayıda ihlal
+  yüzeye çıkıp build'i destabilize edebilir → kontrollü ayrı tur gerektirir).
 - **fix(kod-analiz B6 — IPC race-guard + Faz 0 D1 parite) [audit]:**
   (1) **IPC dispatch race (kontrol kaybının #1 yapısal kaynağı):** `app.ts rl.on("line")` dispatch'i await
   etmiyordu → kullanıcı faz koşarken ikinci mesaj yazınca İKİ `handleUserMessage` aynı `runtime.state`/
