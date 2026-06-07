@@ -39,14 +39,15 @@ const COMPLETE_EVENTS = new Set(["phase-17-complete", "phase-20-complete"]);
  * (tool eksik / komut yok) sonuç "yeşil" sayılamaz — taranmadı. Lint/test skip'i
  * (faz 10/14...) güvenlik değil; yalnız güvenlik scan'lerini yakala (regex'siz, sade).
  */
-function isSecuritySkip(event: string): boolean {
-  if (!event.endsWith("-skipped")) return false;
-  return (
-    event === "phase-13-skipped" ||
-    event.startsWith("csp-evaluator") ||
-    event.startsWith("secret-scan") ||
-    event.startsWith("semgrep")
-  );
+function isSecuritySkip(e: AuditEvent): boolean {
+  if (!e.event.endsWith("-skipped")) return false;
+  // KÖK FİX (kod-analiz 2026-06-07): Faz 13 = güvenlik fazı → oradaki HER `-skipped` bir güvenlik
+  // tarayıcısının atlanmasıdır (csp-evaluator, semgrep*, security-headers, data-sanitization,
+  // web-security, gitleaks, phase-13-skipped...). Eskiden SABİT isim-listesi (csp/secret-scan/
+  // semgrep) security-headers/data-sanitization/web-security'yi KAÇIRIYOR + "secret-scan" hiçbir
+  // gerçek event'le eşleşmiyordu → güvenlik fazı atlansa bile PASS verilebiliyordu (false-green).
+  // Phase'e bağlamak (mechanical-runner skip'leri phase=opts.phaseId yazar) drift-proof.
+  return e.phase === 13;
 }
 
 /**
@@ -74,7 +75,7 @@ export function computeVerdict(events: AuditEvent[]): HarnessVerdict {
 
   // false-green koruması: atlanan güvenlik taramaları (dedup).
   const securitySkipped = [
-    ...new Set(events.filter((e) => isSecuritySkip(e.event)).map((e) => e.event)),
+    ...new Set(events.filter((e) => isSecuritySkip(e)).map((e) => e.event)),
   ];
 
   let verdict: Verdict;

@@ -1716,7 +1716,11 @@ async function shouldRunMechanical(
     return /\b(load|performance|throughput|latency|nfr|tps|rps|p95|p99)\b/.test(lower);
   }
   if (skip_unless === "has_database") {
-    return /\b(database|veritabanı|db|prisma|sql|postgres|mysql|sqlite)\b/.test(lower);
+    // NoSQL/ORM/kalıcılık terimleri de eklendi (kod-analiz): yalnız structured has_database
+    // undefined olduğunda heuristic'e düşülür; Mongo/Redis/NoSQL projeleri kaçmasın.
+    return /\b(database|veritabanı|db|prisma|sql|postgres|mysql|sqlite|mongo|mongodb|redis|nosql|orm|persist|persistence|supabase|firestore|dynamodb)\b/.test(
+      lower,
+    );
   }
   return true;
 }
@@ -2141,23 +2145,34 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       return;
     }
     if (next === 7) {
-      // v15.2.3 borç C-3: structured `state.has_database` öncelikli (Phase 2
-      // classifier'dan); undefined ise spec.md heuristic fallback.
-      const structuredSkip = state.has_database === false;
-      const hasDbHeuristic = await shouldRunMechanical(
-        state.project_root,
-        "has_database",
-      );
-      if (structuredSkip || !hasDbHeuristic) {
-        const reason = structuredSkip
-          ? `classifier_skip has_database=false`
-          : "no_database_in_spec";
+      // KÖK FİX (kod-analiz 2026-06-07): structured `state.has_database` ÖNCELİKLİ —
+      // true→KOŞ, false→SKIP, undefined→spec.md heuristic. Eskiden `structuredSkip ||
+      // !hasDbHeuristic` (OR) yüzünden LLM "DB VAR" (has_database===true) dese bile spec.md
+      // regex'e takılmazsa (Mongo/Redis/NoSQL/"kayıt saklama") Faz 7 atlanıp DB şeması hiç
+      // üretilmiyordu (sessiz kapsam kaybı — structured sinyalin geçersiz kılınması).
+      let skipDb: boolean;
+      let skipReason: string;
+      if (state.has_database === true) {
+        skipDb = false;
+        skipReason = "";
+      } else if (state.has_database === false) {
+        skipDb = true;
+        skipReason = "classifier_skip has_database=false";
+      } else {
+        const hasDbHeuristic = await shouldRunMechanical(
+          state.project_root,
+          "has_database",
+        );
+        skipDb = !hasDbHeuristic;
+        skipReason = "no_database_in_spec";
+      }
+      if (skipDb) {
         await appendAuditModule(state.project_root, {
           ts: Date.now(),
           phase: 7,
           event: "phase-7-skipped",
           caller: "mycl-orchestrator",
-          detail: reason,
+          detail: skipReason,
         });
         await appendAuditModule(state.project_root, {
           ts: Date.now(),
@@ -2167,7 +2182,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         });
         emitChatMessage(
           "system",
-          structuredSkip
+          state.has_database === false
             ? "Faz 7 atlandı — proje veritabanı kullanmıyor."
             : "Faz 7 atlandı — spec'te veritabanı yok.",
         );

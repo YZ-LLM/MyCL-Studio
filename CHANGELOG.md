@@ -6,6 +6,17 @@
 
 ## 2026-06-07
 
+- **fix(kod-analiz B3 — false-pass / "yeşil ama atlanmış" deliklerini kapat) [audit]:**
+  (1) **harness-verdict false-green:** `isSecuritySkip` sabit isim-listesi (csp/secret-scan/semgrep)
+  `security-headers`/`data-sanitization`/`web-security` skip'lerini KAÇIRIYORDU → güvenlik fazı atlansa bile PASS
+  verilebiliyordu. Artık **Faz 13 = güvenlik fazı** semantiğine bağlı (oradaki her `-skipped` güvenliktir,
+  mechanical-runner skip'leri `phase=phaseId` yazar) — drift-proof. (2) **Faz 8 gate:** `iterStartTs` artık
+  `state.iteration_started_at`-öncelikli (resume de bunu kullanıyor); eskiden uzun iterasyonda `iteration-N-start`
+  marker'ı 1500-tail'den taşarsa eski iterasyonun tdd-green'leri sayılıp gate yanlış geçiyordu. (3)
+  **`phase-09-complete`→`phase-9-complete`** (phase-9.ts + phase-registry required_audits): resume-detection
+  padding'siz `phase-${n}-complete` kuruyor; eşleşmiyordu → Faz 9 boot-resume'da gereksiz tekrar koşuyordu. (4)
+  **Faz 7 skip structured-öncelikli:** `has_database===true→KOŞ, false→SKIP, undefined→heuristic` (eskiden OR ile
+  LLM "DB var" dese de regex tutmazsa atlıyordu); heuristic regex'e mongo/redis/nosql/orm/persist eklendi.
 - **fix(kod-analiz B2 — SDK timeout regresyon sınıfını kapat) [audit]:**
   list_models'ı vuran SDK 0.102 kısa-default-timeout yalnız `models.ts`'te yamanmıştı; `runTurn` (codegen/
   orchestrator/relevance/project-type'ın hepsi), `translator`, `conversation-context` hâlâ açıktı. **Tek factory**

@@ -201,7 +201,9 @@ export class Phase9Controller {
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 9,
-      event: "phase-09-complete",
+      // padding'siz "phase-9-complete" — resume-detection `phase-${n}-complete` (padding'siz) kuruyor;
+      // eskiden "phase-09-complete" yazılınca eşleşmiyordu → Faz 9 boot-resume'da gereksiz tekrar koşuyordu.
+      event: "phase-9-complete",
       caller: "user",
       detail: String(outcome.approvalInput.summary ?? "").slice(0, 200),
     });

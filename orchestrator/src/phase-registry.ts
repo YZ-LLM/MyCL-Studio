@@ -236,7 +236,7 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     model_role: "translator",
     prompt_template_path: templatePath("phase-09-risk.md"),
     gate_module_path: gatePath("phase-9.ts"),
-    required_audits: ["risk-decision", "phase-09-complete"],
+    required_audits: ["risk-decision", "phase-9-complete"],
     askq_config: {
       approval_tool_name: "complete_risk_review",
       clarifying_tool_name: "ask_risk_decision",

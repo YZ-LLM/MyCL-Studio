@@ -405,11 +405,18 @@ export class Phase8Controller {
     // sayılmaz. Kullanıcı: "sadece o iterasyondaki iş için yapılacak test".
     // iteration-N-start event'i sınır olarak kullanılır; iter=1'de event yok
     // → tüm audit (eski davranış).
+    // KÖK FİX (kod-analiz 2026-06-07): önce state.iteration_started_at (güvenilir, resume de bunu
+    // birincil kullanıyor); sadece o yoksa audit-tail marker'ına düş. Eskiden uzun iterasyonda
+    // (30-50 AC) marker 1500-tail penceresinden taşarsa iterStartTs=0 olup ESKİ iterasyonun
+    // tdd-green'leri sayılıyor → gate YANLIŞ "geçti" veriyordu (false-pass).
     const iterStart =
       iterCount > 1
         ? audit.find((e) => e.event === `iteration-${iterCount}-start`)
         : undefined;
-    const iterStartTs = iterStart?.ts ?? 0;
+    const iterStartTs =
+      iterCount > 1
+        ? (this.state.iteration_started_at ?? iterStart?.ts ?? 0)
+        : 0;
     // v15.7 (2026-05-25): BUG FIX — observer phase=8 yazıyor (observeTool L371)
     // ama eski filter phase===9 arıyordu (v15.3 numbering renumber kalıntısı).
     // 75 tdd-green event yazılmasına rağmen gate "0 green" görüyordu.
