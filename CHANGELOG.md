@@ -6,6 +6,22 @@
 
 ## 2026-06-07
 
+- **fix(relevance CLI prompt-çelişkisi → "no valid relevance_scores block") [Ümit: "kırmızı hata"]:** Abonelik/CLI
+  modunda relevance classifier hata veriyordu (trace.log: `cli classifier: no valid relevance_scores block`).
+  **Kök neden:** `classifier.ts` SYSTEM_PROMPT'u "Output via the score_chunks **tool**" diyordu (API için), CLI
+  yolu buna `CLI_JSON_INSTRUCTION` ("**Do NOT call any tool**, output JSON") EKLİYORDU → ÇELİŞKİ → sonnet-4-6
+  `{"kind":"relevance_scores"}` bloğunu üretmiyordu. **Fix:** `SYSTEM_PROMPT_BASE` (çıktı-talimatsız) ayrıldı;
+  API tool-suffix, CLI text-JSON-suffix ALIR (çelişki yok). `parseCliScores` dayanıklılaştı (kind eksikse bile
+  `scores[]` içeren bloğu kabul eder, `extractLastJsonObject`). **CANLI doğrulandı** (sonnet, gerçek skorlama:
+  ilgili chunk 9, alakasız 0). 61 relevance testi yeşil.
+- **fix(macOS "başka uygulama verisi" izin penceresi) [Ümit: "her açtığımda izin istiyor"]:** macOS TCC prompt'u
+  "MyCL Studio diğer uygulamalardaki verilere erişmek istiyor" çıkıyordu. **Kök neden:** agent-sandbox darwin'de
+  `Library` runtime-allow'da (Caches/Playwright için gerekli) → sandboxlı claude ~/Library altında BAŞKA
+  uygulamaların verisine (~/Library/{Containers, Application Support, Group Containers}) erişebiliyordu. **Fix:**
+  bu 3 "App Data" alt-yolu agent denyRead'ine eklendi (darwin); `Library` KÖKÜ açık kalır (Caches/Preferences/
+  Playwright çalışır). claude'un ~/Library'siz auth+okuma yaptığı ampirik doğrulandı; denyCount 9→12. **NOT:**
+  TCC prompt'u yalnız gerçek macOS GUI'de doğrulanır (headless değil) + tetikleyici kısmen `claude update`
+  (unsandboxed, her açılış) olabilir → Ümit yeni build'de teyit etmeli; sürerse auto-update tarafına bakılır.
 - **fix(rate-limit yanlış-pozitif: "allowed_warning" ≠ bloklu) [Ümit raporu: "limit dolu değil"]:** Kullanıcıda
   "🔁 abonelik limiti doldu (seven_day) → API'ye geçildi" + ardından "relevance scoring failed" çıkıyordu AMA
   limit dolu değildi. **Kök neden (web+kod doğrulandı):** Claude Code `rate_limit_event.status` sözlüğü

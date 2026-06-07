@@ -16,7 +16,7 @@
 
 import { runTurn, type ToolDef } from "../claude-api.js";
 import { runClaudeCli } from "../cli-run.js";
-import { extractKindBlock } from "../cli-json.js";
+import { extractKindBlock, extractLastJsonObject } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
 import { emitClaudeStream } from "../ipc.js";
 import { log } from "../logger.js";
@@ -49,7 +49,11 @@ const TOOL_SCORE: ToolDef = {
   },
 };
 
-const SYSTEM_PROMPT = `You are a relevance classifier. The user has an INTENT. You are given a list of CHUNKS from the project's history (audit log, spec, abandoned intents, prior conversations, patterns).
+// TABAN prompt — çıktı talimatı YOK (API tool vs CLI text-JSON ayrı eklenir).
+// v15.14: eskiden SYSTEM_PROMPT "Output via the score_chunks tool" diyordu; CLI yolu buna
+// CLI_JSON_INSTRUCTION ("Do NOT call any tool") EKLİYORDU → ÇELİŞKİ → sonnet `relevance_scores`
+// bloğunu üretmiyordu (cli classifier: no valid relevance_scores block). Çıktı talimatını ayır.
+const SYSTEM_PROMPT_BASE = `You are a relevance classifier. The user has an INTENT. You are given a list of CHUNKS from the project's history (audit log, spec, abandoned intents, prior conversations, patterns).
 
 For each chunk, decide how relevant it is to the user's CURRENT intent.
 
@@ -59,7 +63,10 @@ Scoring guide:
 - 6-7: related, useful background context
 - 8-10: directly relevant, should definitely inform the response
 
-Output via the score_chunks tool. Include all chunk ids; do not skip any.`;
+Include all chunk ids; do not skip any.`;
+
+// API (forced-tool) çıktı talimatı.
+const SYSTEM_PROMPT = `${SYSTEM_PROMPT_BASE}\n\nOutput via the score_chunks tool.`;
 
 /**
  * Tek batch'i skorla. Tool_use parse edilir; SDK input validation yapar.
@@ -268,10 +275,16 @@ Include exactly one entry per chunk id; do not skip any.`;
  */
 export function parseCliScores(text: string, chunks: Chunk[]): ScoredChunk[] {
   const block = extractKindBlock(text, ["relevance_scores"]);
-  if (!block || !Array.isArray(block.scores)) {
-    throw new RelevanceError("cli classifier: no valid relevance_scores block");
+  if (block && Array.isArray(block.scores)) {
+    return mergeScoresWithChunks(chunks, block.scores as unknown[]);
   }
-  return mergeScoresWithChunks(chunks, block.scores as unknown[]);
+  // Dayanıklılık: "kind" alanı eksik olsa bile `scores[]` içeren SON JSON objesini kabul et
+  // (küçük/CLI modeli kind'i atlayabilir). API yolundaki tool-input ile aynı şekil.
+  const fallback = extractLastJsonObject(text, (o) => Array.isArray(o.scores));
+  if (fallback && Array.isArray(fallback.scores)) {
+    return mergeScoresWithChunks(chunks, fallback.scores as unknown[]);
+  }
+  throw new RelevanceError("cli classifier: no valid relevance_scores block");
 }
 
 /** Tek batch'i CLI ile skorla (runClaudeCli + text-JSON parse). */
@@ -296,7 +309,8 @@ async function scoreBatchViaCli(
   let res;
   try {
     res = await runClaudeCli({
-      systemPrompt: SYSTEM_PROMPT + CLI_JSON_INSTRUCTION,
+      // TABAN + CLI text-JSON (tool-mention YOK → çelişki giderildi).
+      systemPrompt: SYSTEM_PROMPT_BASE + CLI_JSON_INSTRUCTION,
       userMessage,
       modelId,
       cwd: process.cwd(), // skorlama yalnız intent+chunks metninden — proje erişimi gerekmez
