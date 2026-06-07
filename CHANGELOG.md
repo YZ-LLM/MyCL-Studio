@@ -6,6 +6,13 @@
 
 ## 2026-06-07
 
+- **fix(kod-analiz B5 — config kalıcılık merge + list_models stuck-loading) [audit]:**
+  (1) **`persistApiKeys` + `persistSelectedModels` artık alan-bazlı MERGE** (`mergeDefinedFields`): eskiden
+  tam-üzerine-yazma + UI payload relevance/orchestrator/subagent_models taşımadığından bu key/model'ler sessizce
+  SİLİNİP main'e düşüyordu (yanlış tier/kota). Yalnız tanımlı+boş-olmayan alanlar yazılır; gönderilmeyen mevcut
+  değer korunur. (2) **list_models terminal event:** başarısız yollarda (api key yok / catch) artık boş `models_list`
+  emit ediliyor — frontend loading SADECE bu event'le temizlendiğinden, eskiden dropdown + ↻ sonsuza dek
+  "yükleniyor"da/disabled takılıyordu (özellikle abonelik modunda api key yokken).
 - **fix(kod-analiz B4 — spawn-env + argv disiplini) [audit]:**
   (1) **orchestrator-agent Grep/Bash** `execAsync` çağrıları `process.env`'i filtrelemeden miras alıyordu →
   child ANTHROPIC_API_KEY/AWS/GH_TOKEN görüyordu (tek savunma `validateBashCommand` allowlist'i). Artık

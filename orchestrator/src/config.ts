@@ -462,9 +462,34 @@ export async function loadConfig(): Promise<MyclConfig> {
 /**
  * API key'leri secrets.json'a yazar (chmod 600).
  */
+/**
+ * Yalnız TANIMLI + boş-olmayan alanları üzerine yazar (kod-analiz 2026-06-07): UI eksik payload
+ * mevcut per-rol key/model'i SESSİZCE silmesin. Nesne değerleri (model_tiers/subagent_models) olduğu
+ * gibi geçer; "" / undefined / null gelen alan mevcut değeri korur.
+ */
+function mergeDefinedFields(
+  base: Record<string, unknown> | undefined,
+  patch: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(base ?? {}) };
+  for (const [k, v] of Object.entries(patch ?? {})) {
+    if (v !== undefined && v !== null && v !== "") out[k] = v;
+  }
+  return out;
+}
+
 export async function persistApiKeys(keys: ApiKeys): Promise<void> {
   await fs.mkdir(configDir(), { recursive: true, mode: 0o700 });
-  const raw = JSON.stringify({ api_keys: keys }, null, 2) + "\n";
+  // MERGE (kod-analiz 2026-06-07): mevcut secrets'ı KORU. Eskiden `JSON.stringify({api_keys: keys})`
+  // dosyayı tamamen eziyordu + UI payload relevance/orchestrator taşımadığından bu key'ler sessizce
+  // SİLİNİYOR → relevanceApiKey()/orchestratorApiKey() sessizce main'e düşüyordu (yanlış tier/kota).
+  const existing = await loadSecrets();
+  const mergedKeys = mergeDefinedFields(
+    existing.api_keys as Record<string, unknown> | undefined,
+    keys as unknown as Record<string, unknown>,
+  );
+  const raw =
+    JSON.stringify({ ...existing, api_keys: mergedKeys }, null, 2) + "\n";
   await fs.writeFile(secretsPath(), raw, { encoding: "utf-8", mode: 0o600 });
 }
 
@@ -477,7 +502,12 @@ export async function persistSelectedModels(sel: SelectedModels): Promise<void> 
   const existing = await loadConfigFile();
   const next: ConfigFile = {
     ...existing,
-    selected_models: sel,
+    // MERGE (kod-analiz 2026-06-07): selected_models'ı tam-replace etme — UI payload relevance/
+    // subagent_models taşımadığında bu alanlar sessizce silinip main'e düşüyordu. Alan-bazlı merge.
+    selected_models: mergeDefinedFields(
+      existing.selected_models as Record<string, unknown> | undefined,
+      sel as unknown as Record<string, unknown>,
+    ) as Partial<SelectedModels>,
   };
   const raw = JSON.stringify(next, null, 2) + "\n";
   await fs.writeFile(configPath(), raw, { encoding: "utf-8", mode: 0o600 });

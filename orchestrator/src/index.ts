@@ -968,6 +968,9 @@ async function handleListModels(
       // v15.14: NON-kritik — abonelik modunda API anahtarı yok → model dropdown'ı boş kalır;
       // kırmızı banner ile alarma sokma (yapılandırılmış modeller çalışmaya devam eder).
       log.warn("orchestrator", "list_models: api key yok (dropdown boş, non-fatal)", { which });
+      // Terminal sinyal (kod-analiz 2026-06-07): frontend loading SADECE models_list event'iyle temizlenir;
+      // emit etmezsek dropdown + ↻ butonu sonsuza dek "yükleniyor"da/disabled takılır. Boş liste → unstick.
+      emit("models_list", { which, models: [], fetched_at: Date.now(), cached: false });
       return;
     }
     const result = await listModels(apiKey, force);
@@ -981,6 +984,8 @@ async function handleListModels(
     // v15.14: NON-kritik — dropdown boş kalabilir; yapılandırılmış modeller çalışır. Kırmızı banner YOK
     // (timeout+retry zaten models.ts'te). Settings'ten "Modelleri Yenile" ile yeniden denenebilir.
     log.warn("orchestrator", "list_models failed (non-fatal, dropdown boş kalabilir)", err);
+    // Terminal sinyal: başarısızlıkta da frontend loading'i temizle (stuck "yükleniyor" önle).
+    emit("models_list", { which, models: [], fetched_at: Date.now(), cached: false });
   }
 }
 
