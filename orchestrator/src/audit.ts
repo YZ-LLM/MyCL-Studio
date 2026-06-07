@@ -132,6 +132,29 @@ export async function appendHandoff(
   }
 }
 
+/** handoffs.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
+export async function readHandoffs(
+  projectRoot: string,
+): Promise<HandoffRecord[]> {
+  const p = join(projectRoot, MYCL_DIR, HANDOFFS_FILE);
+  let raw: string;
+  try {
+    raw = await fs.readFile(p, "utf-8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new AuditError(`handoffs read failed: ${String(err)}`);
+  }
+  const out: HandoffRecord[] = [];
+  for (const line of raw.split("\n").filter((l) => l.trim())) {
+    try {
+      out.push(JSON.parse(line) as HandoffRecord);
+    } catch (err) {
+      console.error(`[handoffs] bad line skipped: ${line.slice(0, 100)} (${err})`);
+    }
+  }
+  return out;
+}
+
 /** decisions.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
 export async function readDecisions(
   projectRoot: string,

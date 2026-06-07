@@ -12,6 +12,12 @@
   `parseAcIds`/`acCoverage` (SAF, test edil/i); (2) Faz 8 worker prompt'u testleri AC-id ile etiketler
   (`MYCL_TEST_RESULT: green: AC3`); (3) gate'te **ADDITIVE** kapsam raporu — kapsanmayan AC'ler GÖRÜNÜR kılınır.
   +6 saf test. Rapor: MISSIONS-ENJEKSIYON-RAPORU.md.
+- **feat(③ handoff consumer — devir döngüsünü kapat) [Ümit: "devam et"]:**
+  ③'ün yazma-tarafı vardı (handoffs.jsonl); şimdi OKUMA/tüketme: `readHandoffs` (audit.ts) + orkestratör recall
+  (context-builder.ts) son 6 faz devrini system-prompt'a enjekte ediyor ("### Recent phase handoffs"). Böylece
+  ajan son faz sonuçlarını (özellikle fail + keşfedilen testsiz-AC) görüp HEDEFLİ takip önerebilir (Missions:
+  "başarısızlık → hedefli takip-özelliği, rewrite değil"). Missions handoff döngüsü tam: yaz→oku→sonraki kararı besle.
+  +2 test (readHandoffs roundtrip/empty).
 - **feat(② validator-katmanı framing + ③ structured handoff — Luke/Missions) [Ümit: "1 2 3"]:**
   ② Orchestrator-system.md §14'e "doğrulama katmanı" notu: 3 bağımsız adversarial validator (pre-commit-lens=
   kör-nokta, harness-verdict=scrutiny, verify-feature=user-testing/canlı-davranış) tek disiplin altında; özellik

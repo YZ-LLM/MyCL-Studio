@@ -7,6 +7,7 @@ import {
   appendCost,
   appendDecision,
   appendHandoff,
+  readHandoffs,
   type HandoffRecord,
   AuditError,
   formatDecisions,
@@ -377,15 +378,17 @@ describe("audit", () => {
       await appendHandoff(projectRoot, {
         ts: 2, phase: 8, iteration: 2, status: "fail", summary: "x",
       });
-      const raw = await readFile(
-        join(projectRoot, ".mycl", "handoffs.jsonl"),
-        "utf-8",
-      );
-      const lines = raw
-        .trim()
-        .split("\n")
-        .map((l: string) => JSON.parse(l) as HandoffRecord);
+      const lines = await readHandoffs(projectRoot);
       expect(lines.map((d) => d.status)).toEqual(["complete", "fail"]);
+    });
+
+    it("readHandoffs roundtrip + dosya yoksa []", async () => {
+      expect(await readHandoffs(projectRoot)).toEqual([]); // henüz yok
+      const rec: HandoffRecord = {
+        ts: 5, phase: 8, iteration: 1, status: "complete", summary: "ok",
+      };
+      await appendHandoff(projectRoot, rec);
+      expect(await readHandoffs(projectRoot)).toEqual([rec]);
     });
   });
 

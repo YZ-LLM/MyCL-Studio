@@ -10,7 +10,8 @@
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { readAuditLogTail, readDecisions } from "../audit.js";
+import { readAuditLogTail, readDecisions, readHandoffs } from "../audit.js";
+import type { HandoffRecord } from "../audit.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
 import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
@@ -91,6 +92,9 @@ export interface AgentContextSnapshot {
   recent_audit: Array<{ ts: number; phase: number; event: string; caller: string }>;
   /** v15.8: Son N ADR kararı — "neden böyle karar verildi" (decisions.jsonl). */
   recent_decisions: DecisionRecord[];
+  /** ③ (Missions handoff): son N faz devri — durum + keşfedilen sorun (handoffs.jsonl).
+   *  Orkestratör son faz sonuçlarını görüp HEDEFLİ takip önerebilir (rewrite değil). */
+  recent_handoffs: HandoffRecord[];
   /** Pipeline en az bir kez Faz 17'yi tamamladı mı (yeni iterasyon tetikleyici). */
   was_pipeline_completed: boolean;
   /** v15.6: Projeye özel son N hafıza girişi. */
@@ -165,6 +169,11 @@ export async function buildAgentContext(
   const recentDecisions = (
     await readDecisions(state.project_root).catch(() => [])
   ).slice(-8);
+  // ③ (Missions handoff): son faz devirleri — orkestratör son sonuçları (özellikle fail +
+  // keşfedilen sorun) görüp HEDEFLİ takip önerebilsin (rewrite değil). Defansif limit.
+  const recentHandoffs = (
+    await readHandoffs(state.project_root).catch(() => [])
+  ).slice(-6);
   // v15.11: features.md başlık-indeksi (ucuz; full body değil — token bütçesi).
   const featureHeadings = (
     await extractFeatureChunks(state.project_root).catch(() => [])
@@ -186,6 +195,7 @@ export async function buildAgentContext(
     tdd_compliance_score: state.tdd_compliance_score ?? null,
     recent_audit: recent,
     recent_decisions: recentDecisions,
+    recent_handoffs: recentHandoffs,
     was_pipeline_completed: wasCompleted,
     project_memory: projectMemory,
     general_memory: generalMemory,
@@ -249,6 +259,22 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
     for (const d of ctx.recent_decisions) {
       const reason = d.reason ? ` — ${d.reason.slice(0, 80)}` : "";
       lines.push(`- Phase ${d.phase} (iter ${d.iteration}): ${d.chosen}${reason}`);
+    }
+  }
+  // ③ (Missions handoff): son faz devirleri — agent son sonuçları (özellikle fail + keşfedilen
+  // sorun) görüp HEDEFLİ takip önerebilir ("Faz 8 testsiz AC3 ile fail → o AC için test/fix").
+  lines.push("", "### Recent phase handoffs (last 6 — Missions devir)", "");
+  if (ctx.recent_handoffs.length === 0) {
+    lines.push("(no handoffs)");
+  } else {
+    for (const h of ctx.recent_handoffs) {
+      const disc =
+        h.discovered && h.discovered.length > 0
+          ? ` | keşfedilen: ${h.discovered.join("; ").slice(0, 120)}`
+          : "";
+      lines.push(
+        `- Faz ${h.phase} (iter ${h.iteration}): ${h.status} — ${h.summary.slice(0, 100)}${disc}`,
+      );
     }
   }
   // v15.6: Hafıza bölümü — agent karar verirken geçmiş kararları referans alır
