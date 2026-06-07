@@ -138,6 +138,11 @@ export function claudeSpawnEnv(): NodeJS.ProcessEnv {
     // (claude env'le sorunsuz çalışıyor, doğrulandı). Tarama olmadan TCC prompt'u çıkmaz.
     CLAUDE_CODE_AUTO_CONNECT_IDE: "0",
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    // Dosya-ekleme (attachment) taraması claude'un KR7 fonksiyonuyla ~/Desktop, ~/Documents,
+    // ~/Downloads haritasını kurup dokunuyor → macOS "Belgeler/İndirilenler" izni soruyor. MyCL
+    // claude'a dosya-ekleme yaptırmıyor (proje yolu zaten cwd/--add-dir) → kapat (claude çalışır,
+    // doğrulandı ATTACH_OK). Klasör taramasını kaynağında keser.
+    CLAUDE_CODE_DISABLE_ATTACHMENTS: "1",
     // F2: 1 saatlik prompt cache (yalnız "1h"de; aksi env'e KOYMA = 5dk varsayılan).
     ...(_cacheTtl === "1h" ? { ENABLE_PROMPT_CACHING_1H: "1" } : {}),
   };

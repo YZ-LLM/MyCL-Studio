@@ -6,6 +6,13 @@
 
 ## 2026-06-07
 
+- **fix(macOS izin pencereleri 2: klasör taramasını da kapat — DISABLE_ATTACHMENTS) [Ümit: "gereksiz izin istemesin, sürekli istemesin"]:**
+  AUTO_CONNECT_IDE=0 IDE/tarayıcı taramasını kestiyse de "Belgeler/İndirilenler" izinleri sürdü — ayrı yol:
+  claude'un `KR7` fonksiyonu `{HOME/Desktop/Documents/Downloads}` haritasını kurup **dosya-ekleme (attachment)**
+  özelliği için dokunuyor (yanında MAX_FILE_SIZE 512MB/MAX_FILE_COUNT/COMPRESSION_RATIO limitleri). MyCL claude'a
+  dosya-ekleme yaptırmıyor → `claudeSpawnEnv`'e `CLAUDE_CODE_DISABLE_ATTACHMENTS=1` eklendi (claude bununla çalışır,
+  doğrulandı ATTACH_OK) → klasör taraması kaynağında kesilir. NOT: teşhis sırasında büyük binary'de `strings`'i
+  eşzamanlı koşturmak makineyi çökertti → bundan sonra ağır/eşzamanlı tarama yok (bkz. memory feedback_resource_careful).
 - **fix(macOS izin pencerelerinin GERÇEK kaynağı: claude IDE oto-bağlanma taraması) [Ümit: "indirilenler + apple music izni istedi"]:**
   Whack-a-mole çözüldü: claude binary'sinde **ComputerUseSwift** + IDE oto-bağlanma var — `InstalledApps`
   (kurulu uygulama enum → "Apple Music"), Chrome/Brave/Edge `DevToolsActivePort`, DESKTOP/DOCUMENTS/DOWNLOADS
