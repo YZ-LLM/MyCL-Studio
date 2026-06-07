@@ -67,6 +67,14 @@ export interface ClaudeCodeFlags {
    * CLI/abonelik yolu: `ENABLE_PROMPT_CACHING_1H=1` env. Settings'ten seçilir.
    */
   cache_ttl?: "5m" | "1h";
+  /**
+   * v15.15: Pre-hoc bağımsız kör-nokta merceği. Kritik bir artefakt/karar KOMİT olmadan ÖNCE,
+   * o işi YAPMAYAN ayrı bir ajan "neyi paranteze aldı?"yı yakalar (spec onayı + consequential
+   * orkestratör kararları). "off": kapalı (eski davranış). "consequential" (default): yalnız
+   * consequential + geri-dönülemez noktalarda — tek ucuz tur, trivial/reversible atlanır.
+   * "always": her consequential noktada. Bulgular GÖRÜNÜR; mercek hatası komit'i BLOKLAMAZ.
+   */
+  blindspot_lens?: "off" | "consequential" | "always";
 }
 
 export interface ApiKeys {
@@ -217,6 +225,9 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
   agent_teams_optin: false,
   // v15.14 (F2): prompt cache ömrü default 5dk (mevcut davranış; geriye uyum). "1h" opt-in.
   cache_ttl: "5m",
+  // v15.15: pre-hoc kör-nokta merceği — açık ama gate'li (yalnız consequential + geri-dönülemez;
+  // tek ucuz tur; trivial atlanır; non-blocking). "off" ile tamamen kapatılır.
+  blindspot_lens: "consequential",
 };
 
 const DEFAULT_TIMEOUTS = {

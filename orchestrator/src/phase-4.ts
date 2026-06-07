@@ -11,8 +11,10 @@ import type { ProductionBackend } from "./base/production-schema-controller.js";
 import { createProductionSchemaBackend } from "./base/production-schema-cli-backend.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
-import { emitError } from "./ipc.js";
+import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
+import { blindspotLensDecision } from "./pre-commit-lens-gate.js";
+import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
 import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
 import { substitute } from "./template-engine.js";
 import {
@@ -227,6 +229,28 @@ export class Phase4Controller {
       artifactAuditDetail: (input, hash) => {
         const title = String((input as { title?: string }).title ?? "").slice(0, 80);
         return `sha256=${hash} title="${title}"`;
+      },
+      // v15.15: spec KOMİT olmadan (onay askq'sı çıkmadan) ÖNCE bağımsız kör-nokta merceği —
+      // bu spec'i YAZMAYAN ayrı bir ajan paranteze alınan varsayım/eksik-AC/en-güçlü-itirazı yakalar;
+      // bulgular GÖRÜNÜR (onay öncesi chat). Fail-safe: mercek hatası onayı bloklamaz.
+      preApprovalHook: async (writeInput) => {
+        const dec = blindspotLensDecision({
+          lensFlag: this.config.claude_code_flags.blindspot_lens ?? "consequential",
+          isConsequential: true, // spec daima consequential
+          isReversible: false,
+        });
+        if (dec !== "run") return;
+        const lens = await runBlindspotLens(
+          this.config,
+          this.state.project_root,
+          "spec",
+          specToMarkdown(writeInput as unknown as SpecData),
+          this.state.intent_summary,
+        );
+        if (!lens.clean) {
+          const m = formatLensFindings(lens);
+          if (m) emitChatMessage("system", m);
+        }
       },
     });
 

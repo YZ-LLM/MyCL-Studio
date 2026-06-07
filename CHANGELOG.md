@@ -6,6 +6,20 @@
 
 ## 2026-06-07
 
+- **feat(pre-hoc bağımsız kör-nokta merceği — algoritmanın kalıcı parçası) [Ümit: "her yere lazım"]:**
+  Felsefe: odak = çevreyi bilinçsizce paranteze almak (kör nokta). Bunu somut yaşadık — Cichra-notu raporumun
+  hatalarını üstüne saldığım zıt-odaklı eleştiri workflow'u yakaladı. Çözüm: kritik bir karar/artefakt KOMİT olmadan
+  ÖNCE, o işi YAPMAYAN bağımsız bir ajan "neyi paranteze aldı?"yı ucuzca yakalar (pre-hoc, post-hoc değil).
+  **Yeni:** `pre-commit-lens.ts` (`runBlindspotLens` → mevcut `runReasoningTurn`'ü reuse [design-fanout.ts export];
+  tek READ-ONLY ucuz tur, `verifier` rolü, zıt-odak prompt "bunu sen yazmadın; paranteze alınanı bul; uydurma";
+  `extractKindBlock` parse; FAIL-SAFE: hata→görünür not, komit BLOKLANMAZ) + `pre-commit-lens-gate.ts` (SAF gate,
+  designPanelDecision deseni; trivial/reversible DAİMA atlanır → anti-friction). **Bağlandığı yerler:** (1) Faz 4
+  spec onayı — base production controller'a `preApprovalHook` (SDK+CLI İKİSİ → abonelik paritesi); spec komit olmadan
+  önce mercek, bulgular onay öncesi GÖRÜNÜR. (2) Orkestratör consequential kararları (develop/cancel/debug/kod-fazı
+  run_phase) — execute öncesi mercek, bulgular görünür. **Flag:** `claude_code_flags.blindspot_lens` "off"/
+  "consequential"(default)/"always". **Prompt:** §14'e mercek-disiplini notu (ajan HIGH bulguyu §14 riski sayar).
+  +27 yeni test (gate saf + lens fail-safe/parse mock). 967 test yeşil.
+
 - **fix(kod-analiz B7 — ölü kod: duplicate run_phase case) [audit]:**
   `executeAgentDecision` switch'inde `case "run_phase"` İKİ kez vardı; JS ilk eşleşeni (emitPhaseRunAskq)
   çalıştırdığından ikinci dal (pendingAgentDecision onayı) ÖLÜ koddu + yorum tersini iddia ediyordu. İkinci

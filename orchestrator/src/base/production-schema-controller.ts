@@ -40,6 +40,12 @@ export interface ProductionRunOpts {
   artifactRenderer: (input: Record<string, unknown>) => string;
   /** Audit detail string'i — örn. "sha256=... title=..." */
   artifactAuditDetail?: (input: Record<string, unknown>, hash: string) => string;
+  /**
+   * v15.15: Onay (askApproval) ÖNCESİ çağrılır — pre-hoc bağımsız kör-nokta merceği için. writeInput
+   * = son yazılan artefakt girdisi (örn. spec). Side-effect (mercek koş + bulguları GÖRÜNÜR emit);
+   * onayı BLOKLAMAZ. SDK + CLI backend'lerin İKİSİ de çağırır (abonelik paritesi). Hata yutulur.
+   */
+  preApprovalHook?: (writeInput: Record<string, unknown>) => Promise<void>;
 }
 
 export type ProductionOutcome =
@@ -221,6 +227,14 @@ export class ProductionSchemaBaseController implements ProductionBackend {
         } else if (tu.name === opts.production.approval_tool_name) {
           const input = tu.input as Record<string, unknown>;
           const pitch_en = String(input.pitch ?? input.summary ?? "");
+          // v15.15: onaydan ÖNCE pre-hoc kör-nokta merceği (side-effect; onayı bloklamaz).
+          if (this.lastWriteInput) {
+            try {
+              await opts.preApprovalHook?.(this.lastWriteInput);
+            } catch (e) {
+              log.warn(opts.tag, "preApprovalHook failed (non-blocking)", e);
+            }
+          }
           let result: "approve" | "revise" | "cancel";
           try {
             result = await this.askApproval(pitch_en, suffixKey);

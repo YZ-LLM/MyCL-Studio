@@ -123,6 +123,11 @@ import {
   ensurePlaywrightScaffold,
 } from "./playwright-setup.js";
 import { verifyFeatureHandler } from "./verify-feature.js";
+import {
+  blindspotLensDecision,
+  decisionIsConsequential,
+} from "./pre-commit-lens-gate.js";
+import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
 import { loadProfile } from "./profile-loader.js";
 import { isProcessAlive } from "./process-utils.js";
 import { stopActiveDevServer } from "./dev-server-launcher.js";
@@ -1191,6 +1196,30 @@ async function executeAgentDecision(
   if (!runtime.state || !runtime.config) {
     emitError("no active project", null);
     return;
+  }
+  // v15.15: Pre-hoc bağımsız kör-nokta merceği — consequential karar EXECUTE edilmeden ÖNCE, bu
+  // kararı VERMEYEN ayrı bir ajan "neyi paranteze aldın?"ı yakalar; bulgular GÖRÜNÜR (sessiz değil)
+  // ama kararı BLOKLAMAZ (fail-safe). Gate trivial/reversible'ı eler → friction yok. NOT: bu yol
+  // _handlingUserMessage busy-guard altında; tek-ucuz-tur latency'si kabul (gate çoğu kararı atar).
+  if (
+    blindspotLensDecision({
+      lensFlag: runtime.config.claude_code_flags.blindspot_lens ?? "consequential",
+      isConsequential: decisionIsConsequential(decision),
+      isReversible: false,
+    }) === "run"
+  ) {
+    const lens = await runBlindspotLens(
+      runtime.config,
+      runtime.state.project_root,
+      "decision",
+      `Action: ${decision.action}${
+        decision.target_phase !== undefined ? ` (phase ${decision.target_phase})` : ""
+      }\nReason: ${decision.reason}`,
+    );
+    if (!lens.clean) {
+      const m = formatLensFindings(lens);
+      if (m) emitChatMessage("system", m);
+    }
   }
   // v15.7 (2026-05-27): policy-detector regex shadow check kaldırıldı.
   // Prompt-level HARD RULE'lar (orchestrator-system.md / phase-01-intent.md)

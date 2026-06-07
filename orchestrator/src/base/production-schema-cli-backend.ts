@@ -234,6 +234,14 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
 
       // block.kind === "approval"
       const pitch_en = String(block.pitch_en ?? block.pitch ?? block.summary ?? "");
+      // v15.15: onaydan ÖNCE pre-hoc kör-nokta merceği (SDK ile parite; side-effect, bloklamaz).
+      if (this.lastWriteInput) {
+        try {
+          await this.opts.preApprovalHook?.(this.lastWriteInput);
+        } catch (e) {
+          log.warn(this.opts.tag, "preApprovalHook failed (non-blocking)", e);
+        }
+      }
       let decision: "approve" | "revise" | "cancel";
       try {
         decision = await this.askApproval(pitch_en);

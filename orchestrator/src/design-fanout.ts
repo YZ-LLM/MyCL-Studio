@@ -63,7 +63,7 @@ export interface DesignPlanResult {
  * Tek read-only akıl-yürütme turu. backend "cli" → runClaudeCli (abonelik); "api" →
  * Anthropic messages.create (generateSummary deseni). Düz metin döner.
  */
-async function runReasoningTurn(
+export async function runReasoningTurn(
   config: MyclConfig,
   systemPrompt: string,
   userMessage: string,
