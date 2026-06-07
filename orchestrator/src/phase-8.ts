@@ -517,25 +517,24 @@ export class Phase8Controller {
     const minGreens =
       acCount > 0 ? Math.max(3, Math.ceil(acCount / 5)) : 1;
 
-    // Keystone ① — AC→test izlenebilirliği (Cichra+Missions: çalıştırılabilir doğrulama-sözleşmesi).
-    // ADDITIVE: gate pass/fail'ini DEĞİŞTİRMEZ. Worker testleri AC-id ile etiketlerse (MYCL_TEST_RESULT:
-    // green: ACx) kapsanmayan AC'ler GÖRÜNÜR olur. Etiket yoksa (SDK modu / etiketlemedi) → sessiz no-op
-    // (regresyon/gürültü yok). Enforcement (blokaj) ayrı bilinçli adım.
+    // Keystone ① + enforcement — AC→test izlenebilirliği (Cichra+Missions: çalıştırılabilir doğrulama-
+    // sözleşmesi; Michal "ölçemiyorsan zorlayamazsın"). Worker testleri AC-id ile etiketliyorsa
+    // (acCov.tagged) VE kapsanmayan AC varsa → gate GEÇMEZ (aşağıda acCoverageOk). Worker hiç etiketlemiyorsa
+    // (SDK modu / eski akış) → tagged=false → enforcement GRACEFUL kapalı (eski davranış, regresyon yok).
+    let acCov: { tagged: boolean; covered: string[]; uncovered: string[] } = {
+      tagged: false,
+      covered: [],
+      uncovered: [],
+    };
     try {
-      const cov = acCoverage(
+      acCov = acCoverage(
         await this.getAcIds(),
         p9.filter((e) => e.event === "tdd-green").map((e) => e.detail ?? ""),
       );
-      if (cov.tagged && cov.uncovered.length > 0) {
-        emitChatMessage(
-          "system",
-          `🔍 Doğrulama-sözleşmesi (AC→test): test ile eşleşmeyen kabul kriterleri → ${cov.uncovered.join(", ")}. ` +
-            "Bütünsel test bunları kapsıyorsa ilgili testi AC ile etiketle (MYCL_TEST_RESULT: green: ACx).",
-        );
-      }
     } catch (e) {
-      log.warn("phase-8", "AC coverage report failed (non-blocking)", e);
+      log.warn("phase-8", "AC coverage hesaplanamadı (non-blocking)", e);
     }
+    const acCoverageOk = !acCov.tagged || acCov.uncovered.length === 0;
 
     // Final full-suite: son 10 event içinde en az 1 tdd-green olmalı
     // (Bash test komutu + Claude'un final run'ı). Daha sıkı versiyon
@@ -571,7 +570,7 @@ export class Phase8Controller {
       }
     }
     const reproOk = !reproRequired || hasReproRedThenGreen(p9);
-    if (tddOk && debtOk && finalSuiteRun && reproOk) {
+    if (tddOk && debtOk && finalSuiteRun && reproOk && acCoverageOk) {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 8,
@@ -579,8 +578,8 @@ export class Phase8Controller {
         caller: "mycl-orchestrator",
       });
       // Score: AC coverage × 100 − tech debt penalty (5 puan/bulgu). Min 0.
-      const acCoverage = greens / Math.max(1, minGreens);
-      const baseScore = Math.min(100, Math.round(acCoverage * 100));
+      const acCovRatio = greens / Math.max(1, minGreens);
+      const baseScore = Math.min(100, Math.round(acCovRatio * 100));
       const score = Math.max(0, baseScore - techDebtCount * 5);
       // v15.9: önceki patch'i koru (pending_backend_fix:undefined kaybolmasın) +
       // fix checkpoint ref'ini köprüle (advanceToNextPhase scoped kapsamı bu
@@ -604,6 +603,10 @@ export class Phase8Controller {
       );
     if (!finalSuiteRun) reasons.push("final test suite çalıştırılmadı");
     if (!reproOk) reasons.push("repro-first ihlali: bug'ı yeniden üreten failing test (kırmızı→yeşil) yok");
+    if (!acCoverageOk)
+      reasons.push(
+        `testsiz kabul kriterleri (AC→test): ${acCov.uncovered.join(", ")} — ilgili testi yaz veya bütünsel testi AC ile etiketle (MYCL_TEST_RESULT: green: ACx)`,
+      );
     emitChatMessage(
       "system",
       `❌ Faz 8 gate fail: ${reasons.join("; ")}. MyCL_Pseudocode.md:203 — "ASLA TEKNİK BORÇ BIRAKMA".`,

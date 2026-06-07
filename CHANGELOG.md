@@ -11,8 +11,12 @@
   karşılığı. Eskiden Faz 8 gate yalnız `tdd-green` SAYIYORDU; hangi AC'nin testi var bilinmiyordu. **Eklendi:** (1)
   `parseAcIds`/`acCoverage` (SAF, test edil/i); (2) Faz 8 worker prompt'u testleri AC-id ile etiketler
   (`MYCL_TEST_RESULT: green: AC3`); (3) gate'te **ADDITIVE** kapsam raporu — kapsanmayan AC'ler GÖRÜNÜR kılınır.
-  KRİTİK: gate pass/fail'i DEĞİŞMEDİ (regresyon yok); worker etiketlemezse sessiz no-op (SDK modu/gürültü yok).
-  Enforcement (blokaj) bilinçli olarak ayrı adıma bırakıldı. +6 saf test. Rapor: MISSIONS-ENJEKSIYON-RAPORU.md.
+  +6 saf test. Rapor: MISSIONS-ENJEKSIYON-RAPORU.md.
+- **feat(keystone ① ENFORCEMENT — Michal "ölçemiyorsan zorlayamazsın") [Ümit: "1 2 3"]:** Faz 8 gate artık
+  KOŞULLU zorluyor: worker testleri AC-id ile etiketliyorsa (`acCov.tagged`) VE kapsanmayan AC varsa → gate GEÇMEZ
+  (fail-reason'da testsiz AC'ler + nasıl etiketleneceği). Worker hiç etiketlemiyorsa (SDK modu/eski akış) →
+  `tagged=false` → enforcement GRACEFUL kapalı (eski davranış, regresyon yok). Çalıştırılabilir doğrulama-sözleşmesi
+  artık sadece görünür değil, zorlanabilir.
 - **feat(pre-hoc bağımsız kör-nokta merceği — algoritmanın kalıcı parçası) [Ümit: "her yere lazım"]:**
   Felsefe: odak = çevreyi bilinçsizce paranteze almak (kör nokta). Bunu somut yaşadık — Cichra-notu raporumun
   hatalarını üstüne saldığım zıt-odaklı eleştiri workflow'u yakaladı. Çözüm: kritik bir karar/artefakt KOMİT olmadan
