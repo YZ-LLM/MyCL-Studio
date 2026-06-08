@@ -64,6 +64,8 @@ const EMPTY_LIST: ModelsList = { models: [], fetched_at: 0, loading: false };
 export interface AgentThinkingEvent {
   ts: number;
   sub: "started" | "completed" | "tool_use" | "decision" | "error";
+  /** Agent Teams görünürlüğü: hangi ajan (örn. "Mimari"/"UX"). Tek orkestratörde boş. */
+  agent_label?: string;
   turn?: number;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -487,17 +489,30 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
   // için modal kendisi reverse() yapar; store kronolojik tutar.
   if (ev.kind === "agent_event") {
     const d = ev.data;
-    // Busy counter: started/completed sayaca etki eder, modal listesine
-    // eklenmez (modal "düşünce" event'leri için: tool_use, decision, error).
-    if (d.sub === "started") {
-      return { ...state, agentBusyCount: state.agentBusyCount + 1 };
-    }
-    if (d.sub === "completed") {
-      return { ...state, agentBusyCount: Math.max(0, state.agentBusyCount - 1) };
+    // Busy counter: started/completed sayaca etki eder. ETİKETSİZ (tek orkestratör) → yalnız sayaç.
+    // ETİKETLİ (Agent Teams perspektif/modül ajanı) → ayrıca listele ki "hangi ajan başladı/bitti" görünsün.
+    if (d.sub === "started" || d.sub === "completed") {
+      const agentBusyCount =
+        d.sub === "started"
+          ? state.agentBusyCount + 1
+          : Math.max(0, state.agentBusyCount - 1);
+      if (!d.agent_label) return { ...state, agentBusyCount };
+      const teamEvent: AgentThinkingEvent = {
+        ts: d.ts,
+        sub: d.sub,
+        agent_label: d.agent_label,
+      };
+      const m = [...state.agentEvents, teamEvent];
+      return {
+        ...state,
+        agentBusyCount,
+        agentEvents: m.length > 100 ? m.slice(m.length - 100) : m,
+      };
     }
     const newEvent: AgentThinkingEvent = {
       ts: d.ts,
       sub: d.sub,
+      agent_label: d.agent_label,
       turn: d.turn,
       tool_name: d.tool_name,
       tool_input: d.tool_input,

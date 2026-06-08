@@ -50,6 +50,20 @@ function EventRow({ ev }: { ev: AgentThinkingEvent }) {
       }}
     >
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 4 }}>
+        {ev.agent_label && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "var(--accent, #5b9dff)",
+              background: "rgba(91,157,255,.12)",
+              borderRadius: 6,
+              padding: "1px 7px",
+            }}
+          >
+            🤖 {ev.agent_label}
+          </span>
+        )}
         <span style={{ color: subColor, fontWeight: 600, fontSize: 12 }}>
           {subLabel}
         </span>

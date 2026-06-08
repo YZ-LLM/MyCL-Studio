@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(Agent Teams görünürlüğü) [Ümit: "ajanların çalıştığı + hangi ajan ne iş görünür olsun"]:** Mevcut
+  `agent_event` + `AgentThinkingModal` altyapısı yalnız TEK orkestratör ajanını gösteriyordu; design-fanout'un 4
+  perspektifi (Mimari/UX/Güvenlik/Veri — asıl Agent Teams) hiç emit etmiyordu. Eklendi: `agent_event`'e `agent_label`
+  (events.ts + ipc.ts); `design-fanout` her perspektifte started/completed yayınlar (finally ile dengeli sayaç);
+  `App.tsx` reduce ETİKETLİ ajanları hem sayar hem listeler (etiketsiz orkestratör eskisi gibi yalnız sayaç);
+  `AgentThinkingModal` "🤖 &lt;ajan&gt;" rozetiyle gösterir → kullanıcı hangi ajanın canlı çalıştığını/bittiğini görür.
+  Paralel-codegen worker'ları (K4) aynı kanalı modül-id ile kullanabilir. Frontend typecheck temiz.
 - **feat(modül-paralel codegen — K4 dispatch motoru) [Ümit: "k3 k4'e devam"]:** `module-parallel/dispatch.ts`
   `runParallelModules`: gate(K1) → her modül izole worktree(K2) → worker'lar PARALEL(`Promise.allSettled`) →
   hepsi başarılıysa disjoint değişiklikleri ana ağaca SERİ entegre (`integrateWorktrees`: kapsam-dışı + dosya-

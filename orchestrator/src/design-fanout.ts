@@ -24,6 +24,7 @@ import { runClaudeCli } from "./cli-run.js";
 import { extractKindBlock } from "./cli-json.js";
 import { templatePath } from "./phase-registry.js";
 import { log } from "./logger.js";
+import { emitAgentEvent } from "./ipc.js";
 
 interface PerspectiveDef {
   role: SubagentRole;
@@ -155,9 +156,22 @@ export async function runDesignFanout(
 
   // 4 perspektif PARALEL. Biri düşerse kalanla devam (allSettled).
   const settled = await Promise.allSettled(
-    PERSPECTIVES.map((p, i) =>
-      runReasoningTurn(config, perspectiveTemplates[i], userMsg, p.role, PERSPECTIVE_MAX_TOKENS, projectRoot),
-    ),
+    PERSPECTIVES.map(async (p, i) => {
+      // Agent Teams görünürlüğü: her perspektif-ajanı başla/bit yayını → UI "hangi ajan çalışıyor"ı gösterir.
+      emitAgentEvent({ sub: "started", agent_label: p.label });
+      try {
+        return await runReasoningTurn(
+          config,
+          perspectiveTemplates[i],
+          userMsg,
+          p.role,
+          PERSPECTIVE_MAX_TOKENS,
+          projectRoot,
+        );
+      } finally {
+        emitAgentEvent({ sub: "completed", agent_label: p.label });
+      }
+    }),
   );
   const perspectives: Array<{ label: string; text: string }> = [];
   settled.forEach((r, i) => {

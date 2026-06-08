@@ -74,6 +74,8 @@ export interface AgentEvent {
   data: {
     sub: "started" | "completed" | "tool_use" | "decision" | "error";
     ts: number;
+    /** Agent Teams görünürlüğü: hangi ajan (örn. "Mimari"/"UX"/modül id). Tek orkestratörde boş. */
+    agent_label?: string;
     turn?: number;
     tool_name?: string;
     tool_input?: Record<string, unknown>;
