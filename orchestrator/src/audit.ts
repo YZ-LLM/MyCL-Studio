@@ -98,6 +98,54 @@ export async function appendDecision(
 }
 
 const HANDOFFS_FILE = "handoffs.jsonl";
+const WTF_FILE = "wtf.jsonl";
+
+/**
+ * WTF / "gotcha" kaydı (Cichra karar-yakalama, 4. biçim): "bu tuhaf/sezgi-dışı şey BİLEREK böyle, sebebi şu —
+ * dokunurken dikkat (tuzak / taşıyıcı kod)". Gelecekteki insan/yapay-zekânın load-bearing bir şeyi yanlışlıkla
+ * bozmasını önler. AYRI dosya (`.mycl/wtf.jsonl`); recall'a enjekte edilir (dokunmadan ÖNCE okunur). appendDecision deseni.
+ */
+export interface WtfRecord {
+  ts: number;
+  /** İlgili dosya/konum (varsa). */
+  location?: string;
+  /** "Şu tuhaf görünüyor ama X yüzünden bilerek böyle / Y'ye dokunma" — kısa. */
+  note: string;
+}
+
+export async function appendWtf(projectRoot: string, rec: WtfRecord): Promise<void> {
+  const line = JSON.stringify(rec) + "\n";
+  const p = join(projectRoot, MYCL_DIR, WTF_FILE);
+  await fs.mkdir(dirname(p), { recursive: true });
+  const fh = await openSync(p, "a");
+  try {
+    await fh.write(line);
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+
+/** wtf.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
+export async function readWtf(projectRoot: string): Promise<WtfRecord[]> {
+  const p = join(projectRoot, MYCL_DIR, WTF_FILE);
+  let raw: string;
+  try {
+    raw = await fs.readFile(p, "utf-8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new AuditError(`wtf read failed: ${String(err)}`);
+  }
+  const out: WtfRecord[] = [];
+  for (const line of raw.split("\n").filter((l) => l.trim())) {
+    try {
+      out.push(JSON.parse(line) as WtfRecord);
+    } catch (err) {
+      console.error(`[wtf] bad line skipped: ${line.slice(0, 100)} (${err})`);
+    }
+  }
+  return out;
+}
 
 /**
  * Yapılandırılmış faz DEVİR (handoff) kaydı (Missions disiplini): bir faz tamamlanınca / başarısız

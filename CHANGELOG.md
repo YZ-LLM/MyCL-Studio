@@ -6,6 +6,13 @@
 
 ## 2026-06-08
 
+- **feat(WTF/gotcha kaydı — Cichra karar-yakalamanın 4. biçimi) [Ümit: "WTF ekle"]:** "Bu tuhaf şey bilerek böyle,
+  dokunma" tuzak notları. `WtfRecord` + `appendWtf`/`readWtf` (audit.ts → ayrı `.mycl/wtf.jsonl`, handoff deseni);
+  Faz 0 hata-ayıklaması kök neden + bağımlılık etki-alanını OTOMATİK WTF olarak yazar; `context-builder` son WTF'leri
+  orkestratör recall'ına "### Bilinen tuzaklar (dokunmadan önce oku)" diye enjekte eder → bilerek-böyle olan kod
+  yanlışlıkla bozulmaz. +2 test. Karar-yakalama artık 4 biçim TAM (ADR=decisions + BDD=AC + PRD=living-docs + WTF).
+  Genişletme: WTF'i kodlama-anı tuhaflıklarından da yakalamak (şimdilik yalnız hata-ayıklama). MyCL-Yetenekler.html
+  güncellendi (WTF + Agent Teams durumu: Faz 5 tam-aktif).
 - **feat(#3 bağımlılık etki-alanı → fix codegen'i) [Ümit: "faydalı isteğe-bağlıları yap"]:** Faz 0 D1'in ZATEN
   hesapladığı deterministik bağımlılık blast-radius'unu (`state.pending_diagnostic.affected`) fix payload'ına ekler →
   Faz 8 codegen AI "bu fix şu dosyaları etkiler"i grep'le yeniden keşfetmeden görür (token tasarrufu + dependent'i

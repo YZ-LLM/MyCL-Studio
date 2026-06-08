@@ -10,8 +10,8 @@
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { readAuditLogTail, readDecisions, readHandoffs } from "../audit.js";
-import type { HandoffRecord } from "../audit.js";
+import { readAuditLogTail, readDecisions, readHandoffs, readWtf } from "../audit.js";
+import type { HandoffRecord, WtfRecord } from "../audit.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
 import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
@@ -95,6 +95,9 @@ export interface AgentContextSnapshot {
   /** ③ (Missions handoff): son N faz devri — durum + keşfedilen sorun (handoffs.jsonl).
    *  Orkestratör son faz sonuçlarını görüp HEDEFLİ takip önerebilir (rewrite değil). */
   recent_handoffs: HandoffRecord[];
+  /** WTF/gotcha (Cichra karar-yakalama): bilinen tuzaklar/taşıyıcı-kod notları (wtf.jsonl) —
+   *  dokunmadan önce görülsün ki bilerek-böyle olan şey yanlışlıkla bozulmasın. */
+  recent_wtf: WtfRecord[];
   /** Pipeline en az bir kez Faz 17'yi tamamladı mı (yeni iterasyon tetikleyici). */
   was_pipeline_completed: boolean;
   /** v15.6: Projeye özel son N hafıza girişi. */
@@ -174,6 +177,8 @@ export async function buildAgentContext(
   const recentHandoffs = (
     await readHandoffs(state.project_root).catch(() => [])
   ).slice(-6);
+  // WTF/gotcha: bilinen tuzaklar — orkestratör dokunmadan önce görsün (bilerek-böyle olanı bozmasın).
+  const recentWtf = (await readWtf(state.project_root).catch(() => [])).slice(-6);
   // v15.11: features.md başlık-indeksi (ucuz; full body değil — token bütçesi).
   const featureHeadings = (
     await extractFeatureChunks(state.project_root).catch(() => [])
@@ -196,6 +201,7 @@ export async function buildAgentContext(
     recent_audit: recent,
     recent_decisions: recentDecisions,
     recent_handoffs: recentHandoffs,
+    recent_wtf: recentWtf,
     was_pipeline_completed: wasCompleted,
     project_memory: projectMemory,
     general_memory: generalMemory,
@@ -275,6 +281,16 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
       lines.push(
         `- Faz ${h.phase} (iter ${h.iteration}): ${h.status} — ${h.summary.slice(0, 100)}${disc}`,
       );
+    }
+  }
+  // WTF/gotcha: bilinen tuzaklar — agent BİR ŞEYE DOKUNMADAN ÖNCE okusun ki bilerek-böyle olanı bozmasın.
+  lines.push("", "### Bilinen tuzaklar / WTF (dokunmadan önce oku)", "");
+  if (ctx.recent_wtf.length === 0) {
+    lines.push("(kayıtlı tuzak yok)");
+  } else {
+    for (const w of ctx.recent_wtf) {
+      const loc = w.location ? `[${w.location}] ` : "";
+      lines.push(`- ${loc}${w.note.slice(0, 180)}`);
     }
   }
   // v15.6: Hafıza bölümü — agent karar verirken geçmiş kararları referans alır

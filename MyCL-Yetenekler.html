@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MyCL Studio — Yetenekler ve Kullanım Durumu</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --line: #2a2f3a; --tx: #e6e9ef;
+    --dim: #9aa3b2; --accent: #5b9dff; --ok: #3fb950; --partial: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--tx);
+    font: 16px/1.6 -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 32px 20px 64px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  .sub { color: var(--dim); margin: 0 0 28px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .card h2 { font-size: 18px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  .num { color: var(--accent); font-weight: 700; }
+  .badge { font-size: 12px; padding: 2px 9px; border-radius: 999px; font-weight: 600; margin-left: auto; }
+  .b-ok { background: rgba(63,185,80,.15); color: var(--ok); border: 1px solid rgba(63,185,80,.4); }
+  .b-partial { background: rgba(210,153,34,.15); color: var(--partial); border: 1px solid rgba(210,153,34,.4); }
+  .card .lbl { color: var(--accent); font-size: 13px; font-weight: 600; margin-top: 12px; }
+  .card p { margin: 3px 0 0; }
+  .card .dim { color: var(--dim); }
+  .note {
+    margin-top: 28px; background: #14171d; border: 1px solid var(--line);
+    border-left: 4px solid var(--partial); border-radius: 10px; padding: 18px 22px;
+  }
+  .note h2 { margin-top: 0; }
+  code { background: #11141a; padding: 1px 6px; border-radius: 5px; color: #cdd6e3; font-size: 13px; }
+  .foot { color: var(--dim); margin-top: 26px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MyCL Studio — Yetenekler ve Kullanım Durumu</h1>
+  <p class="sub">Listelediğin dokuz yeteneğin her biri: sade dille “nedir”, MyCL’in onu nasıl kullandığı, ve gerçek durumu. (Kod tabanından doğrulandı, 2026-06-08.)</p>
+
+  <div class="grid">
+
+    <div class="card">
+      <h2><span class="num">1.</span> Ajan Takımları <span class="badge b-ok">Aktif · Faz 5</span></h2>
+      <p class="dim">İngilizcesi: Agent Teams</p>
+      <div class="lbl">Nedir?</div>
+      <p>Tek bir yapay zekâ yerine, birden çok ajanın aynı işe farklı açılardan aynı anda bakması.</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>Arayüz tasarımı adımında (Faz 5) işi dört açıdan paralel inceler: mimari, kullanıcı deneyimi, güvenlik, veri. Açılar çelişirse gerçek ajan-takımı müzakeresi devreye girer.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">Ayardan her Faz 5 için açık → o adımda her zaman çalışıyor. Diğer fazlarda bilinçli kapalı (gerek yok). Tam kapasite, kullanıcı tercihiyle Faz 5 kapsamında.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">2.</span> Belirli-Sıralı İş Akışları <span class="badge b-ok">Aktif · çekirdek</span></h2>
+      <p class="dim">İngilizcesi: Deterministic Workflows</p>
+      <div class="lbl">Nedir?</div>
+      <p>Adımların rastgele değil, hep aynı sırada ve tekrarlanabilir biçimde işlemesi. Aynı girdiyle aynı yol izlenir.</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>Faz 0’dan Faz 17’ye kadar sabit bir boru hattı var. Her iş bu sıralı adımlardan geçer; sürpriz yok, izlenebilir.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">MyCL’in iskeleti bu. Sürekli kullanılıyor.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">3.</span> Kararları Kayda Geçirme <span class="badge b-ok">Aktif · 4 biçim tam</span></h2>
+      <p class="dim">İngilizcesi: BDD, ADR, PRD, WTF — kararları hem insan hem yapay zekâ için kaydetme</p>
+      <div class="lbl">Nedir?</div>
+      <p>“Ne yapıldı, neden yapıldı” bilgisinin sonradan okunabilecek kalıcı kayıtlara dökülmesi. Dört yaygın biçim: davranış senaryoları (BDD), mimari karar kaydı (ADR), ürün gereksinim belgesi (PRD), ve gayriresmî tuzak/gotcha notları (WTF).</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>Dört biçimin de karşılığı var: <strong>mimari kararlar</strong> (<code>decisions.jsonl</code> = ADR), <strong>çalıştırılabilir kabul kriterleri</strong> (= BDD davranış senaryoları), <strong>yaşayan kullanım kılavuzu</strong> (= PRD ürün gereksinimi), ve <strong>tuzak/gotcha notları</strong> (<code>wtf.jsonl</code> = WTF — “bu tuhaf şey bilerek böyle, dokunma”). WTF, hata-ayıklamada bulunan kök neden + etki alanından otomatik yazılır ve orkestratöre “dokunmadan önce oku” diye sunulur. Ayrıca vazgeçilen niyetler + devir kayıtları tutuluyor.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">2026-06-08’de WTF eklendi → artık dört biçim de var. Gelecekte: WTF’i yalnız hata-ayıklamadan değil, kodlama sırasındaki bilinçli tuhaflıklardan da yakalamak genişletilebilir.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">4.</span> Orkestratör Ajan <span class="badge b-ok">Aktif · çekirdek</span></h2>
+      <p class="dim">İngilizcesi: Orchestrator Agent</p>
+      <div class="lbl">Nedir?</div>
+      <p>Kullanıcının mesajını anlayıp “şimdi ne yapılmalı” kararını veren yönetici beyin.</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>Her mesajda yapay zekâ karar verir (kalıp/regex eşleştirmesi yok), uygun adımı tetikler. Geçmiş kararları, devirleri ve hafızayı da önüne alır.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">Sistemin giriş kapısı. Her mesajda kullanılıyor.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">5.</span> Güvenlik Tarama Butonu <span class="badge b-ok">Aktif</span></h2>
+      <div class="lbl">Nedir?</div>
+      <p>Tek tıkla projenin güvenlik denetimini başlatan düğme.</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>Arayüzdeki buton güvenlik taramasını çalıştırır: kod desen denetimi (semgrep), gizli anahtar sızıntısı (gitleaks), yaygın açık listesi (OWASP), güvenlik başlıkları ve içerik politikası kontrolleri. Boru hattında Faz 13 olarak da koşar.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">Hem buton hem otomatik faz olarak çalışıyor.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">6.</span> API ya da Abonelik Yönetimi <span class="badge b-ok">Aktif</span></h2>
+      <p class="dim">İşi hangi arka uçla çalıştıracağını seçme</p>
+      <div class="lbl">Nedir?</div>
+      <p>Yapay zekâyı çağırmanın iki yolu var: ücretli API ya da Claude Code aboneliği. Bu yetenek hangisinin kullanılacağını yönetir.</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>Her rol için arka uç seçilebilir (API / abonelik / otomatik). “Otomatik” modda abonelik limite takılırsa kendiliğinden API’ye geçer; limit açılınca geri döner. Bu oturumda hata-yoluyla gelen limitleri de yakalayacak şekilde tamamlandı.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">Çalışıyor; otomatik geçiş güvenilirliği bu oturumda güçlendirildi.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">7.</span> Güncel Kalan Kullanım Kılavuzu <span class="badge b-ok">Aktif</span></h2>
+      <p class="dim">Proje değiştikçe kendini güncelleyen doküman</p>
+      <div class="lbl">Nedir?</div>
+      <p>Projeyle birlikte yaşayan, elle yazılmadan güncel kalan bir “ne var, nasıl kullanılır” belgesi.</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>İki belge otomatik üretilir/güncellenir: biri yapay zekânın okuması için özellik listesi, biri kullanıcı için adım adım kılavuz. PDF olarak dışa aktarılabiliyor.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">Çalışıyor (PDF dışa aktarım dahil).</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">8.</span> Jeton (Token) Göstergeleri <span class="badge b-ok">Aktif</span></h2>
+      <div class="lbl">Nedir?</div>
+      <p>Her adımda ne kadar jeton harcandığını, maliyeti ve önbellek kullanımını gösteren pano. (Jeton = yapay zekânın işlediği metin birimi; maliyetin ölçüsü.)</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>Tur tur model, jeton sayısı, gerçek maliyet ve önbellek kazanımı paneli (TokenTimelinePanel).</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">Çalışıyor.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="num">9.</span> Hatasız Otomatik Cevap <span class="badge b-ok">Aktif</span></h2>
+      <p class="dim">İngilizcesi: Auto-Answer</p>
+      <div class="lbl">Nedir?</div>
+      <p>Sistemin sorduğu, önerisi belli olan soruları kullanıcıyı bekletmeden otomatik yanıtlama.</p>
+      <div class="lbl">MyCL nasıl kullanıyor?</div>
+      <p>“Oto-cevap” düğmesi açıkken, bir önerisi olan soru sistem tarafından otomatik seçilir; böylece uzun işlerde insan dikkati az kullanılır. Açıp kapatması kullanıcıda.</p>
+      <div class="lbl">Durum</div>
+      <p class="dim">Çalışıyor; arayüzden açılıp kapatılabiliyor.</p>
+    </div>
+
+  </div>
+
+  <div class="note">
+    <h2>Kullanmadığımız var mı? (Dürüst yanıt — güncel)</h2>
+    <p><strong>Hayır — dokuzunun da kodu bağlı ve aktif, eksik kalan yok.</strong> Daha önce “tam kapasite değil” dediğim iki nokta da kapandı:</p>
+    <ul>
+      <li><strong>Ajan Takımları (1):</strong> kullanıcı ayardan her Faz 5 için açtı → o adımda her zaman çalışıyor. Diğer fazlarda kapalı olması bilinçli tercih, eksiklik değil.</li>
+      <li><strong>Kararları Kayda Geçirme (3):</strong> 2026-06-08’de <strong>WTF/tuzak kaydı eklendi</strong> (<code>wtf.jsonl</code>) → artık dört biçim de var (ADR + BDD + PRD + WTF).</li>
+    </ul>
+    <p>Yani listenin tamamı kullanımda. Tek açık “gelecek genişletmesi”: WTF’i hata-ayıklama dışında, kodlama anındaki bilinçli tuhaflıklardan da yakalamak (isteğe bağlı).</p>
+  </div>
+
+  <p class="foot">Kaynak: MyCL Studio kod tabanı (orchestrator + arayüz), 2026-06-08 doğrulaması. Bu sayfa <code>MyCL-Yetenekler.html</code> olarak proje kökünde.</p>
+</div>
+</body>
+</html>

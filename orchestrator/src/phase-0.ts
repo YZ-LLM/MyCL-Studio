@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { appendAudit, formatDecisions, readDecisions } from "./audit.js";
+import { appendAudit, appendWtf, formatDecisions, readDecisions } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
@@ -630,6 +630,23 @@ export class Phase0Controller {
       caller: "mycl-orchestrator",
       detail: `confidence=${confidence} options=${optionsTR.length} affected=${affected.length}`,
     });
+
+    // WTF/gotcha kaydı (Cichra karar-yakalama): bu hata-ayıklamada bulunan kök neden + etki alanı,
+    // gelecekte aynı yere dokunulurken "tuzak"tır → .mycl/wtf.jsonl'a yaz, recall'a enjekte edilsin.
+    // Non-blocking (yazılamazsa pipeline durmaz).
+    try {
+      const danger =
+        affected.length > 0
+          ? ` — dokunurken etkilenen: ${affected.slice(0, 3).map((a) => a.module).join(", ")}`
+          : "";
+      await appendWtf(this.state.project_root, {
+        ts: Date.now(),
+        location: affected.length > 0 ? affected.slice(0, 3).map((a) => a.module).join(", ") : undefined,
+        note: `Kök neden (geçmiş hata): ${rootCauseTR.slice(0, 220)}${danger}`,
+      });
+    } catch (e) {
+      log.warn("phase-0", "WTF kaydı yazılamadı (non-blocking)", e);
+    }
 
     // v15.7 (2026-05-26): Auto-apply path KALDIRILDI. Yeni mimari: Phase 0
     // sadece teşhis + plan sunma. Uygulama Faz 5'in işi (orkestratör

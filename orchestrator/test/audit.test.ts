@@ -9,6 +9,9 @@ import {
   appendHandoff,
   readHandoffs,
   type HandoffRecord,
+  appendWtf,
+  readWtf,
+  type WtfRecord,
   AuditError,
   formatDecisions,
   extractSpecSection,
@@ -389,6 +392,27 @@ describe("audit", () => {
       };
       await appendHandoff(projectRoot, rec);
       expect(await readHandoffs(projectRoot)).toEqual([rec]);
+    });
+  });
+
+  describe("wtf / gotcha (Cichra karar-yakalama)", () => {
+    it("appendWtf + readWtf roundtrip; dosya yoksa []", async () => {
+      expect(await readWtf(projectRoot)).toEqual([]);
+      const rec: WtfRecord = {
+        ts: 9,
+        location: "src/api/orders.ts",
+        note: "Bu sıralama LSH bucket mantığına dayanıyor — bitmask'leri bozma.",
+      };
+      await appendWtf(projectRoot, rec);
+      expect(await readWtf(projectRoot)).toEqual([rec]);
+    });
+
+    it("location opsiyonel + append-only sıra", async () => {
+      await appendWtf(projectRoot, { ts: 1, note: "tuzak 1" });
+      await appendWtf(projectRoot, { ts: 2, note: "tuzak 2" });
+      const all = await readWtf(projectRoot);
+      expect(all.map((w) => w.note)).toEqual(["tuzak 1", "tuzak 2"]);
+      expect(all[0].location).toBeUndefined();
     });
   });
 
