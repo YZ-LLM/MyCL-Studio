@@ -55,6 +55,7 @@ export function useOrchestrator(): UseOrchestratorResult {
   const [lastError, setLastError] = useState<string | null>(null);
   const [bootSequence, setBootSequence] = useState(0);
   const unlistenRef = useRef<UnlistenFn | null>(null);
+  const exitUnlistenRef = useRef<UnlistenFn | null>(null);
   const spawnedRef = useRef(false);
 
   useEffect(() => {
@@ -66,6 +67,9 @@ export function useOrchestrator(): UseOrchestratorResult {
     const eventName = isMultiWindow
       ? `orchestrator-event:${windowLabel}`
       : "orchestrator-event";
+    const exitEventName = isMultiWindow
+      ? `orchestrator-exit:${windowLabel}`
+      : "orchestrator-exit";
 
     (async () => {
       try {
@@ -85,6 +89,15 @@ export function useOrchestrator(): UseOrchestratorResult {
             if (detail) setLastError(detail);
           }
         });
+        // Backend (orkestratör süreci) ölürse SESSİZ kalma — UI "hazır" yalanı söylemesin,
+        // komutlar ölü sürece gitmesin. Görünür hata + ready=false (kullanıcı yeniden başlatır).
+        exitUnlistenRef.current = await listen(exitEventName, () => {
+          if (!mounted) return;
+          setReady(false);
+          setLastError(
+            "Arka uç (orkestratör) süreci durdu — komutlar iletilemez. Pencereyi kapatıp yeniden açın.",
+          );
+        });
         if (!spawnedRef.current) {
           spawnedRef.current = true;
           if (isMultiWindow) {
@@ -103,6 +116,7 @@ export function useOrchestrator(): UseOrchestratorResult {
     return () => {
       mounted = false;
       unlistenRef.current?.();
+      exitUnlistenRef.current?.();
       // Yumuşak kapatma — Tauri uygulaması kapanırken çağrılır.
       if (isMultiWindow) {
         invoke("kill_window", { windowLabel }).catch(() => {});

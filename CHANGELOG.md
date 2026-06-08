@@ -6,6 +6,17 @@
 
 ## 2026-06-08
 
+- **fix(2 olmazsa-olmaz kusur — aktif "must-have" taramasından) [Ümit: "diğer olmazsa olmaz işleri bul"]:**
+  3-ajan salt-okunur tarama (sessiz-başarısızlık / yarım-bağlı / yeni-eklentiler) + süzgeç → 2 GERÇEK bulgu
+  (kalan ~15 aday enhancement/test-açığı/kasıtlı-tasarım diye ATLANDI, ilkeyi çiğnememek için).
+  (A) **phase-0 `plan_summary_en` korumasız:** `plan_kind` defensive fallback'liydi ama bu değildi → eksik/boş
+  gelirse `index.ts selected.planSummary.length` ÇÖKER / fix payload "undefined" olur. Guard + fallback
+  (descTR/labelTR) + warn eklendi.
+  (B) **`orchestrator-exit` frontend'de DİNLENMİYORDU:** backend süreci ölünce UI fark etmiyor, "hazır" yalanı
+  söyleyip komutları ölü sürece yolluyordu (sessiz başarısızlık). `useOrchestrator` artık exit event'ini (tek +
+  çok-pencere) dinliyor → `setReady(false)` + görünür hata mesajı. Elenenler: message_start boş-catch (polish),
+  runtime_error structured (hata zaten chat'te görünür), abort/shutdown/ping UI (özellik), Faz4 handoff asimetrisi
+  (zenginleştirme), test-açıkları (mantık zaten test'li).
 - **fix(noteCliRateLimitError'ı BAĞLA — yarım-bağlı güvenilirlik yolu) [Ümit: "olmazsa olmaz olanları yap"]:**
   `noteCliRateLimitError` tanımlıydı ama HİÇ çağrılmıyordu (ts-prune "ölü" sandı — aslında bağlanmamış). Abonelik
   usage/rate-limit'i `rate_limit_event` YERİNE bir HATA olarak geldiğinde tespit edilmiyor, auto-mode API'ye

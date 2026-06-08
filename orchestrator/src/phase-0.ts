@@ -572,10 +572,21 @@ export class Phase0Controller {
           got: rawKind,
         });
       }
+      // plan_summary_en de defensive (plan_kind gibi): eksik/boş gelirse downstream
+      // `selected.planSummary.length` (index.ts) ÇÖKER veya fix payload "undefined" olur.
+      // Boşsa açıklamaya/etikete düş — asla undefined bırakma.
+      const rawSummary = fixOptionsRaw[i].plan_summary_en;
+      const planSummary =
+        typeof rawSummary === "string" && rawSummary.trim()
+          ? rawSummary
+          : descTR || labelTR || "(plan summary missing)";
+      if (!(typeof rawSummary === "string" && rawSummary.trim())) {
+        log.warn("phase-0", "plan_summary_en missing/empty; falling back", { option_index: i });
+      }
       optionsTR.push({
         label: labelTR,
         description: descTR,
-        planSummary: fixOptionsRaw[i].plan_summary_en,
+        planSummary,
         planKind,
       });
     }
