@@ -5,13 +5,32 @@ import {
 } from "../src/claude-folder-guard.js";
 
 describe("buildSeatbeltProfile", () => {
-  it("allow default + korumalı klasörleri read-deny eder (home dahil)", () => {
+  it("allow default + korumalı konumları read-deny eder (kişisel + diğer-uygulama-verisi)", () => {
     const p = buildSeatbeltProfile("/Users/x");
     expect(p).toContain("(allow default)");
     expect(p).toContain("(deny file-read*");
-    for (const d of ["Downloads", "Documents", "Desktop", "Music", "Pictures", "Movies"]) {
+    for (const d of [
+      "Downloads",
+      "Documents",
+      "Desktop",
+      "Music",
+      "Pictures",
+      "Movies",
+      "Library/Containers",
+      "Library/Group Containers",
+      "Library/Application Support",
+      "Library/Mail",
+      "Library/Calendars",
+      "Library/Mobile Documents",
+    ]) {
       expect(p).toContain(`(subpath "/Users/x/${d}")`);
     }
+  });
+
+  it("auth/config yollarını (~/.claude, ~/.mycl) REDDETMEZ", () => {
+    const p = buildSeatbeltProfile("/Users/x");
+    expect(p).not.toContain("/Users/x/.claude");
+    expect(p).not.toContain("/Users/x/.mycl");
   });
 });
 

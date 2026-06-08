@@ -15,6 +15,11 @@
   sandbox-exec altında çalışıyor (auth+cevap) + Downloads reddediliyor + proje/~.claude açık. macOS-only (Linux
   no-op). Escape hatch: `MYCL_CLAUDE_FOLDER_GUARD=0`. Apple Music (Media framework, dosya değil) sürebilir → tek
   sefer deny. +3 test.
+- **fix(macOS izin — "diğer uygulamaların verisi" + bunun gibi hepsi):** Klasör-guard deny-listesi
+  genişletildi: kişisel klasörlere ek olarak `~/Library/{Containers, Group Containers, Application Support,
+  Mail, Calendars, Mobile Documents}` (kTCCServiceSystemPolicyAppData "diğer uygulama verisi" + Mail/Takvim/
+  iCloud). EMPİRİK doğrulandı: claude bu yolların TÜMÜ reddedilince bile auth+cevap veriyor (config ~/.claude +
+  ~/.claude.json, Library ALTINDA değil → açık). Böylece "bunun gibi" tüm TCC pencereleri kaynağında kesiliyor.
 
 ## 2026-06-07
 

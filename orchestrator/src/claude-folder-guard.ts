@@ -1,8 +1,9 @@
-// claude-folder-guard — macOS: spawn ettiğimiz `claude`'un başlangıç klasör-taramasını
-// (Downloads/Documents/Desktop/Music/Pictures/Movies) bir OS sandbox'ıyla engelle → bu klasör
-// okuması syscall'da düşer, TCC sorulmadan → macOS izin penceresi ("İndirilenler'e erişmek
-// istiyor") ÇIKMAZ. claude bu klasörlere MyCL işi için erişmez; geri kalan her şey (~/.claude
-// auth, proje, ağ, /tmp) açık (`allow default`).
+// claude-folder-guard — macOS: spawn ettiğimiz `claude`'un başlangıç taramasını TCC-korumalı
+// konumlardan (kişisel klasörler + DİĞER uygulamaların verisi + Mail/Takvim/iCloud) bir OS
+// sandbox'ıyla engelle → bu okumalar syscall'da düşer, TCC sorulmadan → macOS izin pencereleri
+// ("İndirilenler'e / diğer uygulamaların verilerine erişmek istiyor" vb.) ÇIKMAZ. claude bunlara
+// MyCL işi için erişmez; geri kalan her şey (~/.claude + ~/.claude.json auth, ~/.mycl, proje, ağ,
+// /tmp) açık (`allow default`). EMPİRİK doğrulandı: claude bu liste altında auth+cevap veriyor.
 //
 // YALNIZ read-only claude çağrılarında kullanılır (Bash tool'u OLMAYAN). Bash-kullanan çağrıyı
 // sarmak, claude'un kendi iç Bash-sandbox'ıyla nesting çakışması yaratabilir → onlar sarılmaz
@@ -10,7 +11,11 @@
 
 import { homedir } from "node:os";
 
-/** TCC penceresi çıkaran korumalı kullanıcı klasörleri (claude'un MyCL işi için ihtiyacı yok). */
+/**
+ * TCC penceresi çıkaran korumalı konumlar ($HOME'a göreli; claude'un MyCL işi için ihtiyacı yok).
+ * Kişisel klasörler + "diğer uygulamaların verisi" (Containers/Group Containers/Application Support)
+ * + Mail/Takvim/iCloud. NOT: ~/.claude + ~/.claude.json (auth) ve ~/.mycl Library ALTINDA DEĞİL → açık kalır.
+ */
 const GUARDED_DIRS = [
   "Downloads",
   "Documents",
@@ -18,6 +23,12 @@ const GUARDED_DIRS = [
   "Music",
   "Pictures",
   "Movies",
+  "Library/Containers",
+  "Library/Group Containers",
+  "Library/Application Support",
+  "Library/Mail",
+  "Library/Calendars",
+  "Library/Mobile Documents",
 ] as const;
 
 /** Seatbelt profili: her şeye izin ver, korumalı kullanıcı klasörlerini OKUMAYI reddet. */
