@@ -6,6 +6,12 @@
 
 ## 2026-06-08
 
+- **feat(#3 bağımlılık etki-alanı → fix codegen'i) [Ümit: "faydalı isteğe-bağlıları yap"]:** Faz 0 D1'in ZATEN
+  hesapladığı deterministik bağımlılık blast-radius'unu (`state.pending_diagnostic.affected`) fix payload'ına ekler →
+  Faz 8 codegen AI "bu fix şu dosyaları etkiler"i grep'le yeniden keşfetmeden görür (token tasarrufu + dependent'i
+  kaçırmama). Tam da fix/debug penceresi (dep-map'in en parladığı yer). `formatBlastRadius` (SAF, fix/dep-graph;
+  +3 test); index.ts fix payload'ına eklendi. **Süzgeç:** #1-Faz2 (marjinal + qa-askq'ya dolaşık) ve
+  ④ PRD-relevance / #2 subtract / yabancı-proje onboarding ATLANDI — faydalı-değil / güvenli-aday-yok / "sonra".
 - **fix(2 olmazsa-olmaz kusur — aktif "must-have" taramasından) [Ümit: "diğer olmazsa olmaz işleri bul"]:**
   3-ajan salt-okunur tarama (sessiz-başarısızlık / yarım-bağlı / yeni-eklentiler) + süzgeç → 2 GERÇEK bulgu
   (kalan ~15 aday enhancement/test-açığı/kasıtlı-tasarım diye ATLANDI, ilkeyi çiğnememek için).

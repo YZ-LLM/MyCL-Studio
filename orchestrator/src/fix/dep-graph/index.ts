@@ -212,3 +212,17 @@ export function getAffected(
     }))
     .sort((a, b) => riskRank(b.risk) - riskRank(a.risk));
 }
+
+/**
+ * #3 — getAffected çıktısını fix codegen'inin GÖRECEĞİ metne çevirir: codegen AI bağımlılık
+ * blast-radius'unu grep'le yeniden keşfetmek zorunda kalmaz (token tasarrufu + dependent'i
+ * gözden kaçırmama). Boşsa "" döner (gürültü yok). SAF — test edilebilir.
+ */
+export function formatBlastRadius(affected: AffectedModule[], max = 10): string {
+  if (!affected || affected.length === 0) return "";
+  const top = affected
+    .slice(0, max)
+    .map((a) => `- ${a.module} (${a.risk}: ${a.why})`)
+    .join("\n");
+  return `\n\n📊 Bağımlılık etki alanı (Faz 0 deterministik analizi — bu fix'in dokunduğu kök şunları etkiler; dokunurken gözden kaçırma):\n${top}`;
+}

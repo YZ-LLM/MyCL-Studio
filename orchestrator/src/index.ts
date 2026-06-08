@@ -110,6 +110,7 @@ import { setCacheTtl } from "./codegen/cli-backend.js";
 import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
+import { formatBlastRadius } from "./fix/dep-graph/index.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
 import {
   computeChangedScope,
@@ -3098,7 +3099,9 @@ export async function handleAskqAnswer(
       caller: "user",
       detail: `label="${selected.label}" kind=${kind}${planKindMissing ? " (defaulted)" : ""} plan_len=${selected.planSummary.length}`,
     });
-    const fixPayload = `Fix request: ${selected.label}\n\nPlan:\n${selected.planSummary}`;
+    // #3: Faz 0'ın deterministik bağımlılık etki-alanını fix payload'ına ekle → Faz 8 codegen AI
+    // blast-radius'u grep'siz görür (token + kaçırma). pending.affected Faz 0 D1'de hesaplandı.
+    const fixPayload = `Fix request: ${selected.label}\n\nPlan:\n${selected.planSummary}${formatBlastRadius(pending.affected ?? [])}`;
     // v15.10: fix-güvenlik katmanı TÜM kod fix'lerine (backend + UI). Kod
     // değişiminden ÖNCE checkpoint al → regresyonda rollback hedefi + scoped-gate
     // (fix_checkpoint_ref shouldComputeScope'u tetikler; mekanik gate'ler yalnız
