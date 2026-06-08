@@ -6,6 +6,12 @@
 
 ## 2026-06-09
 
+- **test(modül-paralel codegen — GERÇEK 2-modül E2E GEÇTİ, no mock) [Ümit: "2 modüllü proje ile E2E, mock yok"]:**
+  `orchestrator/scripts/e2e-parallel-codegen.mjs` — geçici git repo + 2 ayrık modül (greet/calc), GERÇEK
+  `makeScopedCodegenWorker` (sonnet, abonelik) ile `runParallelModules`. Sonuç: `parallel:true, ok:true`, iki modül
+  PARALEL izole worktree'de yazıldı + ayrık entegre (10 sn, 2 api_call), `src/greet/greet.ts` + `src/calc/add.ts`
+  doğru gerçek kod, çakışma/sızıntı yok, worktree'ler temizlendi. → Paralel codegen çekirdeği (K1 kapı + K2 worktree +
+  K4 dispatch + gerçek worker) UÇTAN UCA KANITLANDI. Kalan (opt-in, ileride): LLM decomposition + Faz 5/8 pipeline hook.
 - **feat(#2 onboarding — yabancı koda hakimiyet, ilk artım) [Ümit: "unutma dediğim işi yap"]:** MyCL kendi
   yaratmadığı/ilk gördüğü projeyi anlasın diye: `onboarding/project-map.ts` — `buildProjectMap` (mevcut
   `fix/dep-graph` reverse-import'undan en MERKEZİ modülleri çıkarır = "önce buraya bak, dokunursan etkisi geniş") +
