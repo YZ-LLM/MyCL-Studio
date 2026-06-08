@@ -20,6 +20,12 @@
   Mail, Calendars, Mobile Documents}` (kTCCServiceSystemPolicyAppData "diğer uygulama verisi" + Mail/Takvim/
   iCloud). EMPİRİK doğrulandı: claude bu yolların TÜMÜ reddedilince bile auth+cevap veriyor (config ~/.claude +
   ~/.claude.json, Library ALTINDA değil → açık). Böylece "bunun gibi" tüm TCC pencereleri kaynağında kesiliyor.
+- **fix(macOS izin — framework-tabanlı TCC: Apple Music/Media + Photos):** Dosya-deny bunları kesemiyordu
+  (kTCCServiceMediaLibrary + kTCCServicePhotos = framework çağrısı, dosya değil). Çözüm: Seatbelt profiline
+  `(deny mach-lookup (global-name-regex "^com\.apple\.tccd"))` — claude'un in-process framework'leri (Media/Photos)
+  izin SORMAK için tccd'ye ulaşamaz → bu pencereler de AÇILAMAZ. Blanket etki: kalan tüm TCC pencerelerini keser.
+  EMPİRİK doğrulandı: claude TAM profil (tüm file-deny + tccd mach-deny) altında auth+cevap veriyor (coding için
+  tccd'ye ihtiyaç yok). file-deny'ler least-privilege için korundu (defense-in-depth).
 
 ## 2026-06-07
 

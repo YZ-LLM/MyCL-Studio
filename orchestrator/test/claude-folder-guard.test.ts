@@ -32,6 +32,12 @@ describe("buildSeatbeltProfile", () => {
     expect(p).not.toContain("/Users/x/.claude");
     expect(p).not.toContain("/Users/x/.mycl");
   });
+
+  it("tccd mach-lookup'ı reddeder (framework-tabanlı TCC: Media/Photos pencereleri)", () => {
+    const p = buildSeatbeltProfile("/Users/x");
+    expect(p).toContain("deny mach-lookup");
+    expect(p).toContain("tccd");
+  });
 });
 
 describe("wrapReadOnlyClaude", () => {

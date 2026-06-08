@@ -31,10 +31,21 @@ const GUARDED_DIRS = [
   "Library/Mobile Documents",
 ] as const;
 
-/** Seatbelt profili: her şeye izin ver, korumalı kullanıcı klasörlerini OKUMAYI reddet. */
+/**
+ * Seatbelt profili: her şeye izin ver, AMA (1) korumalı kullanıcı konumlarını OKUMAYI reddet
+ * (least-privilege; folder/diğer-uygulama TCC'sini kaynağında keser) VE (2) `tccd`'ye mach-lookup'ı
+ * reddet → claude'un in-process framework'leri (Media Library/Apple Music, Photos) izin SORMAK için
+ * TCC'ye ulaşamaz → bu framework-tabanlı pencereler de AÇILAMAZ (dosya-deny onları kesemiyordu).
+ * claude coding için ne bu konumlara ne tccd'ye ihtiyaç duyar (her ikisi de empirik doğrulandı).
+ */
 export function buildSeatbeltProfile(home: string): string {
   const denies = GUARDED_DIRS.map((d) => `(subpath "${home}/${d}")`).join(" ");
-  return `(version 1)\n(allow default)\n(deny file-read* ${denies})`;
+  return [
+    "(version 1)",
+    "(allow default)",
+    `(deny file-read* ${denies})`,
+    '(deny mach-lookup (global-name-regex #"^com\\.apple\\.tccd"))',
+  ].join("\n");
 }
 
 export interface FolderGuardOpts {
