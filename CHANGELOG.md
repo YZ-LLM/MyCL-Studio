@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(modül-paralel codegen — K4 dispatch motoru) [Ümit: "k3 k4'e devam"]:** `module-parallel/dispatch.ts`
+  `runParallelModules`: gate(K1) → her modül izole worktree(K2) → worker'lar PARALEL(`Promise.allSettled`) →
+  hepsi başarılıysa disjoint değişiklikleri ana ağaca SERİ entegre (`integrateWorktrees`: kapsam-dışı + dosya-
+  çakışması defense'i) → temizlik. Her aşama FAIL-CLOSED (gate/worktree/worker/entegrasyon hatası → temizle + caller
+  seri). `runWorker` ENJEKTE → motor mock + gerçek git fixture ile UÇTAN UCA test edildi (happy/worker-fail/kapsam-
+  dışı; +`pathWithin`). +4 test. KALAN: gerçek worker (worktree'de scoped codegen) + decomposition (LLM modülleri
+  öner) + pipeline hook — opt-in/fail-closed; bu ortamda doğrulanamaz (gerçek ≥2-modül koşusu).
 - **feat(modül-paralel codegen — K1 güvenlik kapısı + K2 worktree izolasyon) [Ümit: ">1 modül → paralel yaz, hızlan"]:**
   Plan: additive + gated + fail-closed (mevcut SERİ codegen DEĞİŞMEZ). **K1** `module-parallel/independence.ts` — SAF
   kapı (`pathsOverlap` + `modulesDisjoint` + `shouldParallelize`): paralele YALNIZ flag açık + ≥2 modül + AYRIK

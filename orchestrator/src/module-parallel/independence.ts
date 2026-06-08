@@ -25,6 +25,13 @@ export function pathsOverlap(a: string, b: string): boolean {
   return na.startsWith(nb + "/") || nb.startsWith(na + "/");
 }
 
+/** `file` verilen kapsam önekinin (dizin/dosya) İÇİNDE mi? Entegrasyonda kapsam-dışı yazımı yakalar. SAF. */
+export function pathWithin(file: string, scopePrefix: string): boolean {
+  const f = norm(file);
+  const p = norm(scopePrefix);
+  return f === p || f.startsWith(p + "/");
+}
+
 /**
  * Modüllerin YOL kapsamları çiftler hâlinde ayrık mı? İlk çakışmada {ok:false, reason}. SAF.
  * (Dosya-yazma çakışmasının önlenmesinin temeli — ayrık kapsam + enforce = çakışma imkânsız.)
