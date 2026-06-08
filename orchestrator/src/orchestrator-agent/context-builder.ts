@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readAuditLogTail, readDecisions, readHandoffs, readWtf } from "../audit.js";
 import type { HandoffRecord, WtfRecord } from "../audit.js";
+import { peekProjectMap, formatProjectMap } from "../onboarding/project-map.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
 import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
@@ -98,6 +99,8 @@ export interface AgentContextSnapshot {
   /** WTF/gotcha (Cichra karar-yakalama): bilinen tuzaklar/taşıyıcı-kod notları (wtf.jsonl) —
    *  dokunmadan önce görülsün ki bilerek-böyle olan şey yanlışlıkla bozulmasın. */
   recent_wtf: WtfRecord[];
+  /** Onboarding (yabancı koda hakimiyet): projenin en merkezi modülleri (hazır digest, boş olabilir). */
+  project_map: string;
   /** Pipeline en az bir kez Faz 17'yi tamamladı mı (yeni iterasyon tetikleyici). */
   was_pipeline_completed: boolean;
   /** v15.6: Projeye özel son N hafıza girişi. */
@@ -202,6 +205,10 @@ export async function buildAgentContext(
     recent_decisions: recentDecisions,
     recent_handoffs: recentHandoffs,
     recent_wtf: recentWtf,
+    project_map: ((): string => {
+      const m = peekProjectMap(state.project_root);
+      return m ? formatProjectMap(m) : "";
+    })(),
     was_pipeline_completed: wasCompleted,
     project_memory: projectMemory,
     general_memory: generalMemory,
@@ -292,6 +299,10 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
       const loc = w.location ? `[${w.location}] ` : "";
       lines.push(`- ${loc}${w.note.slice(0, 180)}`);
     }
+  }
+  // Onboarding: yabancı/mevcut projenin merkezi modül haritası (hazırsa) — AI ilk turdan iskeleti bilsin.
+  if (ctx.project_map) {
+    lines.push("", ctx.project_map);
   }
   // v15.6: Hafıza bölümü — agent karar verirken geçmiş kararları referans alır
   lines.push(

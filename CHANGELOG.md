@@ -6,6 +6,14 @@
 
 ## 2026-06-09
 
+- **feat(#2 onboarding — yabancı koda hakimiyet, ilk artım) [Ümit: "unutma dediğim işi yap"]:** MyCL kendi
+  yaratmadığı/ilk gördüğü projeyi anlasın diye: `onboarding/project-map.ts` — `buildProjectMap` (mevcut
+  `fix/dep-graph` reverse-import'undan en MERKEZİ modülleri çıkarır = "önce buraya bak, dokunursan etkisi geniş") +
+  `formatProjectMap` (saf digest) + cache (`getCachedProjectMap`/`peekProjectMap`/`clearProjectMapCache`).
+  `open_project`'te ARKA PLANDA hesaplanır (bloklamaz), `clearProjectMapCache` ile proje değişince sıfırlanır;
+  `context-builder` cache'i peek edip orkestratör recall'ına enjekte eder → AI ilk turdan yabancı projenin iskeletini
+  bilir. Hafıza notuna sadık: koddan türet, HAFİF dep-map, ağır graph DB YOK (turbogrep dersi). +3 test. Derinleştirme
+  (git-niyet, mimari anlatı) sonraki artım.
 - **feat(Agent Teams görünürlüğü) [Ümit: "ajanların çalıştığı + hangi ajan ne iş görünür olsun"]:** Mevcut
   `agent_event` + `AgentThinkingModal` altyapısı yalnız TEK orkestratör ajanını gösteriyordu; design-fanout'un 4
   perspektifi (Mimari/UX/Güvenlik/Veri — asıl Agent Teams) hiç emit etmiyordu. Eklendi: `agent_event`'e `agent_label`

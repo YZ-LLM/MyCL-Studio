@@ -109,6 +109,7 @@ import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
 import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
+import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
@@ -548,6 +549,13 @@ async function handleOpenProject(path: string): Promise<void> {
         log.warn("orchestrator", "living-docs bootstrap failed (non-fatal)", e),
       );
     }
+
+    // Onboarding (yabancı koda hakimiyet): proje haritasını ARKA PLANDA hesapla (open'ı bloklamaz) →
+    // orkestratör recall'ı sonraki turlarda merkezi modülleri görür. Proje değişti → eski harita temizlendi.
+    clearProjectMapCache();
+    void getCachedProjectMap(runtime.state.project_root).catch((e: unknown) =>
+      log.warn("orchestrator", "project-map onboarding failed (non-fatal)", e),
+    );
 
     // v15.6 (2026-05-24): Boot durum özeti — kullanıcı talebi: "ilk açılışta
     // orkestra ajanı yarıda kalan bi iş varsa onu algılasın ve kullanıcıya
