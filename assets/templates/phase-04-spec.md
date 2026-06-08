@@ -17,6 +17,12 @@ Your job:
    - **Out of scope**: 1-5 bullets — features, integrations, polish DEFERRED.
    - **Technical risks**: 1-4 bullets — known unknowns, integration friction,
      data shape uncertainty. Each ≤ 2 sentences.
+   - **Assumptions (visibility — be honest)**: List anything you INFERRED that
+     the user did NOT explicitly state but the spec now depends on — an added
+     acceptance criterion, a chosen default, an interpretation of a vague word.
+     Each: what you assumed + why. Omit if everything came directly from the
+     user. These are SHOWN to the user so they can object if one is wrong; they
+     are NOT a gate. Surfacing an assumption is always better than burying it.
    - **Error catalog (MANDATORY)**: This project MUST persist runtime errors
      to `error_folder/errors.db` (SQLite) so MyCL Debug Triage can read
      known errors next time. Spec MUST include these acceptance criteria:

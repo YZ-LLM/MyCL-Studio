@@ -60,6 +60,20 @@
           "detail": { "type": "string", "minLength": 10, "maxLength": 400 }
         }
       }
+    },
+    "assumptions": {
+      "type": "array",
+      "maxItems": 7,
+      "description": "#1 visibility: assumptions the user did NOT explicitly state but the spec depends on. Optional (omit if none). Surfaced to the user, NOT a gate.",
+      "items": {
+        "type": "object",
+        "required": ["assumption", "why"],
+        "additionalProperties": false,
+        "properties": {
+          "assumption": { "type": "string", "minLength": 5, "maxLength": 300 },
+          "why": { "type": "string", "minLength": 3, "maxLength": 300 }
+        }
+      }
     }
   }
 }

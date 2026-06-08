@@ -6,6 +6,14 @@
 
 ## 2026-06-08
 
+- **feat(#1 varsayım görünürlüğü — Faz 4 spec) [Gemini-vizyon tartışması → "alan aç, gör + itiraz et"]:** Yapay
+  zekânın kullanıcının AÇIKÇA demediği ama spec'in dayandığı varsayımları görünür kılar — KAPI DEĞİL (tek tek
+  onaylatmaz, AI'a alan açık kalır; kullanıcı yanlış görürse itiraz eder). write_spec'e opsiyonel
+  `assumptions: [{assumption, why}]` eklendi (CLI tool + strict JSON şema — parite); `specToMarkdown` varsayım VARSA
+  "## Assumptions" bölümü yazar (yoksa gürültü yok); `preApprovalHook` onaydan ÖNCE varsayımları görünür emit eder.
+  Dogfood: bunu kurarken kendi build-varsayımlarımı da kullanıcıya gösterdim + kör-nokta merceğini kendi işime
+  uyguladım. +4 saf test. SINIR: yalnız Faz 4 (Faz 2 özet-sapması ayrı tur); değer ajanın alanı dürüst doldurmasına
+  bağlı (zorlama yok — yargı işi).
 - **test(klasör-guard kararını ağ kapsamına al — "test'i test et" deneyinin sonucu):** check'in gerçek sınırını
   ampirik gösterdik (test edilen mantığı yakalar, test edilmeyen yolu kaçırır). Kaçan örnek tam da guard kararıydı
   (`cli-run.ts` içinde gömülü, testsiz). Karar saf bir fonksiyona çıkarıldı: `shouldFolderGuard` (claude-folder-guard.ts);

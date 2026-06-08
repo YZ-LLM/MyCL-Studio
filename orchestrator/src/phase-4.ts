@@ -66,6 +66,19 @@ const TOOL_WRITE_SPEC: ToolDef = {
           },
         },
       },
+      assumptions: {
+        type: "array",
+        description:
+          "Assumptions you made that the user did NOT explicitly state but the spec depends on (e.g. you inferred an acceptance criterion, picked a default, interpreted a vague word). Each: {assumption, why}. Omit/empty if everything came directly from the user. NOT a gate — the user SEES these so they can object if one is wrong.",
+        items: {
+          type: "object",
+          required: ["assumption", "why"],
+          properties: {
+            assumption: { type: "string" },
+            why: { type: "string" },
+          },
+        },
+      },
     },
   },
 };
@@ -89,9 +102,11 @@ interface SpecData {
   acceptance_criteria: Array<{ id: string; statement: string }>;
   out_of_scope: string[];
   risks: Array<{ title: string; detail: string }>;
+  /** #1 (varsayım görünürlüğü): kullanıcının açıkça demediği ama spec'in dayandığı varsayımlar. Opsiyonel. */
+  assumptions?: Array<{ assumption: string; why: string }>;
 }
 
-function specToMarkdown(spec: SpecData): string {
+export function specToMarkdown(spec: SpecData): string {
   const ac = spec.acceptance_criteria
     .map((a) => `- **${a.id}**: ${a.statement}`)
     .join("\n");
@@ -99,6 +114,15 @@ function specToMarkdown(spec: SpecData): string {
   const risks = spec.risks
     .map((r) => `### ${r.title}\n${r.detail}`)
     .join("\n\n");
+  // #1 (varsayım görünürlüğü): yalnız varsayım VARSA bölüm yazılır (AC3 — varsayım yoksa gürültü yok).
+  const assumptions =
+    spec.assumptions && spec.assumptions.length > 0
+      ? `
+## Assumptions (kullanıcı açıkça belirtmedi — yanlışsa itiraz et)
+
+${spec.assumptions.map((a) => `- **${a.assumption}** — ${a.why}`).join("\n")}
+`
+      : "";
   return `# ${spec.title}
 
 ## Scope
@@ -116,7 +140,7 @@ ${oos}
 ## Risks
 
 ${risks}
-`;
+${assumptions}`;
 }
 
 export class Phase4Controller {
@@ -234,6 +258,18 @@ export class Phase4Controller {
       // bu spec'i YAZMAYAN ayrı bir ajan paranteze alınan varsayım/eksik-AC/en-güçlü-itirazı yakalar;
       // bulgular GÖRÜNÜR (onay öncesi chat). Fail-safe: mercek hatası onayı bloklamaz.
       preApprovalHook: async (writeInput) => {
+        // #1 (varsayım görünürlüğü): yapay zekânın kullanıcı-demediği varsayımlarını onaydan ÖNCE görünür kıl.
+        // Kapı DEĞİL (tek tek onaylatmaz; alan korunur) — kullanıcı yanlış görürse itiraz eder.
+        const specInput = writeInput as unknown as SpecData;
+        if (specInput.assumptions && specInput.assumptions.length > 0) {
+          const lines = specInput.assumptions
+            .map((a) => `• ${a.assumption} — ${a.why}`)
+            .join("\n");
+          emitChatMessage(
+            "system",
+            `🔍 Spec yazarken şu varsayımları yaptım (sen açıkça belirtmedin). Yanlış olan varsa söyle, düzeltirim:\n${lines}`,
+          );
+        }
         const dec = blindspotLensDecision({
           lensFlag: this.config.claude_code_flags.blindspot_lens ?? "consequential",
           isConsequential: true, // spec daima consequential
