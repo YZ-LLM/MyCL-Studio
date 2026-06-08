@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSeatbeltProfile,
+  shouldFolderGuard,
   wrapReadOnlyClaude,
 } from "../src/claude-folder-guard.js";
 
@@ -64,5 +65,22 @@ describe("wrapReadOnlyClaude", () => {
   it("disabled (flag=0) → no-op", () => {
     const r = wrapReadOnlyClaude(bin, args, { platform: "darwin", enabled: false });
     expect(r).toEqual({ cmd: bin, args });
+  });
+});
+
+describe("shouldFolderGuard (hangi çağrı sarılır)", () => {
+  it("tool yok → sar (read-only varsayılan)", () => {
+    expect(shouldFolderGuard({})).toBe(true);
+  });
+  it("Bash'siz tool'lar (Read/Grep/Glob) → sar", () => {
+    expect(shouldFolderGuard({ allowedTools: ["Read", "Grep", "Glob"] })).toBe(true);
+  });
+  it("Bash var → SARMA (nesting riski)", () => {
+    expect(shouldFolderGuard({ allowedTools: ["Read", "Bash", "Edit"] })).toBe(false);
+    expect(shouldFolderGuard({ allowedTools: ["Bash(rm *)"] })).toBe(false);
+  });
+  it("açık override her zaman kazanır", () => {
+    expect(shouldFolderGuard({ allowedTools: ["Bash"], folderGuard: true })).toBe(true);
+    expect(shouldFolderGuard({ folderGuard: false })).toBe(false);
   });
 });

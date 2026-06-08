@@ -73,3 +73,19 @@ export function wrapReadOnlyClaude(
   // Absolute yol: paketlenmiş .app'te minimal PATH bare "sandbox-exec"i ENOENT yapabilir.
   return { cmd: "/usr/bin/sandbox-exec", args: ["-p", profile, bin, ...args] };
 }
+
+/**
+ * Bir claude çağrısı klasör-guard ile sarmalanmalı mı? SAF karar.
+ * Kural: açık `folderGuard` override'ı verilmişse onu kullan; verilmemişse Bash tool'u YOKSA sar
+ * (read-only çağrı — claude'un iç Bash-sandbox'ıyla nesting çakışması yok), Bash VARSA sarma
+ * (nesting riski). Bu fonksiyon cli-run içinde gömülüydü ve test edilmiyordu — ayrıştırıldı ki
+ * "tool yoksa sar" kararı ağ (check) tarafından korunabilsin.
+ */
+export function shouldFolderGuard(opts: {
+  allowedTools?: string[];
+  folderGuard?: boolean;
+}): boolean {
+  if (opts.folderGuard !== undefined) return opts.folderGuard;
+  const usesBash = (opts.allowedTools ?? []).some((t) => /^Bash\b/.test(t));
+  return !usesBash;
+}

@@ -6,6 +6,12 @@
 
 ## 2026-06-08
 
+- **test(klasör-guard kararını ağ kapsamına al — "test'i test et" deneyinin sonucu):** check'in gerçek sınırını
+  ampirik gösterdik (test edilen mantığı yakalar, test edilmeyen yolu kaçırır). Kaçan örnek tam da guard kararıydı
+  (`cli-run.ts` içinde gömülü, testsiz). Karar saf bir fonksiyona çıkarıldı: `shouldFolderGuard` (claude-folder-guard.ts);
+  cli-run onu çağırıyor (davranış birebir aynı). +4 test (tool yok→sar, Bash'siz→sar, Bash→sarma, override). Artık
+  "tool yoksa sar" kararı ters çevrilirse check kırmızı verir — delik kapandı.
+
 - **fix(macOS izin pencereleri — KAYNAĞINDA kes: sandbox-exec klasör-guard) [Ümit: "gereksiz yerler için izin
   istiyor"]:** Env bayrakları (DISABLE_ATTACHMENTS vb.) claude'un başlangıç klasör-taramasını (Downloads/Documents/
   Desktop/Music/Pictures/Movies) DURDURMUYORDU — bunu kapatan bir bayrak YOK. Yeni: `claude-folder-guard.ts`

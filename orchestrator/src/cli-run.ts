@@ -10,7 +10,7 @@ import { createInterface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import { noteRateLimitEvent, type RateLimitInfo } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
-import { wrapReadOnlyClaude } from "./claude-folder-guard.js";
+import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js";
 import type { TokenUsage } from "./cli-session.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
@@ -131,12 +131,9 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
 
     // Mutlak yol + zenginleştirilmiş PATH — minimal PATH'te bare "claude" ENOENT.
     const claudeBin = resolveClaudePath() ?? "claude";
-    // macOS klasör-guard (TCC izin penceresini kaynağında kes): Bash tool'u OLMAYAN read-only
-    // çağrılar sandbox-exec ile sarılır → claude'un başlangıç klasör-taraması reddedilir, pencere
-    // çıkmaz. Bash-kullanan çağrı sarılmaz (nesting riski). Açık override: opts.folderGuard.
-    const usesBash = (opts.allowedTools ?? []).some((t) => /^Bash\b/.test(t));
-    const guard = opts.folderGuard ?? !usesBash;
-    const spawnCmd = guard
+    // macOS klasör-guard (TCC izin penceresini kaynağında kes): karar shouldFolderGuard'da (saf+test'li)
+    // — Bash tool'u OLMAYAN read-only çağrılar sandbox-exec ile sarılır, Bash'liler sarılmaz (nesting).
+    const spawnCmd = shouldFolderGuard(opts)
       ? wrapReadOnlyClaude(claudeBin, args)
       : { cmd: claudeBin, args };
     const child = spawn(spawnCmd.cmd, spawnCmd.args, {
