@@ -10,6 +10,7 @@ import { createInterface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import { noteRateLimitEvent, type RateLimitInfo } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
+import { wrapReadOnlyClaude } from "./claude-folder-guard.js";
 import type { TokenUsage } from "./cli-session.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
@@ -39,6 +40,11 @@ export interface CliRunOpts {
    * ilgili çağrıda set edilir → diğer çağrıların davranışı değişmez.
    */
   extraEnv?: Record<string, string>;
+  /**
+   * macOS klasör-guard override. Verilmezse otomatik: Bash tool'u yoksa SAR (read-only), varsa SARMA
+   * (nesting riski). Açıkça `false` → asla sarma; `true` → her zaman sar (yalnız darwin + flag açık).
+   */
+  folderGuard?: boolean;
 }
 
 export interface CliRunResult {
@@ -125,7 +131,15 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
 
     // Mutlak yol + zenginleştirilmiş PATH — minimal PATH'te bare "claude" ENOENT.
     const claudeBin = resolveClaudePath() ?? "claude";
-    const child = spawn(claudeBin, args, {
+    // macOS klasör-guard (TCC izin penceresini kaynağında kes): Bash tool'u OLMAYAN read-only
+    // çağrılar sandbox-exec ile sarılır → claude'un başlangıç klasör-taraması reddedilir, pencere
+    // çıkmaz. Bash-kullanan çağrı sarılmaz (nesting riski). Açık override: opts.folderGuard.
+    const usesBash = (opts.allowedTools ?? []).some((t) => /^Bash\b/.test(t));
+    const guard = opts.folderGuard ?? !usesBash;
+    const spawnCmd = guard
+      ? wrapReadOnlyClaude(claudeBin, args)
+      : { cmd: claudeBin, args };
+    const child = spawn(spawnCmd.cmd, spawnCmd.args, {
       cwd: opts.cwd,
       // API key YOK → abonelik; PATH zenginleştirilir. extraEnv (varsa) ÜSTE eklenir
       // (Agent Teams/Workflow flag'leri için; yoksa davranış birebir korunur).

@@ -4,6 +4,18 @@
 > Amaç: eski kararları/kuralları unutup bozmamak; bir işi değiştirmeden önce buraya bak.
 > Eski bir işi değiştirmek/silmek gerekiyorsa ÖNCE Ümit'e sor (kural, 2026-06-03).
 
+## 2026-06-08
+
+- **fix(macOS izin pencereleri — KAYNAĞINDA kes: sandbox-exec klasör-guard) [Ümit: "gereksiz yerler için izin
+  istiyor"]:** Env bayrakları (DISABLE_ATTACHMENTS vb.) claude'un başlangıç klasör-taramasını (Downloads/Documents/
+  Desktop/Music/Pictures/Movies) DURDURMUYORDU — bunu kapatan bir bayrak YOK. Yeni: `claude-folder-guard.ts`
+  (`buildSeatbeltProfile` + `wrapReadOnlyClaude`) read-only claude çağrılarını `sandbox-exec` ile sarar; korumalı
+  klasör okuması syscall'da reddedilir → TCC sorulmaz → pencere çıkmaz. `cli-run.ts` AUTO-classify: Bash tool'u
+  YOKSA sar (read-only), VARSA sarma (claude'un iç Bash-sandbox'ıyla nesting riski). Ampirik doğrulandı: claude
+  sandbox-exec altında çalışıyor (auth+cevap) + Downloads reddediliyor + proje/~.claude açık. macOS-only (Linux
+  no-op). Escape hatch: `MYCL_CLAUDE_FOLDER_GUARD=0`. Apple Music (Media framework, dosya değil) sürebilir → tek
+  sefer deny. +3 test.
+
 ## 2026-06-07
 
 - **feat(keystone ① — AC→test izlenebilirliği: çalıştırılabilir doğrulama-sözleşmesi) [4-talk birleşimi raporu]:**
