@@ -14,7 +14,9 @@
 //     bunu görmeli — hata GİZLENMEZ.
 
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 import { safeEnv } from "./safe-env.js";
+import { log } from "./logger.js";
 
 export class GitError extends Error {
   override readonly name = "GitError";
@@ -409,4 +411,34 @@ export async function getChangedFiles(
   }
 
   return [...files].filter((f) => !isExcludedScopePath(f));
+}
+
+/**
+ * Paralel codegen için İZOLE çalışma kopyası (git worktree): `<projectRoot>/.mycl/worktrees/<id>`'de
+ * mevcut HEAD'den detached bir worktree kurar → worker burada kendi modülünü yazar (diğerlerinden izole).
+ * Başarısızsa null döner → caller SERİ yola düşer (fail-closed). git repo değil / worktree desteklenmiyorsa null.
+ */
+export async function createWorktree(
+  projectRoot: string,
+  id: string,
+): Promise<{ path: string } | null> {
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 60) || "mod";
+  const wtPath = join(projectRoot, ".mycl", "worktrees", safe);
+  // Tekrar-çalıştırma güvenliği: varsa önce kaldır.
+  await runGit(projectRoot, ["worktree", "remove", "--force", wtPath]).catch(() => undefined);
+  const r = await runGit(projectRoot, ["worktree", "add", "--detach", wtPath, "HEAD"]);
+  if (r.code !== 0) {
+    log.warn("git", "worktree add başarısız → seri yola düşülecek", {
+      id,
+      stderr: r.stderr.slice(0, 200),
+    });
+    return null;
+  }
+  return { path: wtPath };
+}
+
+/** Worktree'yi kaldır (force) + prune. İdempotent; hata yutulur (temizlik adımı). */
+export async function removeWorktree(projectRoot: string, wtPath: string): Promise<void> {
+  await runGit(projectRoot, ["worktree", "remove", "--force", wtPath]).catch(() => undefined);
+  await runGit(projectRoot, ["worktree", "prune"]).catch(() => undefined);
 }

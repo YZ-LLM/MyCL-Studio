@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createCheckpoint,
+  createWorktree,
+  removeWorktree,
   getBlameForLines,
   getChangedFiles,
   getCommitStats,
@@ -28,6 +30,35 @@ function gitInit(dir: string) {
 function gitCommit(dir: string, msg: string) {
   spawnSync("git", ["commit", "--allow-empty", "-m", msg], { cwd: dir, stdio: "ignore" });
 }
+
+describe("git · worktree (paralel codegen izolasyonu)", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "mycl-git-"));
+    gitInit(dir);
+    gitCommit(dir, "init"); // worktree add HEAD bir commit gerektirir
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("createWorktree izole dizin kurar; removeWorktree temizler", async () => {
+    const wt = await createWorktree(dir, "auth/login!");
+    expect(wt).not.toBeNull();
+    expect(existsSync(wt!.path)).toBe(true);
+    await removeWorktree(dir, wt!.path);
+    expect(existsSync(wt!.path)).toBe(false);
+  });
+
+  it("git olmayan dizinde null döner (fail-closed)", async () => {
+    const nodir = await mkdtemp(join(tmpdir(), "mycl-nogit-"));
+    try {
+      expect(await createWorktree(nodir, "x")).toBeNull();
+    } finally {
+      await rm(nodir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("git · isGitRepo", () => {
   let dir: string;

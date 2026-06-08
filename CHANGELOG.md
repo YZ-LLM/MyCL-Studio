@@ -4,6 +4,17 @@
 > Amaç: eski kararları/kuralları unutup bozmamak; bir işi değiştirmeden önce buraya bak.
 > Eski bir işi değiştirmek/silmek gerekiyorsa ÖNCE Ümit'e sor (kural, 2026-06-03).
 
+## 2026-06-09
+
+- **feat(modül-paralel codegen — K1 güvenlik kapısı + K2 worktree izolasyon) [Ümit: ">1 modül → paralel yaz, hızlan"]:**
+  Plan: additive + gated + fail-closed (mevcut SERİ codegen DEĞİŞMEZ). **K1** `module-parallel/independence.ts` — SAF
+  kapı (`pathsOverlap` + `modulesDisjoint` + `shouldParallelize`): paralele YALNIZ flag açık + ≥2 modül + AYRIK
+  yol-kapsamı hepsi doğruysa girilir; şüphe/çakışma → seri (Luke'ın çakışma tuzağına karşı yapısal koruma). **K2**
+  `git.ts` `createWorktree`/`removeWorktree` — izole çalışma kopyası (başarısız → null → seri). +9 test (gerçek git
+  fixture dahil). **KALAN (büyük, çekirdeğe dokunur, AYRI tur):** K3 decomposition (işi ayrık-kapsam modüllere bölme)
+  + K4 dispatch/entegrasyon — bu ortamda uçtan-uca DOĞRULANAMAZ (gerçek ≥2-modül koşusu gerekir); güvenli devreye
+  alma için opt-in + fail-closed kalacak.
+
 ## 2026-06-08
 
 - **feat(WTF/gotcha kaydı — Cichra karar-yakalamanın 4. biçimi) [Ümit: "WTF ekle"]:** "Bu tuhaf şey bilerek böyle,
