@@ -8,7 +8,12 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
-import { noteRateLimitEvent, type RateLimitInfo } from "./cli-rate-limit.js";
+import {
+  noteRateLimitEvent,
+  noteCliRateLimitError,
+  detectCliRateLimit,
+  type RateLimitInfo,
+} from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js";
 import type { TokenUsage } from "./cli-session.js";
@@ -126,6 +131,7 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     let turns = 0;
     let resultIsError = false;
     let resultSeen = false;
+    let resultErrorText = "";
     let stderrTail = "";
     let usage: TokenUsage | undefined;
 
@@ -197,6 +203,7 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       } else if (type === "result") {
         resultSeen = true;
         resultIsError = ev.is_error === true || ev.subtype === "error";
+        if (resultIsError) resultErrorText = String(ev.result ?? ev.error ?? "");
         if (typeof ev.num_turns === "number") turns = ev.num_turns;
         const u = ev.usage as Record<string, unknown> | undefined;
         if (u) {
@@ -225,6 +232,12 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
 
     child.on("close", (code) => {
       const ok = code === 0 && (!resultSeen || !resultIsError);
+      // Auto Mode: hata abonelik usage/rate-limit imzası taşıyorsa CLI'yi limitli işaretle
+      // (rate_limit_event GELMEYEN hata-yolu için) → backendForRole "auto" API'ye düşebilsin.
+      if (!ok) {
+        const rl = detectCliRateLimit(`${resultErrorText} ${stderrTail}`);
+        if (rl) noteCliRateLimitError(rl);
+      }
       done({
         ok,
         text: texts.join(""),

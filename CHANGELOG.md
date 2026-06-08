@@ -6,6 +6,14 @@
 
 ## 2026-06-08
 
+- **fix(noteCliRateLimitError'ı BAĞLA — yarım-bağlı güvenilirlik yolu) [Ümit: "olmazsa olmaz olanları yap"]:**
+  `noteCliRateLimitError` tanımlıydı ama HİÇ çağrılmıyordu (ts-prune "ölü" sandı — aslında bağlanmamış). Abonelik
+  usage/rate-limit'i `rate_limit_event` YERİNE bir HATA olarak geldiğinde tespit edilmiyor, auto-mode API'ye
+  düşmüyordu → sessiz başarısızlık. Eklendi: `detectCliRateLimit` (SAF + DAR imza — usage/rate-limit; çıplak "429"
+  YOK çünkü satır-no yanlış-pozitifi) + 3 CLI spawn site'ında (cli-run / cli-session / cli-backend) `result is_error`
+  yolunda detect→noteCliRateLimitError. +3 test. **Süzgeç sonucu:** diğer ORTA maddeler (betas uyarısı / ESLint /
+  ④ PRD-relevance) "olmazsa olmaz değil" diye ATLANDI; "yan-sınıflandırma routing" zaten parite (scoreChunksViaCli)
+  → pending değil.
 - **feat(#1 varsayım görünürlüğü — Faz 4 spec) [Gemini-vizyon tartışması → "alan aç, gör + itiraz et"]:** Yapay
   zekânın kullanıcının AÇIKÇA demediği ama spec'in dayandığı varsayımları görünür kılar — KAPI DEĞİL (tek tek
   onaylatmaz, AI'a alan açık kalır; kullanıcı yanlış görürse itiraz eder). write_spec'e opsiyonel

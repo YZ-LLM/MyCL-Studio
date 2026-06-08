@@ -29,7 +29,12 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { MAIN_AGENT_LANGUAGE_REMINDER } from "../agent-language.js";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "../agent-sandbox.js";
-import { noteRateLimitEvent, type RateLimitInfo } from "../cli-rate-limit.js";
+import {
+  noteRateLimitEvent,
+  noteCliRateLimitError,
+  detectCliRateLimit,
+  type RateLimitInfo,
+} from "../cli-rate-limit.js";
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
 import type { CodegenBackend } from "./backend.js";
 import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "../ipc.js";
@@ -284,6 +289,9 @@ export class CliCodegenBackend implements CodegenBackend {
         if (code === 0 && (!resultSeen || !resultIsError)) {
           resolve({ kind: "done", turns: numTurns });
         } else {
+          // Auto Mode: hata usage/rate-limit imzası taşıyorsa CLI'yi limitli işaretle (hata-yolu) → fallback.
+          const rlErr = detectCliRateLimit(stderrTail);
+          if (rlErr) noteCliRateLimitError(rlErr);
           resolve({
             kind: "failed",
             reason: `claude CLI exit=${code}${stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""}`,

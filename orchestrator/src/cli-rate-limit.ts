@@ -132,6 +132,21 @@ export function noteCliRateLimitError(rateLimitType?: string): void {
 }
 
 /**
+ * CLI HATA metninde abonelik usage / rate-limit imzası var mı? SAF + DAR — yalnız net
+ * usage/rate-limit ifadeleri eşleşir (genel bir hatayı yanlışlıkla "limit" sanıp gereksiz
+ * API'ye düşmemek için). Eşleşirse tip ("usage-limit"/"rate-limit") döner, yoksa null.
+ * `noteCliRateLimitError` ile birlikte: result is_error yolunda çağrılır (auto-mode fallback'i besler).
+ */
+export function detectCliRateLimit(text: string): string | null {
+  const t = (text ?? "").toLowerCase();
+  if (!t) return null;
+  if (/usage[ _-]?limit/.test(t)) return "usage-limit";
+  // NOT: çıplak "429" eklenmedi — satır no ("file.ts:429") yanlış-pozitifi; "too many requests" gerçek 429'u kapsar.
+  if (/rate[ _-]?limit|too many requests/.test(t)) return "rate-limit";
+  return null;
+}
+
+/**
  * Şu an CLI limitli mi (impure — Date.now). Limit geçtiyse temizler + bir kez
  * "CLI'ye dönüldü" mesajı verir (görünür reset). backendForRole "auto" bunu çağırır.
  */
