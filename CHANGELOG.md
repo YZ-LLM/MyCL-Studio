@@ -6,6 +6,14 @@
 
 ## 2026-06-09
 
+- **fix(çalışırken HER ZAMAN loading + ne yaptığı) [Ümit: "çalışıyor ama hiç loading yok; çalışırken ne yaptığını
+  söylesin her zaman"]:** Önceden `emit("phase_running")` sticky banner'ı YALNIZ Faz 0 + DAST kullanıyordu → diğer
+  fazlarda (tasarım paneli, müzakere, codegen, mekanik) hiç gösterge yoktu. Fix: (1) `runController`'a `runningLabel`
+  param → p1-p9 LLM fazları çalıştığı SÜRECE "⏳ <ne yaptığı>" banner (Niyet toplanıyor / Spec yazılıyor / UI
+  yazılıyor / ...); try/finally → askq'da fn döner → idle (bekleme ≠ çalışma), takılı spinner yok. (2) Mekanik fazlar
+  (10-17 lint/test/build) `runner.run()` try/finally ile `phaseLabelTR` banner'ı. Artık her faz çalışırken kalıcı
+  spinner + ne yaptığı görünür.
+
 - **feat(API desteği TAMAMLANDI: model-discovery de backend-aware) [Ümit: "API yok diye yapmadığın bişey olmasın;
   param olunca her şeyi API ile çalıştıracağım"]:** discovery artık cli → claude CLI WebSearch/WebFetch, **api →
   Anthropic SDK + server-side web_search tool** (`web_search_20250305`, name `web_search`, max_uses 5 — beta header

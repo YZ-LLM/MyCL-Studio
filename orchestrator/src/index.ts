@@ -277,12 +277,18 @@ type AnyPhaseController =
 async function runController<T>(
   controller: AnyPhaseController,
   fn: () => Promise<T>,
+  runningLabel?: string,
 ): Promise<T> {
   runtime.controller = controller;
+  // Ümit: "çalışırken ne yaptığını söylesin her zaman." Faz controller'ı çalıştığı SÜRECE
+  // sticky banner (⏳ + ne yaptığı). try/finally ile zorunlu kapanış (takılı spinner yok).
+  // askq'da fn() döner → finally → idle (bekleme ≠ çalışma). Sonraki turda tekrar açılır.
+  if (runningLabel) emit("phase_running", { label: `⏳ ${runningLabel}`, ts: Date.now() });
   try {
     return await fn();
   } finally {
     runtime.controller = null;
+    if (runningLabel) emit("phase_idle", { ts: Date.now() });
   }
 }
 
@@ -770,7 +776,7 @@ async function restartPhase1WithIntent(intentText: string): Promise<void> {
     config: runtime.config,
     spec,
   });
-  const result = await runController(p1, () => p1.run(intentText));
+  const result = await runController(p1, () => p1.run(intentText), "Niyet toplanıyor");
   if (result === "complete") {
     emitChatMessage("system", "Faz 1 tamamlandı — niyet onaylandı.");
     const summary = p1.approvedSummary ?? runtime.state.intent_summary;
@@ -1794,7 +1800,7 @@ async function executeDispatchedIntent(
     config: runtime.config,
     spec,
   });
-  const result = await runController(p1, () => p1.run(text));
+  const result = await runController(p1, () => p1.run(text), "Niyet toplanıyor");
   log.info("orchestrator", "phase 1 end", { result });
   if (result === "complete") {
     emitChatMessage("system", "Faz 1 tamamlandı — niyet onaylandı.");
@@ -2036,7 +2042,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     beginPhaseCost(next, state.iteration_count ?? 1);
     if (next === 2) {
       const p2 = new Phase2Controller({ state, config: cfg, spec });
-      const r = await runController(p2, () => p2.run());
+      const r = await runController(p2, () => p2.run(), "Hassasiyet denetleniyor");
       log.info("orchestrator", "phase 2 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p2.statePatch };
@@ -2111,7 +2117,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     }
     if (next === 3) {
       const p3 = new Phase3Controller({ state, config: cfg, spec });
-      const r = await runController(p3, () => p3.run());
+      const r = await runController(p3, () => p3.run(), "Mühendislik brifingi hazırlanıyor");
       log.info("orchestrator", "phase 3 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p3.statePatch };
@@ -2154,7 +2160,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     }
     if (next === 4) {
       const p4 = new Phase4Controller({ state, config: cfg, spec });
-      const r = await runController(p4, () => p4.run());
+      const r = await runController(p4, () => p4.run(), "Spec yazılıyor");
       log.info("orchestrator", "phase 4 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p4.statePatch };
@@ -2208,7 +2214,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         continue;
       }
       const p5 = new Phase5Controller({ state, config: cfg, spec });
-      const r = await runController(p5, () => p5.run());
+      const r = await runController(p5, () => p5.run(), "UI yazılıyor");
       log.info("orchestrator", "phase 5 end", { result: r });
       if (r === "complete") {
         // Dev server pid statePatch'inden state'e taşı (zombi koruma için).
@@ -2258,7 +2264,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // outer loop STOP. User'ın bir sonraki composer mesajı router'da Phase 6
       // context'inde işlenir (approve_ui / revise_ui / cancel_pipeline).
       const p6 = new Phase6Controller({ state, config: cfg, spec });
-      const r = await runController(p6, () => p6.run());
+      const r = await runController(p6, () => p6.run(), "UI inceleniyor");
       log.info("orchestrator", "phase 6 end", { result: r });
       // Phase 6 dev server'ı (boot-resume'da Faz 5 spawn atlandığı için ölü
       // olabilir) yeniden başlatmış olabilir → güncel dev_server_pid'i persist
@@ -2320,7 +2326,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         continue;
       }
       const p7 = new Phase7Controller({ state, config: cfg, spec });
-      const r = await runController(p7, () => p7.run());
+      const r = await runController(p7, () => p7.run(), "Veritabanı tasarlanıyor");
       log.info("orchestrator", "phase 7 end", { result: r });
       if (r === "complete") {
         emitChatMessage("system", "Faz 7 tamamlandı — DB tasarımı onaylandı.");
@@ -2337,7 +2343,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         "Faz 8 başlıyor — TDD codegen. Bu uzun sürebilir, maliyetli olabilir.",
       );
       const p8 = new Phase8Controller({ state, config: cfg, spec });
-      const r = await runController(p8, () => p8.run());
+      const r = await runController(p8, () => p8.run(), "TDD uygulanıyor");
       log.info("orchestrator", "phase 8 end", { result: r });
       if (r === "complete") {
         state = { ...state, ...p8.statePatch };
@@ -2356,7 +2362,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
     }
     if (next === 9) {
       const p9 = new Phase9Controller({ state, config: cfg, spec });
-      const r = await runController(p9, () => p9.run());
+      const r = await runController(p9, () => p9.run(), "Risk inceleniyor");
       log.info("orchestrator", "phase 9 end", { result: r });
       if (r === "complete") {
         emitChatMessage("system", "Faz 9 tamamlandı — risk incelemesi onaylandı.");
@@ -2545,7 +2551,15 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         // v15.9: scoped-touch modunda değişen dosyalara daralt (boş → tüm-proje).
         changedScope: state.changed_scope?.files,
       });
-      const outcome = await runner.run();
+      // Ümit: "çalışırken ne yaptığını söylesin." Mekanik faz (lint/test/build — yavaş olabilir)
+      // çalıştığı sürece sticky banner. try/finally → takılı spinner yok.
+      emit("phase_running", { label: `⏳ ${phaseLabelTR(next, spec)}`, ts: Date.now() });
+      let outcome;
+      try {
+        outcome = await runner.run();
+      } finally {
+        emit("phase_idle", { ts: Date.now() });
+      }
       log.info("orchestrator", `phase ${next} mechanical end`, {
         outcome: outcome.kind,
       });
