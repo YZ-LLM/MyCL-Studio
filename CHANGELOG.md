@@ -6,6 +6,11 @@
 
 ## 2026-06-09
 
+- **fix(model-alaka "kaliteli hız" kesin tanım: kaliteyi düşüren hız YOK) [Ümit: "kalitesinden ödün vermeyecek
+  şekilde hızlı; hız kaliteyi azaltıyorsa yapma"]:** Kalite SABİT kısıt. TASK_RELEVANCE'tan `classification → cheap`
+  (haiku) KALDIRILDI → artık HİÇBİR iş cheap(haiku)'ya düşmüyor (haiku sınıflandırma/çeviri kalitesini riske atar);
+  en düşük tier = balanced (sonnet, tam-kalite + hızlı). Hız yalnızca kalite-nötr kaynaklardan: paralellik + kalite-
+  eşit-yerde-hızlı-model + faz-atlama. Test: "hiçbir iş cheap değil". feedback_kaliteli_hiz belleği kesin tanımla güncel.
 - **feat(model "kaliteli hız" — Faz 4 spec + Faz 8 codegen → strong tier) [Ümit: "önemli olan kaliteli hız"]:**
   Auto-override AÇIK + akıllı: KALİTE-kritik fazlar (spec her şeyi sürer, codegen kod üretir) selectModelForTask ile
   strong tier (opus) seçer + formatModelChoice ile chat'te gösterir. Hafif/sık fazlar (orchestration/translation/

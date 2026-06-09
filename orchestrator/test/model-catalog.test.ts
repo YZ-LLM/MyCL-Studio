@@ -60,7 +60,12 @@ describe("selectModelForTask", () => {
     expect(findModel(c.modelId)).toBeDefined(); // geçerli modele düştü
     expect(findModel(c.modelId)?.tier).toBe("strong");
   });
-  it("classification → cheap", () => {
-    expect(selectModelForTask("classification", undefined).tier).toBe("cheap");
+  it("KRİTİK: hiçbir iş 'cheap'(haiku) değil — kaliteyi riske atma (kaliteli hız)", () => {
+    for (const k of [
+      "classification", "translation", "orchestration", "intent", "design",
+      "spec", "codegen", "review", "debug", "verification",
+    ] as const) {
+      expect(selectModelForTask(k, undefined).tier).not.toBe("cheap");
+    }
   });
 });

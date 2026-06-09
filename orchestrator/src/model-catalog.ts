@@ -83,11 +83,13 @@ export type TaskKind =
   | "verification";
 
 /**
- * İŞ → TIER alaka listesi (HATASIZ olmalı — yanlış tier kaliteyi/sistemi bozar). DİKKAT: çeviri
- * BALANCED'tır (fast değil) — kullanıcı İngilizce bilmez, çeviride anlam kaybı OLMAMALI (kritik).
+ * İŞ → TIER alaka listesi (HATASIZ olmalı). PRENSİP "kaliteli hız" (Ümit): kaliteden ödün VERMEDEN hızlı —
+ * kaliteyi düşürecek hiçbir downgrade YOK. Bu yüzden HİÇBİR iş "cheap"(haiku)'ya düşmez (haiku kaliteyi riske atar);
+ * en düşük = balanced (sonnet, tam-kalite + hızlı). Hız: paralellik + kalite-eşit yerde hızlı model + faz-atlama.
+ * Kalite-kritik (kod/spec/inceleme/debug/tasarım) → strong (opus). Çeviri balanced (anlam kaybı olmamalı).
  */
 export const TASK_RELEVANCE: Record<TaskKind, { tier: ModelTier; reason: string }> = {
-  classification: { tier: "cheap", reason: "kısa sınıflandırma → hızlı/ucuz model yeter" },
+  classification: { tier: "balanced", reason: "sınıflandırma da yanlış olursa zarar → kaliteyi riske atma (haiku değil)" },
   translation: { tier: "balanced", reason: "çeviri → anlam kaybı olmamalı, dengeli model (ucuz değil)" },
   orchestration: { tier: "balanced", reason: "karar/yönlendirme → dengeli yeter" },
   intent: { tier: "balanced", reason: "niyet/clarify → dengeli yeter" },
