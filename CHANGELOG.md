@@ -6,6 +6,14 @@
 
 ## 2026-06-09
 
+- **feat(model AUTO-KEŞİF: açılışta güncel modelleri çek + tier'la) [Ümit: "her açışta güncel versiyonları çek,
+  yeni çıkanı senin tablon gibi tier'la, 1-2 sürüm yukarı taşı"]:** `model-catalog.ts` `setLiveTiersFromModels` —
+  canlı model listesinden (Anthropic Models API, `listModels`, created_at-desc) her aileye EN YENİ sürümü tier'lar:
+  opus→strong, sonnet→balanced, haiku→cheap. `selectModelForTask` artık CANLI tier'ı config'in ÜSTÜNDE kullanır →
+  opus-4-9 çıkınca strong otomatik yükselir (auto-bump). `index.ts` open_project'te API key varsa arka planda çeker +
+  chat'te "güncel modeller → güçlü/dengeli/hızlı: X" gösterir. Bilinmeyen aile (mythos vb.) `unknownFamilies`'e
+  düşer (tier ataması manuel — kapasite API'den bilinemez). +3 test. **API DESTEĞİ:** keşif API-tabanlı (Models API
+  key ister); subscription-only (key yok) → atlanır, statik katalog geçerli (elle güncel tutulur).
 - **feat(model "kaliteli hız" — Faz 0 debug + parallel-review de strong tier):** Faz 0 debug (kök-neden akıl
   yürütmesi, CLI+SDK+D1 yolları) + `module-parallel/review.ts` (birleşik çıktı incelemesi) artık `selectModelForTask`
   ile strong (opus) seçer; debug ayrıca chat'te gösterir. Böylece TÜM kalite-kritik fazlar opus: codegen/spec/debug/

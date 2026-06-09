@@ -108,6 +108,46 @@ function defaultModelForTier(tier: ModelTier): ModelInfo {
   return m ?? MODEL_CATALOG[0];
 }
 
+// ───────── CANLI keşif (Ümit: "açılışta güncel modelleri çek + otomatik tier'la; yeni sürümü 1-2 yukarı taşı") ─────────
+// Anthropic Models API'sinden (API key ile) gelen GÜNCEL modeller → en yeni opus=strong, sonnet=balanced, haiku=cheap.
+// Yeni sürüm (opus-4-9) çıkınca strong otomatik ona taşınır. API key yoksa (subscription-only) bu boş kalır →
+// selectModelForTask config/statik-katalog'a düşer (güvenli). API DESTEĞİ: keşif API key ile çalışır.
+
+interface TierModel {
+  id: string;
+  label: string;
+}
+let _liveTiers: Partial<Record<ModelTier, TierModel>> = {};
+
+/**
+ * Canlı model listesinden (created_at desc = EN YENİ BAŞTA) her aileye en yeni sürümü tier'lara atar. SAF.
+ * Bilinmeyen aile (örn. "mythos") otomatik atanmaz — caller surface eder (tier rolü belirsiz).
+ */
+export function setLiveTiersFromModels(
+  modelsNewestFirst: Array<{ id: string; display_name: string }>,
+): { strong?: string; balanced?: string; cheap?: string; unknownFamilies: string[] } {
+  const pick = (fam: string) =>
+    modelsNewestFirst.find((m) => m.id.toLowerCase().includes(fam));
+  const o = pick("opus");
+  const s = pick("sonnet");
+  const h = pick("haiku");
+  _liveTiers = {
+    strong: o ? { id: o.id, label: o.display_name } : undefined,
+    balanced: s ? { id: s.id, label: s.display_name } : undefined,
+    cheap: h ? { id: h.id, label: h.display_name } : undefined,
+  };
+  const known = new Set(["opus", "sonnet", "haiku"]);
+  const unknownFamilies = modelsNewestFirst
+    .filter((m) => ![...known].some((k) => m.id.toLowerCase().includes(k)))
+    .map((m) => m.id);
+  return { strong: o?.id, balanced: s?.id, cheap: h?.id, unknownFamilies };
+}
+
+/** Test/yeniden-init için canlı tier'ları temizle. */
+export function clearLiveTiers(): void {
+  _liveTiers = {};
+}
+
 export interface ModelChoice {
   modelId: string;
   label: string;
@@ -124,6 +164,11 @@ export function selectModelForTask(
   tierModels?: Partial<Record<ModelTier, string>>,
 ): ModelChoice {
   const rel = TASK_RELEVANCE[taskKind];
+  // Öncelik: CANLI keşif (en güncel sürüm) > kullanıcı config tier'ı > statik katalog varsayılanı.
+  const live = _liveTiers[rel.tier];
+  if (live) {
+    return { modelId: live.id, label: live.label, tier: rel.tier, reason: rel.reason };
+  }
   const fromConfig = tierModels?.[rel.tier];
   const resolved =
     fromConfig && findModel(fromConfig) ? findModel(fromConfig)! : defaultModelForTier(rel.tier);

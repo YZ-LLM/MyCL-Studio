@@ -73,6 +73,7 @@ import {
   type PendingErrorAnalysis,
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
+import { setLiveTiersFromModels } from "./model-catalog.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { extractStockedModules } from "./module-stock.js";
@@ -561,6 +562,32 @@ async function handleOpenProject(path: string): Promise<void> {
     void getCachedProjectMap(runtime.state.project_root).catch((e: unknown) =>
       log.warn("orchestrator", "project-map onboarding failed (non-fatal)", e),
     );
+
+    // Model AUTO-KEŞİF (Ümit): açılışta GÜNCEL modelleri Anthropic Models API'sinden çek → en yeni sürümü
+    // tier'lara ata (opus→strong, sonnet→balanced, haiku→cheap). Yeni sürüm (opus-4-9) çıkınca otomatik yükselir.
+    // API DESTEĞİ: API key ile çalışır; subscription-only (key yok) → atlanır, statik katalog geçerli. Non-blocking.
+    const discoveryKey = runtime.config
+      ? runtime.config.api_keys.main ||
+        runtime.config.api_keys.orchestrator ||
+        runtime.config.api_keys.translator
+      : "";
+    if (discoveryKey) {
+      void listModels(discoveryKey)
+        .then((res) => {
+          const t = setLiveTiersFromModels(res.models);
+          log.info("orchestrator", "model auto-keşif", t);
+          const unknown = t.unknownFamilies.length
+            ? ` (yeni aile: ${t.unknownFamilies.slice(0, 3).join(", ")} — tier ataması manuel)`
+            : "";
+          emitChatMessage(
+            "system",
+            `🔄 Güncel modeller çekildi → güçlü: ${t.strong ?? "?"}, dengeli: ${t.balanced ?? "?"}, hızlı: ${t.cheap ?? "?"}${unknown}`,
+          );
+        })
+        .catch((e: unknown) =>
+          log.warn("orchestrator", "model auto-keşif başarısız (statik katalog geçerli)", e),
+        );
+    }
 
     // v15.6 (2026-05-24): Boot durum özeti — kullanıcı talebi: "ilk açılışta
     // orkestra ajanı yarıda kalan bi iş varsa onu algılasın ve kullanıcıya
