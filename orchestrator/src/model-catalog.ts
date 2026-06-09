@@ -7,7 +7,8 @@
 // Alaka (TASK_RELEVANCE) task→TIER eşler; tier→model kullanıcının config.model_tiers'ından çözülür → kullanıcı
 // tercihine saygı + iş-bazlı zekâ. Hız kaldıracı: basit işe fast, ağır işe strong.
 
-export type ModelTier = "fast" | "balanced" | "strong";
+// Tier adları config.model_tiers + WorkTier (config.ts) ile AYNI olmalı: cheap/balanced/strong.
+export type ModelTier = "cheap" | "balanced" | "strong";
 
 export interface ModelInfo {
   id: string;
@@ -56,7 +57,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     id: "claude-haiku-4-5",
     label: "Haiku 4.5",
-    tier: "fast",
+    tier: "cheap",
     contextTokens: 200_000,
     isOpus: false,
     blurb: "En hızlı/ucuz — sınıflandırma + kısa/basit işler",
@@ -86,8 +87,8 @@ export type TaskKind =
  * BALANCED'tır (fast değil) — kullanıcı İngilizce bilmez, çeviride anlam kaybı OLMAMALI (kritik).
  */
 export const TASK_RELEVANCE: Record<TaskKind, { tier: ModelTier; reason: string }> = {
-  classification: { tier: "fast", reason: "kısa sınıflandırma → hızlı model yeter" },
-  translation: { tier: "balanced", reason: "çeviri → anlam kaybı olmamalı, dengeli model (fast değil)" },
+  classification: { tier: "cheap", reason: "kısa sınıflandırma → hızlı/ucuz model yeter" },
+  translation: { tier: "balanced", reason: "çeviri → anlam kaybı olmamalı, dengeli model (ucuz değil)" },
   orchestration: { tier: "balanced", reason: "karar/yönlendirme → dengeli yeter" },
   intent: { tier: "balanced", reason: "niyet/clarify → dengeli yeter" },
   design: { tier: "strong", reason: "mimari tasarım → güçlü gerek" },

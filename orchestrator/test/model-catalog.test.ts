@@ -13,7 +13,7 @@ describe("MODEL_CATALOG (hatasız liste)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
   it("her tier'dan en az bir model var (fallback güvenli)", () => {
-    for (const tier of ["fast", "balanced", "strong"] as const) {
+    for (const tier of ["cheap", "balanced", "strong"] as const) {
       expect(MODEL_CATALOG.some((m) => m.tier === tier)).toBe(true);
     }
   });
@@ -31,12 +31,12 @@ describe("TASK_RELEVANCE (her iş tipi eşli + doğru)", () => {
   it("her TaskKind'in geçerli tier+reason'ı var", () => {
     for (const k of kinds) {
       expect(TASK_RELEVANCE[k]).toBeDefined();
-      expect(["fast", "balanced", "strong"]).toContain(TASK_RELEVANCE[k].tier);
+      expect(["cheap", "balanced", "strong"]).toContain(TASK_RELEVANCE[k].tier);
       expect(TASK_RELEVANCE[k].reason.length).toBeGreaterThan(0);
     }
   });
-  it("KRİTİK: çeviri 'fast' DEĞİL (anlam kaybı olmamalı)", () => {
-    expect(TASK_RELEVANCE.translation.tier).not.toBe("fast");
+  it("KRİTİK: çeviri 'cheap' DEĞİL (anlam kaybı olmamalı)", () => {
+    expect(TASK_RELEVANCE.translation.tier).not.toBe("cheap");
   });
   it("ağır işler (codegen/spec/review/debug) → strong", () => {
     for (const k of ["codegen", "spec", "review", "debug"] as const) {
@@ -60,7 +60,7 @@ describe("selectModelForTask", () => {
     expect(findModel(c.modelId)).toBeDefined(); // geçerli modele düştü
     expect(findModel(c.modelId)?.tier).toBe("strong");
   });
-  it("classification → fast", () => {
-    expect(selectModelForTask("classification", undefined).tier).toBe("fast");
+  it("classification → cheap", () => {
+    expect(selectModelForTask("classification", undefined).tier).toBe("cheap");
   });
 });
