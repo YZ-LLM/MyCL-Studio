@@ -29,6 +29,7 @@ import { appendAbandonedIntent } from "./abandoned-intents.js";
 import {
   appendAudit as appendAuditModule,
   appendCost,
+  appendHandoff,
   readCosts,
   extractSpecSection,
   readAuditLog,
@@ -1317,6 +1318,26 @@ async function executeAgentDecision(
             emitChatMessage("assistant", formatVerifyResult(verify));
           } catch (e) {
             log.warn("orchestrator", "paralel sonrası kalite kapıları hatası (non-blocking)", e);
+          }
+          // MyCL'in hakim olduğu DİNAMİK kısımları tazele: paralel yol pipeline-SONU tazelemeyi atladığı için
+          // yaşayan dökümanlar + proje haritası + devir kaydı BAYATLAMASIN ("her zaman dinamik kal"). Non-blocking.
+          try {
+            await updateLivingDocs(runtime.state, runtime.config); // features.md/user-guide yeni modülleri yansıtsın
+            clearProjectMapCache(); // proje haritası eski kalmasın
+            void getCachedProjectMap(runtime.state.project_root).catch(() => undefined); // arka planda yeniden ısıt
+            await appendHandoff(runtime.state.project_root, {
+              ts: Date.now(),
+              phase: 8,
+              iteration: runtime.state.iteration_count ?? 1,
+              status: "complete",
+              summary: `Çoklu Ajan Seçimi: ${(sel.modules ?? []).join(", ")} paralel (${(sel.files ?? []).length} dosya)`,
+            });
+            emitChatMessage(
+              "assistant",
+              "🔄 Dinamik kısımlar tazelendi (yaşayan dökümanlar + proje haritası + devir kaydı) — bayat kalmadı.",
+            );
+          } catch (e) {
+            log.warn("orchestrator", "paralel sonrası dinamik tazeleme hatası (non-blocking)", e);
           }
           return;
         }

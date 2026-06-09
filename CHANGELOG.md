@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(#3: paralel sonrası dinamik kısımlar bayatlamasın — "her zaman dinamik kal") [Ümit: "sonra da MyCL'in hakim
+  olduğu kısımlara etkilerini araştır … bayat/eksik kalmasın"]:** ARAŞTIRMA: Çoklu Ajan Seçimi yolu erken `return`
+  ettiği için pipeline-SONU tazeleme adımlarını (updateLivingDocs + proje-haritası + handoff + module-stock) ATLIYORDU
+  → yaşayan dökümanlar/proje-haritası/devir bayatlıyordu. FIX: paralel build + verify sonrası `updateLivingDocs` +
+  `clearProjectMapCache` (+ arka planda recompute) + `appendHandoff` çağrılır → MyCL'in hakim olduğu dinamik kısımlar
+  güncel kalır. Relevance zaten on-demand (git/dosyadan okur → otomatik taze, reindex gerekmez). Diğer code-yazan
+  yollar (fix/develop) pipeline-sonu tazelemeden zaten geçiyor → kapsam tam.
 - **perf(#2: kalite kapısı taramalarını paralelleştir — güvenli kısım) [Ümit: "sonra 2"]:** `mechanical-runner`
   `extra_scans` döngüsü (Faz 13: semgrep/gitleaks/csp/headers vb.) seri `for...await`'ten `Promise.all`'a → BAĞIMSIZ +
   salt-okunur taramalar paralel = saf hız, çakışma yok (kod yazmazlar). abort'ta hiç başlatma; fail-aggregation sıra-
