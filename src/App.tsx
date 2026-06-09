@@ -234,6 +234,7 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       ...state,
       pendingAskq: {
         id: ev.data.id,
+        ts: Date.now(), // mesajlar da Date.now() → sonra yazılan mesaj kartın altında görünür
         question: ev.data.question,
         options: ev.data.options,
         allow_other: ev.data.allow_other,

@@ -6,6 +6,11 @@
 
 ## 2026-06-09
 
+- **fix(UI: askq kartı kronolojik konumda — "yazım yukarı geliyordu") [Ümit]:** ChatPanel eskiden tüm mesajları
+  sonra askq kartını render ediyordu → kart hep en altta sabit → askq pending iken composer'dan yazılan mesaj kartın
+  ÜSTÜNDE kalıyordu. Artık kart sorulma zamanına (`PendingAskq.ts`) göre KRONOLOJİK render ediliyor: sorudan SONRA
+  yazılan mesaj kartın ALTINDA görünür. `PendingAskq.ts` eklendi (App.tsx askq reduce'da Date.now()). Faz-sırası: Faz 1
+  (askq/dil) işi.
 - **fix(Faz 0 orkestratör hakimiyeti: debug iptali → kaldığı yerden DEVAM) [Ümit: "vazgeç dedim, Faz 0'da kaldı,
   her şeyi unuttu — 'kaldığım yerden devam edeyim' demeli"]:** D2_WAITING "Vazgeç" eskiden sadece `pending_diagnostic`'i
   temizleyip `return` ediyordu → pipeline kaldığı fazda donuyor, orkestratör Faz 0'da takılı görünüyordu. Artık:

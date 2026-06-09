@@ -130,6 +130,8 @@ export interface ChatMessage {
 
 export interface PendingAskq {
   id: string;
+  /** Sorulma zamanı — kart kronolojik konumda render edilsin (sonra yazılan mesaj altta). */
+  ts: number;
   question: string;
   options: AskqOption[];
   allow_other?: boolean;
@@ -289,42 +291,57 @@ export function ChatPanel({
         {loadingOlder && (
           <div className="lazy-loading">Daha eski mesajlar yükleniyor…</div>
         )}
-        {messages.map((m) => {
-          const highlighted = selectedTs === m.ts ? " highlighted" : "";
-          const tsLabel = fmtTs(m.ts);
-          if (m.role === "error") {
+        {(() => {
+          const renderMsg = (m: ChatMessage) => {
+            const highlighted = selectedTs === m.ts ? " highlighted" : "";
+            const tsLabel = fmtTs(m.ts);
+            if (m.role === "error") {
+              return (
+                <div
+                  key={m.id}
+                  onClick={() => onMessageSelected(m.ts)}
+                  className={highlighted ? "msg-wrap highlighted" : "msg-wrap"}
+                >
+                  {tsLabel && <span className="msg-ts">{tsLabel}</span>}
+                  <ErrorMessage msg={m} />
+                </div>
+              );
+            }
             return (
               <div
                 key={m.id}
+                className={`msg ${m.role}${highlighted}`}
                 onClick={() => onMessageSelected(m.ts)}
-                className={highlighted ? "msg-wrap highlighted" : "msg-wrap"}
               >
                 {tsLabel && <span className="msg-ts">{tsLabel}</span>}
-                <ErrorMessage msg={m} />
+                {linkifyText(m.text)}
               </div>
             );
-          }
-          return (
-            <div
-              key={m.id}
-              className={`msg ${m.role}${highlighted}`}
-              onClick={() => onMessageSelected(m.ts)}
-            >
-              {tsLabel && <span className="msg-ts">{tsLabel}</span>}
-              {linkifyText(m.text)}
-            </div>
+          };
+          if (!pendingAskq) return messages.map(renderMsg);
+          const card = (
+            <AskqCard
+              key="pending-askq"
+              question={pendingAskq.question}
+              options={pendingAskq.options}
+              allowOther={pendingAskq.allow_other}
+              multiSelect={pendingAskq.multi_select}
+              suggestedOption={pendingAskq.suggested_option}
+              onAnswer={(sel) => onAskqAnswer(pendingAskq.id, sel)}
+            />
           );
-        })}
-        {pendingAskq && (
-          <AskqCard
-            question={pendingAskq.question}
-            options={pendingAskq.options}
-            allowOther={pendingAskq.allow_other}
-            multiSelect={pendingAskq.multi_select}
-            suggestedOption={pendingAskq.suggested_option}
-            onAnswer={(sel) => onAskqAnswer(pendingAskq.id, sel)}
-          />
-        )}
+          // Askq kartını KRONOLOJİK konumda göster: sorulmasından SONRA composer'dan yazılan mesaj kartın
+          // ALTINDA görünsün (Ümit: "yazım yukarı geliyordu, aşağıya gelmeli"). Kart en altta sabit DEĞİL.
+          const before = messages.filter((m) => m.ts <= pendingAskq.ts);
+          const after = messages.filter((m) => m.ts > pendingAskq.ts);
+          return (
+            <>
+              {before.map(renderMsg)}
+              {card}
+              {after.map(renderMsg)}
+            </>
+          );
+        })()}
       </div>
       {runningBanner && (
         <div
