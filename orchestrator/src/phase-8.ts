@@ -21,7 +21,6 @@ import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
-import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import type { ToolDef } from "./claude-api.js";
@@ -336,6 +335,7 @@ export class Phase8Controller {
         "doğrular — yanlış green gate'i geçirmez, sadece teknik borç gizler.";
     }
 
+    const role = this.spec.model_role!;
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
       extra_denied_paths: this.spec.denied_paths,
@@ -363,17 +363,13 @@ export class Phase8Controller {
       this.pendingMigrationNote +
       this.pendingFixNote;
 
-    // Model-alaka listesi: codegen "strong" iş → doğru modeli SEÇ + chat'te GÖSTER (Ümit talebi). Geçersiz
-    // tier → katalog varsayılanına güvenli fallback (sistem bozulmaz). config.model_tiers'tan çözülür.
-    const modelChoice = selectModelForTask("codegen", this.config.selected_models.model_tiers);
-    emitChatMessage("system", formatModelChoice("codegen", modelChoice));
     this.base = createCodegenBackend({
       tag: "phase-8",
       phaseId: 8,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: modelChoice.modelId,
+      modelId: this.config.selected_models[role],
       apiKey: this.config.api_keys.main,
       initialUserMessage: initialMessage,
       tools: TOOLS_CODEGEN as unknown as ToolDef[],

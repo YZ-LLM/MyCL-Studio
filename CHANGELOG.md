@@ -6,12 +6,6 @@
 
 ## 2026-06-09
 
-- **feat(model-alaka: codegen'e bağlandı + chat'te gösterim) [Ümit: "ilgili model çağırılır + hangi model seçildi
-  chat'te gösterilir"]:** Faz 8 codegen artık `selectModelForTask("codegen", model_tiers)` ile modeli SEÇİYOR (strong
-  tier) + `formatModelChoice` ile chat'te "🧠 codegen işi için <model> seçildi" gösteriyor. DAVRANIŞ DEĞİŞİMİ: codegen
-  eskiden `selected_models[model_role]` (rol-tabanlı) kullanıyordu → artık strong-tier (config.model_tiers.strong).
-  Kullanıcının tier config'ine saygı; geçersiz tier → katalog varsayılanı (güvenli). Gerçek koşuda doğrulanmalı.
-  Diğer fazların (orchestration/translation/spec/design) bağlanması sıradaki adım (her biri dikkatli + görünür).
 - **feat(model-alaka listesi — katalog + iş→model seçimi) [Ümit: "iş için doğru modeli seç, hatasız liste, chat'te
   göster, güncel tut"]:** `model-catalog.ts` — TÜM Claude modelleri (opus-4-8/4-7/4-6, sonnet-4-6, haiku-4-5) tier'lı
   HATASIZ katalog + `TASK_RELEVANCE` (iş→tier: classification/translation→fast-değil-balanced, orchestration/intent/
