@@ -6,6 +6,12 @@
 
 ## 2026-06-09
 
+- **feat(orkestratör kuralı: dev-ortam ayrımı + dil hattı) [Ümit eksik-listesi #3]:** `orchestrator-system.md`'ye
+  eklendi: (1) ÜÇÜNCÜ kategori — DEV-ORTAM sorunu (port/server/install) kod bug'ı DEĞİL → `chat` ile çöz + pipeline'ı
+  sürdür, full `debug_triage` YAPMA (o kodu teşhis eder); "kod mu, IDE mi, ortam mı?" diye analiz et. (2) DİL HATTI
+  HARD kuralı: kullanıcı İngilizce bilmez; orkestratör Türkçe düşünür; "main"e ASLA DOĞRUDAN gitmez (YASAK), fazlar
+  gider + translator Türkçe↔İngilizce köprüler (anlam kaybı yok); ne zaman KENDİ cevaplar (dev-ortam/durum → chat) vs
+  faza delege eder kararı. (Mevcut satır 9 zaten reason/message_to_user Türkçe zorunluluğunu içeriyordu.)
 - **perf(model-discovery günlük cache) [Ümit eksik-listesi #5]:** Keşif her açılışta web-arama yapıp token yakıyordu.
   `~/.mycl/model-discovery-cache.json` (24s TTL): 24 saat içinde keşif yapıldıysa web-arama ATLANIR (cache döner).
   Modeller global (proje-bağımsız) → global cache. Başarılı keşifte yazılır; bozuk/eski → yeniden ara. Günde bir kez
