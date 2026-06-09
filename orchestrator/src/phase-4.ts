@@ -13,6 +13,7 @@ import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
+import { translate } from "./translator.js";
 import { blindspotLensDecision } from "./pre-commit-lens-gate.js";
 import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
 import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
@@ -262,9 +263,17 @@ export class Phase4Controller {
         // Kapı DEĞİL (tek tek onaylatmaz; alan korunur) — kullanıcı yanlış görürse itiraz eder.
         const specInput = writeInput as unknown as SpecData;
         if (specInput.assumptions && specInput.assumptions.length > 0) {
-          const lines = specInput.assumptions
+          const enLines = specInput.assumptions
             .map((a) => `• ${a.assumption} — ${a.why}`)
             .join("\n");
+          // DİL HATTI: varsayımlar spec'ten gelir → İngilizce. Kullanıcı İngilizce bilmez → translator ile
+          // Türkçeye çevir (anlam kaybı olmadan). Çeviri başarısızsa İngilizce göster (bloklamaz).
+          let lines = enLines;
+          try {
+            lines = (await translate(this.config, enLines, "en-to-tr")).text;
+          } catch (e) {
+            log.warn("phase-4", "varsayım çevirisi başarısız — İngilizce gösterilecek", e);
+          }
           emitChatMessage(
             "system",
             `🔍 Spec yazarken şu varsayımları yaptım (sen açıkça belirtmedin). Yanlış olan varsa söyle, düzeltirim:\n${lines}`,

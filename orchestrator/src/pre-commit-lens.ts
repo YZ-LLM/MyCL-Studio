@@ -53,7 +53,8 @@ Rules:
   - If it is genuinely clean, set clean=true and return an EMPTY blindspots list. A false alarm is worse than silence — never manufacture issues.
   - Be terse. At most 3 findings, highest-impact first. Use severity "high" ONLY for a real, material risk.
 
-OUTPUT — your ENTIRE final reply is exactly one JSON block and nothing else:
+OUTPUT — your ENTIRE final reply is exactly one JSON block and nothing else. Write "note" and "recommendation"
+in TURKISH (the user reads them directly and does not know English); keep the JSON keys and "severity" values in English:
 {"kind":"blindspot_review","clean":true|false,"blindspots":[{"severity":"low|medium|high","note":"...","recommendation":"..."}]}`;
 }
 

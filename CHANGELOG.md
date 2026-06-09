@@ -6,6 +6,12 @@
 
 ## 2026-06-09
 
+- **fix(Faz 4 DİL HATTI: kullanıcıya İngilizce sızıntı kapatıldı) [Ümit: "kullanıcı İngilizce bilmiyor, anlam kaybı
+  olmamalı"]:** Ekran kanıtı: spec varsayımları kullanıcıya İNGİLİZCE gösteriliyordu (main spec EN üretir, çevrilmeden
+  emit ediliyordu). Düzeltme: (1) `phase-4` preApprovalHook varsayımları emit'ten ÖNCE `translate(..., "en-to-tr")`
+  ile Türkçeye çevirir (çeviri başarısızsa İngilizce fallback, bloklamaz). (2) Kör-nokta merceği (`pre-commit-lens`)
+  prompt'una "note/recommendation'ı TÜRKÇE yaz (kullanıcı doğrudan okur, İngilizce bilmez)" eklendi → mercek bulguları
+  artık Türkçe (format etiketleri zaten Türkçeydi). Faz-sırası: Faz 4 dil işi.
 - **fix(UI: askq kartı kronolojik konumda — "yazım yukarı geliyordu") [Ümit]:** ChatPanel eskiden tüm mesajları
   sonra askq kartını render ediyordu → kart hep en altta sabit → askq pending iken composer'dan yazılan mesaj kartın
   ÜSTÜNDE kalıyordu. Artık kart sorulma zamanına (`PendingAskq.ts`) göre KRONOLOJİK render ediliyor: sorudan SONRA
