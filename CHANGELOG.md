@@ -6,6 +6,10 @@
 
 ## 2026-06-09
 
+- **perf(model-discovery günlük cache) [Ümit eksik-listesi #5]:** Keşif her açılışta web-arama yapıp token yakıyordu.
+  `~/.mycl/model-discovery-cache.json` (24s TTL): 24 saat içinde keşif yapıldıysa web-arama ATLANIR (cache döner).
+  Modeller global (proje-bağımsız) → global cache. Başarılı keşifte yazılır; bozuk/eski → yeniden ara. Günde bir kez
+  web-arama yeterli (yeni model günlük çıkmaz).
 - **feat(API desteği: decompose + review backend-aware) [Ümit: "her şey API'yi de desteklesin"]:** `llm-reasoning.ts`
   `runReasoning` — backend-aware (api/cli) tek-atış reasoning (backendForRole → cli=runClaudeCli, api=Anthropic SDK;
   modelId dışarıdan = canlı-tier uyumlu). `decompose.ts` (proposeModules) + `review.ts` (reviewMergedModules) artık

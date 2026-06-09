@@ -5,10 +5,37 @@
 // Sonra deterministik aile-tier'lama (model-catalog.setLiveTiersFromModels) uygular (LLM tier YANLIŞI olmasın).
 // Hatasızlık: yalnız resmi kaynak + EXACT id + doğrulama (claude-* deseni); şüphe/başarısızlık → statik katalog.
 
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, dirname } from "node:path";
 import { runClaudeCli } from "./cli-run.js";
 import { extractKindBlock } from "./cli-json.js";
 import { type MyclConfig } from "./config.js";
 import { log } from "./logger.js";
+
+// GÜNLÜK CACHE (Ümit: "her açılışta web-arama token yakmasın"). Modeller global (proje-bağımsız) → ~/.mycl'de.
+const CACHE_PATH = join(homedir(), ".mycl", "model-discovery-cache.json");
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 saat: günde bir kez ara
+
+async function readDiscoveryCache(): Promise<DiscoveredModel[] | null> {
+  try {
+    const c = JSON.parse(await readFile(CACHE_PATH, "utf-8")) as { ts: number; models: DiscoveredModel[] };
+    if (Date.now() - c.ts < CACHE_TTL_MS && Array.isArray(c.models) && c.models.length > 0) {
+      return c.models;
+    }
+  } catch {
+    // yok/bozuk/eski → null (yeniden ara)
+  }
+  return null;
+}
+async function writeDiscoveryCache(models: DiscoveredModel[]): Promise<void> {
+  try {
+    await mkdir(dirname(CACHE_PATH), { recursive: true });
+    await writeFile(CACHE_PATH, JSON.stringify({ ts: Date.now(), models }, null, 2));
+  } catch (e) {
+    log.warn("model-discovery", "cache yazılamadı (non-fatal)", e);
+  }
+}
 
 const DISCOVERY_SYSTEM = [
   "You find the CURRENT, OFFICIAL Claude (Anthropic) model lineup. Use WebSearch + WebFetch on Anthropic's",
@@ -59,6 +86,12 @@ export async function discoverModelsViaWeb(
   config: MyclConfig,
   projectRoot: string,
 ): Promise<DiscoveredModel[]> {
+  // Günlük cache: 24 saat içinde keşif yapıldıysa web-aramayı ATLA (token tasarrufu).
+  const cached = await readDiscoveryCache();
+  if (cached) {
+    log.info("model-discovery", "cache hit (günlük) — web-arama atlandı", { count: cached.length });
+    return cached;
+  }
   try {
     const res = await runClaudeCli({
       systemPrompt: DISCOVERY_SYSTEM,
@@ -73,7 +106,9 @@ export async function discoverModelsViaWeb(
       log.warn("model-discovery", "web keşif başarısız (statik katalog geçerli)", { error: res.error });
       return [];
     }
-    return parseDiscoveredModels(res.text);
+    const models = parseDiscoveredModels(res.text);
+    if (models.length > 0) await writeDiscoveryCache(models); // günlük cache'e yaz
+    return models;
   } catch (e) {
     log.warn("model-discovery", "web keşif exception (statik katalog geçerli)", e);
     return [];
