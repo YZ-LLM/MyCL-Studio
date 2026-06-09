@@ -68,6 +68,8 @@ export interface AgentDecision {
   action: AgentAction;
   /** Türkçe 1-2 cümle gerekçe — kullanıcıya gösterilebilir. */
   reason: string;
+  /** Adım adım muhakeme (Düşünceler panelinde gösterilir). reason=kısa gerekçe, thinking=süreç. */
+  thinking?: string;
   /** Sadece action="run_phase" için: hedef faz. */
   target_phase?: PhaseId;
   /** Opsiyonel ek chat mesajı — chat/ask_clarify action'ları için kullanılır. */
@@ -147,6 +149,10 @@ export function parseAgentDecision(input: unknown): AgentDecision {
     action: action as AgentAction,
     reason,
   };
+  // Düşünme süreci (opsiyonel) — Düşünceler panelinde gösterilir.
+  if (typeof obj.thinking === "string" && obj.thinking.length > 0) {
+    decision.thinking = obj.thinking;
+  }
 
   // run_phase için target_phase zorunlu
   if (decision.action === "run_phase") {
@@ -295,6 +301,13 @@ export function parseAgentDecision(input: unknown): AgentDecision {
 export const DECIDE_ACTION_TOOL_SCHEMA = {
   type: "object" as const,
   properties: {
+    thinking: {
+      type: "string",
+      description:
+        "ÖNCE düşün, sonra karar ver. Bu kararı verirken ADIM ADIM muhakemen (Türkçe): hangi sinyalleri gördün " +
+        "(state, önceki iş, kullanıcı niyeti), hangi seçenekleri tarttın, neden bu action'a vardın? 'reason' kısa " +
+        "gerekçedir; 'thinking' düşünme SÜRECİDİR. Kullanıcı bunu 'Düşünceler' panelinde görür → her zaman DOLDUR.",
+    },
     action: {
       type: "string",
       enum: Array.from(VALID_ACTIONS),

@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(orkestratör düşünme süreci görünür: `thinking` alanı) [Ümit: "sadece kararı yazmış, ne düşündüğünü de
+  yazsın"]:** `decide_action` şemasına `thinking` alanı eklendi — **action'dan ÖNCE** (chain-of-thought: önce
+  adım-adım muhakeme, sonra karar → karar kalitesine de katkı). SDK yolu (DECIDE_ACTION_TOOL_SCHEMA) + CLI yolu
+  (DECISION_OUTPUT_INSTRUCTION) ikisi de üretir; `parseAgentDecision` opsiyonel olarak ayıklar; `AgentDecision.thinking`.
+  AgentThinkingModal kararın üstünde "💭 Düşünce:" bloğunda gösterir (whitespace-pre-wrap). Modal başlığı kronolojiğe
+  göre düzeltildi ("en yeni altta"). NOT: `tool_choice:"any"` modeli decide_action'a zorladığı için narrative-text
+  yakalama güvenilmezdi → şema alanı güvenilir çözüm (model her zaman doldurur).
 - **feat(UI: orkestratör düşüncelerini banner'dan aç + kaymasın) [Ümit: "Model çalışıyor'a tıklayınca popup açılsın,
   aşağı kaymasın, manuel kaydırırım"]:** `ChatPanel` running-banner ("🤖 Model çalışıyor") artık tıklanır →
   `onOrchestratorClick` ile orkestratör düşünce modalını (AgentThinkingModal) açar + "💭 düşünceler" ipucu + cursor

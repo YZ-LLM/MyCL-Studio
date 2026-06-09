@@ -65,6 +65,9 @@ Bu modda \`decide_action\` TOOL'U YOKTUR. Araştırmanı (Read/Grep/Bash/Glob) b
 **SON çıktın** olarak kararını TEK bir \`\`\`json ... \`\`\` bloğu içinde ver — \`decide_action\`
 ile AYNI semantik alanlar:
 
+- \`thinking\` (ZORUNLU): ÖNCE düşün — adım adım muhakemen (Türkçe): hangi sinyalleri gördün (state, önceki iş,
+  kullanıcı niyeti), hangi seçenekleri tarttın, neden bu action'a vardın? \`reason\` kısa gerekçedir; \`thinking\`
+  düşünme SÜRECİDİR. Kullanıcı bunu "Düşünceler" panelinde görür → her zaman DOLDUR.
 - \`action\` (ZORUNLU): "chat" | "ask_clarify" | "run_phase" | "approve_ui" | "revise_ui" |
   "cancel_pipeline" | "resume_pipeline" | "debug_triage" | "develop_new_or_iter" |
   "set_optional_phases" | "answer_askq" | "verify_feature" | "save_memory_proposal" |

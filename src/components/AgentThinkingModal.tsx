@@ -100,6 +100,23 @@ function EventRow({ ev }: { ev: AgentThinkingEvent }) {
       )}
       {ev.sub === "decision" && ev.decision && (
         <div style={{ fontSize: 12 }}>
+          {Boolean(ev.decision.thinking) && (
+            <div
+              style={{
+                marginBottom: 8,
+                padding: 8,
+                background: "rgba(90, 155, 229, 0.08)",
+                borderRadius: 4,
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.5,
+              }}
+            >
+              <strong>💭 Düşünce:</strong>{" "}
+              <span style={{ color: "var(--fg-bright)" }}>
+                {String(ev.decision.thinking)}
+              </span>
+            </div>
+          )}
           <div>
             <strong>action:</strong>{" "}
             <code style={{ fontFamily: "var(--font-mono)" }}>
@@ -196,7 +213,7 @@ export function AgentThinkingModal({ open, events, onClose }: Props) {
                 fontWeight: 400,
               }}
             >
-              ({events.length} event, en yeni üstte)
+              ({events.length} event, kronolojik — en yeni altta)
             </span>
           </h2>
           <button
