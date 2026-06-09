@@ -17,6 +17,7 @@ describe("formatProjectMap (saf)", () => {
         { file: "src/api/db.ts", importedBy: 12 },
         { file: "src/util/log.ts", importedBy: 7 },
       ],
+      background: "",
     };
     const out = formatProjectMap(m);
     expect(out).toContain("Proje haritası");
@@ -24,9 +25,21 @@ describe("formatProjectMap (saf)", () => {
     expect(out).toContain("src/util/log.ts (7 modül");
   });
 
+  it("git-intent: merkez yok ama arka plan (README/commit) varsa onu gösterir", () => {
+    const out = formatProjectMap({
+      available: true,
+      fileCount: 0,
+      central: [],
+      background: "README (özet):\nBu bir ödeme servisi.\n\nSon commit'ler (yön):\n- feat: iade akışı",
+    });
+    expect(out).toContain("Proje arka planı");
+    expect(out).toContain("ödeme servisi");
+    expect(out).toContain("iade akışı");
+  });
+
   it("harita yok / boş → '' (gürültü yok)", () => {
-    expect(formatProjectMap({ available: false, fileCount: 0, central: [] })).toBe("");
-    expect(formatProjectMap({ available: true, fileCount: 5, central: [] })).toBe("");
+    expect(formatProjectMap({ available: false, fileCount: 0, central: [], background: "" })).toBe("");
+    expect(formatProjectMap({ available: true, fileCount: 5, central: [], background: "" })).toBe("");
   });
 });
 

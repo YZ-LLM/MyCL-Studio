@@ -6,6 +6,12 @@
 
 ## 2026-06-09
 
+- **feat(onboarding git-intent: yabancı projede "neden/ne") [Ümit eksik-listesi #4]:** `onboarding/project-map.ts`
+  artık dep-map'e ek olarak `buildBackground`: README özeti (ilk 1200 char) + son 12 commit subject'i → "Proje arka
+  planı" digesti. Deterministik (LLM yok, hafif). `ProjectMap.background` + `formatProjectMap` render eder; open'da
+  cache'lenip orkestratör bağlamına enjekte. Kod-yok ama README/git olan projede de hakimiyet (available = dep-graph
+  VEYA background). +1 test.
+
 - **feat(API desteği: parallel-codegen WORKER backend-aware) [Ümit: "API yok diye yapmadığın bir şey olmasın; param
   olunca her şeyi API ile çalıştıracağım"]:** worker (`module-parallel/worker.ts`) artık `runClaudeCli` (CLI-only)
   yerine `createCodegenBackend` kullanıyor → `backendForRole`'a göre CLI ya da SDK (API). tag "parallel-module"

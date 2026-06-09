@@ -5,8 +5,10 @@
 // mevcut `fix/dep-graph` (reverse-import) ile HAFİF bir harita: "en merkezi modüller = önce buraya bak, dokunursan
 // etkisi geniş". Orkestratör recall'ına enjekte edilir → AI ilk turdan projenin iskeletini bilir.
 
-import { relative } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { buildReverseImportGraph } from "../fix/dep-graph/index.js";
+import { getRecentCommits } from "../git.js";
 
 export interface ProjectMap {
   available: boolean;
@@ -14,6 +16,35 @@ export interface ProjectMap {
   fileCount: number;
   /** En çok import edilen (merkezi/taşıyıcı) modüller — yabancı projede ilk bakılacak yerler. */
   central: Array<{ file: string; importedBy: number }>;
+  /** git-intent: yabancı projede "neden/ne" — README özeti + son commit yönü (hafif, LLM'siz). */
+  background: string;
+}
+
+/** README + son commit'lerden "proje arka planı" (yabancı koda hakimiyet; deterministik, LLM yok). */
+async function buildBackground(projectRoot: string): Promise<string> {
+  const parts: string[] = [];
+  // README (varsa) — projenin ne olduğu / niyeti.
+  for (const name of ["README.md", "readme.md", "README"]) {
+    try {
+      const txt = (await readFile(join(projectRoot, name), "utf-8")).trim();
+      if (txt) {
+        parts.push(`README (özet):\n${txt.slice(0, 1200)}`);
+        break;
+      }
+    } catch {
+      // yok → sıradaki
+    }
+  }
+  // Son commit'ler — projenin son yönü/aktivitesi.
+  try {
+    const commits = await getRecentCommits(projectRoot, 12);
+    if (commits.length > 0) {
+      parts.push(`Son commit'ler (yön):\n${commits.map((c) => `- ${c.subject}`).join("\n")}`);
+    }
+  } catch {
+    // git yok / hata → atla
+  }
+  return parts.join("\n\n");
 }
 
 /**
@@ -21,14 +52,22 @@ export interface ProjectMap {
  * (dosya okur) ama deterministik. git/analyzer yoksa available:false (sessiz — onboarding opsiyonel bağlam).
  */
 export async function buildProjectMap(projectRoot: string, topN = 12): Promise<ProjectMap> {
+  const background = await buildBackground(projectRoot); // git-intent (README + commit yönü)
   const graph = await buildReverseImportGraph(projectRoot);
-  if (!graph.available) return { available: false, fileCount: 0, central: [] };
-  const central = [...graph.reverse.entries()]
-    .map(([file, importers]) => ({ file: relative(projectRoot, file), importedBy: importers.size }))
-    .filter((e) => e.importedBy > 0)
-    .sort((a, b) => b.importedBy - a.importedBy)
-    .slice(0, topN);
-  return { available: true, fileCount: graph.reverse.size, central };
+  const central = graph.available
+    ? [...graph.reverse.entries()]
+        .map(([file, importers]) => ({ file: relative(projectRoot, file), importedBy: importers.size }))
+        .filter((e) => e.importedBy > 0)
+        .sort((a, b) => b.importedBy - a.importedBy)
+        .slice(0, topN)
+    : [];
+  // available: dep-graph YA DA arka plan varsa (kod-yok ama README/git olan projede de hakimiyet sağla).
+  return {
+    available: graph.available || background.length > 0,
+    fileCount: graph.available ? graph.reverse.size : 0,
+    central,
+    background,
+  };
 }
 
 // Proje-başına cache: harita oturum içinde sabit (yapı yavaş değişir) → her orkestratör turunda
@@ -56,9 +95,18 @@ export function clearProjectMapCache(): void {
 
 /** ProjectMap'i orkestratör bağlamına enjekte edilecek metne çevirir. Boşsa "" (gürültü yok). SAF. */
 export function formatProjectMap(map: ProjectMap): string {
-  if (!map.available || map.central.length === 0) return "";
-  const lines = map.central
-    .map((c) => `- ${c.file} (${c.importedBy} modül tarafından kullanılıyor)`)
-    .join("\n");
-  return `### Proje haritası (yabancı koda hakimiyet — en merkezi modüller; dokunurken etkisi geniş)\n${lines}`;
+  if (!map.available) return "";
+  const sections: string[] = [];
+  if (map.central.length > 0) {
+    const lines = map.central
+      .map((c) => `- ${c.file} (${c.importedBy} modül tarafından kullanılıyor)`)
+      .join("\n");
+    sections.push(
+      `### Proje haritası (yabancı koda hakimiyet — en merkezi modüller; dokunurken etkisi geniş)\n${lines}`,
+    );
+  }
+  if (map.background) {
+    sections.push(`### Proje arka planı (git-intent — yabancı projede "neden/ne")\n${map.background}`);
+  }
+  return sections.join("\n\n");
 }
