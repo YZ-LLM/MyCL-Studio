@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(modül-paralel — decomposition + TÜM canlı zincir E2E GEÇTİ) [Ümit: "devam et"]:** `module-parallel/
+  decompose.ts` — `proposeModules` (LLM işi ≥2 AYRIK modüle böler; planlayıcı promptu "kod yazma, SADECE JSON";
+  `allowedTools:[]`+`disallowedTools` ile kodlama moduna kaçışı engellenir) + `parseModulesResponse` (saf, +3 test) +
+  K1 kapısı doğrular → over-claim/bölünemez → null → SERİ (fail-closed). **GERÇEK uçtan-uca E2E** (`scripts/e2e-
+  parallel-full.mjs`, no mock): istek → LLM böldü (2 ayrık modül, 5sn) → `runParallelModules` gerçek worker'larla
+  paralel + ayrık entegre (3 dosya, 52sn) → `parallel:true ok:true`, çakışma yok. İLK denemede LLM planlamak yerine
+  kodlamaya kalkmıştı (JSON yok→null); prompt sertleştirilince düzeldi. Kalan (opt-in): Faz 5/8 pipeline auto-hook.
 - **test(modül-paralel codegen — GERÇEK 2-modül E2E GEÇTİ, no mock) [Ümit: "2 modüllü proje ile E2E, mock yok"]:**
   `orchestrator/scripts/e2e-parallel-codegen.mjs` — geçici git repo + 2 ayrık modül (greet/calc), GERÇEK
   `makeScopedCodegenWorker` (sonnet, abonelik) ile `runParallelModules`. Sonuç: `parallel:true, ok:true`, iki modül
