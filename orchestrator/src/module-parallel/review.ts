@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { runClaudeCli } from "../cli-run.js";
 import { extractKindBlock } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
+import { selectModelForTask } from "../model-catalog.js";
 
 const REVIEW_SYSTEM = [
   "You review code written by MULTIPLE INDEPENDENT agents IN PARALLEL, then merged. Each agent saw ONLY its own",
@@ -73,7 +74,7 @@ export async function reviewMergedModules(
   const res = await runClaudeCli({
     systemPrompt: REVIEW_SYSTEM,
     userMessage: `Review these merged, parallel-written modules as a whole:\n\n${parts.join("\n\n")}`,
-    modelId: config.selected_models.main,
+    modelId: selectModelForTask("review", config.selected_models.model_tiers).modelId, // kalite-kritik → strong
     cwd: projectRoot,
     allowedTools: [],
   });

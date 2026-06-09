@@ -19,6 +19,7 @@ import { appendAudit, appendWtf, formatDecisions, readDecisions } from "./audit.
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
+import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
@@ -346,7 +347,9 @@ export class Phase0Controller {
       }
     }
 
-    const role = this.spec.model_role!;
+    // "Kaliteli hız": debug kök-neden akıl yürütmesi KALİTE-kritik → strong tier seçilir + chat'te gösterilir.
+    const modelChoice = selectModelForTask("debug", this.config.selected_models.model_tiers);
+    emitChatMessage("system", formatModelChoice("debug", modelChoice));
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
       extra_denied_paths: this.spec.denied_paths,
@@ -375,7 +378,7 @@ export class Phase0Controller {
     if (wantCli) {
       reportTool = await this.runD1Cli(
         systemPrompt,
-        (this.config.selected_models[role] ?? this.config.selected_models.main) as string,
+        modelChoice.modelId,
         contextWithHypotheses,
       );
     } else {
@@ -385,7 +388,7 @@ export class Phase0Controller {
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: modelChoice.modelId,
       apiKey: this.config.api_keys.main,
       initialUserMessage:
         "D1 — Investigation phase. Use Read/Grep/Bash to find the root cause. When ready, call `report_root_cause` with root_cause_en + 2-4 fix_options. Do NOT call any other tool to conclude." +
@@ -468,7 +471,7 @@ export class Phase0Controller {
               },
             ],
             system: systemPrompt,
-            model: this.config.selected_models[role],
+            model: modelChoice.modelId,
             tools: [TOOL_REPORT_ROOT_CAUSE],
             tool_choice: {
               type: "tool",

@@ -6,6 +6,10 @@
 
 ## 2026-06-09
 
+- **feat(model "kaliteli hız" — Faz 0 debug + parallel-review de strong tier):** Faz 0 debug (kök-neden akıl
+  yürütmesi, CLI+SDK+D1 yolları) + `module-parallel/review.ts` (birleşik çıktı incelemesi) artık `selectModelForTask`
+  ile strong (opus) seçer; debug ayrıca chat'te gösterir. Böylece TÜM kalite-kritik fazlar opus: codegen/spec/debug/
+  review (+ design-fanout zaten tier'lı). Hafif fazlar sonnet (config, hız). "Kaliteli hız" model-seçimi tamam.
 - **fix(model-alaka "kaliteli hız" kesin tanım: kaliteyi düşüren hız YOK) [Ümit: "kalitesinden ödün vermeyecek
   şekilde hızlı; hız kaliteyi azaltıyorsa yapma"]:** Kalite SABİT kısıt. TASK_RELEVANCE'tan `classification → cheap`
   (haiku) KALDIRILDI → artık HİÇBİR iş cheap(haiku)'ya düşmüyor (haiku sınıflandırma/çeviri kalitesini riske atar);
