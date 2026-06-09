@@ -6,6 +6,15 @@
 
 ## 2026-06-09
 
+- **feat(paralel titizlik açığı KAPATILDI: tam kalite pipeline + anlamsal review) [Ümit: "evet işte bu" + "anlamsal/
+  business code review edelim"]:** Çoklu Ajan Seçimi yolu artık erken `return` ETMİYOR → paralel sonucu
+  `advanceToNextPhase(9)` ile **Faz 10-17 tam kalite pipeline'ından geçiriyor** (codegen'den sonra geldiği için ezmez,
+  sadece doğrular: lint/sadeleştir/perf/güvenlik/birim/entegrasyon/e2e/yük) + GERÇEK pipeline-sonu tazeleme (living-
+  docs/proje-haritası/handoff) ondan koşar. Önceki `verifyBuild` (yarım subset) + manuel refresh KALDIRILDI (gerçek
+  pipeline supersede etti; verify.ts silindi). **+ (b) anlamsal/business code review** (`module-parallel/review.ts`
+  `reviewMergedModules`): bağımsız ajanların birleşik çıktısını BÜTÜN hâlinde inceler (business-logic + modüller-arası
+  uyum + gizli kuplaj) → mekanik kapıların göremediği semantik katman; bloklamaz, yüzeye çıkarır. +2 test. Decompose
+  riski (Luke #2) modüler-ilke (davranışsal-bağlı şeyler ayrı modüle konmaz) + bu review ile kapatıldı.
 - **feat(#3: paralel sonrası dinamik kısımlar bayatlamasın — "her zaman dinamik kal") [Ümit: "sonra da MyCL'in hakim
   olduğu kısımlara etkilerini araştır … bayat/eksik kalmasın"]:** ARAŞTIRMA: Çoklu Ajan Seçimi yolu erken `return`
   ettiği için pipeline-SONU tazeleme adımlarını (updateLivingDocs + proje-haritası + handoff + module-stock) ATLIYORDU

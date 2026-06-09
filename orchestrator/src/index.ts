@@ -29,7 +29,6 @@ import { appendAbandonedIntent } from "./abandoned-intents.js";
 import {
   appendAudit as appendAuditModule,
   appendCost,
-  appendHandoff,
   readCosts,
   extractSpecSection,
   readAuditLog,
@@ -112,7 +111,7 @@ import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
-import { verifyBuild, formatVerifyResult } from "./module-parallel/verify.js";
+import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
@@ -1311,34 +1310,19 @@ async function executeAgentDecision(
             `🤖 Çoklu Ajan Seçimi: ${sel.modules?.length ?? 0} bağımsız modül PARALEL yazıldı ` +
               `(${(sel.modules ?? []).join(", ")}). Dosyalar: ${(sel.files ?? []).join(", ")}.`,
           );
-          // Paralel build'i "yazıldı" bırakma → kalite kapıları (build/lint/test/güvenlik) otomatik koşar.
-          emitChatMessage("assistant", "Kalite kapıları çalışıyor (paralel build doğrulanıyor)…");
+          // (b) ANLAMSAL / business-logic review: birleşik çıktı bütün hâlinde tutarlı mı (bağımsız ajanlar
+          // birbirini görmeden yazdı → mekanik kapıların göremediği semantik/gizli-kuplaj). Yüzeye çıkarır, bloklamaz.
           try {
-            const verify = await verifyBuild(runtime.state);
-            emitChatMessage("assistant", formatVerifyResult(verify));
+            const review = await reviewMergedModules(runtime.config, runtime.state.project_root, sel.files ?? []);
+            emitChatMessage("assistant", formatReview(review));
           } catch (e) {
-            log.warn("orchestrator", "paralel sonrası kalite kapıları hatası (non-blocking)", e);
+            log.warn("orchestrator", "paralel anlamsal review hatası (non-blocking)", e);
           }
-          // MyCL'in hakim olduğu DİNAMİK kısımları tazele: paralel yol pipeline-SONU tazelemeyi atladığı için
-          // yaşayan dökümanlar + proje haritası + devir kaydı BAYATLAMASIN ("her zaman dinamik kal"). Non-blocking.
-          try {
-            await updateLivingDocs(runtime.state, runtime.config); // features.md/user-guide yeni modülleri yansıtsın
-            clearProjectMapCache(); // proje haritası eski kalmasın
-            void getCachedProjectMap(runtime.state.project_root).catch(() => undefined); // arka planda yeniden ısıt
-            await appendHandoff(runtime.state.project_root, {
-              ts: Date.now(),
-              phase: 8,
-              iteration: runtime.state.iteration_count ?? 1,
-              status: "complete",
-              summary: `Çoklu Ajan Seçimi: ${(sel.modules ?? []).join(", ")} paralel (${(sel.files ?? []).length} dosya)`,
-            });
-            emitChatMessage(
-              "assistant",
-              "🔄 Dinamik kısımlar tazelendi (yaşayan dökümanlar + proje haritası + devir kaydı) — bayat kalmadı.",
-            );
-          } catch (e) {
-            log.warn("orchestrator", "paralel sonrası dinamik tazeleme hatası (non-blocking)", e);
-          }
+          // (a) TAM TİTİZLİK: paralel sonucu Faz 10-17 kalite pipeline'ından GEÇİR (codegen'den SONRA → ezmez,
+          // sadece doğrular: sadeleştir/perf/entegrasyon/e2e/yük dahil) + pipeline-SONU tazeleme (living-docs/
+          // proje-haritası/handoff) GERÇEK akıştan koşar. Bu yüzden burada return YOK / elde-tazeleme YOK.
+          emitChatMessage("assistant", "Kalite fazları (10-17) paralel sonuç üstünde çalışıyor…");
+          await advanceToNextPhase(9);
           return;
         }
         log.info("orchestrator", "Çoklu Ajan Seçimi kullanılmadı → seri develop", { reason: sel.reason });
