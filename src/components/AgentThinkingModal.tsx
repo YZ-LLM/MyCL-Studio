@@ -148,8 +148,9 @@ function EventRow({ ev }: { ev: AgentThinkingEvent }) {
 export function AgentThinkingModal({ open, events, onClose }: Props) {
   if (!open) return null;
 
-  // Reverse-chronological (en yeni üstte)
-  const reversed = [...events].reverse();
+  // Kronolojik (en yeni ALTTA). Yeni olay ALTA eklenir → üstte okunan içerik AŞAĞI KAYMAZ; kullanıcı
+  // istediğinde manuel kaydırır (Ümit talebi 2026-06-09). Oto-scroll YOK.
+  const ordered = events;
 
   return (
     <div
@@ -214,14 +215,14 @@ export function AgentThinkingModal({ open, events, onClose }: Props) {
           </button>
         </header>
         <div style={{ padding: 18, overflowY: "auto", flex: 1 }}>
-          {reversed.length === 0 ? (
+          {ordered.length === 0 ? (
             <p style={{ color: "var(--fg-dim)", fontSize: 12 }}>
               Henüz orkestrator ajan kararı yok. Settings → API Keys → "Orkestrator
               Ajan API Key" alanına bir anahtar gir, sonra mesaj yaz — agent karar
               verdikçe burada listelenir.
             </p>
           ) : (
-            reversed.map((ev) => <EventRow key={ev.ts} ev={ev} />)
+            ordered.map((ev) => <EventRow key={ev.ts} ev={ev} />)
           )}
         </div>
       </div>

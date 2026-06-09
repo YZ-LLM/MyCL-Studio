@@ -327,11 +327,23 @@ export function ChatPanel({
         )}
       </div>
       {runningBanner && (
-        <div className="running-banner" title={runningBanner.detail ?? ""}>
+        <div
+          className="running-banner"
+          title={
+            onOrchestratorClick
+              ? "Düşünceleri görmek için tıkla"
+              : (runningBanner.detail ?? "")
+          }
+          onClick={onOrchestratorClick}
+          style={onOrchestratorClick ? { cursor: "pointer" } : undefined}
+        >
           <span className="running-spinner" aria-hidden>⏳</span>
           <span className="running-label">{runningBanner.label}</span>
           {runningBanner.detail && (
             <span className="running-detail">{runningBanner.detail}</span>
+          )}
+          {onOrchestratorClick && (
+            <span className="running-detail">· 💭 düşünceler</span>
           )}
         </div>
       )}

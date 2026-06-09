@@ -6,6 +6,11 @@
 
 ## 2026-06-09
 
+- **feat(UI: orkestratör düşüncelerini banner'dan aç + kaymasın) [Ümit: "Model çalışıyor'a tıklayınca popup açılsın,
+  aşağı kaymasın, manuel kaydırırım"]:** `ChatPanel` running-banner ("🤖 Model çalışıyor") artık tıklanır →
+  `onOrchestratorClick` ile orkestratör düşünce modalını (AgentThinkingModal) açar + "💭 düşünceler" ipucu + cursor
+  pointer. `AgentThinkingModal` artık KRONOLOJİK (yeni olay ALTTA, eskiden reverse=yeni üstte) → yeni düşünce
+  geldiğinde üstte okunan içerik AŞAĞI KAYMAZ; oto-scroll yok, kullanıcı manuel kaydırır. Frontend typecheck temiz.
 - **feat(paralel titizlik açığı KAPATILDI: tam kalite pipeline + anlamsal review) [Ümit: "evet işte bu" + "anlamsal/
   business code review edelim"]:** Çoklu Ajan Seçimi yolu artık erken `return` ETMİYOR → paralel sonucu
   `advanceToNextPhase(9)` ile **Faz 10-17 tam kalite pipeline'ından geçiriyor** (codegen'den sonra geldiği için ezmez,
