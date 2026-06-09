@@ -196,10 +196,14 @@ export class MechanicalRunnerBase {
     }
 
     let anyFail = mainOutcome.kind === "fail";
-    for (const extra of extras) {
-      if (this.aborted) break;
-      const extraOutcome = await this.runExtraScan(extra, timeout);
-      if (extraOutcome === "fail") anyFail = true;
+    // Ekstra taramalar (örn. Faz 13: semgrep/gitleaks/csp/headers) BAĞIMSIZ + salt-okunur → PARALEL koş.
+    // Saf hız kazancı; kod YAZMADIKLARI için çakışma riski yok (yalnız analiz). abort'ta hiç başlatma.
+    // (Fazlar-ARASI paralel DEĞİL — o faz-makinesini/singleton'ı bozar; yalnız faz-İÇİ bağımsız taramalar.)
+    if (!this.aborted) {
+      const extraResults = await Promise.all(
+        extras.map((extra) => this.runExtraScan(extra, timeout)),
+      );
+      if (extraResults.some((r) => r === "fail")) anyFail = true;
     }
 
     // Kombinasyon: main fail veya herhangi bir extra fail ise final fail.

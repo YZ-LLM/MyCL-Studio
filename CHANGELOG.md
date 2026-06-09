@@ -6,6 +6,11 @@
 
 ## 2026-06-09
 
+- **perf(#2: kalite kapısı taramalarını paralelleştir — güvenli kısım) [Ümit: "sonra 2"]:** `mechanical-runner`
+  `extra_scans` döngüsü (Faz 13: semgrep/gitleaks/csp/headers vb.) seri `for...await`'ten `Promise.all`'a → BAĞIMSIZ +
+  salt-okunur taramalar paralel = saf hız, çakışma yok (kod yazmazlar). abort'ta hiç başlatma; fail-aggregation sıra-
+  bağımsız (eşdeğer sonuç). DÜRÜST KAPSAM: fazlar-ARASI paralel YAPILMADI (faz-makinesi/singleton'ı bozar, riskli);
+  yalnız faz-İÇİ bağımsız taramalar. Yazan fazlar (lint_fix/simplify) seri kalır.
 - **feat(Çoklu Ajan Seçimi TAMAMLANDI — #1: paralel sonrası kalite kapıları + Settings toggle) [Ümit: "1"]:**
   (a) `module-parallel/verify.ts` — `verifyBuild`: paralel build SONRASI stack profilinden build/lint/test/güvenlik
   koşar (komut yoksa skip), `formatVerifyResult` özet. Develop dalında `sel.used` sonrası otomatik çalışır → paralel
