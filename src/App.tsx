@@ -618,6 +618,7 @@ function App() {
   const [currentModelTiers, setCurrentModelTiers] = useState<ModelTiers | undefined>(undefined);
   const [currentDesignWorkflow, setCurrentDesignWorkflow] = useState<DesignWorkflowMode | undefined>(undefined);
   const [currentAgentTeamsOptIn, setCurrentAgentTeamsOptIn] = useState<boolean | undefined>(undefined);
+  const [currentMultiAgentSelection, setCurrentMultiAgentSelection] = useState<boolean | undefined>(undefined);
   const [currentCacheTtl, setCurrentCacheTtl] = useState<"5m" | "1h" | undefined>(undefined);
   /**
    * Boot history load guard: request yolda iken effect re-fire ederse 2.
@@ -694,6 +695,8 @@ function App() {
         if (ev.data.design_workflow) setCurrentDesignWorkflow(ev.data.design_workflow);
         if (typeof ev.data.agent_teams_optin === "boolean")
           setCurrentAgentTeamsOptIn(ev.data.agent_teams_optin);
+        if (typeof ev.data.multi_agent_selection === "boolean")
+          setCurrentMultiAgentSelection(ev.data.multi_agent_selection);
         if (ev.data.cache_ttl) setCurrentCacheTtl(ev.data.cache_ttl);
       } else if (ev.kind === "phases_list") {
         setPhasesList(ev.data.phases);
@@ -754,6 +757,7 @@ function App() {
     designWorkflow?: DesignWorkflowMode,
     agentTeamsOptIn?: boolean,
     cacheTtl?: "5m" | "1h",
+    multiAgentSelection?: boolean,
   ) => {
     setSavingModels(true);
     if (effort) setCurrentEffort(effort);
@@ -761,6 +765,7 @@ function App() {
     if (modelTiers) setCurrentModelTiers(modelTiers);
     if (designWorkflow) setCurrentDesignWorkflow(designWorkflow);
     if (typeof agentTeamsOptIn === "boolean") setCurrentAgentTeamsOptIn(agentTeamsOptIn);
+    if (typeof multiAgentSelection === "boolean") setCurrentMultiAgentSelection(multiAgentSelection);
     if (cacheTtl) setCurrentCacheTtl(cacheTtl);
     void orch.send({
       kind: "save_settings",
@@ -773,6 +778,7 @@ function App() {
         ...(modelTiers ? { model_tiers: modelTiers } : {}),
         ...(designWorkflow ? { design_workflow: designWorkflow } : {}),
         ...(typeof agentTeamsOptIn === "boolean" ? { agent_teams_optin: agentTeamsOptIn } : {}),
+        ...(typeof multiAgentSelection === "boolean" ? { multi_agent_selection: multiAgentSelection } : {}),
         ...(cacheTtl ? { cache_ttl: cacheTtl } : {}),
       },
     });
@@ -1071,6 +1077,7 @@ function App() {
       currentModelTiers={currentModelTiers}
       currentDesignWorkflow={currentDesignWorkflow}
       currentAgentTeamsOptIn={currentAgentTeamsOptIn}
+      currentMultiAgentSelection={currentMultiAgentSelection}
       currentCacheTtl={currentCacheTtl}
       modelsTranslator={modelsTranslator}
       modelsMain={modelsMain}

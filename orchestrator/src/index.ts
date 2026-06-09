@@ -111,6 +111,7 @@ import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
+import { verifyBuild, formatVerifyResult } from "./module-parallel/verify.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
@@ -861,6 +862,7 @@ async function handleSaveSelectedModels(
     backends?: Partial<AgentBackends>;
     design_workflow?: ClaudeCodeFlags["design_workflow"];
     agent_teams_optin?: boolean;
+    multi_agent_selection?: boolean;
     cache_ttl?: ClaudeCodeFlags["cache_ttl"];
   },
 ): Promise<void> {
@@ -872,7 +874,8 @@ async function handleSaveSelectedModels(
   try {
     // v15.13: tasarım flag'lerini (design_workflow/agent_teams_optin) modellerden ayır;
     // gerisi (translator/main/orchestrator/model_tiers) selected_models'e gider.
-    const { effort, backends, design_workflow, agent_teams_optin, cache_ttl, ...sel } = payload;
+    const { effort, backends, design_workflow, agent_teams_optin, multi_agent_selection, cache_ttl, ...sel } =
+      payload;
     await persistSelectedModels(sel as SelectedModels);
     // v15.8: Efor + v15.13: tasarım fan-out flag'leri — Modeller sekmesinde modellerle
     // birlikte kaydedilir. CLI backend aktifse efor `--effort` olarak kullanılır.
@@ -886,6 +889,9 @@ async function handleSaveSelectedModels(
     }
     if (typeof agent_teams_optin === "boolean") {
       flagsPatch.agent_teams_optin = agent_teams_optin;
+    }
+    if (typeof multi_agent_selection === "boolean") {
+      flagsPatch.multi_agent_selection = multi_agent_selection;
     }
     if (cache_ttl === "5m" || cache_ttl === "1h") {
       flagsPatch.cache_ttl = cache_ttl;
@@ -1024,6 +1030,7 @@ async function handleReadSelectedModels(): Promise<void> {
       model_tiers: sel?.model_tiers,
       design_workflow: flags.design_workflow ?? "off",
       agent_teams_optin: flags.agent_teams_optin ?? false,
+      multi_agent_selection: flags.multi_agent_selection ?? false,
       cache_ttl: flags.cache_ttl ?? "5m",
     });
   } catch (err) {
@@ -1301,9 +1308,16 @@ async function executeAgentDecision(
           emitChatMessage(
             "assistant",
             `🤖 Çoklu Ajan Seçimi: ${sel.modules?.length ?? 0} bağımsız modül PARALEL yazıldı ` +
-              `(${(sel.modules ?? []).join(", ")}). Dosyalar: ${(sel.files ?? []).join(", ")}. ` +
-              `Kaliteyi doğrulamak için kalite fazlarını (lint/test/güvenlik) çalıştırabilirsiniz.`,
+              `(${(sel.modules ?? []).join(", ")}). Dosyalar: ${(sel.files ?? []).join(", ")}.`,
           );
+          // Paralel build'i "yazıldı" bırakma → kalite kapıları (build/lint/test/güvenlik) otomatik koşar.
+          emitChatMessage("assistant", "Kalite kapıları çalışıyor (paralel build doğrulanıyor)…");
+          try {
+            const verify = await verifyBuild(runtime.state);
+            emitChatMessage("assistant", formatVerifyResult(verify));
+          } catch (e) {
+            log.warn("orchestrator", "paralel sonrası kalite kapıları hatası (non-blocking)", e);
+          }
           return;
         }
         log.info("orchestrator", "Çoklu Ajan Seçimi kullanılmadı → seri develop", { reason: sel.reason });

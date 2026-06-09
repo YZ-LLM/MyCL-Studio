@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(Çoklu Ajan Seçimi TAMAMLANDI — #1: paralel sonrası kalite kapıları + Settings toggle) [Ümit: "1"]:**
+  (a) `module-parallel/verify.ts` — `verifyBuild`: paralel build SONRASI stack profilinden build/lint/test/güvenlik
+  koşar (komut yoksa skip), `formatVerifyResult` özet. Develop dalında `sel.used` sonrası otomatik çalışır → paralel
+  kod "yazıldı" bırakılmaz, doğrulanır. +1 test (saf format). (b) **Settings UI toggle:** `multi_agent_selection` flag'i
+  uçtan uca bağlandı — events.ts (2) + save handler (index.ts payload/destructure/flagsPatch/emit) + App.tsx (state/
+  receive/param/set/persist/prop) + Settings.tsx (prop/state/checkbox "Çoklu Ajan Seçimi"/onSave). Artık config.json
+  düzenlemeden Settings'ten açılıp kapanıyor. Frontend typecheck temiz.
 - **feat(ajan-içi TAM İZ — kör nokta kalmasın) [Ümit: "ajanlar birbiriyle konuşuyor, bu süreçleri logla, tam trace"]:**
   `agent-trace.ts` — kalıcı iz (`.mycl/traces/agents.jsonl`): `setAgentTraceRoot` (open_project'te set) +
   `traceAgentEvent` (O_APPEND, non-blocking) + `readAgentTrace`. Bağlandı: (1) `emitAgentEvent` (ipc) artık UI'ya

@@ -61,6 +61,7 @@ interface Props {
     designWorkflow?: DesignWorkflowMode,
     agentTeamsOptIn?: boolean,
     cacheTtl?: "5m" | "1h",
+    multiAgentSelection?: boolean,
   ) => void;
   /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
   currentBackends?: AgentBackends;
@@ -80,6 +81,8 @@ interface Props {
   currentDesignWorkflow?: DesignWorkflowMode;
   /** v15.13: mevcut Agent Teams müzakere opt-in. */
   currentAgentTeamsOptIn?: boolean;
+  /** Çoklu Ajan Seçimi: ≥2 bağımsız modülü paralel yazdırma opt-in. */
+  currentMultiAgentSelection?: boolean;
   /** v15.14 (F2): mevcut prompt cache ömrü (5m/1h). */
   currentCacheTtl?: "5m" | "1h";
 }
@@ -218,6 +221,7 @@ export function Settings({
   currentModelTiers,
   currentDesignWorkflow,
   currentAgentTeamsOptIn,
+  currentMultiAgentSelection,
   currentCacheTtl,
 }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -251,6 +255,9 @@ export function Settings({
   );
   const [agentTeamsOptInSel, setAgentTeamsOptInSel] = useState<boolean>(
     currentAgentTeamsOptIn ?? false,
+  );
+  const [multiAgentSelectionSel, setMultiAgentSelectionSel] = useState<boolean>(
+    currentMultiAgentSelection ?? false,
   );
   // v15.14 (F2): prompt cache ömrü (5m/1h).
   const [cacheTtlSel, setCacheTtlSel] = useState<"5m" | "1h">(currentCacheTtl ?? "5m");
@@ -508,6 +515,14 @@ export function Settings({
                   />
                   Gerçek çok-ajanlı derinlik: tasarım çatışma-müzakeresi (Agent Teams) + debug hipotez fan-out (abonelik; ek maliyet)
                 </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={multiAgentSelectionSel}
+                    onChange={(e) => setMultiAgentSelectionSel(e.target.checked)}
+                  />
+                  Çoklu Ajan Seçimi: develop'ta ≥2 bağımsız modülü izole worktree'lerde PARALEL yazdır (hız; kapı + fail-closed)
+                </label>
                 <p
                   style={{
                     fontSize: 11,
@@ -578,6 +593,7 @@ export function Settings({
                     designWorkflowSel,
                     agentTeamsOptInSel,
                     cacheTtlSel,
+                    multiAgentSelectionSel,
                   )
                 }
               >
