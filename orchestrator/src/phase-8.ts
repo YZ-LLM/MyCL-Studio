@@ -21,7 +21,7 @@ import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
-import { formatModelInUse } from "./model-catalog.js";
+import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import type { ToolDef } from "./claude-api.js";
@@ -336,7 +336,6 @@ export class Phase8Controller {
         "doğrular — yanlış green gate'i geçirmez, sadece teknik borç gizler.";
     }
 
-    const role = this.spec.model_role!;
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
       extra_denied_paths: this.spec.denied_paths,
@@ -364,16 +363,17 @@ export class Phase8Controller {
       this.pendingMigrationNote +
       this.pendingFixNote;
 
-    // Model görünürlüğü (Ümit: "hangi model seçildi chat'te gösterilsin"). Override YOK — config'teki rol modeli
-    // kullanılır (hız korunur); sadece hangi modelin bu işe gittiği + işin uygun-tier'ı gösterilir.
-    emitChatMessage("system", formatModelInUse("codegen", this.config.selected_models[role]));
+    // "Kaliteli hız" (Ümit): codegen KALİTE-kritik → strong tier (güçlü model) SEÇİLİR + chat'te gösterilir.
+    // Hafif fazlar zaten sonnet (hızlı, config). config.model_tiers.strong'dan çözülür; geçersiz → güvenli fallback.
+    const modelChoice = selectModelForTask("codegen", this.config.selected_models.model_tiers);
+    emitChatMessage("system", formatModelChoice("codegen", modelChoice));
     this.base = createCodegenBackend({
       tag: "phase-8",
       phaseId: 8,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: modelChoice.modelId,
       apiKey: this.config.api_keys.main,
       initialUserMessage: initialMessage,
       tools: TOOLS_CODEGEN as unknown as ToolDef[],
