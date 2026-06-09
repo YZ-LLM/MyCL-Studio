@@ -436,6 +436,12 @@ export interface State {
           why: string;
           risk: "high" | "medium" | "low";
         }>;
+        /**
+         * 2026-06-09 (Ümit: "hata çözümünü sorma, kendin çöz"): D1 ajanının önerdiği (otomatik
+         * uygulanacak) seçeneğin label'ı. Set ise index.ts askq YERİNE doğrudan bu seçeneği
+         * route eder. Eski state.json'larda yok → askq fallback (geriye uyumlu).
+         */
+        auto_selected_label?: string;
         ts: number;
       }
     | {

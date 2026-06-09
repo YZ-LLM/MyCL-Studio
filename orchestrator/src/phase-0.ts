@@ -1,13 +1,12 @@
 // phase-0 — Debug Triage (multi-stage state machine D1 → D2 → D3).
 //
-// Akış (Ümit 2026-05-21):
+// Akış (Ümit 2026-05-21; D2 oto-seçim 2026-06-09):
 //   D1: Claude Read/Grep/Bash ile araştırır → `report_root_cause` tool ile
-//       root cause + 2-4 çözüm seçeneği döner → orchestrator EN→TR çevirir →
-//       chat'e "🔍 Tespit" yazar + askq emit eder (Vazgeç dahil).
-//   D2: kullanıcı askq'dan seçer → answerAskq → index.ts continueWithSelection
-//       çağırır. "Vazgeç" → abort.
-//   D3: seçilen plan ile yeni codegen tour (Edit/Write/Bash) → `report_fix_done`
-//       tool ile bitirir → dev server restart (P6 pattern reuse) → tarayıcı aç.
+//       root cause + 2-4 çözüm + recommended_index döner → orchestrator EN→TR çevirir →
+//       chat'e "🔍 Tespit" + "🤖 En iyi çözüm otomatik seçildi" yazar (askq YOK).
+//   D2: Ümit 2026-06-09 "hata çözümünü sorma, kendin çöz" → önerilen seçenek
+//       index.ts'te otomatik route edilir (handleAskqAnswer ile aynı yol).
+//       Eski state.json'da auto_selected_label yoksa geriye-uyumlu askq açılır.
 //
 // Phase 0 standalone — iteration_count + current_phase korunur. D2_WAITING
 // state'inde Phase 0 "askıya alınmış" sayılır; phase event'i complete YAPMAZ.
@@ -35,7 +34,6 @@ import { clearHistory } from "./history.js";
 // silinince bu helper'lar bu modülde gereksiz. Faz 5 (UI tweak mode) ve
 // command handler kendi modüllerinde reuse ediyor.
 import {
-  emitAskq,
   emitChatMessage,
   emitClaudeStream,
   emitError,
@@ -84,10 +82,10 @@ interface FixOptionRaw {
 export const TOOL_REPORT_ROOT_CAUSE: ToolDef = {
   name: "report_root_cause",
   description:
-    "Conclude D1 (investigation) by reporting the root cause and 2-4 fix options. Call EXACTLY ONCE after thorough investigation with Read/Grep/Bash. Auto-apply was removed (v15.7) — orchestrator ALWAYS opens askq for user confirmation. Therefore: ALWAYS provide 2-4 fix_options with real trade-offs. confidence='high' = you are sure all options are safe; 'uncertain' = user judgment really matters. Never return 1 option — that creates a useless askq.",
+    "Conclude D1 (investigation) by reporting the root cause and 2-4 fix options. Call EXACTLY ONCE after thorough investigation with Read/Grep/Bash. The orchestrator AUTO-APPLIES your recommended option (the user is NOT asked — they see the decision + alternatives). Therefore: provide 2-4 fix_options with real trade-offs AND set recommended_index to the option you would apply yourself: correctness first, then lowest blast-radius/risk.",
   input_schema: {
     type: "object",
-    required: ["root_cause_en", "confidence", "fix_options"],
+    required: ["root_cause_en", "confidence", "fix_options", "recommended_index"],
     properties: {
       root_cause_en: {
         type: "string",
@@ -99,7 +97,12 @@ export const TOOL_REPORT_ROOT_CAUSE: ToolDef = {
         type: "string",
         enum: ["high", "uncertain"],
         description:
-          "'high' = you are sure all options would safely fix the bug; 'uncertain' = user judgment matters between meaningful trade-offs. Note: v15.7 auto-apply REMOVED — orchestrator always opens askq, so confidence is just metadata for the user. Always provide 2-4 options regardless.",
+          "'high' = you are sure the recommended option safely fixes the bug; 'uncertain' = meaningful trade-offs remain. Metadata shown to the user; the recommended option is auto-applied either way, so recommend the SAFEST correct option when uncertain.",
+      },
+      recommended_index: {
+        type: "number",
+        description:
+          "0-based index into fix_options of the option YOU would apply: the best balance of correctness (fixes the actual root cause) and lowest risk/blast-radius. The orchestrator auto-applies this option.",
       },
       fix_options: {
         type: "array",
@@ -391,7 +394,7 @@ export class Phase0Controller {
       modelId: modelChoice.modelId,
       apiKey: this.config.api_keys.main,
       initialUserMessage:
-        "D1 — Investigation phase. Use Read/Grep/Bash to find the root cause. When ready, call `report_root_cause` with root_cause_en + 2-4 fix_options. Do NOT call any other tool to conclude." +
+        "D1 — Investigation phase. Use Read/Grep/Bash to find the root cause. When ready, call `report_root_cause` with root_cause_en + 2-4 fix_options + recommended_index (the option YOU would apply — it is auto-applied). Do NOT call any other tool to conclude." +
         (contextWithHypotheses ? `\n\n${contextWithHypotheses}` : ""),
       tools,
       // D1 = SALT-ARAŞTIRMA (kod-analiz 2026-06-07 parite): SDK yolu da CLI (runD1Cli) gibi READ-ONLY
@@ -467,7 +470,7 @@ export class Phase0Controller {
               {
                 role: "user",
                 content:
-                  "You completed investigation but ended with plain text instead of the required tool call. NOW call `report_root_cause` with ALL required fields:\n- `root_cause_en`: 1-2 sentences\n- `confidence`: \"high\" or \"uncertain\"\n- `fix_options`: ALWAYS 2-4 options (v15.7: auto-apply removed, user always picks)\n- Each option needs `plan_kind`: \"ui-only\" / \"backend-only\" / \"full-stack\" / \"new-iteration\"\nOmitting any required field will fail. This is your ONLY remaining action.",
+                  "You completed investigation but ended with plain text instead of the required tool call. NOW call `report_root_cause` with ALL required fields:\n- `root_cause_en`: 1-2 sentences\n- `confidence`: \"high\" or \"uncertain\"\n- `fix_options`: ALWAYS 2-4 options\n- `recommended_index`: 0-based index of the option YOU would apply (it is AUTO-applied)\n- Each option needs `plan_kind`: \"ui-only\" / \"backend-only\" / \"full-stack\" / \"new-iteration\"\nOmitting any required field will fail. This is your ONLY remaining action.",
               },
             ],
             system: systemPrompt,
@@ -651,22 +654,29 @@ export class Phase0Controller {
       log.warn("phase-0", "WTF kaydı yazılamadı (non-blocking)", e);
     }
 
-    // v15.7 (2026-05-26): Auto-apply path KALDIRILDI. Yeni mimari: Phase 0
-    // sadece teşhis + plan sunma. Uygulama Faz 5'in işi (orkestratör
-    // tetikler). High-confidence single option olsa bile askq açılır;
-    // kullanıcı her zaman onay verir. Bu hem tutarlı UX hem Phase 0 boundary
-    // disiplini (kullanıcı kuralı: "her faz sadece kendi görevini yapsın").
+    // 2026-06-09 (Ümit: "hata çözümünü kullanıcıya sormasın; kendisi en iyi çözümü bulup çözsün"):
+    // v15.7'nin "kullanıcı her zaman seçer" kararı TERSİNE DÖNDÜ. D1 ajanının recommended_index'i
+    // otomatik uygulanır; kullanıcı kararı + alternatifleri GÖRÜR (şeffaflık) ama sorulmaz.
+    // index.ts debug_triage akışı auto_selected_label'ı görüp aynı routing'i (handleAskqAnswer) sürer.
+    const recRaw = Number(data.recommended_index);
+    const recIdx =
+      Number.isInteger(recRaw) && recRaw >= 0 && recRaw < optionsTR.length ? recRaw : 0;
+    if (!(Number.isInteger(recRaw) && recRaw >= 0 && recRaw < optionsTR.length)) {
+      log.warn("phase-0", "recommended_index eksik/geçersiz → ilk seçenek", { got: data.recommended_index });
+    }
+    const chosen = optionsTR[recIdx];
+    const alternatives = optionsTR
+      .filter((_, i) => i !== recIdx)
+      .map((o) => `- ${o.label} — ${o.description}`)
+      .join("\n");
+    emitChatMessage(
+      "system",
+      `🤖 **En iyi çözüm otomatik seçildi:** ${chosen.label}\n${chosen.description}` +
+        (alternatives ? `\n\nDeğerlendirilen alternatifler:\n${alternatives}` : "") +
+        (confidence === "uncertain" ? "\n\n⚠️ Ajan emin değil — en güvenli doğru seçenek tercih edildi." : ""),
+    );
 
-    // Her durumda askq aç.
     const askqId = randomUUID();
-    const askqOptions = [...optionsTR.map((o) => o.label), "Vazgeç"];
-    emitAskq({
-      id: askqId,
-      question: "Hangi çözümü uygulayalım?",
-      options: askqOptions,
-      allow_other: false,
-    });
-
     this.statePatch = {
       pending_diagnostic: {
         phase: "D2_WAITING",
@@ -674,6 +684,7 @@ export class Phase0Controller {
         rootCauseTR,
         options: optionsTR,
         affected,
+        auto_selected_label: chosen.label,
         ts: Date.now(),
       },
     };
@@ -709,7 +720,7 @@ Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
     const res = await runClaudeCli({
       systemPrompt: sys + MAIN_AGENT_LANGUAGE_RULE,
       userMessage:
-        'D1 — investigate with Read/Grep/Bash, then conclude by emitting the {"kind":"root_cause",...} JSON block (root_cause_en + 2-4 fix_options).' +
+        'D1 — investigate with Read/Grep/Bash, then conclude by emitting the {"kind":"root_cause",...} JSON block (root_cause_en + 2-4 fix_options + recommended_index = 0-based index of the option YOU would apply; it is auto-applied).' +
         (contextSuffix ? `\n\n${contextSuffix}` : ""),
       modelId,
       cwd: this.state.project_root,

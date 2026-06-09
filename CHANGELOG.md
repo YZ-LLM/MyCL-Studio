@@ -6,6 +6,23 @@
 
 ## 2026-06-09
 
+- **feat(hata çözümü OTOMATİK — askq kaldırıldı) [Ümit: "hata çözümü kullanıcıya sormasın; kendisi en iyi çözümü
+  bulup çözsün"]:** v15.7'nin "auto-apply kaldırıldı, kullanıcı her zaman seçer" kararı Ümit talimatıyla TERSİNE
+  DÖNDÜ. `report_root_cause` şemasına `recommended_index` (required) eklendi — D1 ajanı uygulayacağı seçeneği kendisi
+  seçer (önce doğruluk, sonra en düşük risk/etki-alanı; emin değilse en güvenli doğru seçenek). Faz 0 askq AÇMAZ;
+  "🤖 En iyi çözüm otomatik seçildi" + alternatifler chat'te gösterilir (şeffaflık), `pending_diagnostic.
+  auto_selected_label` set edilir → index.ts debug_triage akışı `handleAskqAnswer` ile AYNI routing'i otomatik sürer
+  (dokunuş haritası + checkpoint + ui-only/backend-only/full-stack yönlendirme aynen). Boot-restore'da da otomatik;
+  eski state.json (label yok) → geriye-uyumlu askq. Audit dürüst: otomatik seçim `caller: mycl-orchestrator (auto)`.
+  CLI text-JSON + SDK retry prompt'ları güncellendi.
+
+- **feat(agent-skills OTOMATİK kurulum + bağlama) [Ümit: "sadece önermesin, bağlasın projeye"]:** Eski karar
+  ("auto-clone yok — supply-chain riski") Ümit talimatıyla tersine döndü; risk PIN ile sınırlandı. Yeni
+  `skills-setup.ts` `ensureAgentSkills`: `~/.mycl/agent-skills` yoksa SABİT commit'ten (0427b5b) git fetch+checkout
+  ile kurar (.tmp→rename atomik; yarışta no-op; fail → görünür uyarı + elle-kur ipucu). open_project arka planında
+  koşar; kurulunca mevcut `resolveSkillsDir` + `--plugin-dir` bağlama otomatik devreye girer (depo gerçek plugin
+  formatında: .claude-plugin/plugin.json + skills/). CANLI DOĞRULANDI: kurulum koştu, pin SHA'da `~/.mycl/agent-skills`
+  hazır → bir sonraki codegen'den itibaren skill'ler bağlı.
 - **fix(çalışırken HER ZAMAN loading + ne yaptığı) [Ümit: "çalışıyor ama hiç loading yok; çalışırken ne yaptığını
   söylesin her zaman"]:** Önceden `emit("phase_running")` sticky banner'ı YALNIZ Faz 0 + DAST kullanıyordu → diğer
   fazlarda (tasarım paneli, müzakere, codegen, mekanik) hiç gösterge yoktu. Fix: (1) `runController`'a `runningLabel`

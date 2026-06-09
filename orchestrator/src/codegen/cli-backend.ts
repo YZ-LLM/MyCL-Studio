@@ -154,12 +154,13 @@ export function claudeSpawnEnv(): NodeJS.ProcessEnv {
 }
 
 /**
- * agent-skills dizini opt-in tespiti (`<config>/agent-skills`).
+ * agent-skills dizini tespiti (`<config>/agent-skills`).
  *
  * Skills'i AÇIKÇA --plugin-dir ile bağlarız: kullanıcının global plugin
  * setine bağımlı olmadan MyCL'in agent-skills'ini deterministik yükler.
- * Auto-clone YAPILMAZ (runtime network/supply-chain riski) — kullanıcı bir kez
- * `git clone https://github.com/addyosmani/agent-skills ~/.mycl/agent-skills`.
+ * 2026-06-09 (Ümit: "sadece önermesin, bağlasın"): kurulum OTOMATİK —
+ * open_project'te `skills-setup.ensureAgentSkills` pinli commit'ten kurar
+ * (eski "auto-clone yok" kararı Ümit talimatıyla tersine döndü; risk pinle sınırlı).
  */
 export function resolveSkillsDir(): string | null {
   try {
@@ -207,7 +208,7 @@ export class CliCodegenBackend implements CodegenBackend {
       skillsHintShown = true;
       emitChatMessage(
         "system",
-        "💡 İpucu: senior-engineer workflow skill'lerini bağlamak için bir kez:\n`git clone https://github.com/addyosmani/agent-skills ~/.mycl/agent-skills`",
+        "💡 agent-skills henüz kurulmamış (otomatik kurulum proje açılışında dener; başarısızsa elle):\n`git clone https://github.com/addyosmani/agent-skills ~/.mycl/agent-skills`",
       );
     }
 

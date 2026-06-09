@@ -75,6 +75,7 @@ import {
 import { listModels } from "./models.js";
 import { setLiveTiersFromModels } from "./model-catalog.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
+import { ensureAgentSkills } from "./skills-setup.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { extractStockedModules } from "./module-stock.js";
@@ -478,21 +479,34 @@ async function handleOpenProject(path: string): Promise<void> {
     // pending_diagnostic'i askq olarak re-emit et.
     const pendingDiag = runtime.state.pending_diagnostic;
     if (pendingDiag?.phase === "D2_WAITING") {
-      const askqOptions = [
-        ...pendingDiag.options.map((o) => o.label),
-        "Vazgeç",
-      ];
-      emitChatMessage(
-        "system",
-        `🔍 **Önceki debug oturumu**\n\n${pendingDiag.rootCauseTR}\n\n(Bir çözüm seç veya Vazgeç.)`,
-        { persist: false },
-      );
-      emit("askq", {
-        id: pendingDiag.askq_id,
-        question: "Hangi çözümü uygulayalım?",
-        options: askqOptions,
-        allow_other: false,
-      });
+      if (pendingDiag.auto_selected_label) {
+        // 2026-06-09 (Ümit): otomatik çözüm modunda boot'ta da sorma — kaldığı yerden uygula.
+        emitChatMessage(
+          "system",
+          `🔍 **Önceki debug oturumu**\n\n${pendingDiag.rootCauseTR}\n\n🤖 Önerilen çözüm otomatik uygulanıyor: **${pendingDiag.auto_selected_label}**`,
+          { persist: false },
+        );
+        void handleAskqAnswer(pendingDiag.askq_id, pendingDiag.auto_selected_label).catch(
+          (e: unknown) => log.error("orchestrator", "boot auto-fix routing failed", e),
+        );
+      } else {
+        // Eski state.json (auto_selected_label yok) → geriye uyumlu askq.
+        const askqOptions = [
+          ...pendingDiag.options.map((o) => o.label),
+          "Vazgeç",
+        ];
+        emitChatMessage(
+          "system",
+          `🔍 **Önceki debug oturumu**\n\n${pendingDiag.rootCauseTR}\n\n(Bir çözüm seç veya Vazgeç.)`,
+          { persist: false },
+        );
+        emit("askq", {
+          id: pendingDiag.askq_id,
+          question: "Hangi çözümü uygulayalım?",
+          options: askqOptions,
+          allow_other: false,
+        });
+      }
     }
 
     // Zombi dev server kontrolü: state'te kayıtlı pid varsa yaşıyor mu bak.
@@ -568,6 +582,12 @@ async function handleOpenProject(path: string): Promise<void> {
     clearProjectMapCache();
     void getCachedProjectMap(runtime.state.project_root).catch((e: unknown) =>
       log.warn("orchestrator", "project-map onboarding failed (non-fatal)", e),
+    );
+
+    // agent-skills AUTO-KURULUM (Ümit 2026-06-09: "sadece önermesin, bağlasın"): yoksa pinli commit'ten
+    // arka planda kur → cli-backend --plugin-dir ile codegen ajanlarına bağlar. Non-blocking, fail görünür.
+    void ensureAgentSkills().catch((e: unknown) =>
+      log.warn("orchestrator", "agent-skills kurulum hatası (non-fatal)", e),
     );
 
     // Model AUTO-KEŞİF (Ümit): LLM WEB'de Anthropic'in resmi dökümanlarından güncel modelleri bulur (API key
@@ -1716,6 +1736,12 @@ async function executeDispatchedIntent(
       await saveState(runtime.state);
     }
     log.info("orchestrator", "debug triage end", { result });
+    // 2026-06-09 (Ümit: "hata çözümünü sorma, kendin çöz"): D1'in önerdiği seçenek
+    // sorulmadan otomatik uygulanır — askq cevabıyla aynı routing (handleAskqAnswer).
+    const diag = runtime.state?.pending_diagnostic;
+    if (result === "complete" && diag?.phase === "D2_WAITING" && diag.auto_selected_label) {
+      await handleAskqAnswer(diag.askq_id, diag.auto_selected_label);
+    }
     return;
   }
 
@@ -3191,12 +3217,14 @@ export async function handleAskqAnswer(
         "ℹ Eski oturum verisi: plan kapsamı belirsiz, güvenli yola düşüp yeni iterasyon olarak ele alıyorum.",
       );
     }
+    // Otomatik seçim (auto_selected_label) audit'te dürüstçe orchestrator olarak görünür.
+    const autoSelected = pending.auto_selected_label === selectedText;
     await appendAuditModule(runtime.state.project_root, {
       ts: Date.now(),
       phase: 0,
       event: "debug-fix-selected",
-      caller: "user",
-      detail: `label="${selected.label}" kind=${kind}${planKindMissing ? " (defaulted)" : ""} plan_len=${selected.planSummary.length}`,
+      caller: autoSelected ? "mycl-orchestrator" : "user",
+      detail: `label="${selected.label}" kind=${kind}${planKindMissing ? " (defaulted)" : ""}${autoSelected ? " (auto)" : ""} plan_len=${selected.planSummary.length}`,
     });
     // #3: Faz 0'ın deterministik bağımlılık etki-alanını fix payload'ına ekle → Faz 8 codegen AI
     // blast-radius'u grep'siz görür (token + kaçırma). pending.affected Faz 0 D1'de hesaplandı.
