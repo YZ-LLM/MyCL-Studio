@@ -283,7 +283,7 @@ async function runController<T>(
   // Ümit: "çalışırken ne yaptığını söylesin her zaman." Faz controller'ı çalıştığı SÜRECE
   // sticky banner (⏳ + ne yaptığı). try/finally ile zorunlu kapanış (takılı spinner yok).
   // askq'da fn() döner → finally → idle (bekleme ≠ çalışma). Sonraki turda tekrar açılır.
-  if (runningLabel) emit("phase_running", { label: `⏳ ${runningLabel}`, ts: Date.now() });
+  if (runningLabel) emit("phase_running", { label: runningLabel, ts: Date.now() });
   try {
     return await fn();
   } finally {
@@ -2553,7 +2553,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       });
       // Ümit: "çalışırken ne yaptığını söylesin." Mekanik faz (lint/test/build — yavaş olabilir)
       // çalıştığı sürece sticky banner. try/finally → takılı spinner yok.
-      emit("phase_running", { label: `⏳ ${phaseLabelTR(next, spec)}`, ts: Date.now() });
+      emit("phase_running", { label: phaseLabelTR(next, spec), ts: Date.now() });
       let outcome;
       try {
         outcome = await runner.run();

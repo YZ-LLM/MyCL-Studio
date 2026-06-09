@@ -28,7 +28,7 @@ import {
   expectedPortsFor,
   readNodeScripts,
 } from "./intent-router/handlers/command.js";
-import { emitChatMessage, emitError } from "./ipc.js";
+import { emitChatMessage, emitError, emitPhaseRunning } from "./ipc.js";
 import { loadProfile, resolveCommand } from "./profile-loader.js";
 import { applyPrototype } from "./prototype-cache.js";
 import { replaceActiveWatcher } from "./runtime-error-watcher.js";
@@ -172,6 +172,7 @@ export class Phase5Controller {
           "system",
           "🎨 Tasarım paneli: architect/ux/security/data perspektifleri paralel çalışıyor → sentez…",
         );
+        emitPhaseRunning("Tasarım paneli çalışıyor (4 perspektif paralel)");
         const design = await runDesignFanout(this.config, this.state.project_root, specContent);
         if (design.ok) {
           await appendAudit(this.state.project_root, {
@@ -193,6 +194,7 @@ export class Phase5Controller {
               "system",
               `🤝 ${design.conflicts.length} tasarım çatışması müzakereye gidiyor: ${design.conflicts.map((c) => c.topic).join("; ").slice(0, 140)}…`,
             );
+            emitPhaseRunning("Tasarım çatışmaları müzakere ediliyor");
             try {
               const nego = await negotiateConflicts(
                 this.config,
@@ -249,6 +251,8 @@ export class Phase5Controller {
       ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. Backend paths are denied. Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`
       : `Begin Phase 5: build the UI. Backend paths are denied. Write UI files, run \`${installCmd}\` if needed, and run \`${buildCmd}\` to verify. Stop when build succeeds.${designInjection}`;
 
+    // Tasarım paneli/müzakere bittiyse banner'ı codegen'e geri al (staleness yok — her adım kendi etiketi).
+    emitPhaseRunning(isTweakMode ? "UI rötuşu yazılıyor" : "UI kodu yazılıyor");
     this.base = createCodegenBackend({
       tag: "phase-5",
       phaseId: 5,

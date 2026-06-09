@@ -12,7 +12,10 @@
   param → p1-p9 LLM fazları çalıştığı SÜRECE "⏳ <ne yaptığı>" banner (Niyet toplanıyor / Spec yazılıyor / UI
   yazılıyor / ...); try/finally → askq'da fn döner → idle (bekleme ≠ çalışma), takılı spinner yok. (2) Mekanik fazlar
   (10-17 lint/test/build) `runner.run()` try/finally ile `phaseLabelTR` banner'ı. Artık her faz çalışırken kalıcı
-  spinner + ne yaptığı görünür.
+  spinner + ne yaptığı görünür. (3) Faz 5 ince alt-etiketler: "Tasarım paneli çalışıyor (4 perspektif)" → "Tasarım
+  çatışmaları müzakere ediliyor" → "UI kodu yazılıyor" (her adım kendi `emitPhaseRunning`'i → staleness yok). (4)
+  ÇİFT-⏳ düzeltildi: ChatPanel `.running-spinner` zaten animasyonlu ⏳ (`mycl-spin`) render ediyor → label'dan ⏳
+  kaldırıldı (spinner dönüyor + label metni). Banner gerçek animasyonlu loading göstergesi.
 
 - **feat(API desteği TAMAMLANDI: model-discovery de backend-aware) [Ümit: "API yok diye yapmadığın bişey olmasın;
   param olunca her şeyi API ile çalıştıracağım"]:** discovery artık cli → claude CLI WebSearch/WebFetch, **api →
