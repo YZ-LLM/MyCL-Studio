@@ -1329,7 +1329,7 @@ async function executeAgentDecision(
       // izole worktree'lerde PARALEL yazdır. Kullanıldıysa fresh seri pipeline'ı ÇALIŞTIRMA (üzerine yazmasın).
       // Flag kapalıysa bu blok hiç girmez → normal akış değişmez. Her hata → used:false → normal akışa düşer.
       if (runtime.config.claude_code_flags.multi_agent_selection) {
-        const sel = await runMultiAgentSelection(runtime.config, text, runtime.state.project_root);
+        const sel = await runMultiAgentSelection(runtime.config, runtime.state, text);
         if (sel.used) {
           emitChatMessage(
             "assistant",

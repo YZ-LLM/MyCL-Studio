@@ -39,7 +39,7 @@ export interface CodegenBackend {
  * phase-8'in MyCL-koşulu deterministik anchor'ı ile çözülür). Faz 0 (report_root_cause)
  * CLI'da phase-0.ts içinde ayrı text-JSON yoluyla ele alınır (createCodegenBackend değil).
  */
-const CLI_ELIGIBLE_TAGS = new Set(["phase-5", "verify-feature", "phase-8"]);
+const CLI_ELIGIBLE_TAGS = new Set(["phase-5", "verify-feature", "phase-8", "parallel-module"]);
 
 /**
  * Aktif config'e göre codegen backend'i seç.

@@ -1,15 +1,21 @@
 // module-parallel/worker — GERÇEK scoped codegen worker'ı (dispatch motorunun RunWorker'ı).
 //
-// Her worker İZOLE bir git worktree'de (cwd) çalışır, YALNIZ kendi modülünün kapsamına yazar. Çakışmasızlık
-// iki katmanlı: (1) prompt + cwd worktree → worker kendi kopyasında; (2) entegrasyonda `integrateWorktrees`
-// kapsam-dışı/çakışan dosyayı reddeder (defense-in-depth). Mevcut `runClaudeCli` (abonelik/API CLI yolu) yeniden
-// kullanılır; Bash tool'u olduğu için folder-guard SARMAZ (nesting) — zaten worktree cwd ile sınırlı.
+// BACKEND-AWARE (Ümit: "her şey API'yi de desteklesin"): `createCodegenBackend` backend'i (api/cli) backendForRole
+// + tag ("parallel-module" CLI-eligible) ile seçer → CLI modunda CLI, API modunda SDK. İzole git worktree'de
+// (state.project_root = worktreePath) scoped codegen. Çakışmasızlık: prompt + worktree izolasyonu + entegrasyonda
+// kapsam-kontrolü (integrateWorktrees defense). Her tool çağrısı modül-etiketiyle ize yazılır (kör nokta yok).
 
-import { runClaudeCli } from "../cli-run.js";
-import type { MyclConfig } from "../config.js";
+import { createCodegenBackend } from "../codegen/backend.js";
+import { selectModelForTask } from "../model-catalog.js";
 import { emitAgentEvent } from "../ipc.js";
 import { traceAgentEvent } from "../agent-trace.js";
+import { TOOLS_CODEGEN, type ToolContext } from "../tool-handlers.js";
+import type { ToolDef } from "../claude-api.js";
+import type { MyclConfig } from "../config.js";
+import type { State } from "../types.js";
 import type { ModuleWork, RunWorker } from "./dispatch.js";
+
+const WORKER_TOOLS = ["Read", "Edit", "Write", "Bash", "Glob", "Grep"];
 
 function workerSystemPrompt(m: ModuleWork): string {
   return [
@@ -26,34 +32,49 @@ function workerSystemPrompt(m: ModuleWork): string {
 }
 
 /**
- * config'ten gerçek codegen worker'ı üretir (dispatch motoruna enjekte edilir). Her çağrı worktree cwd'sinde
- * scoped codegen koşar. runClaudeCli `ok=false` → worker başarısız → motor seri fallback yapar (fail-closed).
+ * config + base state'ten gerçek codegen worker'ı üretir (dispatch motoruna enjekte edilir). Her çağrı izole
+ * worktree'de scoped codegen koşar (backend-aware: api/cli). outcome.kind!=="done" → {ok:false} → motor seri fallback.
  */
-export function makeScopedCodegenWorker(config: MyclConfig): RunWorker {
+export function makeScopedCodegenWorker(config: MyclConfig, baseState: State): RunWorker {
   return async (m: ModuleWork, worktreePath: string): Promise<{ ok: boolean; error?: string }> => {
-    // Görünürlük: bu modül-ajanı başla/bit yayını → UI'da "🤖 <modül> çalışıyor/bitti" görünür.
+    // Görünürlük: bu modül-ajanı başla/bit yayını → UI'da "🤖 <modül>" görünür.
     emitAgentEvent({ sub: "started", agent_label: m.id });
     try {
-      const res = await runClaudeCli({
+      const modelId = selectModelForTask("codegen", config.selected_models.model_tiers).modelId;
+      const toolCtx: ToolContext = { project_root: worktreePath };
+      const backend = createCodegenBackend({
+        tag: "parallel-module", // CLI-eligible → CLI modunda CLI; API modunda SDK (backend-aware)
+        phaseId: 8,
+        state: { ...baseState, project_root: worktreePath }, // worktree-scoped
+        config,
         systemPrompt: workerSystemPrompt(m),
-        userMessage: m.brief,
-        modelId: config.selected_models.main,
-        cwd: worktreePath,
-        allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
-        folderGuard: false, // Bash kullanır → sandbox-exec ile sarma (nesting); cwd zaten worktree ile sınırlı
+        modelId,
+        apiKey: config.api_keys.main,
+        initialUserMessage: m.brief,
+        tools: TOOLS_CODEGEN as unknown as ToolDef[],
+        toolContext: toolCtx,
+        allowed_tool_names: WORKER_TOOLS,
+        betas: config.claude_code_flags.betas,
+        // Tam iz (kör nokta yok): her tool çağrısı modül-etiketiyle .mycl/traces'a.
+        observer: async (ctx) => {
+          void traceAgentEvent({
+            ts: Date.now(),
+            agent_label: m.id,
+            sub: "tool_use",
+            tool_name: ctx.tool_use.name,
+            tool_input: ctx.tool_use.input,
+          });
+        },
       });
-      // Tam iz (kör nokta kalmasın): bu worker'ın TÜM tool çağrıları + final çıktısı, modül etiketiyle.
-      for (const t of res.toolUses) {
-        void traceAgentEvent({
-          ts: Date.now(),
-          agent_label: m.id,
-          sub: "tool_use",
-          tool_name: t.name,
-          tool_input: t.input,
-        });
-      }
-      void traceAgentEvent({ ts: Date.now(), agent_label: m.id, sub: "output", text: res.text.slice(0, 2000) });
-      return { ok: res.ok, error: res.ok ? undefined : res.error };
+      const outcome = await backend.run();
+      void traceAgentEvent({
+        ts: Date.now(),
+        agent_label: m.id,
+        sub: "output",
+        text: `codegen: ${outcome.kind}${outcome.kind === "failed" ? ` — ${outcome.reason}` : ""}`,
+      });
+      if (outcome.kind === "done") return { ok: true };
+      return { ok: false, error: outcome.kind === "failed" ? outcome.reason : "aborted" };
     } finally {
       emitAgentEvent({ sub: "completed", agent_label: m.id });
     }

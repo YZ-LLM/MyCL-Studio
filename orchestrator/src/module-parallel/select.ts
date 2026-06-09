@@ -4,6 +4,7 @@
 // devam eder → normal akış ASLA bozulmaz (flag varsayılan KAPALI olduğu için de zaten devre dışı).
 
 import type { MyclConfig } from "../config.js";
+import type { State } from "../types.js";
 import { proposeModules } from "./decompose.js";
 import { runParallelModules } from "./dispatch.js";
 import { makeScopedCodegenWorker } from "./worker.js";
@@ -24,12 +25,13 @@ export interface MultiAgentResult {
  */
 export async function runMultiAgentSelection(
   config: MyclConfig,
+  state: State,
   request: string,
-  projectRoot: string,
 ): Promise<MultiAgentResult> {
   if (!config.claude_code_flags.multi_agent_selection) {
     return { used: false, reason: "Çoklu Ajan Seçimi kapalı → seri" };
   }
+  const projectRoot = state.project_root;
   let modules;
   try {
     modules = await proposeModules(config, request, projectRoot);
@@ -45,7 +47,7 @@ export async function runMultiAgentSelection(
       projectRoot,
       modules,
       { enabled: true },
-      makeScopedCodegenWorker(config),
+      makeScopedCodegenWorker(config, state), // backend-aware worker (api/cli)
     );
   } catch (e) {
     return { used: false, reason: `paralel codegen hatası → seri: ${String(e)}` };

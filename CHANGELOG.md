@@ -6,6 +6,15 @@
 
 ## 2026-06-09
 
+- **feat(API desteği: parallel-codegen WORKER backend-aware) [Ümit: "API yok diye yapmadığın bir şey olmasın; param
+  olunca her şeyi API ile çalıştıracağım"]:** worker (`module-parallel/worker.ts`) artık `runClaudeCli` (CLI-only)
+  yerine `createCodegenBackend` kullanıyor → `backendForRole`'a göre CLI ya da SDK (API). tag "parallel-module"
+  CLI_ELIGIBLE_TAGS'e eklendi (CLI'da CLI, API'de SDK). state worktree'ye override (`{...state, project_root:
+  worktreePath}`); `runMultiAgentSelection(config, state, request)` + `makeScopedCodegenWorker(config, state)` ile
+  state threading (index→select→worker). Per-tool trace observer ile korundu; `outcome.kind` → {ok}. Obsolete
+  standalone E2E script'leri (eski runClaudeCli worker + minimal config) kaldırıldı — engine dispatch-test'le, worker
+  createCodegenBackend phase-usage'la, akış gerçek-app'le kapsanıyor. Kalan küçük edge: model-discovery WebSearch
+  claude CLI aracı (saf-API-no-CLI'de API web_search server-tool gerekir). "API yok diye bırakma" büyük ölçüde kapandı.
 - **feat(orkestratör kuralı: dev-ortam ayrımı + dil hattı) [Ümit eksik-listesi #3]:** `orchestrator-system.md`'ye
   eklendi: (1) ÜÇÜNCÜ kategori — DEV-ORTAM sorunu (port/server/install) kod bug'ı DEĞİL → `chat` ile çöz + pipeline'ı
   sürdür, full `debug_triage` YAPMA (o kodu teşhis eder); "kod mu, IDE mi, ortam mı?" diye analiz et. (2) DİL HATTI
