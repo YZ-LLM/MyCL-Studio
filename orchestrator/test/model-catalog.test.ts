@@ -1,0 +1,66 @@
+import { describe, expect, it } from "vitest";
+import {
+  MODEL_CATALOG,
+  TASK_RELEVANCE,
+  selectModelForTask,
+  findModel,
+  type TaskKind,
+} from "../src/model-catalog.js";
+
+describe("MODEL_CATALOG (hatasız liste)", () => {
+  it("id'ler benzersiz", () => {
+    const ids = MODEL_CATALOG.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+  it("her tier'dan en az bir model var (fallback güvenli)", () => {
+    for (const tier of ["fast", "balanced", "strong"] as const) {
+      expect(MODEL_CATALOG.some((m) => m.tier === tier)).toBe(true);
+    }
+  });
+  it("findModel id ile bulur", () => {
+    expect(findModel("claude-opus-4-8")?.tier).toBe("strong");
+    expect(findModel("yok")).toBeUndefined();
+  });
+});
+
+describe("TASK_RELEVANCE (her iş tipi eşli + doğru)", () => {
+  const kinds: TaskKind[] = [
+    "classification", "translation", "orchestration", "intent", "design",
+    "spec", "codegen", "review", "debug", "verification",
+  ];
+  it("her TaskKind'in geçerli tier+reason'ı var", () => {
+    for (const k of kinds) {
+      expect(TASK_RELEVANCE[k]).toBeDefined();
+      expect(["fast", "balanced", "strong"]).toContain(TASK_RELEVANCE[k].tier);
+      expect(TASK_RELEVANCE[k].reason.length).toBeGreaterThan(0);
+    }
+  });
+  it("KRİTİK: çeviri 'fast' DEĞİL (anlam kaybı olmamalı)", () => {
+    expect(TASK_RELEVANCE.translation.tier).not.toBe("fast");
+  });
+  it("ağır işler (codegen/spec/review/debug) → strong", () => {
+    for (const k of ["codegen", "spec", "review", "debug"] as const) {
+      expect(TASK_RELEVANCE[k].tier).toBe("strong");
+    }
+  });
+});
+
+describe("selectModelForTask", () => {
+  it("config tier modeli geçerliyse onu seçer", () => {
+    const c = selectModelForTask("codegen", { strong: "claude-opus-4-7" });
+    expect(c.modelId).toBe("claude-opus-4-7");
+    expect(c.tier).toBe("strong");
+  });
+  it("config tier yoksa katalog varsayılanı (strong → opus)", () => {
+    const c = selectModelForTask("codegen", undefined);
+    expect(findModel(c.modelId)?.tier).toBe("strong");
+  });
+  it("config'te GEÇERSİZ model → katalog varsayılanına düşer (sistem bozulmaz)", () => {
+    const c = selectModelForTask("codegen", { strong: "uydurma-model-xyz" });
+    expect(findModel(c.modelId)).toBeDefined(); // geçerli modele düştü
+    expect(findModel(c.modelId)?.tier).toBe("strong");
+  });
+  it("classification → fast", () => {
+    expect(selectModelForTask("classification", undefined).tier).toBe("fast");
+  });
+});

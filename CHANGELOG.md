@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(model-alaka listesi — katalog + iş→model seçimi) [Ümit: "iş için doğru modeli seç, hatasız liste, chat'te
+  göster, güncel tut"]:** `model-catalog.ts` — TÜM Claude modelleri (opus-4-8/4-7/4-6, sonnet-4-6, haiku-4-5) tier'lı
+  HATASIZ katalog + `TASK_RELEVANCE` (iş→tier: classification/translation→fast-değil-balanced, orchestration/intent/
+  verification→balanced, spec/codegen/design/review/debug→strong) + `selectModelForTask` (task→tier→model, config
+  model_tiers'tan çözer; geçersiz model → katalog varsayılanına GÜVENLİ fallback, sistem bozulmaz) + `formatModelChoice`.
+  KRİTİK: çeviri 'fast' DEĞİL (anlam kaybı olmamalı). +12 test (benzersizlik, her tier var, exhaustive eşleme, güvenli
+  fallback). GÜNCEL TUTMA: yeni model → MODEL_CATALOG'a satır ekle. Sıradaki: seçimi chat'te göster + LLM-çağrısına bağla.
 - **fix(Faz 5 dev-ortam ≠ proje: çalışan server'ı tanı) [Ümit: "5176'da başlatınca çözülmüştü, dev-ortam sorunuydu,
   orkestratör bunu kendi analiz etmeli + kaldığı yerden devam"]:** Faz 5 eskiden HER ZAMAN yeni dev-server spawn
   ediyordu; dışarıdan çalışan server'ı (kullanıcı elle başlatmış, örn. başka portta) tanımıyordu → resume edilince
