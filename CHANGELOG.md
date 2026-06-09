@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **fix(Faz 0 orkestratör hakimiyeti: debug iptali → kaldığı yerden DEVAM) [Ümit: "vazgeç dedim, Faz 0'da kaldı,
+  her şeyi unuttu — 'kaldığım yerden devam edeyim' demeli"]:** D2_WAITING "Vazgeç" eskiden sadece `pending_diagnostic`'i
+  temizleyip `return` ediyordu → pipeline kaldığı fazda donuyor, orkestratör Faz 0'da takılı görünüyordu. Artık:
+  debug bir KESİNTİ olarak ele alınıyor — `debug_triage` zaten `current_phase`'i değiştirmiyor → Vazgeç'te o faz
+  mid-flight (Faz 1-9) ise "🔄 Faz N'den kaldığım yerden devam ediyorum" + `advanceToNextPhase(N-1)` ile resume; idle/
+  tamamlanmışsa sadece durur. Çalışma sırası: işler MyCL fazlarına göre, Faz 0'dan (hız hariç — o tüm fazlar). KALAN
+  (Faz 5): dev-ortam≠proje ayrımı (port yoklama) — resume edilen Faz 5 dev-server'ı yeniden denememesi için.
 - **feat(orkestratör düşünme süreci görünür: `thinking` alanı) [Ümit: "sadece kararı yazmış, ne düşündüğünü de
   yazsın"]:** `decide_action` şemasına `thinking` alanı eklendi — **action'dan ÖNCE** (chain-of-thought: önce
   adım-adım muhakeme, sonra karar → karar kalitesine de katkı). SDK yolu (DECIDE_ACTION_TOOL_SCHEMA) + CLI yolu

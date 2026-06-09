@@ -3085,19 +3085,31 @@ export async function handleAskqAnswer(
     runtime.config
   ) {
     if (selectedText === "Vazgeç") {
-      emitChatMessage("system", "🛑 Debug iptal edildi.");
       await appendAuditModule(runtime.state.project_root, {
         ts: Date.now(),
         phase: 0,
         event: "debug-cancelled",
         caller: "user",
       });
+      // Debug bir KESİNTİYDİ; iptal = "sorun yokmuş → kaldığım yerden DEVAM" (Ümit: orkestratör takılıp
+      // unutmamalı). debug_triage current_phase'i değiştirmedi → kaldığı faz hâlâ orada. Pipeline mid-flight
+      // (Faz 1-9) ise resume; değilse (idle/tamamlanmış) sadece dur.
+      const resumePhase = runtime.state.current_phase;
       runtime.state = {
         ...runtime.state,
         pending_diagnostic: undefined,
         updated_at: Date.now(),
       };
       await saveState(runtime.state);
+      if (typeof resumePhase === "number" && resumePhase >= 1 && resumePhase <= 9) {
+        emitChatMessage(
+          "system",
+          `🔄 Debug iptal edildi — Faz ${resumePhase}'ten kaldığım yerden devam ediyorum.`,
+        );
+        await advanceToNextPhase((resumePhase - 1) as PhaseId);
+      } else {
+        emitChatMessage("system", "🛑 Debug iptal edildi.");
+      }
       return;
     }
     const selected = pending.options.find((o) => o.label === selectedText);
