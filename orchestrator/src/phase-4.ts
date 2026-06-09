@@ -14,6 +14,7 @@ import type { MyclConfig } from "./config.js";
 import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
 import { translate } from "./translator.js";
+import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
 import { blindspotLensDecision } from "./pre-commit-lens-gate.js";
 import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
 import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
@@ -237,14 +238,16 @@ export class Phase4Controller {
       // spec.md yok → ilk spec; varsayılan mesaj kalır.
     }
 
-    const role = this.spec.model_role!;
+    // "Kaliteli hız": spec her şeyi sürer → KALİTE-kritik → strong tier (güçlü model) seçilir + gösterilir.
+    const modelChoice = selectModelForTask("spec", this.config.selected_models.model_tiers);
+    emitChatMessage("system", formatModelChoice("spec", modelChoice));
     this.base = createProductionSchemaBackend({
       tag: "phase-4",
       phaseId: 4,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: modelChoice.modelId,
       apiKey: this.config.api_keys.main,
       initialUserMessage,
       tools: [TOOL_WRITE_SPEC, TOOL_REQUEST_APPROVAL],

@@ -6,6 +6,11 @@
 
 ## 2026-06-09
 
+- **feat(model "kaliteli hız" — Faz 4 spec + Faz 8 codegen → strong tier) [Ümit: "önemli olan kaliteli hız"]:**
+  Auto-override AÇIK + akıllı: KALİTE-kritik fazlar (spec her şeyi sürer, codegen kod üretir) selectModelForTask ile
+  strong tier (opus) seçer + formatModelChoice ile chat'te gösterir. Hafif/sık fazlar (orchestration/translation/
+  intent — config'te zaten sonnet) hızlı kalır → kalite gereken yerde güçlü model, gerisinde hız. config.model_tiers.
+  strong'dan çözülür; geçersiz → güvenli katalog fallback. Aynı desen review/debug'a genişletilebilir.
 - **feat(model-alaka listesi — katalog + iş→model seçimi) [Ümit: "iş için doğru modeli seç, hatasız liste, chat'te
   göster, güncel tut"]:** `model-catalog.ts` — TÜM Claude modelleri (opus-4-8/4-7/4-6, sonnet-4-6, haiku-4-5) tier'lı
   HATASIZ katalog + `TASK_RELEVANCE` (iş→tier: classification/translation→fast-değil-balanced, orchestration/intent/
