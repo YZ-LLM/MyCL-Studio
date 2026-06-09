@@ -8,6 +8,7 @@
 import { runClaudeCli } from "../cli-run.js";
 import type { MyclConfig } from "../config.js";
 import { emitAgentEvent } from "../ipc.js";
+import { traceAgentEvent } from "../agent-trace.js";
 import type { ModuleWork, RunWorker } from "./dispatch.js";
 
 function workerSystemPrompt(m: ModuleWork): string {
@@ -41,6 +42,17 @@ export function makeScopedCodegenWorker(config: MyclConfig): RunWorker {
         allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
         folderGuard: false, // Bash kullanır → sandbox-exec ile sarma (nesting); cwd zaten worktree ile sınırlı
       });
+      // Tam iz (kör nokta kalmasın): bu worker'ın TÜM tool çağrıları + final çıktısı, modül etiketiyle.
+      for (const t of res.toolUses) {
+        void traceAgentEvent({
+          ts: Date.now(),
+          agent_label: m.id,
+          sub: "tool_use",
+          tool_name: t.name,
+          tool_input: t.input,
+        });
+      }
+      void traceAgentEvent({ ts: Date.now(), agent_label: m.id, sub: "output", text: res.text.slice(0, 2000) });
       return { ok: res.ok, error: res.ok ? undefined : res.error };
     } finally {
       emitAgentEvent({ sub: "completed", agent_label: m.id });

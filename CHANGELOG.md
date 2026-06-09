@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(ajan-içi TAM İZ — kör nokta kalmasın) [Ümit: "ajanlar birbiriyle konuşuyor, bu süreçleri logla, tam trace"]:**
+  `agent-trace.ts` — kalıcı iz (`.mycl/traces/agents.jsonl`): `setAgentTraceRoot` (open_project'te set) +
+  `traceAgentEvent` (O_APPEND, non-blocking) + `readAgentTrace`. Bağlandı: (1) `emitAgentEvent` (ipc) artık UI'ya
+  gösterdiği HER olayı ize de yazar; (2) paralel worker'lar TÜM tool çağrılarını + final çıktısını modül-etiketiyle
+  ize ekler (eski kör nokta: yalnız başla/bit loglanıyordu); (3) gerçek Agent Teams peer-müzakere çıktısı (design-
+  fanout CLI yolu) ize eklenir. **GERÇEK E2E doğrulama:** 2-modül paralel koşuda iz 17 kayıt yakaladı (datefmt:7,
+  arrutil:10), her worker'ın tool_use'ları ajan-etiketli. +3 test. → Ajan süreçlerinde tam izlenebilirlik, kör nokta yok.
 - **feat(ÇOKLU AJAN SEÇİMİ — paralel codegen develop akışına bağlandı) [Ümit: "şimdi kur, adı çoklu ajan seçimi olsun"]:**
   Flag `multi_agent_selection` (config, varsayılan KAPALI → normal akış sıfır etkilenir). `module-parallel/select.ts`
   `runMultiAgentSelection` — flag açık + niyet ≥2 GERÇEKTEN bağımsız modüle bölünüyorsa izole worktree'lerde PARALEL

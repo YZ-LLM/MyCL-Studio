@@ -111,6 +111,7 @@ import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
+import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
@@ -233,6 +234,7 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.pendingErrorAnalysis = null;
   runtime.pendingDast = null;
   setHistoryRoot(state.project_root);
+  setAgentTraceRoot(state.project_root);
   setRecordContext({ phase: state.current_phase ?? 0 });
 }
 
@@ -415,6 +417,7 @@ async function handleOpenProject(path: string): Promise<void> {
     // Persistence root'u set et — sonraki emit'ler history.log'a yazılır.
     // Erken set: loadOrInit sonrası ilk emit'ler de kaydedilsin.
     setHistoryRoot(path);
+    setAgentTraceRoot(path); // ajan-içi tam iz aynı projeye yazsın (kör nokta kalmasın)
     // v15.11 GÜVENLİK: ajan sandbox politikasını config'ten set et (spawn'lar okur).
     if (runtime.config) {
       setSandboxPolicy(runtime.config.claude_code_flags.agent_sandbox_policy ?? "enforce");

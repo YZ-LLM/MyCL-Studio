@@ -25,6 +25,7 @@ import { extractKindBlock } from "./cli-json.js";
 import { templatePath } from "./phase-registry.js";
 import { log } from "./logger.js";
 import { emitAgentEvent } from "./ipc.js";
+import { traceAgentEvent } from "./agent-trace.js";
 
 interface PerspectiveDef {
   role: SubagentRole;
@@ -287,6 +288,13 @@ export async function negotiateConflicts(
     });
     if (!res.ok) return { ok: false, mode, reason: res.error ?? "takım müzakeresi başarısız" };
     text = res.text.trim();
+    // Tam iz: gerçek Agent Teams peer-müzakeresi (kör nokta kalmasın) — çelişki sayısı + uzlaşı çıktısı.
+    void traceAgentEvent({
+      ts: Date.now(),
+      agent_label: "Agent Teams müzakere",
+      sub: "output",
+      text: `conflicts=${conflicts.length} → ${text.slice(0, 1500)}`,
+    });
   } else {
     // API (gerçek Agent Teams YOK): MyCL-simüle cross-critique — synthesizer çelişkileri tek-tur
     // muhakemeyle (her iki tarafı steel-man) çözer. Aynı template; "teams yoksa kendin akıl yürüt" der.
