@@ -61,6 +61,13 @@ export interface ClaudeCodeFlags {
    */
   agent_teams_optin?: boolean;
   /**
+   * Çoklu Ajan Seçimi (2026-06-09): develop akışında, niyet ≥2 GERÇEKTEN bağımsız (dosya paylaşmayan)
+   * modüle bölünebiliyorsa, bunları izole git worktree'lerde PARALEL yazdırır (seri yerine → hız). Kapı
+   * (module-parallel/independence) ayrıklığı zorlar; bölünemezse/ayrık değilse SERİ (fail-closed). Varsayılan
+   * KAPALI → açık değilse normal akış hiç etkilenmez. Luke Alvoeiro tezi: paralel-yazma yalnız kanıtlı-bağımsız.
+   */
+  multi_agent_selection?: boolean;
+  /**
    * v15.14 (F2): Prompt cache ömrü. "5m" (default): mevcut davranış (Anthropic
    * varsayılanı). "1h": uzun pipeline koşularında cache-hit'i artırır → maliyet
    * düşer (1h cache-write 2x, cache-read 0.1x). API yolu: `cache_control.ttl:"1h"`.
@@ -223,6 +230,9 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
   design_workflow: "off",
   // v15.13 (Layer B): çatışma → gerçek Agent Teams müzakeresi default KAPALI (opt-in, maliyet).
   agent_teams_optin: false,
+  // Çoklu Ajan Seçimi (2026-06-09): ≥2 bağımsız modülü paralel yazdırma. Default KAPALI (opt-in) →
+  // açık değilse normal develop akışı hiç değişmez.
+  multi_agent_selection: false,
   // v15.14 (F2): prompt cache ömrü default 5dk (mevcut davranış; geriye uyum). "1h" opt-in.
   cache_ttl: "5m",
   // v15.15: pre-hoc kör-nokta merceği — açık ama gate'li (yalnız consequential + geri-dönülemez;

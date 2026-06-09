@@ -110,6 +110,7 @@ import { setCacheTtl } from "./codegen/cli-backend.js";
 import { setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
+import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
@@ -1287,6 +1288,22 @@ async function executeAgentDecision(
         });
       } catch (err) {
         log.warn("orchestrator", "agent decision log fail (fast-path)", err);
+      }
+      // ÇOKLU AJAN SEÇİMİ (opt-in, varsayılan KAPALI): niyet ≥2 GERÇEKTEN bağımsız modüle bölünüyorsa
+      // izole worktree'lerde PARALEL yazdır. Kullanıldıysa fresh seri pipeline'ı ÇALIŞTIRMA (üzerine yazmasın).
+      // Flag kapalıysa bu blok hiç girmez → normal akış değişmez. Her hata → used:false → normal akışa düşer.
+      if (runtime.config.claude_code_flags.multi_agent_selection) {
+        const sel = await runMultiAgentSelection(runtime.config, text, runtime.state.project_root);
+        if (sel.used) {
+          emitChatMessage(
+            "assistant",
+            `🤖 Çoklu Ajan Seçimi: ${sel.modules?.length ?? 0} bağımsız modül PARALEL yazıldı ` +
+              `(${(sel.modules ?? []).join(", ")}). Dosyalar: ${(sel.files ?? []).join(", ")}. ` +
+              `Kaliteyi doğrulamak için kalite fazlarını (lint/test/güvenlik) çalıştırabilirsiniz.`,
+          );
+          return;
+        }
+        log.info("orchestrator", "Çoklu Ajan Seçimi kullanılmadı → seri develop", { reason: sel.reason });
       }
       await executeConfirmedAgentDecision(decision, text);
       return;

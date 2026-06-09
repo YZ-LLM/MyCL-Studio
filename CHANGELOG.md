@@ -6,6 +6,16 @@
 
 ## 2026-06-09
 
+- **feat(ÇOKLU AJAN SEÇİMİ — paralel codegen develop akışına bağlandı) [Ümit: "şimdi kur, adı çoklu ajan seçimi olsun"]:**
+  Flag `multi_agent_selection` (config, varsayılan KAPALI → normal akış sıfır etkilenir). `module-parallel/select.ts`
+  `runMultiAgentSelection` — flag açık + niyet ≥2 GERÇEKTEN bağımsız modüle bölünüyorsa izole worktree'lerde PARALEL
+  yazdırır + ayrık entegre; aksi/hata → seri (fail-closed). Develop girişine (`index.ts` case develop_new_or_iter)
+  opt-in dal: kullanıldıysa paralel build + görünür rapor + return (fresh seri pipeline üzerine yazmaz). Worker artık
+  per-modül `agent_event` yayınlar → AgentThinkingModal "🤖 <modül>" gösterir (görünürlük tie-in). **GERÇEK E2E
+  (flag açık, no mock):** ilk koşu worker scope-dışı (package.json) yazdı → entegrasyon REDDETTİ (defense çalıştı,
+  fail-closed); worker promptu sertleştirildi (config/init yasak) → 2. koşu `used:true`, 2 modül paralel + 15 dosya
+  entegre, görünürlük olayları aktı. +1 test (flag-kapalı fail-closed). Kalan (ileride): paralel sonrası kalite
+  fazlarını otomatik koşma + UI toggle.
 - **feat(modül-paralel — decomposition + TÜM canlı zincir E2E GEÇTİ) [Ümit: "devam et"]:** `module-parallel/
   decompose.ts` — `proposeModules` (LLM işi ≥2 AYRIK modüle böler; planlayıcı promptu "kod yazma, SADECE JSON";
   `allowedTools:[]`+`disallowedTools` ile kodlama moduna kaçışı engellenir) + `parseModulesResponse` (saf, +3 test) +

@@ -7,16 +7,20 @@
 
 import { runClaudeCli } from "../cli-run.js";
 import type { MyclConfig } from "../config.js";
+import { emitAgentEvent } from "../ipc.js";
 import type { ModuleWork, RunWorker } from "./dispatch.js";
 
 function workerSystemPrompt(m: ModuleWork): string {
   return [
     "You are a PARALLEL codegen worker running on an ISOLATED git worktree.",
     `Your module: "${m.id}".`,
-    `Write files ONLY within these paths: ${m.scope_paths.join(", ")}.`,
-    "Do NOT create or edit any file outside your module's scope — other workers own those; out-of-scope",
-    "writes will be REJECTED at integration. Keep your work fully inside your scope.",
-    "Use Read/Glob/Grep to understand, Write/Edit/Bash to implement. Finish with your module's files written.",
+    `Create/edit files ONLY within these paths: ${m.scope_paths.join(", ")}.`,
+    "STRICT scope rules — any violation is REJECTED at integration (your work is discarded):",
+    "- Do NOT create or edit package.json, tsconfig.json, .gitignore, lockfiles, READMEs, or ANY file at the",
+    "  repo root or outside your scope. Other workers / the integration own those.",
+    "- Do NOT run `npm`/`yarn`/`pnpm`/`git` init/install or any command that writes outside your scope.",
+    "- Write ONLY the source files your module needs, all inside your scope paths.",
+    "Use Read/Glob/Grep to understand, Write/Edit to implement. Finish with your module's files written, nothing else.",
   ].join("\n");
 }
 
@@ -26,14 +30,20 @@ function workerSystemPrompt(m: ModuleWork): string {
  */
 export function makeScopedCodegenWorker(config: MyclConfig): RunWorker {
   return async (m: ModuleWork, worktreePath: string): Promise<{ ok: boolean; error?: string }> => {
-    const res = await runClaudeCli({
-      systemPrompt: workerSystemPrompt(m),
-      userMessage: m.brief,
-      modelId: config.selected_models.main,
-      cwd: worktreePath,
-      allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
-      folderGuard: false, // Bash kullanır → sandbox-exec ile sarma (nesting); cwd zaten worktree ile sınırlı
-    });
-    return { ok: res.ok, error: res.ok ? undefined : res.error };
+    // Görünürlük: bu modül-ajanı başla/bit yayını → UI'da "🤖 <modül> çalışıyor/bitti" görünür.
+    emitAgentEvent({ sub: "started", agent_label: m.id });
+    try {
+      const res = await runClaudeCli({
+        systemPrompt: workerSystemPrompt(m),
+        userMessage: m.brief,
+        modelId: config.selected_models.main,
+        cwd: worktreePath,
+        allowedTools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+        folderGuard: false, // Bash kullanır → sandbox-exec ile sarma (nesting); cwd zaten worktree ile sınırlı
+      });
+      return { ok: res.ok, error: res.ok ? undefined : res.error };
+    } finally {
+      emitAgentEvent({ sub: "completed", agent_label: m.id });
+    }
   };
 }
