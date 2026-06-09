@@ -14,17 +14,24 @@ const DISCOVERY_SYSTEM = [
   "You find the CURRENT, OFFICIAL Claude (Anthropic) model lineup. Use WebSearch + WebFetch on Anthropic's",
   "OFFICIAL sources ONLY (docs.anthropic.com, anthropic.com, official model/pricing pages).",
   "Extract each currently-available model's EXACT API id (e.g. \"claude-opus-4-8\") and display name.",
+  "For EACH model assign a tier from the docs' OWN positioning:",
+  '  - "strong" = the MOST CAPABLE / flagship model (best reasoning/coding),',
+  '  - "balanced" = mid (fast + capable, general use),',
+  '  - "cheap" = the FASTEST / cheapest / lightest model.',
+  "So even a BRAND-NEW family (not opus/sonnet/haiku) gets the right tier from how the docs describe it.",
   "Do NOT guess or invent ids — only models you CONFIRM in official Anthropic sources. If unsure, omit it.",
-  'Output ONLY one JSON block, nothing else: {"kind":"models","models":[{"id":"claude-...","display_name":"..."}]}',
-  "Order newest/current first. If you cannot confirm from official sources, return an empty models array.",
+  'Output ONLY one JSON block: {"kind":"models","models":[{"id":"claude-...","display_name":"...","tier":"strong|balanced|cheap"}]}',
+  "Order MOST CAPABLE first. If you cannot confirm from official sources, return an empty models array.",
 ].join("\n");
 
 export interface DiscoveredModel {
   id: string;
   display_name: string;
+  /** LLM'in dökümandan attığı tier (yeni aileler için kritik). cheap/balanced/strong. */
+  tier?: "cheap" | "balanced" | "strong";
 }
 
-/** Web-arama yanıtından modelleri ayıklar (SAF) + doğrular (id claude-* benzeri, boş değil). */
+/** Web-arama yanıtından modelleri ayıklar (SAF) + doğrular (id claude-* benzeri, boş değil; tier geçerliyse alınır). */
 export function parseDiscoveredModels(text: string): DiscoveredModel[] {
   const block = extractKindBlock(text, ["models"]);
   const raw = block?.models;
@@ -37,7 +44,9 @@ export function parseDiscoveredModels(text: string): DiscoveredModel[] {
     // Doğrulama: Anthropic model id deseni (uydurma/bozuk id'leri ele).
     if (!/^claude-[a-z0-9.-]+$/i.test(id)) continue;
     const dn = typeof m.display_name === "string" && m.display_name.trim() ? m.display_name.trim() : id;
-    out.push({ id, display_name: dn });
+    const tier =
+      m.tier === "cheap" || m.tier === "balanced" || m.tier === "strong" ? m.tier : undefined;
+    out.push({ id, display_name: dn, tier });
   }
   return out;
 }

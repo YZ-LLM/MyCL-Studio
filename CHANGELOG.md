@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **fix(model keşfi: YENİ aile otomatik tier'lanıp KULLANILIR — manuel bırakma) [Ümit: "yeni model geldiyse o
+  kullanılsın; güncellenmeli, eski kalmasın"]:** Önceki tutum yeni aileyi (Mythos vb.) "manuel" bırakıyordu →
+  MyCL eski kalırdı. Düzeltme: discovery prompt artık her modele dökümandaki konumlandırmadan TIER attırır (en
+  yetenekli→strong, en hızlı→cheap). `setLiveTiersFromModels` HİBRİT: bilinen aile (opus/sonnet/haiku) DETERMİNİSTİK
+  (güvenlik ağı, LLM hatasını ezer), YENİ aile → LLM'in dök-tier'ı → OTOMATİK atanır + kullanılır (en-yetenekli-başta
+  sıralı → ilk per-tier kazanır). Yeni flagship (Mythos 1) strong'a girer → codegen/spec onu kullanır. Manuel adım
+  YOK; MyCL hep güncel. Test güncellendi (yeni aile auto-atama + selectModelForTask onu verir).
 - **fix(model keşfi: API yerine WEB ARAMA) [Ümit: "keşfin API ile alakası yok; LLM internette Anthropic/Claude
   dökümanlarından bulsun"]:** Models-API keşfi (API key gerektiriyordu → abonelik-only kullanıcıda çalışmıyordu)
   WEB-ARAMA keşfiyle DEĞİŞTİRİLDİ. `model-discovery.ts` `discoverModelsViaWeb`: claude CLI (WebSearch/WebFetch)

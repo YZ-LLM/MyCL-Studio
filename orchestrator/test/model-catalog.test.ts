@@ -94,9 +94,18 @@ describe("canlı keşif (auto-discovery: güncel modelleri tier'la)", () => {
     expect(c.label).toBe("Opus 4.9");
   });
 
-  it("bilinmeyen aile (mythos) → unknownFamilies, tier'a atanmaz", () => {
+  it("YENİ aile (mythos) LLM-tier'ı ile OTOMATİK atanır + kullanılır (Ümit: yeni model kullanılsın)", () => {
+    const t = setLiveTiersFromModels([
+      { id: "claude-mythos-1", display_name: "Mythos 1", tier: "strong" }, // LLM dök-tier
+    ]);
+    expect(t.strong).toBe("claude-mythos-1"); // yeni aile strong'a atandı, KULLANILIR
+    expect(t.newFamilies).toContain("claude-mythos-1");
+    // selectModelForTask artık bunu codegen'e (strong) verir:
+    expect(selectModelForTask("codegen", undefined).modelId).toBe("claude-mythos-1");
+  });
+
+  it("yeni aile + tier YOK → atanmaz (körlemesine değil)", () => {
     const t = setLiveTiersFromModels([{ id: "claude-mythos-1", display_name: "Mythos 1" }]);
-    expect(t.unknownFamilies).toContain("claude-mythos-1");
     expect(t.strong).toBeUndefined();
   });
 });

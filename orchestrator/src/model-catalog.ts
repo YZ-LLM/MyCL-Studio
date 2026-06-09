@@ -119,28 +119,40 @@ interface TierModel {
 }
 let _liveTiers: Partial<Record<ModelTier, TierModel>> = {};
 
+/** Bilinen aile → deterministik tier (güvenlik ağı; LLM tier hatasını ezer). Bilinmeyen → undefined. */
+function knownFamilyTier(id: string): ModelTier | undefined {
+  const l = id.toLowerCase();
+  if (l.includes("opus")) return "strong";
+  if (l.includes("sonnet")) return "balanced";
+  if (l.includes("haiku")) return "cheap";
+  return undefined;
+}
+
 /**
- * Canlı model listesinden (created_at desc = EN YENİ BAŞTA) her aileye en yeni sürümü tier'lara atar. SAF.
- * Bilinmeyen aile (örn. "mythos") otomatik atanmaz — caller surface eder (tier rolü belirsiz).
+ * Canlı/keşfedilen modelleri tier'lara atar (EN YETENEKLİ BAŞTA sıralı). HİBRİT: bilinen aile (opus/sonnet/haiku)
+ * DETERMİNİSTİK tier (güvenlik ağı); YENİ aile (örn. "mythos") → LLM'in dökümandan attığı `tier`. Böylece yeni
+ * model otomatik tier'lanıp KULLANILIR (Ümit: "yeni model geldiyse o kullanılsın, manuel bırakma"). İlk (en
+ * yetenekli) per-tier kazanır. SAF.
  */
 export function setLiveTiersFromModels(
-  modelsNewestFirst: Array<{ id: string; display_name: string }>,
-): { strong?: string; balanced?: string; cheap?: string; unknownFamilies: string[] } {
-  const pick = (fam: string) =>
-    modelsNewestFirst.find((m) => m.id.toLowerCase().includes(fam));
-  const o = pick("opus");
-  const s = pick("sonnet");
-  const h = pick("haiku");
-  _liveTiers = {
-    strong: o ? { id: o.id, label: o.display_name } : undefined,
-    balanced: s ? { id: s.id, label: s.display_name } : undefined,
-    cheap: h ? { id: h.id, label: h.display_name } : undefined,
+  modelsBestFirst: Array<{ id: string; display_name: string; tier?: ModelTier }>,
+): { strong?: string; balanced?: string; cheap?: string; newFamilies: string[] } {
+  const result: Partial<Record<ModelTier, TierModel>> = {};
+  const newFamilies: string[] = [];
+  for (const m of modelsBestFirst) {
+    const known = knownFamilyTier(m.id);
+    const tier = known ?? m.tier; // bilinen aile deterministik; yeni aile → LLM dök-tier'ı
+    if (!tier) continue; // ne bilinen aile ne LLM-tier → atlanamaz, geç
+    if (!known && !newFamilies.includes(m.id)) newFamilies.push(m.id);
+    if (!result[tier]) result[tier] = { id: m.id, label: m.display_name }; // ilk = en yetenekli, kazanır
+  }
+  _liveTiers = result;
+  return {
+    strong: result.strong?.id,
+    balanced: result.balanced?.id,
+    cheap: result.cheap?.id,
+    newFamilies,
   };
-  const known = new Set(["opus", "sonnet", "haiku"]);
-  const unknownFamilies = modelsNewestFirst
-    .filter((m) => ![...known].some((k) => m.id.toLowerCase().includes(k)))
-    .map((m) => m.id);
-  return { strong: o?.id, balanced: s?.id, cheap: h?.id, unknownFamilies };
 }
 
 /** Test/yeniden-init için canlı tier'ları temizle. */

@@ -575,12 +575,12 @@ async function handleOpenProject(path: string): Promise<void> {
           if (models.length === 0) return; // keşif başarısız → statik katalog geçerli
           const t = setLiveTiersFromModels(models);
           log.info("orchestrator", "model auto-keşif (web)", t);
-          const unknown = t.unknownFamilies.length
-            ? ` (yeni aile: ${t.unknownFamilies.slice(0, 3).join(", ")} — tier ataması manuel)`
+          const fresh = t.newFamilies.length
+            ? ` (yeni aile otomatik tier'landı + kullanımda: ${t.newFamilies.slice(0, 3).join(", ")})`
             : "";
           emitChatMessage(
             "system",
-            `🔄 Güncel modeller (web) → güçlü: ${t.strong ?? "?"}, dengeli: ${t.balanced ?? "?"}, hızlı: ${t.cheap ?? "?"}${unknown}`,
+            `🔄 Güncel modeller (web) → güçlü: ${t.strong ?? "?"}, dengeli: ${t.balanced ?? "?"}, hızlı: ${t.cheap ?? "?"}${fresh}`,
           );
         })
         .catch((e: unknown) =>
