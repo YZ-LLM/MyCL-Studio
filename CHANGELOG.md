@@ -6,6 +6,12 @@
 
 ## 2026-06-09
 
+- **feat(API desteği: decompose + review backend-aware) [Ümit: "her şey API'yi de desteklesin"]:** `llm-reasoning.ts`
+  `runReasoning` — backend-aware (api/cli) tek-atış reasoning (backendForRole → cli=runClaudeCli, api=Anthropic SDK;
+  modelId dışarıdan = canlı-tier uyumlu). `decompose.ts` (proposeModules) + `review.ts` (reviewMergedModules) artık
+  `runClaudeCli` yerine `runReasoning` → API modunda da çalışır. KALAN (substantial, opt-in): parallel-codegen WORKER
+  (agentic codegen loop) hâlâ CLI-only — API yolu State threading + SDK tool-loop ister; model-discovery WebSearch CLI
+  aracı (saf-API'de API web_search gerekir). Flag'lendi.
 - **fix(model keşfi: YENİ aile otomatik tier'lanıp KULLANILIR — manuel bırakma) [Ümit: "yeni model geldiyse o
   kullanılsın; güncellenmeli, eski kalmasın"]:** Önceki tutum yeni aileyi (Mythos vb.) "manuel" bırakıyordu →
   MyCL eski kalırdı. Düzeltme: discovery prompt artık her modele dökümandaki konumlandırmadan TIER attırır (en

@@ -7,7 +7,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runClaudeCli } from "../cli-run.js";
+import { runReasoning } from "../llm-reasoning.js";
 import { extractKindBlock } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
 import { selectModelForTask } from "../model-catalog.js";
@@ -71,12 +71,12 @@ export async function reviewMergedModules(
     }
   }
   if (parts.length === 0) return { ok: true, issues: [] };
-  const res = await runClaudeCli({
+  // Backend-aware (api/cli) + kalite-kritik → strong model. Ümit: her şey API'yi desteklesin.
+  const res = await runReasoning(config, {
     systemPrompt: REVIEW_SYSTEM,
     userMessage: `Review these merged, parallel-written modules as a whole:\n\n${parts.join("\n\n")}`,
-    modelId: selectModelForTask("review", config.selected_models.model_tiers).modelId, // kalite-kritik → strong
-    cwd: projectRoot,
-    allowedTools: [],
+    modelId: selectModelForTask("review", config.selected_models.model_tiers).modelId,
+    projectRoot,
   });
   if (!res.ok) return { ok: true, issues: [] };
   return parseReviewResponse(res.text);

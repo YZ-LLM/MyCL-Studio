@@ -3,7 +3,7 @@
 // LLM öneri yapar (hangi modüller, hangi AYRIK kapsam); K1 kapısı (`shouldParallelize`) gerçek ayrıklığı
 // DETERMİNİSTİK doğrular → LLM "bağımsız" diye över ama kapıyı kod geçer. Bölemezse/ayrık değilse → null → SERİ.
 
-import { runClaudeCli } from "../cli-run.js";
+import { runReasoning } from "../llm-reasoning.js";
 import { extractKindBlock } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
 import { shouldParallelize } from "./independence.js";
@@ -49,13 +49,12 @@ export async function proposeModules(
   request: string,
   projectRoot: string,
 ): Promise<ModuleWork[] | null> {
-  const res = await runClaudeCli({
+  // Backend-aware (api/cli) — API modunda da çalışır (Ümit: her şey API'yi desteklesin).
+  const res = await runReasoning(config, {
     systemPrompt: DECOMPOSE_SYSTEM,
     userMessage: `Plan only — do NOT implement. Split this into independent modules:\n\n${request}`,
     modelId: config.selected_models.main,
-    cwd: projectRoot,
-    allowedTools: [], // salt akıl yürütme; yazma yok
-    disallowedTools: ["Write", "Edit", "Bash", "NotebookEdit"], // belt-and-suspenders: kodlama moduna kaçamasın
+    projectRoot,
   });
   if (!res.ok) return null;
   const modules = parseModulesResponse(res.text);
