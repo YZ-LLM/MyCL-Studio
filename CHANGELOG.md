@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **fix(model keşfi: API yerine WEB ARAMA) [Ümit: "keşfin API ile alakası yok; LLM internette Anthropic/Claude
+  dökümanlarından bulsun"]:** Models-API keşfi (API key gerektiriyordu → abonelik-only kullanıcıda çalışmıyordu)
+  WEB-ARAMA keşfiyle DEĞİŞTİRİLDİ. `model-discovery.ts` `discoverModelsViaWeb`: claude CLI (WebSearch/WebFetch)
+  Anthropic'in RESMİ dökümanlarını arar → güncel model id'leri/adları → `setLiveTiersFromModels` (deterministik aile-
+  tier: opus→strong vs). **API key GEREKMEZ → abonelikte çalışır.** Hatasızlık: yalnız resmi kaynak + `claude-*` id
+  deseni doğrulaması (uydurma/yanlış id reddedilir); başarısız → statik katalog. open_project'te background, non-
+  blocking. +3 test. (Sandbox dosya/bash hapsi yapar ama WebSearch sunucu-taraflı → ağ engellenmez.)
 - **feat(model AUTO-KEŞİF: açılışta güncel modelleri çek + tier'la) [Ümit: "her açışta güncel versiyonları çek,
   yeni çıkanı senin tablon gibi tier'la, 1-2 sürüm yukarı taşı"]:** `model-catalog.ts` `setLiveTiersFromModels` —
   canlı model listesinden (Anthropic Models API, `listModels`, created_at-desc) her aileye EN YENİ sürümü tier'lar:
