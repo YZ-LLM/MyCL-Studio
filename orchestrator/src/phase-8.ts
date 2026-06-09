@@ -21,6 +21,7 @@ import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
+import { formatModelInUse } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import type { ToolDef } from "./claude-api.js";
@@ -363,6 +364,9 @@ export class Phase8Controller {
       this.pendingMigrationNote +
       this.pendingFixNote;
 
+    // Model görünürlüğü (Ümit: "hangi model seçildi chat'te gösterilsin"). Override YOK — config'teki rol modeli
+    // kullanılır (hız korunur); sadece hangi modelin bu işe gittiği + işin uygun-tier'ı gösterilir.
+    emitChatMessage("system", formatModelInUse("codegen", this.config.selected_models[role]));
     this.base = createCodegenBackend({
       tag: "phase-8",
       phaseId: 8,

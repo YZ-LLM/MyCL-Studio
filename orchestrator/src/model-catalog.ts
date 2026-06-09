@@ -137,3 +137,14 @@ export function selectModelForTask(
 export function formatModelChoice(taskKind: TaskKind, choice: ModelChoice): string {
   return `🧠 "${taskKind}" işi için **${choice.label}** seçildi (${choice.tier}: ${choice.reason}).`;
 }
+
+/**
+ * GÜVENLİ görünürlük: KULLANILAN modeli (config'ten, override YOK) iş başına gösterir + işin alaka-tier'ını
+ * not düşer. Kullanıcı hangi modelin hangi işe gittiğini görür, config'i ezilmez (hız korunur).
+ */
+export function formatModelInUse(taskKind: TaskKind, modelId: string): string {
+  const info = findModel(modelId);
+  const label = info?.label ?? modelId;
+  const rel = TASK_RELEVANCE[taskKind];
+  return `🧠 "${taskKind}" işi → **${label}** (bu iş tipi için uygun tier: ${rel.tier}).`;
+}
