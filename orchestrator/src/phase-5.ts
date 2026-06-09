@@ -20,6 +20,7 @@ import {
   openBrowser,
   stopActiveDevServer,
   tryDevServerChain,
+  waitForDevServer,
 } from "./dev-server-launcher.js";
 import {
   commandsFor,
@@ -434,6 +435,34 @@ export class Phase5Controller {
       await ensureViteRuntimeInjection(this.state.project_root);
     } catch (err) {
       log.warn("phase-5", "vite injection failed (non-fatal)", err);
+    }
+    // dev-ortam ≠ proje sorunu: dev server ZATEN çalışıyor mu? Kullanıcı dışarıdan başlatmış olabilir
+    // (örn. MyCL 5173'te başlatamadı, kullanıcı 5176'da elle çalıştırdı). Spawn'dan ÖNCE aday + yaygın dev
+    // portlarını KISA + PARALEL yokla; biri dev-server yanıtı veriyorsa onu KULLAN — boşuna yeniden başlatma/
+    // fail etme + orkestratör bunu gereksiz tam-debug'a sokmasın. Phase 6 smoke testi yanlış server'ı yine yakalar.
+    const probePorts = [
+      ...new Set([...candidates.flatMap((c) => c.ports), 5173, 5174, 5175, 5176, 5177, 5178, 3000]),
+    ];
+    const existing = (
+      await Promise.all(
+        probePorts.map(async (p) => ({ p, up: await waitForDevServer(p, 1000) })),
+      )
+    ).find((r) => r.up);
+    if (existing) {
+      emitChatMessage(
+        "system",
+        `✅ Dev server zaten port ${existing.p}'te çalışıyor (dışarıdan başlatılmış görünüyor) — onu kullanıyorum, yeniden başlatmıyorum.`,
+      );
+      openBrowser(`http://localhost:${existing.p}`);
+      await appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 5,
+        event: "phase-5-complete",
+        caller: "mycl-orchestrator",
+        detail: `external dev server detected on port ${existing.p} (not spawned)`,
+      });
+      log.info("phase-5", "complete (external dev server)", { port: existing.p });
+      return "complete";
     }
     emitChatMessage(
       "system",

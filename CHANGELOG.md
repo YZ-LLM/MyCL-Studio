@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **fix(Faz 5 dev-ortam ≠ proje: çalışan server'ı tanı) [Ümit: "5176'da başlatınca çözülmüştü, dev-ortam sorunuydu,
+  orkestratör bunu kendi analiz etmeli + kaldığı yerden devam"]:** Faz 5 eskiden HER ZAMAN yeni dev-server spawn
+  ediyordu; dışarıdan çalışan server'ı (kullanıcı elle başlatmış, örn. başka portta) tanımıyordu → resume edilince
+  boşuna yeniden deneyip fail ediyordu. Düzeltme: spawn'dan ÖNCE aday + yaygın dev portları (5173-5178, 3000) KISA +
+  PARALEL HTTP-yoklanıyor (`waitForDevServer`); biri yanıt veriyorsa onu KULLAN + tarayıcı aç + `phase-5-complete`
+  (spawn yok). Böylece resume edilen Faz 5 çalışan server'ı bulur, dev-ortam sorunu gereksiz tam-debug'a girmez.
+  Yanlış server riski Phase 6 smoke testiyle yakalanır (güvenlik ağı).
 - **fix(Faz 4 DİL HATTI: kullanıcıya İngilizce sızıntı kapatıldı) [Ümit: "kullanıcı İngilizce bilmiyor, anlam kaybı
   olmamalı"]:** Ekran kanıtı: spec varsayımları kullanıcıya İNGİLİZCE gösteriliyordu (main spec EN üretir, çevrilmeden
   emit ediliyordu). Düzeltme: (1) `phase-4` preApprovalHook varsayımları emit'ten ÖNCE `translate(..., "en-to-tr")`
