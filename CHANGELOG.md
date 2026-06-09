@@ -6,6 +6,13 @@
 
 ## 2026-06-09
 
+- **feat(API desteği TAMAMLANDI: model-discovery de backend-aware) [Ümit: "API yok diye yapmadığın bişey olmasın;
+  param olunca her şeyi API ile çalıştıracağım"]:** discovery artık cli → claude CLI WebSearch/WebFetch, **api →
+  Anthropic SDK + server-side web_search tool** (`web_search_20250305`, name `web_search`, max_uses 5 — beta header
+  GEREKMEZ; tool spec resmi Anthropic dökümanından doğrulandı, tahmin değil). Final text content-block'larından parse.
+  Böylece TÜM LLM-çağıran yollar api+cli: decompose/review (runReasoning), worker (createCodegenBackend), discovery
+  (cli WebSearch / api web_search). **CLI-only gap KALMADI** — "API yok diye yapma" tamamen kapandı.
+
 - **feat(onboarding git-intent: yabancı projede "neden/ne") [Ümit eksik-listesi #4]:** `onboarding/project-map.ts`
   artık dep-map'e ek olarak `buildBackground`: README özeti (ilk 1200 char) + son 12 commit subject'i → "Proje arka
   planı" digesti. Deterministik (LLM yok, hafif). `ProjectMap.background` + `formatProjectMap` render eder; open'da
