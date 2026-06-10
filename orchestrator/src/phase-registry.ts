@@ -473,11 +473,14 @@ export function getSpec(phase: PhaseId): PhaseSpec | undefined {
  *
  * Tek source of truth — frontend PhaseSidebar.tsx senkron tutmalı.
  */
+// Faz 9 (Risk İncelemesi) ZORUNLU (Ümit 2026-06-11: "Faz 9 asla atlanmasın" — düşman-gözü doğrulama katmanı,
+// insan-incelemesinin yerini alır; atlanırsa kontrol delinir). Runtime zaten 9'u atlamıyor (isPhaseSkippedByScope
+// yalnız 5-8); bu set'ler de artık gerçeği yansıtır.
 export const REQUIRED_PHASES: ReadonlySet<PhaseId> = new Set([
-  1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 16, 17,
+  1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16, 17,
 ]);
 
-export const OPTIONAL_PHASES: ReadonlySet<PhaseId> = new Set([5, 6, 7, 8, 9]);
+export const OPTIONAL_PHASES: ReadonlySet<PhaseId> = new Set([5, 6, 7, 8]);
 
 export function isRequiredPhase(phase: PhaseId): boolean {
   return REQUIRED_PHASES.has(phase);
