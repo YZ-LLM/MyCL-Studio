@@ -111,7 +111,7 @@ import { detectStack, handleCommandIntent } from "./intent-router/handlers/comma
 import { createCheckpoint } from "./git.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
-import { setAutoAnswerSuggested } from "./auto-answer.js";
+import { autoAnswerSuggested, setAutoAnswerSuggested } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
@@ -392,16 +392,21 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   emitPhaseChanged(n, n, "error");
   if (!runtime.state || !runtime.config) return;
   const errCtx: ErrorContext = { phase: n, message, detail: ctrl?.lastFailReason };
-  // Döngü-kıran: AYNI imza zaten AUTO_SOLVE_MAX kez otomatik denendiyse otomatik tamir DUR → kullanıcıya sor.
+  // Oto-çözüm YALNIZ "Oto-cevap" açıkken (Ümit: "oto-cevap işaretliyse yapar onları"). Kapalıyken MyCL
+  // otomatik kod değiştirmez — seçenekleri kullanıcıya sorar (otonomi = kullanıcı opt-in'i). Ek olarak
+  // döngü-kıran: AYNI imza AUTO_SOLVE_MAX kez denendiyse yine sor (sahte-yeşil/sonsuz-döngü önleme).
+  const otoCevap = autoAnswerSuggested();
   const sig = failSignature(n, ctrl);
   const prev = autoSolveSig.get(n);
   const sameSig = prev?.sig === sig;
   const priorCount = sameSig ? prev!.count : 0;
-  const autoResolve = priorCount < AUTO_SOLVE_MAX;
+  const autoResolve = otoCevap && priorCount < AUTO_SOLVE_MAX;
   if (!autoResolve) {
     emitChatMessage(
       "system",
-      `ℹ️ Aynı hata ${AUTO_SOLVE_MAX} otomatik çözüm denemesine rağmen sürüyor — demek ki sorun değiştirdiğim yerde DEĞİL. Otomatik tamiri durdurdum; seçenekleri sana soruyorum (gerçek hatayı yukarıdaki "asıl hata" çıktısından gör).`,
+      !otoCevap
+        ? "ℹ️ Oto-cevap kapalı — hatayı otomatik düzeltmiyorum; seçenekleri sana soruyorum (Oto-cevap'ı açarsan otomatik çözer)."
+        : `ℹ️ Aynı hata ${AUTO_SOLVE_MAX} otomatik çözüm denemesine rağmen sürüyor — demek ki sorun değiştirdiğim yerde DEĞİL. Otomatik tamiri durdurdum; seçenekleri sana soruyorum (gerçek hatayı yukarıdaki "asıl hata" çıktısından gör).`,
     );
   }
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
@@ -2763,7 +2768,12 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // ORADA yapılıp ORASI yeniden doğrulanır — geri dönüş yok. Bu yüzden HER mekanik gate fail'inde (yalnız fix_cmd'li
       // lint değil) önce FAZIN İÇİNDE odaklı-minimal düzeltme + gate'i YENİDEN koş. Bir deneme (gateAutofixTried);
       // olmazsa investigate+solve. (Faz 13 güvenlik yukarıda kendi dalında döner — buraya düşmez.)
-      if (outcome.kind === "fail" && spec.type === "mechanical" && !gateAutofixTried.has(next)) {
+      if (
+        outcome.kind === "fail" &&
+        spec.type === "mechanical" &&
+        autoAnswerSuggested() && // Oto-cevap açıkken otomatik düzelt; kapalıyken aşağıdaki failPhase askq açar
+        !gateAutofixTried.has(next)
+      ) {
         gateAutofixTried.add(next);
         emitChatMessage(
           "system",

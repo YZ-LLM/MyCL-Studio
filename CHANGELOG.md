@@ -6,6 +6,14 @@
 
 ## 2026-06-10
 
+- **fix(otonomi = Oto-cevap opt-in: oto-davranışlar toggle'a bağlandı) [Ümit: "otonom değil; oto-cevap işaretliyse
+  yapar onları"]:** KRİTİK uyumsuzluk: faz-fail oto-çözüm (`failPhase`), Faz 0 D2 oto-seçim (`auto_selected_label`)
+  ve gate-autofix Oto-cevap toggle'ına HİÇ bakmıyordu — toggle KAPALIYKEN bile otomatik kod değiştiriyorlardı
+  ("otonomi tehlikesi"nin asıl kaynağı). Fix: üçü de `autoAnswerSuggested()`'e bağlandı. Oto-cevap KAPALI →
+  MyCL otomatik kod değiştirmez, seçenekleri kullanıcıya sorar (görünür "Oto-cevap kapalı — sen seç" notu). AÇIK →
+  otomatik çözer. Pipeline-restart (full-stack) Oto-cevap açık olsa bile otomatik değil (guardrail 1 korunur).
+  Böylece otonomi gerçekten kullanıcının opt-in'i; güvenlik isteyen Oto-cevap'ı kapatır → her düzeltmeden önce sorulur.
+
 - **fix(2 guardrail: gate-fail asla oto-yeni-iterasyon + MyCL kararını "kullanıcı istiyor" diye yazmaz) [Ümit
   vakası: Faz 11 fix'i full-stack→yeni iterasyon→"Kullanıcı tsconfig istiyor" fabrikasyonu]:**
   (1) **Pipeline-restart asla otomatik değil:** Faz 0 oto-seçimi, planKind `full-stack`/`new-iteration` (tüm

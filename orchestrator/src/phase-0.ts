@@ -33,6 +33,7 @@ import { clearHistory } from "./history.js";
 // dev-server-launcher / command handler import'ları kaldırıldı — Phase 0 D3
 // silinince bu helper'lar bu modülde gereksiz. Faz 5 (UI tweak mode) ve
 // command handler kendi modüllerinde reuse ediyor.
+import { autoAnswerSuggested } from "./auto-answer.js";
 import {
   emitAskq,
   emitChatMessage,
@@ -670,21 +671,22 @@ export class Phase0Controller {
       .filter((_, i) => i !== recIdx)
       .map((o) => `- ${o.label} — ${o.description}`)
       .join("\n");
-    // GUARDRAIL 1 (Ümit 2026-06-10): TÜM PIPELINE'I yeniden başlatan (full-stack/new-iteration) bir çözüm
-    // ASLA otomatik uygulanmaz — pipeline-restart kullanıcı kararıdır (yanlışsa tüm ilerleme yok olur). Bu sınıfta
-    // oto-seçim yapma → askq aç, kullanıcı onaylasın. Diğerleri (ui-only/backend-only odaklı) otomatik kalır.
+    // OTO-SEÇİM YALNIZ: (Oto-cevap açık) VE (pipeline-restart DEĞİL).
+    //  - Oto-cevap kapalı (Ümit: "oto-cevap işaretliyse yapar onları") → kullanıcıya sor.
+    //  - GUARDRAIL 1: full-stack/new-iteration (tüm pipeline'ı yeniden başlatan) ASLA otomatik değil — büyük karar.
     const restartsPipeline = chosen.planKind === "full-stack" || chosen.planKind === "new-iteration";
-    if (restartsPipeline) {
-      emitChatMessage(
-        "system",
-        `🤔 Önerilen çözüm tüm pipeline'ı yeniden başlatmayı gerektiriyor (kapsamlı): **${chosen.label}**\n` +
-          `Bu büyük bir karar — otomatik uygulamıyorum, onayını istiyorum.` +
-          (alternatives ? `\n\nDiğer seçenekler:\n${alternatives}` : ""),
-      );
+    const otoCevap = autoAnswerSuggested();
+    if (restartsPipeline || !otoCevap) {
+      const reasonMsg = restartsPipeline
+        ? `🤔 Önerilen çözüm tüm pipeline'ı yeniden başlatmayı gerektiriyor (kapsamlı): **${chosen.label}**\nBu büyük bir karar — otomatik uygulamıyorum, onayını istiyorum.`
+        : `🔍 **Tespit + önerilen çözüm:** ${chosen.label}\n${chosen.description}\n\n(Oto-cevap kapalı — otomatik uygulamıyorum; sen seç.)`;
+      emitChatMessage("system", reasonMsg + (alternatives ? `\n\nDiğer seçenekler:\n${alternatives}` : ""));
       const askqId = randomUUID();
       emitAskq({
         id: askqId,
-        question: "Bu kapsamlı çözüm tüm pipeline'ı yeniden başlatır. Onaylıyor musun?",
+        question: restartsPipeline
+          ? "Bu kapsamlı çözüm tüm pipeline'ı yeniden başlatır. Onaylıyor musun?"
+          : "Hangi çözümü uygulayalım?",
         options: [...optionsTR.map((o) => o.label), "Vazgeç"],
         allow_other: false,
       });
