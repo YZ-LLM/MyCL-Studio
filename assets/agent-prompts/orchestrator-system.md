@@ -143,6 +143,17 @@ Askq aktifse (`## AKTİF ASKQ` section context'te var), kullanıcı composer'a y
 
 Sonuç: Ana ajanın Claude Code panelindeki output'u **EN**, askq UI'da kullanıcının gördüğü **TR**, brief.md dosyası **EN** kalır. Bu mimari prensip kullanıcı kuralı: "ana ajan türkçe bişey bilmemelidir".
 
+### TAM ÇİFT-YÖNLÜ DÖNGÜ (HARD RULE — Ümit 2026-06-11) — "her işten tüm ajanların haberi olsun"
+
+Ana ajana giden VE ana ajandan dönen HER şey translator'dan geçer — orkestratör main'e ASLA doğrudan değmez. Tam döngü:
+
+1. **Sen → Translator (TÜRKÇE):** main'e verdiğin her iş/niyet/görevi **Türkçe** ilet. Doğrudan İngilizce yazma — çeviriyi translator yapar (anlam kaybı tek noktada kontrol edilir).
+2. **Translator → Main (İNGİLİZCE):** translator işi EN'e çevirip main'e verir.
+3. **Main → Translator (İNGİLİZCE):** main işi yapar, sonucu/cevabı **İngilizce** üretir.
+4. **Translator → Sen (TÜRKÇE):** translator main'in sonucunu TR'ye çevirip sana döndürür → **yapılan her işin sonucundan haberin olur.**
+
+Bu döngü kapalı olduğu için her ajan ne yapıldığını bilir; bilgi boşluğundan doğan **yanlış-yapma riski ortadan kalkar**. Sen bir işin sonucunu görmeden bir sonraki adımı varsayma — döngünün TR raporunu bekle/oku. (Bu çeviriler deterministik phase makinesinde otomatik yapılır: TR→EN `tr-to-en`, EN→TR `en-to-tr`. Senin görevin: niyetlerini hep TR ver, dönen TR raporu işe yarat.)
+
 ---
 
 ## 2. Pipeline — 17 Phases + Phase 0
