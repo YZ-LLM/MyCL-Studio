@@ -52,6 +52,12 @@ If the user says "login returns 500 in adminpanel" → user project **code** bug
 - **NEVER** offer "Yeni projeyi ayır" / "Start as separate project" / "Create new project" as an askq option. It is impossible in this window.
 - If the user explicitly says "başka bir proje" / "yeni klasör" / "ayrı proje", explain: "Yeni proje için yeni pencere aç (header → + Yeni Pencere) ve klasörünü seç."
 
+### RESUME vs NEW ITERATION (HARD RULE — Ümit 2026-06-10, "ağzımla 10. faz diyorum, yine 1. fazdan başlatıyor")
+
+If the user says an in-progress task is half-done / stuck at / should continue from a phase — e.g. "N. fazda kaldık", "yarım kaldı, devam et", "şu işi tamamla", "kaldığı yerden devam" — AND `state.current_phase` is mid-pipeline (1–17, pipeline not completed): choose **`action: "run_phase"`** with `target_phase` = the phase the user named (or `state.current_phase` if they didn't). This RESUMES the pipeline from that phase (N → 17), keeping the already-completed phases (1..N-1).
+
+**Do NOT choose `develop_new_or_iter` for this.** A new iteration restarts from Phase 1 and REDOES the completed phases (1–9) — wasted work, and the user explicitly told you where they are. Trust the user's stated phase; do not "verify" it by restarting. `develop_new_or_iter` is ONLY for a genuinely NEW feature, or when the pipeline already COMPLETED and the user wants the next thing. When unsure between resume and new-iteration, prefer RESUME (run_phase) — it never destroys completed work.
+
 ---
 
 ## 1. MyCL Architecture Overview

@@ -6,6 +6,13 @@
 
 ## 2026-06-10
 
+- **fix(orkestratör: "N. fazda kaldık" → resume, yeni-iterasyon DEĞİL) [Ümit: "ağzımla 10. faz diyorum, yine 1.
+  fazdan başlatıyor; onlar bitmiş zaten"]:** Orkestratör yarım-kalan işi "yeni iterasyon (Faz 1)" diye ele alıp
+  tamamlanmış Faz 1-9'u tekrar ediyordu. orchestrator-system.md'ye HARD RULE: "N. fazda kaldık / yarım kaldı, devam"
+  + state mid-pipeline ise → `run_phase` target_phase=N (advance modu pipeline'ı N→17 sürdürür, 1..N-1 korunur);
+  `develop_new_or_iter` SEÇME (Faz 1'den yeniden = boşuna). Kullanıcının söylediği faza güven, doğrulamak için
+  restart etme. Belirsizse resume tercih (tamamlanmış işi yok etmez).
+
 - **fix(geri-alma veri kaybı yapmasın: faz geçince rollback kilitlenir) [Ümit: "veri kaybına yol açmayanı tercih
   ederim"]:** Otomatik geri-alma, başka bir hatanın tükenmesinde önceki BAŞARILI bir fazı/düzeltmeyi geri alabiliyordu
   (iyi işi kaybetme). Fix: bir faz başarıyla bitince (`disarmRollback`) rollback noktası temizleniyor — mekanik-pass,
