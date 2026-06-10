@@ -9,10 +9,10 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { appendAudit, readAuditLog } from "./audit.js";
+import { appendAudit, readAuditLog, readAuditLogTail } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
-import { designPanelDecision } from "./design-panel-gate.js";
+import { designPanelDecision, designSynthesizedInCurrentIteration } from "./design-panel-gate.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
@@ -162,7 +162,28 @@ export class Phase5Controller {
       );
       log.info("phase-5", "design panel skipped (ui_complexity=simple)");
     }
+    // Boot-resume israf önleme (Ümit 2026-06-10: "kapatıp açınca fazın başına gidiyor"):
+    // bu iterasyonda panel ZATEN sentezlendiyse (audit) + design.md duruyorsa yeniden KOŞMA —
+    // kaldığı yerden (codegen'den) devam. Kontrol edilemezse normal koş (fail-open, panel zararsız).
+    let designAlreadyDone = false;
     if (panelDecision === "run") {
+      try {
+        const tail = await readAuditLogTail(this.state.project_root, 600);
+        if (designSynthesizedInCurrentIteration(tail)) {
+          await stat(join(this.state.project_root, ".mycl", "design.md"));
+          designAlreadyDone = true;
+          designInjection =
+            "\n\nA multi-perspective design plan has been written to .mycl/design.md. Read that file FIRST and implement the UI according to it.";
+          emitChatMessage(
+            "system",
+            "🎨 Tasarım paneli bu iterasyonda zaten tamamlanmıştı — yeniden çalıştırılmadı; mevcut `.mycl/design.md` kullanılıyor.",
+          );
+        }
+      } catch {
+        // design.md yok / audit okunamadı → panel normal koşar.
+      }
+    }
+    if (panelDecision === "run" && !designAlreadyDone) {
       try {
         const specContent = await readFile(
           join(this.state.project_root, ".mycl", "spec.md"),

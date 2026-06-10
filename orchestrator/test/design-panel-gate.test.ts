@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { designPanelDecision } from "../src/design-panel-gate.js";
+import { designPanelDecision, designSynthesizedInCurrentIteration } from "../src/design-panel-gate.js";
 
 describe("designPanelDecision (Faz 5 spec gate)", () => {
   const base = {
@@ -47,5 +47,29 @@ describe("designPanelDecision (Faz 5 spec gate)", () => {
     expect(
       designPanelDecision({ ...base, designFlag: "off", uiComplexity: "simple" }),
     ).toBe("off");
+  });
+});
+
+// 2026-06-10 boot-resume: bu iterasyonda panel zaten sentezlendiyse yeniden koşma.
+describe("designSynthesizedInCurrentIteration", () => {
+  it("sentez var + sonrasında yeni iterasyon yok → true", () => {
+    expect(
+      designSynthesizedInCurrentIteration([
+        { event: "iteration-2-start" },
+        { event: "ui-design-synthesized" },
+        { event: "phase-5-start" },
+      ]),
+    ).toBe(true);
+  });
+  it("sentezden SONRA yeni iterasyon başladı → false (eski iterasyonun sentezi)", () => {
+    expect(
+      designSynthesizedInCurrentIteration([
+        { event: "ui-design-synthesized" },
+        { event: "iteration-3-start" },
+      ]),
+    ).toBe(false);
+  });
+  it("hiç sentez yok → false", () => {
+    expect(designSynthesizedInCurrentIteration([{ event: "phase-4-complete" }])).toBe(false);
   });
 });

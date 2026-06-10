@@ -28,3 +28,20 @@ export function designPanelDecision(params: {
   if (uiComplexity === "simple") return "skip-simple";
   return "run";
 }
+
+/**
+ * Boot-resume israf önleme (Ümit 2026-06-10: "kapatıp açınca fazın başına gidiyor"): audit
+ * kuyruğunda (eski→yeni sıralı) bu iterasyonda panel sentezi var mı? Sondan tara: bir
+ * `iteration-N-start` görülürse ondan ÖNCEKİ sentez başka iterasyona aittir → false.
+ * SAF — dosya varlığını (design.md) caller kontrol eder.
+ */
+export function designSynthesizedInCurrentIteration(
+  eventsOldestFirst: Array<{ event: string }>,
+): boolean {
+  for (let i = eventsOldestFirst.length - 1; i >= 0; i--) {
+    const e = eventsOldestFirst[i].event;
+    if (/^iteration-\d+-start$/.test(e)) return false;
+    if (e === "ui-design-synthesized") return true;
+  }
+  return false;
+}

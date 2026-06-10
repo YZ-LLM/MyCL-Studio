@@ -6,6 +6,19 @@
 
 ## 2026-06-10
 
+- **fix(boot-resume: faz başa sarmasın + chat geçmişi geri gelsin) [Ümit ekranı: "kapatıp açtığımda kaldığı
+  yerden başlamıyor, fazın başına gidiyor; chat ekranı bile aynı kalmalı"]:** İki kök neden:
+  (1) **Chat boş geliyordu** — boot 48s/2000-event yüklüyor ama yoğun codegen oturumunda en yeni 2000 event'in
+  ~hepsi claude_stream delta'sı → chat_message pencereye giremiyordu. `history-loader.loadMessages`'a ADİL KOTA:
+  chat_message'a ayrı kota (min(400,limit)) → stream seli chat'i boğamaz; iki kota dolunca lazy-chunk. +1 test
+  (500 delta + 5 chat → 5'i de gelir).
+  (2) **Faz 5 baştan koşuyordu** — boot-resume advanceToNextPhase fazı baştan başlatınca tasarım paneli (4
+  perspektif, pahalı) YENİDEN koşuyordu. `designSynthesizedInCurrentIteration` (saf, design-panel-gate):
+  audit kuyruğunda bu iterasyonda `ui-design-synthesized` varsa + `.mycl/design.md` duruyorsa panel atlanır,
+  görünür mesajla codegen'den devam edilir. +3 test. Codegen tarafı: SDK yolu konuşmayı zaten phase-history'den
+  sürdürüyor; CLI yolunda dosyalar diskte kaldığından ajan kaldığı dosyaların üstüne devam ediyor (tam
+  konuşma-resume CLI'da yok — bilinen sınır).
+
 - **feat(faz-hatası OTO-ÇÖZÜM + E2BIG öz-iyileştirme) [Ümit ekranı: Faz 5 hatası 00:38'den beri askıda; "kolayca
   çözebileceği şeyi bile bana soruyor"]:** Üç kök neden, üç düzeltme:
   (1) **Faz-fail artık sormuyor** — error-analysis JSON'una `best_index` eklendi; `analyzeAndAskError(autoResolve)`

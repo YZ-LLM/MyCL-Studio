@@ -201,3 +201,32 @@ describe("history-loader", () => {
     ]);
   });
 });
+
+// 2026-06-10 (Ümit: "chat ekranı bile aynı kalmalı"): stream seli chat'i boğamaz (adil kota).
+describe("loadMessages — chat adil kotası", () => {
+  let projectRoot: string;
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "mycl-history-fair-"));
+  });
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it("limit'i aşan stream deltası varken eski chat mesajları YİNE gelir", async () => {
+    await mkdir(join(projectRoot, ".mycl"), { recursive: true });
+    const lines: string[] = [];
+    // Önce 5 chat (eski), sonra 500 stream delta (yeni) — eski davranışta limit=100
+    // pencereyi deltalar doldurur, chat hiç gelmezdi.
+    for (let i = 0; i < 5; i++) {
+      lines.push(JSON.stringify({ ts: 1000 + i, kind: "chat_message", data: { role: "system", text: `m${i}` } }));
+    }
+    for (let i = 0; i < 500; i++) {
+      lines.push(JSON.stringify({ ts: 2000 + i, kind: "claude_stream", data: { sub: "text", text: "x" } }));
+    }
+    await writeFile(join(projectRoot, ".mycl", "history.log"), lines.join("\n") + "\n");
+    const res = await loadMessages(projectRoot, { since_ts: 0, limit: 100 });
+    const chats = res.events.filter((e) => e.kind === "chat_message");
+    expect(chats).toHaveLength(5); // hepsi geldi (ayrı kota)
+    expect(res.events.filter((e) => e.kind === "claude_stream")).toHaveLength(100); // stream kendi limitinde
+  });
+});

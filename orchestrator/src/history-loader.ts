@@ -115,6 +115,12 @@ export async function loadMessages(
   // En yeniden başlayarak topla; limit dolunca olası daha eski satır var mı diye flag.
   const reversed: HistoryEntry[] = [];
   let olderAvailable = false;
+  // ADİL KOTA (2026-06-10, Ümit: "chat ekranı bile aynı kalmalı" — boot'ta chat boş geldi):
+  // yoğun codegen oturumunda en yeni `limit` event'in ~hepsi claude_stream delta'sıdır →
+  // chat_message pencereye hiç giremezdi. Chat'e AYRI kota → stream seli chat'i boğamaz.
+  const chatCap = Math.min(400, opts.limit);
+  let chatCount = 0;
+  let otherCount = 0;
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!line) continue;
@@ -145,12 +151,25 @@ export async function loadMessages(
     // UI'da gösterilmeyen noise event'leri (token_usage / init / relevance_call)
     // limit hesabına alma — yoğun projelerde chat_message'ları gizler.
     if (isNoiseEvent(entry)) continue;
-    if (reversed.length >= opts.limit) {
-      // Limit doldu; eldeki satır + bundan daha eski tüm satırlar lazy chunk'a kalır.
+    if (entry.kind === "chat_message") {
+      if (chatCount >= chatCap) {
+        olderAvailable = true;
+        continue;
+      }
+      chatCount++;
+    } else {
+      if (otherCount >= opts.limit) {
+        olderAvailable = true;
+        continue;
+      }
+      otherCount++;
+    }
+    reversed.push(entry);
+    if (chatCount >= chatCap && otherCount >= opts.limit) {
+      // İki kota da doldu; daha eski satırlar lazy chunk'a kalır.
       olderAvailable = true;
       break;
     }
-    reversed.push(entry);
   }
 
   // Kronolojik sıraya çevir (eskiden yeniye)
