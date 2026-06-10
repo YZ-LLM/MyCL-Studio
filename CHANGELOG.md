@@ -6,6 +6,16 @@
 
 ## 2026-06-10
 
+- **feat(Lint fazı kendi içinde düzeltir — debug'a kaçmaz) [Ümit: "lint ayrı bir faz; o faza gelince ÇALIŞMASI
+  (düzeltip geçmesi) gerekiyordu"]:** Audit kanıtı: lint fazı reach edildi, `eslint --fix`'i koştu (scan→fix→rescan)
+  ama `no-unused-vars`'ı ESLint otomatik SİLMEZ → faz fail → 1 satırlık iş debug→Faz 8 codegen döngüsüne gitti
+  (orantısız + kullanıcı oradan çıkamadı). Fix: yeni `gate-autofix.ts` `runGateAutofix` — auto-düzeltilebilir gate
+  (fix_cmd VAR = lint) deterministik fix'le çözülemezse, FAZIN İÇİNDE tam o hatalara odaklı MİNİMAL düzeltme yapar
+  (backend-aware createCodegenBackend, yalnız Read/Edit/Grep/Glob, refactor/davranış-değişikliği YOK), sonra gate
+  YENİDEN koşulup gerçekten geçtiği doğrulanır. Geçerse faz tamam (debug eskalasyonu yok). Bir deneme/koşu
+  (`gateAutofixTried`), olmazsa normal investigate+solve. tag "gate-autofix" CLI-eligible. Artık lint fazı reach
+  edilince kendi işini bitiriyor.
+
 - **fix(her faz-fail araştırılıp çözülür + MyCL kendi bozuk aracını proje hatası saymaz) [Ümit logları: "bi faz
   hata aldığında sebebini araştırıp çözüm üretmeli"; csp/headers/web-sec hepsi "Cannot find module .../MyCL Studio.app"
   ile düşüp MyCL'i sqlite3-v6 (kırıcı!) yükseltmeye itmiş]:**

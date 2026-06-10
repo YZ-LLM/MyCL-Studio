@@ -76,6 +76,7 @@ import { listModels } from "./models.js";
 import { setLiveTiersFromModels } from "./model-catalog.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
+import { runGateAutofix } from "./gate-autofix.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { extractStockedModules } from "./module-stock.js";
@@ -2008,6 +2009,9 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
   // v15.9: değişen-kapsam bir kez hesaplanır (ilk mekanik fazda); scoped-touch
   // modunda scope'lanamayan sistem-gate'leri atlanır.
   let scopeComputed = false;
+  // Ümit 2026-06-10: auto-düzeltilebilir gate (lint) bu koşuda BİR kez kendi-içinde-düzeltme denedi mi?
+  // (1 satırlık lint'i sonsuz düzeltmeye çalışıp döngüye girmesin — bir deneme, olmazsa eskale.)
+  const gateAutofixTried = new Set<number>();
 
   // ARDIŞIK akış: N → N+1, atlamasız. Controller'ı olmayan fazlar skip stub
   // ile geçer (audit phase-N-skipped + phase-N-complete) ama state.current_phase
@@ -2753,11 +2757,61 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         runtime.pendingErrorAnalysis = pending;
         return;
       }
-      // 2026-06-10 (Ümit: "bi faz hata aldığında ya da başaramadığında sebebini araştırıp çözüm üretmeli"):
-      // Eskiden gerçek mekanik fail (lint/simplify/...) sessizce "soft_complete" yazılıp geçiliyordu — araştırma
-      // YOK. Artık güvenlik (Faz 13) gibi investigate+solve akışına gider: failPhase → gerçek stderr ile analiz →
-      // en iyi çözümü otomatik uygula. Döngü-kıran (aynı hata 2× → kullanıcıya sor; non-blocking'de "kuyruğa al,
-      // devam et" seçeneği var → takılma yok). MyCL'in KENDİ bozuk aracı zaten yukarıda skip edildi (proje fix'i yok).
+      // 2026-06-10 (Ümit: "lint ayrı bir faz; o faza gelince ÇALIŞMASI=düzeltip geçmesi gerekiyordu"):
+      // Auto-düzeltilebilir gate (fix_cmd VAR — lint) deterministik fix'le (eslint --fix) çözülemediyse (örn.
+      // no-unused-vars eslint'in otomatik silmediği bir sınıf), FAZIN İÇİNDE odaklı-minimal düzeltme dene + gate'i
+      // YENİDEN koş. Geçerse faz tamam — debug→Faz 8 gibi orantısız eskalasyona GEREK YOK. Bir deneme (gateAutofixTried),
+      // olmazsa normal investigate+solve'a düşer.
+      if (
+        outcome.kind === "fail" &&
+        spec.type === "mechanical" &&
+        spec.mechanical_config?.fix_cmd &&
+        !gateAutofixTried.has(next)
+      ) {
+        gateAutofixTried.add(next);
+        emitChatMessage(
+          "system",
+          `🔧 Faz ${next} (${phaseLabelTR(next, spec)}) — bildirilen hataları fazın içinde düzeltiyorum (bu fazın işi; debug'a kaçmadan).`,
+        );
+        const fixRan = await runGateAutofix(state, cfg, next, phaseLabelTR(next, spec), outcome.stderr);
+        if (fixRan) {
+          // Gate'i YENİDEN koş — gerçekten geçti mi DOĞRULA (autofix "geçti" demez).
+          const reRunner = new MechanicalRunnerBase({
+            tag: `phase-${next}`,
+            displayLabel: phaseLabelTR(next, spec),
+            phaseId: next,
+            state,
+            mechanical: spec.mechanical_config,
+            pass_event: passEvent,
+            fail_event: failEvent,
+            changedScope: state.changed_scope?.files,
+          });
+          emit("phase_running", { label: phaseLabelTR(next, spec), ts: Date.now() });
+          let reOutcome;
+          try {
+            reOutcome = await reRunner.run();
+          } finally {
+            emit("phase_idle", { ts: Date.now() });
+          }
+          if (reOutcome.kind === "pass" || reOutcome.kind === "skipped") {
+            await appendAuditModule(state.project_root, {
+              ts: Date.now(),
+              phase: next,
+              event: `phase-${next}-complete`,
+              caller: "mycl-orchestrator",
+              detail: "gate_autofix_resolved",
+            });
+            emitChatMessage("system", `✅ Faz ${next} kendi içinde düzeltildi — geçti.`);
+            cur = next;
+            continue;
+          }
+          // Hâlâ fail → güncel çıktıyla aşağıdaki investigate+solve'a düş.
+          outcome = reOutcome;
+        }
+      }
+      // Gerçek mekanik fail → güvenlik (Faz 13) gibi investigate+solve akışına gider: failPhase → gerçek stderr ile
+      // analiz → en iyi çözümü otomatik uygula. Döngü-kıran (aynı hata 2× → kullanıcıya sor; non-blocking'de
+      // "kuyruğa al, devam et" seçeneği var → takılma yok). MyCL'in KENDİ bozuk aracı zaten yukarıda skip edildi.
       const mechHolder: FailReasonHolder = {
         lastFailReason:
           `Faz ${next} (${phaseLabelTR(next, spec)}) başarısız.` +
