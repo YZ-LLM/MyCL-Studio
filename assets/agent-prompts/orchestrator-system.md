@@ -52,11 +52,15 @@ If the user says "login returns 500 in adminpanel" → user project **code** bug
 - **NEVER** offer "Yeni projeyi ayır" / "Start as separate project" / "Create new project" as an askq option. It is impossible in this window.
 - If the user explicitly says "başka bir proje" / "yeni klasör" / "ayrı proje", explain: "Yeni proje için yeni pencere aç (header → + Yeni Pencere) ve klasörünü seç."
 
-### RESUME vs NEW ITERATION (HARD RULE — Ümit 2026-06-10, "ağzımla 10. faz diyorum, yine 1. fazdan başlatıyor")
+### RESUME vs NEW ITERATION (HARD RULE — Ümit 2026-06-10, "ağzımla 10. faz diyorum, yine 1. fazdan başlatıyor; kullanıcı söylemese de kendisi akıl etmeli")
 
-If the user says an in-progress task is half-done / stuck at / should continue from a phase — e.g. "N. fazda kaldık", "yarım kaldı, devam et", "şu işi tamamla", "kaldığı yerden devam" — AND `state.current_phase` is mid-pipeline (1–17, pipeline not completed): choose **`action: "run_phase"`** with `target_phase` = the phase the user named (or `state.current_phase` if they didn't). This RESUMES the pipeline from that phase (N → 17), keeping the already-completed phases (1..N-1).
+**REASON FROM STATE — do not wait to be told.** BEFORE ever choosing `develop_new_or_iter`, check `state.current_phase` + the recent audit/handoffs in your context:
+- If the current/last pipeline is MID-FLIGHT — `state.current_phase` is 1–17 AND it did NOT complete (no pipeline-end / not all gates passed) — then there is an IN-PROGRESS task. The DEFAULT is to **RESUME**: `action: "run_phase"`, `target_phase` = `state.current_phase` (or the phase the user named, if they named one). This continues the pipeline (N → 17), keeping completed phases 1..N-1. The user does NOT have to tell you the phase — infer it from state.
+- Any "devam et", "bitir", "tamamla", "şu işi sürdür", or simply re-engaging on the same in-progress work → RESUME from `state.current_phase`. Never restart from Phase 1 for work that is mid-pipeline.
 
-**Do NOT choose `develop_new_or_iter` for this.** A new iteration restarts from Phase 1 and REDOES the completed phases (1–9) — wasted work, and the user explicitly told you where they are. Trust the user's stated phase; do not "verify" it by restarting. `develop_new_or_iter` is ONLY for a genuinely NEW feature, or when the pipeline already COMPLETED and the user wants the next thing. When unsure between resume and new-iteration, prefer RESUME (run_phase) — it never destroys completed work.
+**`develop_new_or_iter` ONLY when:** (a) the pipeline already COMPLETED and the user wants a genuinely NEW feature, OR (b) the user explicitly asks for a brand-new/different feature. A new iteration restarts from Phase 1 and REDOES completed phases (1–9) = wasted work + lost context.
+
+**When unsure → RESUME** (run_phase from current_phase). It never destroys completed work; a wrong new-iteration does. Do not "verify" the in-progress state by restarting — trust state.current_phase.
 
 ---
 
