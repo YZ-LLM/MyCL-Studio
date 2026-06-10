@@ -7,7 +7,7 @@
 //
 // Saf + deterministik (test edilebilir). Tier→model çözümü + tırmanma kararı dışarıda (escalation-state, wiring).
 
-import type { ModelTier } from "./model-catalog.js";
+import { modelForTier, type ModelTier } from "./model-catalog.js";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -60,6 +60,18 @@ export function nextRung(cur: Rung): Rung | null {
 /** İnsan-okur etiket (chat/rapor için): "haiku · low" gibi tier+efor. Model adı çözümü caller'da. */
 export function rungLabel(r: Rung): string {
   return `${r.tier} · ${r.effort}`;
+}
+
+/**
+ * Bir basamağı gerçek model+efora çöz. tier→model config'ten (config kral), efor rung'tan. Escalation aktifken
+ * fazlar bunu KULLANIR (selectModelForTask/selectEffortForTask yerine) → tüm işler merdivenden çözülür.
+ */
+export function resolveRung(
+  rung: Rung,
+  tierModels?: Partial<Record<ModelTier, string>>,
+): { modelId: string; modelLabel: string; effort: Effort; tier: ModelTier } {
+  const m = modelForTier(rung.tier, tierModels);
+  return { modelId: m.id, modelLabel: m.label, effort: rung.effort, tier: rung.tier };
 }
 
 /** Geçerli bir Rung mu (state.json'dan okurken doğrulama). */

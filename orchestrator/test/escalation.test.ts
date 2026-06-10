@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildLadder, firstRung, nextRung, rungLabel, isRung, type Rung } from "../src/escalation.js";
+import { buildLadder, firstRung, nextRung, rungLabel, isRung, resolveRung, type Rung } from "../src/escalation.js";
+import { findModel } from "../src/model-catalog.js";
 
 describe("escalation merdiveni (Ümit: ucuzdan başla, sorun çıktıkça tırman)", () => {
   it("ilk basamak = cheap · low (en düşük model+efor)", () => {
@@ -41,6 +42,18 @@ describe("escalation merdiveni (Ümit: ucuzdan başla, sorun çıktıkça tırma
       cur = nextRung(cur);
     }
     expect(visited).toEqual(buildLadder());
+  });
+
+  it("resolveRung: tier→model config'ten (config kral), efor rung'tan", () => {
+    // config strong = opus-4-7 → strong basamağı onu çözer
+    const r = resolveRung({ tier: "strong", effort: "max" }, { strong: "claude-opus-4-7" });
+    expect(r.modelId).toBe("claude-opus-4-7");
+    expect(r.effort).toBe("max");
+    expect(r.tier).toBe("strong");
+    // config yoksa katalog default (cheap → geçerli bir cheap model)
+    const c = resolveRung({ tier: "cheap", effort: "low" }, undefined);
+    expect(findModel(c.modelId)?.tier).toBe("cheap");
+    expect(c.effort).toBe("low");
   });
 
   it("rungLabel + isRung", () => {

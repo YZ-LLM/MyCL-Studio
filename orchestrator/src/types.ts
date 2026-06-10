@@ -341,6 +341,12 @@ export interface State {
    */
   iteration_count?: number;
   /**
+   * Escalation merdiveni — o an çalışan fazın model+efor basamağı (Ümit 2026-06-11: en düşükten başla, sorun
+   * çıktıkça tırman). Loop her fazı koşturmadan önce set eder; fazlar model+eforu buradan (resolveRung) çözer.
+   * Set değilse fazlar eski selectModelForTask davranışına düşer (geriye-uyumlu).
+   */
+  escalation_rung?: import("./escalation.js").Rung;
+  /**
    * Bu iterasyonun başlangıç timestamp'i (Date.now). Boot-resume'da hangi
    * audit event'lerinin BU iterasyona ait olduğunu belirler — audit tail'i
    * (son 300) iteration-N-start'ı kaçırırsa bile resume scope'u doğru kalır

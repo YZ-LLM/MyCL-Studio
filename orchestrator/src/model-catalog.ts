@@ -192,6 +192,19 @@ export function selectModelForTask(
   };
 }
 
+/**
+ * Bir tier için gerçek modeli çöz (config kral > katalog default). Escalation merdiveni (rung.tier → model)
+ * bunu kullanır. taskKind'den bağımsız — saf tier→model.
+ */
+export function modelForTier(
+  tier: ModelTier,
+  tierModels?: Partial<Record<ModelTier, string>>,
+): { id: string; label: string } {
+  const fromConfig = tierModels?.[tier];
+  const resolved = fromConfig && findModel(fromConfig) ? findModel(fromConfig)! : defaultModelForTier(tier);
+  return { id: resolved.id, label: resolved.label };
+}
+
 /** Seçilen modeli chat'te göstermek için (Türkçe). */
 export function formatModelChoice(taskKind: TaskKind, choice: ModelChoice): string {
   return `🧠 "${taskKind}" işi için **${choice.label}** seçildi (${choice.tier}: ${choice.reason}).`;
