@@ -6,6 +6,16 @@
 
 ## 2026-06-10
 
+- **feat(OTO-EFOR: efor seçimi iş-tipine göre otomatik) [Ümit: "tek darboğaz LLM yanıt süresi; ama düşünme
+  vakti vermezsek hata yapar, en küçük hata bile istemiyorum; kolay işte max gereksiz düşünüyor → efor da otomatik"]:**
+  `model-catalog.selectEffortForTask`: KALİTE-kritik (strong-tier: codegen/spec/design/review/debug) işler config
+  eforunu AYNEN alır (varsayılan max — tam düşünme, DOKUNULMAZ); hafif/sık işler (orkestrasyon/niyet/doğrulama/
+  çeviri/sınıflandırma) "high" TAVANINA çekilir (high = Anthropic'in önerilen varsayılanı, kalite tabanı; max kısa
+  işte sadece bekletir). Kullanıcının bilinçli DÜŞÜK seçimi asla yükseltilmez; hiçbir iş low'a düşürülmez; geçersiz
+  config → güvenli max. Bağlanan yerler (davranış değişen): cli-orchestrator (orkestrasyon — HER TURDA koşan en sık
+  çağrı, en büyük gecikme kazancı), qa-askq-cli (niyet/netleştirme), living-docs (doğrulama). Codegen/spec/debug
+  yolları değişmedi (max kaldı). +4 test.
+
 - **feat(tasarım paneli çatışma çıtası yükseltildi) [Ümit: 401-vs-403 gibi "çok basit konularda mı çatışma
   oluşmuş?" → "çok iyi tespit, yap"]:** `design-synthesizer.md`'ye CONFLICT BAR eklendi: yerleşik sektör-standardı
   cevabı olan / saf konvansiyon soruları (HTTP status semantiği, isimlendirme, dosya düzeni) ÇATIŞMA DEĞİL —

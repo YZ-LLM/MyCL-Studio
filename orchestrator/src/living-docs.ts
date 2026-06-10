@@ -8,6 +8,7 @@
 // JSON bloğu döner; YAZIMI MyCL yapar (forced-tool yok; ajan .mycl dışına yazamaz). Approval YOK.
 // Fail → görünür uyarı + audit, ana akışı BLOKLAMAZ (yan-yarar, sessiz değil).
 
+import { selectEffortForTask } from "./model-catalog.js";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { appendAudit } from "./audit.js";
@@ -143,7 +144,7 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
       cwd: state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
       disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
-      effort: config.claude_code_flags.effort,
+      effort: selectEffortForTask("verification", config.claude_code_flags.effort), // oto-efor: doküman güncelleme hafif iş
       onText: (t) => emitClaudeStream({ sub: "text", text: t }),
       observer: (tu) =>
         emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),

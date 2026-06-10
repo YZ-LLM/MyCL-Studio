@@ -19,6 +19,7 @@
 import { runClaudeCli } from "../cli-run.js";
 import { extractLastJsonObject } from "../cli-json.js";
 import { orchestratorModelId, type MyclConfig } from "../config.js";
+import { selectEffortForTask } from "../model-catalog.js";
 import { emitAgentEvent } from "../ipc.js";
 import { log } from "../logger.js";
 import type { State } from "../types.js";
@@ -148,6 +149,9 @@ export class CliOrchestratorBackend {
         cwd: this.state.project_root,
         allowedTools: ORCH_ALLOWED_TOOLS,
         disallowedTools: ORCH_DISALLOWED_TOOLS,
+        // Oto-efor (Ümit): orkestrasyon her turda koşan EN SIK çağrı — high tavanı (Anthropic'in
+        // önerilen varsayılanı, kalite tabanı); max/xhigh kısa yönlendirme kararında gereksiz bekletir.
+        effort: selectEffortForTask("orchestration", this.config.claude_code_flags.effort),
         timeoutMs: ORCH_TIMEOUT_MS,
       });
       if (!res.ok) {

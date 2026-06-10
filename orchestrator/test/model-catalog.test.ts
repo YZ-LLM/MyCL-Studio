@@ -6,6 +6,7 @@ import {
   findModel,
   setLiveTiersFromModels,
   clearLiveTiers,
+  selectEffortForTask,
   type TaskKind,
 } from "../src/model-catalog.js";
 
@@ -107,5 +108,30 @@ describe("canlı keşif (auto-discovery: güncel modelleri tier'la)", () => {
   it("yeni aile + tier YOK → atanmaz (körlemesine değil)", () => {
     const t = setLiveTiersFromModels([{ id: "claude-mythos-1", display_name: "Mythos 1" }]);
     expect(t.strong).toBeUndefined();
+  });
+});
+
+// 2026-06-10 (Ümit: "efor seçimi de otomatik; kolay işte max gereksiz düşünüyor; en küçük hata istemem").
+describe("selectEffortForTask (oto-efor — kaliteli hız)", () => {
+  it("KALİTE-kritik işler config eforunu AYNEN alır (tam düşünme, dokunulmaz)", () => {
+    for (const k of ["codegen", "spec", "design", "review", "debug"] as const) {
+      expect(selectEffortForTask(k, "max")).toBe("max");
+      expect(selectEffortForTask(k, "ultracode")).toBe("ultracode");
+      expect(selectEffortForTask(k, undefined)).toBe("max"); // config yok → max
+    }
+  });
+  it("hafif/sık işler high TAVANINA çekilir (max → high; gereksiz düşünme yok)", () => {
+    for (const k of ["orchestration", "intent", "verification", "translation", "classification"] as const) {
+      expect(selectEffortForTask(k, "max")).toBe("high");
+      expect(selectEffortForTask(k, "ultracode")).toBe("high");
+      expect(selectEffortForTask(k, undefined)).toBe("high");
+    }
+  });
+  it("kullanıcının bilinçli DÜŞÜK seçimi yükseltilmez (ekonomi tercihi)", () => {
+    expect(selectEffortForTask("orchestration", "medium")).toBe("medium");
+    expect(selectEffortForTask("intent", "high")).toBe("high");
+  });
+  it("geçersiz config eforu → güvenli max tabanı", () => {
+    expect(selectEffortForTask("codegen", "bozuk-değer")).toBe("max");
   });
 });

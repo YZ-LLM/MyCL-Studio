@@ -197,6 +197,42 @@ export function formatModelChoice(taskKind: TaskKind, choice: ModelChoice): stri
   return `🧠 "${taskKind}" işi için **${choice.label}** seçildi (${choice.tier}: ${choice.reason}).`;
 }
 
+// ───────── Otomatik EFOR seçimi (Ümit 2026-06-10: "efor seçimi de otomatik olsun; kolay işte max
+// gereksiz düşünüyor — ama en küçük hata bile istemiyorum") ─────────
+// Prensip "kaliteli hız"ın efor boyutu: KALİTE-kritik (strong tier) işler config eforunu AYNEN alır
+// (varsayılan max — tam düşünme, dokunulmaz). Hafif/sık işler (orkestrasyon/niyet/doğrulama/çeviri/
+// sınıflandırma) "high" TAVANINA çekilir — high Anthropic'in önerilen varsayılanıdır (kalite tabanı),
+// max bu kısa işlerde sadece gereksiz bekletir. Kullanıcının BİLİNÇLİ daha düşük seçimi (örn. medium)
+// asla yükseltilmez (ekonomi tercihi). Hiçbir iş low'a otomatik düşürülmez.
+
+export type EffortChoice = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
+
+const EFFORT_RANK: Record<EffortChoice, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  xhigh: 3,
+  max: 4,
+  ultracode: 5, // ayrı Claude Code ayarı ama "en derin" muamelesi görür
+};
+
+function isEffortChoice(v: unknown): v is EffortChoice {
+  return typeof v === "string" && v in EFFORT_RANK;
+}
+
+/**
+ * İş tipine göre eforu otomatik seç. strong-tier → config eforu aynen (tam düşünme);
+ * diğerleri → min(config, "high"). SAF + deterministik.
+ */
+export function selectEffortForTask(
+  taskKind: TaskKind,
+  configEffort: string | undefined,
+): EffortChoice {
+  const base: EffortChoice = isEffortChoice(configEffort) ? configEffort : "max";
+  if (TASK_RELEVANCE[taskKind].tier === "strong") return base;
+  return EFFORT_RANK[base] > EFFORT_RANK.high ? "high" : base;
+}
+
 /**
  * GÜVENLİ görünürlük: KULLANILAN modeli (config'ten, override YOK) iş başına gösterir + işin alaka-tier'ını
  * not düşer. Kullanıcı hangi modelin hangi işe gittiğini görür, config'i ezilmez (hız korunur).

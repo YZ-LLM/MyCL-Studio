@@ -14,6 +14,7 @@ import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
 import { autoAnswerSuggested } from "../auto-answer.js";
+import { selectEffortForTask } from "../model-catalog.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
@@ -142,7 +143,8 @@ export class CliQaAskqBackend implements QaAskqBackend {
     const askq = opts.askq;
     const sessionId = randomUUID();
     const systemPrompt = opts.systemPrompt + buildOutputInstruction(opts);
-    const effort = opts.config.claude_code_flags.effort;
+    // Oto-efor (Ümit): niyet/netleştirme hafif iş → high tavanı (max gereksiz düşünme).
+    const effort = selectEffortForTask("intent", opts.config.claude_code_flags.effort);
     // max_questions clarifying turu + onay + birkaç resume/nudge için tampon.
     const maxTurns = askq.max_questions + 4;
 
