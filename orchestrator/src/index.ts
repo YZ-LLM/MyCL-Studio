@@ -395,10 +395,22 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   }
 }
 
+/**
+ * Config'ten TÜREYEN modül-singleton'ları uygula (Ümit 2026-06-10: "kapatıp açmadan da aktif olsun").
+ * Backend (api/cli) zaten runtime.config'ten okunur — ama sandbox politikası + cache TTL gibi singleton'lar
+ * yalnız boot'ta set ediliyordu → ayar değişince restart gerekiyordu. Artık her config-yüklemede yenilenir.
+ * Tek nokta: emitConfigStatus + open_project bunu çağırır → yeni singleton eklenince TEK yerde güncellenir.
+ */
+function applyConfigDerivedSettings(config: MyclConfig): void {
+  setSandboxPolicy(config.claude_code_flags.agent_sandbox_policy ?? "enforce");
+  setCacheTtl(config.claude_code_flags.cache_ttl);
+}
+
 /** Config'i yüklemeyi dener, durumu UI'a yollar. */
 async function emitConfigStatus(): Promise<boolean> {
   try {
     runtime.config = await loadConfig();
+    applyConfigDerivedSettings(runtime.config); // restart'sız aktif: singleton'ları her yüklemede tazele
     log.info("config", "loaded", {
       selected_models: runtime.config.selected_models,
     });
@@ -450,12 +462,9 @@ async function handleOpenProject(path: string): Promise<void> {
     // Erken set: loadOrInit sonrası ilk emit'ler de kaydedilsin.
     setHistoryRoot(path);
     setAgentTraceRoot(path); // ajan-içi tam iz aynı projeye yazsın (kör nokta kalmasın)
-    // v15.11 GÜVENLİK: ajan sandbox politikasını config'ten set et (spawn'lar okur).
-    if (runtime.config) {
-      setSandboxPolicy(runtime.config.claude_code_flags.agent_sandbox_policy ?? "enforce");
-      // F2: CLI/abonelik spawn'larında 1h prompt cache (ENABLE_PROMPT_CACHING_1H) için.
-      setCacheTtl(runtime.config.claude_code_flags.cache_ttl);
-    }
+    // v15.11 GÜVENLİK: config-türevi singleton'lar (sandbox politikası + cache TTL). Tek nokta:
+    // applyConfigDerivedSettings (emitConfigStatus de çağırır → ayar değişince restart'sız tazelenir).
+    if (runtime.config) applyConfigDerivedSettings(runtime.config);
     // v15.11: Açılışta mevcut UI kullanma kılavuzunu "Kılavuz" sekmesine push
     // et (varsa). Yoksa sessiz — bootstrap arka planda üretip sonra emit eder.
     void fsReadFile(pathJoin(path, ".mycl", "user-guide.md"), "utf-8")
@@ -990,7 +999,21 @@ async function handleSaveSelectedModels(
       }
     }
     runtime.config = null;
-    await emitConfigStatus();
+    const ok = await emitConfigStatus(); // runtime.config'i + singleton'ları YENİDEN yükler (restart'sız aktif)
+    // Görünür onay (Ümit 2026-06-10: "kapatıp açmadan da aktif olsun") — kullanıcı değişimin
+    // anında geçerli olduğunu görür; bir sonraki iş/faz yeni backend+model+efor ile koşar.
+    const fresh = runtime.config as MyclConfig | null;
+    if (ok && fresh) {
+      const b = fresh.agent_backends;
+      const label = (v: string | undefined) => (v === "cli" ? "Abonelik" : v === "auto" ? "Auto" : "API");
+      emitChatMessage(
+        "system",
+        `✅ Ayarlar uygulandı — yeniden başlatma GEREKMEZ. Bir sonraki iş şu ayarla koşar:\n` +
+          `• Backend → main: ${label(b?.main)}, translator: ${label(b?.translator)}, orkestratör: ${label(b?.orchestrator)}\n` +
+          `• Model → main: ${fresh.selected_models.main}` +
+          `${flagsPatch.effort ? ` · efor: ${flagsPatch.effort}` : ""}`,
+      );
+    }
   } catch (err) {
     log.error("orchestrator", "save_selected_models failed", err);
     emitError("save_settings failed", String(err));
@@ -1008,6 +1031,7 @@ async function handleSaveFeatures(
     // null check fail eder → "no active project" hatası. Yerinde reload.
     try {
       runtime.config = await loadConfig();
+      applyConfigDerivedSettings(runtime.config); // restart'sız aktif (singleton'ları tazele)
     } catch (err) {
       log.warn("orchestrator", "config reload after save_features failed", err);
       // Eski config kalır; sonraki çağrı yine çalışır.

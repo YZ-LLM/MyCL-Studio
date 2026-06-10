@@ -6,6 +6,17 @@
 
 ## 2026-06-10
 
+- **fix(ayar değişikliği restart'sız aktif + görünür onay) [Ümit: "API moduna geçtim ama kapatıp açmadan anlamadı;
+  kapatıp açmadan da aktif olsun seçimim"]:** Backend (api/cli) zaten her save'de `runtime.config` reload edilip
+  canlı okunuyordu; ama (1) config-türevi SINGLETON'lar (`setSandboxPolicy` + `setCacheTtl`) yalnız boot/open'da
+  set ediliyordu → bu ayarlar gerçekten restart istiyordu. Artık `applyConfigDerivedSettings` TEK NOKTADA toplandı
+  ve HER config-yüklemede (emitConfigStatus + open_project + save_features) çağrılıyor → restart'sız aktif.
+  (2) Save sonrası GÖRÜNÜR onay: "✅ Ayarlar uygulandı — yeniden başlatma GEREKMEZ. Bir sonraki iş şu ayarla koşar:
+  backend main/translator/orchestrator + model + efor" — kullanıcı değişimin geçerli olduğunu görür (önceden sessizdi,
+  "anlamadı" algısının kaynağı). NOT: çalışmakta olan bir faz, başladığı config'le biter; YENİ iş/faz yeni ayarla
+  koşar (doğru davranış — config mid-flight değişmez). AÇIK (API modu): faz-fail hata-analizi hâlâ CLI-only
+  (orkestratör rolü API'de analiz atlıyor) → API modunda oto-çözüm çalışmaz; API agentic-loop yolu sıradaki iş.
+
 - **feat(OTO-EFOR: efor seçimi iş-tipine göre otomatik) [Ümit: "tek darboğaz LLM yanıt süresi; ama düşünme
   vakti vermezsek hata yapar, en küçük hata bile istemiyorum; kolay işte max gereksiz düşünüyor → efor da otomatik"]:**
   `model-catalog.selectEffortForTask`: KALİTE-kritik (strong-tier: codegen/spec/design/review/debug) işler config
