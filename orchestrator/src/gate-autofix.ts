@@ -12,6 +12,7 @@ import type { ToolDef } from "./claude-api.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { buildProjectFacts } from "./project-facts.js";
+import { snapshotBeforeAutofix } from "./fix-snapshot.js";
 import type { MyclConfig } from "./config.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -40,9 +41,18 @@ export async function runGateAutofix(
     "- Do NOT refactor, rename, reformat, change behavior, or edit unrelated files.",
     "- Unused variable/import → remove it; BUT if it's a test that clearly intended to use it, add the missing",
     "  usage (e.g. an assertion) instead of deleting. Pick the change that keeps the test meaningful.",
+    "",
+    "GATE INTEGRITY — NEVER cheat the gate to make it green (this is the cardinal rule):",
+    "- Do NOT weaken, skip, delete, or comment out tests; no `.skip`/`.only`/`xit`/`it.skip`; do NOT loosen",
+    "  assertions just to pass. If a test catches a REAL bug, fix the CODE so the test passes honestly.",
+    "- Do NOT disable lint rules, add `eslint-disable`/`ts-ignore`, or edit the gate/lint/tsconfig config to",
+    "  ignore the failure. Do NOT lower thresholds or exclude files from the check.",
+    "- The goal is a GENUINELY correct codebase, not a green checkmark. A suppressed/weakened gate is a failure.",
     "- After fixing, STOP (no further tool calls). Do not run the linter yourself — the gate re-runs automatically.",
   ].join("\n");
   try {
+    // Otomatik kod düzenlemesinden ÖNCE snapshot (git checkpoint veya .mycl/backups) → yanlışsa geri alınır.
+    await snapshotBeforeAutofix(state.project_root, Date.now());
     const backend = createCodegenBackend({
       tag: "gate-autofix",
       phaseId,

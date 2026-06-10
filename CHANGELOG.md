@@ -6,6 +6,19 @@
 
 ## 2026-06-10
 
+- **feat(oto-cevap güvenli otonomi: snapshot + gate-integrity + darboğazda durmama) [Ümit: "ekle; oto-cevap
+  işaretliyse durmasın, kendisi darboğazlarda devam etsin"]:** Oto-cevap AÇIKKEN MyCL artık darboğazları otonom
+  geçer, güvenlik ağıyla:
+  (1) **Snapshot her oto-düzeltmeden önce** (`fix-snapshot.ts`): git varsa checkpoint; git YOKSA kaynak ağacı
+  `~/.mycl/backups/<proje>-autofix-<ts>/`'a kopyalanır (node_modules/dist/.mycl hariç; hedef proje DIŞINDA →
+  `fs.cp` self-copy hatası yok). gate-autofix + debug-fix uygulaması bunu çağırır → yanlış düzeltme geri alınabilir.
+  (2) **Gate-integrity (sahte-yeşil yasak):** gate-autofix + error-analysis promptlarına KARDİNAL kural — testi
+  silme/skip/zayıflatma, eslint-disable/ts-ignore, eşik düşürme, gate/config'i görmezden getirme YOK; altta yatan
+  KODU düzelt. Yeşil checkmark değil, gerçekten doğru kod hedef.
+  (3) **Darboğazda durmama:** loop-breaker tavanı 2→6 (Oto-cevap açık); farklı hata çıkarsa imza sıfırlanır
+  (ilerleme = sınırsız). Yalnız AYNI hata 6 denemeyi aşarsa "gerçekten takıldı" deyip kullanıcıya bırakır (sonsuz
+  aynı-fix/kaynak-israfı backstop). +2 test.
+
 - **fix(otonomi = Oto-cevap opt-in: oto-davranışlar toggle'a bağlandı) [Ümit: "otonom değil; oto-cevap işaretliyse
   yapar onları"]:** KRİTİK uyumsuzluk: faz-fail oto-çözüm (`failPhase`), Faz 0 D2 oto-seçim (`auto_selected_label`)
   ve gate-autofix Oto-cevap toggle'ına HİÇ bakmıyordu — toggle KAPALIYKEN bile otomatik kod değiştiriyorlardı

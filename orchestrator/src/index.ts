@@ -109,6 +109,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
+import { snapshotBeforeAutofix } from "./fix-snapshot.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
 import { autoAnswerSuggested, setAutoAnswerSuggested } from "./auto-answer.js";
@@ -366,7 +367,11 @@ function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): stri
 // bir daha aynı hatayı otomatik tamir etmeye çalışma (fix işe yaramıyor → kök neden başka) → kullanıcıya sor.
 // Zaman PENCERESİ YOK: logda aynı hata saatlerce tekrarladı, 45-dk pencere sıfırlanınca döngü sürdü.
 // FARKLI hata imzası → sayaç sıfır (yeni sorun meşru, otomatik denenir).
-const AUTO_SOLVE_MAX = 2;
+// Oto-cevap KAPALI: zaten otomatik düzeltmiyor (kullanıcıya sorar). Oto-cevap AÇIK (Ümit: "durmasın, darboğazda
+// devam etsin"): aynı hata-imzasında bile yüksek tavana kadar (snapshot güvenliğiyle) DENEMEYE devam; farklı bir
+// hata çıkarsa imza sıfırlanır (ilerleme = sınırsız sürer). Yalnız AYNI hata bu tavanı aşarsa "gerçekten takıldı"
+// deyip kullanıcıya bırakır (sonsuz aynı-fix döngüsü = sahte-yeşil/kaynak israfı backstop).
+const AUTO_SOLVE_MAX = 6;
 const autoSolveSig = new Map<number, { sig: string; count: number }>();
 
 /** Hata imzası: faz + lastFailReason'ın ilk ~160 char'ı (sayılar normalize → port/pid/ts gürültüsü eşleşmeyi bozmasın). */
@@ -3405,10 +3410,8 @@ export async function handleAskqAnswer(
           "📌 Fix öncesi checkpoint alındı — regresyonda otomatik geri alınabilir; mekanik kalite-gate'leri değişen dosyalara odaklanacak (scoped).",
         );
       } else {
-        emitChatMessage(
-          "system",
-          `⚠️ Otomatik geri alma kapalı: ${cp.reason}. Fix yine uygulanır; gerekirse geri almayı elle yaparsın.`,
-        );
+        // Git yok/kirli → scoped-gate yok AMA yine de geri-alınabilir yedek al (.mycl/backups).
+        await snapshotBeforeAutofix(runtime.state.project_root, Date.now());
       }
     }
     if (kind === "ui-only") {
