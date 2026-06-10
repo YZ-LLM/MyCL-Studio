@@ -367,10 +367,10 @@ export class Phase8Controller {
     // Ümit 2026-06-10: "silme kararı → önce yedek." TDD codegen ajanı dosya silebilir/üstüne yazabilir. Fix modu
     // zaten debug-fix yolunda snapshot'landı; normal TDD'de burada snapshot al → silinen geri alınabilir.
     if (!this.isFixMode) await snapshotBeforeAutofix(this.state.project_root, Date.now());
-    // Escalation (Ümit 2026-06-11): model+efor MERDİVENden çözülür (escalation_rung set ise) — en düşükten başla,
-    // sorun çıktıkça failPhase tırmandırır. Set değilse eski "codegen→strong" davranışı (geriye-uyumlu). Config kral.
-    const me = escalatedModelEffort(this.state, this.config, "codegen");
-    emitChatMessage("system", `🧠 Codegen: **${me.modelLabel}** · efor ${me.effort}${this.state.escalation_rung ? " (merdiven)" : ""}`);
+    // Escalation (Ümit 2026-06-11): model+efor PER-DOMAIN merdivenden — bu domain'in (tdd-codegen) öğrenilmiş
+    // basamağından başlar, sorun çıktıkça failPhase tırmandırır (monotonik). Config kral: tier→model config'ten.
+    const me = escalatedModelEffort(this.state, this.config, "tdd-codegen");
+    emitChatMessage("system", `🧠 Codegen: **${me.modelLabel}** · efor ${me.effort} (merdiven)`);
     this.base = createCodegenBackend({
       tag: "phase-8",
       phaseId: 8,

@@ -100,9 +100,7 @@ export class Phase5Controller {
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
-
-    const role = this.spec.model_role!;
-    const escMe = escalatedModelEffort(this.state, this.config, "codegen");
+    const escMe = escalatedModelEffort(this.state, this.config, "ui-codegen");
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
       // Backend yolları registry'deki spec.denied_paths'ten gelir — proje
@@ -287,8 +285,8 @@ export class Phase5Controller {
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
-      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
+      modelId: escMe.modelId,
+      effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage,
       tools: TOOLS_CODEGEN as unknown as ToolDef[],

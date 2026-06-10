@@ -157,8 +157,6 @@ export class Phase1Controller {
       emitError("template load failed", String(err));
       return "fail";
     }
-
-    const role = this.spec.model_role!;
     // Escalation (Ümit 2026-06-11): model+efor merdivenden (escalation_rung set ise); değilse eski config[role].
     const escMe = escalatedModelEffort(this.state, this.config, "intent");
     this.base = createQaAskqBackend({
@@ -166,8 +164,8 @@ export class Phase1Controller {
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
-      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
+      modelId: escMe.modelId,
+      effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage: "Begin Phase 1 intent clarification now.",
       tools: [TOOL_ASK_CLARIFYING, TOOL_APPROVE_INTENT],

@@ -238,10 +238,10 @@ export class Phase4Controller {
       // spec.md yok → ilk spec; varsayılan mesaj kalır.
     }
 
-    // Escalation (Ümit 2026-06-11): spec model+eforu MERDİVENden (escalation_rung set ise) — en düşükten başla,
-    // sorun çıktıkça tırman. Set değilse eski "spec→strong" davranışı. Config kral.
+    // Escalation (Ümit 2026-06-11): spec model+eforu PER-DOMAIN merdivenden — bu domain'in öğrenilmiş basamağından
+    // başlar, sorun çıktıkça tırman (monotonik). Config kral: tier→model config'ten.
     const me = escalatedModelEffort(this.state, this.config, "spec");
-    emitChatMessage("system", `🧠 Spec: **${me.modelLabel}** · efor ${me.effort}${this.state.escalation_rung ? " (merdiven)" : ""}`);
+    emitChatMessage("system", `🧠 Spec: **${me.modelLabel}** · efor ${me.effort} (merdiven)`);
     this.base = createProductionSchemaBackend({
       tag: "phase-4",
       phaseId: 4,

@@ -75,7 +75,7 @@ import {
 import { listModels } from "./models.js";
 import { computeTiersFromModels } from "./model-catalog.js";
 import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
-import { firstRung, nextRung, resolveRung, rungLabel } from "./escalation.js";
+import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
@@ -407,12 +407,13 @@ function phaseDomain(n: PhaseId): string {
   return map[n] ?? `phase-${n}`;
 }
 
-/** Escalation merdiveninde bu fazın deneme sonucunu rapora yaz (hangi model hangi işte iyi). */
+/** Escalation merdiveninde bu fazın (domain'in) deneme sonucunu rapora yaz (hangi model hangi işte iyi). */
 async function recordRungOutcome(n: PhaseId, success: boolean): Promise<void> {
   if (!runtime.state || !runtime.config) return;
-  const rung = runtime.state.escalation_rung ?? firstRung();
+  const domain = phaseDomain(n);
+  const rung = rungForDomain(runtime.state, domain);
   const model = resolveRung(rung, runtime.config.selected_models.model_tiers).modelId;
-  await recordStrength({ domain: phaseDomain(n), rung: rungLabel(rung), model, success }, Date.now());
+  await recordStrength({ domain, rung: rungLabel(rung), model, success }, Date.now());
 }
 
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
@@ -435,16 +436,22 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // Yalnız MERDİVENE BAĞLI fazlarda escalation (model+eforu escalation_rung'tan çözenler) — yoksa tırmanma boşa
   // re-run olur. Şimdilik spec (4) + codegen (8). Yeni faz bağlandıkça bu kümeye eklenir.
   if (autoAnswerSuggested() && ESCALATION_PHASES.has(n)) {
+    const domain = phaseDomain(n);
     await recordRungOutcome(n, false);
-    const cur = runtime.state.escalation_rung ?? firstRung();
+    const cur = rungForDomain(runtime.state, domain);
     const up = nextRung(cur);
     if (up) {
       const model = resolveRung(up, runtime.config.selected_models.model_tiers).modelId;
-      runtime.state = { ...runtime.state, escalation_rung: up, updated_at: Date.now() };
+      // PER-DOMAIN climb (monotonik): yalnız bu domain'in basamağı yükselir; diğer domain'ler dokunulmaz.
+      runtime.state = {
+        ...runtime.state,
+        escalation_rungs: { ...(runtime.state.escalation_rungs ?? {}), [domain]: up },
+        updated_at: Date.now(),
+      };
       await saveState(runtime.state);
       emitChatMessage(
         "system",
-        `🔼 Faz ${n} ${rungLabel(cur)} ile çözemedi → ${rungLabel(up)} (${model}) ile aynı işi tekrar deniyorum.`,
+        `🔼 Faz ${n} (${domain}) ${rungLabel(cur)} ile çözemedi → ${rungLabel(up)} (${model}) ile aynı işi tekrar deniyorum.`,
       );
       await advanceToNextPhase((n - 1) as PhaseId);
       return;

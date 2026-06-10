@@ -341,11 +341,12 @@ export interface State {
    */
   iteration_count?: number;
   /**
-   * Escalation merdiveni — o an çalışan fazın model+efor basamağı (Ümit 2026-06-11: en düşükten başla, sorun
-   * çıktıkça tırman). Loop her fazı koşturmadan önce set eder; fazlar model+eforu buradan (resolveRung) çözer.
-   * Set değilse fazlar eski selectModelForTask davranışına düşer (geriye-uyumlu).
+   * Escalation merdiveni — PER-DOMAIN basamak (Ümit 2026-06-11: "önceki tecrübeler önemli; yükseltme var düşürme
+   * yok"). domain (phaseDomain: intent/spec/tdd-codegen/...) → o işin öğrenilmiş model+efor basamağı. Her iş kendi
+   * alanının seviyesinden başlar (intent cheap kalır, codegen tırmanır); başarısızlıkta o domain tırmanır;
+   * iterasyonlar arası TAŞINIR (monotonik, asla düşmez). Domain yoksa firstRung (cheap·low).
    */
-  escalation_rung?: import("./escalation.js").Rung;
+  escalation_rungs?: Record<string, import("./escalation.js").Rung>;
   /**
    * Bu iterasyonun başlangıç timestamp'i (Date.now). Boot-resume'da hangi
    * audit event'lerinin BU iterasyona ait olduğunu belirler — audit tail'i

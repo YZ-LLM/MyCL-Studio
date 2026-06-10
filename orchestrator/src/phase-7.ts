@@ -210,17 +210,15 @@ export class Phase7Controller {
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
-
-    const role = this.spec.model_role!;
-    const escMe = escalatedModelEffort(this.state, this.config, "design");
+    const escMe = escalatedModelEffort(this.state, this.config, "db-design");
     this.base = createProductionSchemaBackend({
       tag: "phase-7",
       phaseId: 7,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
-      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
+      modelId: escMe.modelId,
+      effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage: "Begin Phase 7: design the database schema and migration plan.",
       tools: [TOOL_WRITE_DB, TOOL_APPROVAL],

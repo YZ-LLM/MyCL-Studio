@@ -206,17 +206,15 @@ export class Phase3Controller {
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
-
-    const role = this.spec.model_role!;
-    const escMe = escalatedModelEffort(this.state, this.config, "spec");
+    const escMe = escalatedModelEffort(this.state, this.config, "briefing");
     this.base = createProductionSchemaBackend({
       tag: "phase-3",
       phaseId: 3,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
-      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
+      modelId: escMe.modelId,
+      effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage: "Begin Phase 3: write the engineering brief.",
       tools: [TOOL_WRITE_BRIEF, TOOL_APPROVAL],

@@ -203,16 +203,14 @@ export class Phase2Controller {
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
-
-    const role = this.spec.model_role!;
-    const escMe = escalatedModelEffort(this.state, this.config, "review");
+    const escMe = escalatedModelEffort(this.state, this.config, "audit");
     this.base = createQaAskqBackend({
       tag: "phase-2",
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
-      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
+      modelId: escMe.modelId,
+      effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage:
         "Begin Phase 2 Precision Audit. Walk through the 8 dimensions; COMPLIANCE is last.",
