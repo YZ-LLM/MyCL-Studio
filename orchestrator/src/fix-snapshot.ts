@@ -38,7 +38,7 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
   // 1. Git tercih edilir (ucuz, temiz ağaçta).
   const cp1 = await createCheckpoint(projectRoot).catch(() => ({ ok: false as const, ref: undefined }));
   if (cp1.ok && "ref" in cp1 && cp1.ref) {
-    emitChatMessage("system", "📌 Snapshot alındı (git) — bu otomatik düzeltme gerekirse geri alınabilir.");
+    emitChatMessage("system", "📌 Snapshot alındı (git) — bu adımda silinen/değişen dosyalar gerekirse geri alınabilir.");
     return { method: "git", ref: cp1.ref };
   }
   // 2. Git yok/kirli → kaynak ağacını yedekle. Hedef proje DIŞINDA (~/.mycl/backups) — `fs.cp` bir dizini kendi
@@ -57,7 +57,7 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
     });
     emitChatMessage(
       "system",
-      "📌 Snapshot alındı (`~/.mycl/backups`) — git yok ama kaynak yedeklendi; yanlış düzeltmede oradan geri alınır.",
+      "📌 Snapshot alındı (`~/.mycl/backups`) — git yok ama kaynak yedeklendi; silinen/yanlış değişen dosya oradan geri alınır.",
     );
     return { method: "copy", dir };
   } catch (e) {

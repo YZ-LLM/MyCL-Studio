@@ -21,6 +21,7 @@ import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
+import { snapshotBeforeAutofix } from "./fix-snapshot.js";
 import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
@@ -363,6 +364,9 @@ export class Phase8Controller {
       this.pendingMigrationNote +
       this.pendingFixNote;
 
+    // Ümit 2026-06-10: "silme kararı → önce yedek." TDD codegen ajanı dosya silebilir/üstüne yazabilir. Fix modu
+    // zaten debug-fix yolunda snapshot'landı; normal TDD'de burada snapshot al → silinen geri alınabilir.
+    if (!this.isFixMode) await snapshotBeforeAutofix(this.state.project_root, Date.now());
     // "Kaliteli hız" (Ümit): codegen KALİTE-kritik → strong tier (güçlü model) SEÇİLİR + chat'te gösterilir.
     // Hafif fazlar zaten sonnet (hızlı, config). config.model_tiers.strong'dan çözülür; geçersiz → güvenli fallback.
     const modelChoice = selectModelForTask("codegen", this.config.selected_models.model_tiers);

@@ -6,6 +6,15 @@
 
 ## 2026-06-10
 
+- **feat(silme öncesi MUTLAKA yedek — codegen fazları da snapshot'lı) [Ümit: "herhangi bir şeyi silme kararı
+  verdiyse yedeğini almadan silmesin; ilerde sorun olursa geri yükler"]:** Codegen ajanı dosya silebilir/üstüne
+  yazabilir (supersession: eski sayfa/route'u kaldır). CLI ajanının tek tek `rm`'lerini MyCL araya giremediği için
+  en sağlam garanti: **silme/değişiklik yapabilen her faz çalışmadan ÖNCE snapshot.** Faz 5 (UI) + Faz 8 (TDD)
+  codegen'den ÖNCE `snapshotBeforeAutofix` çağırıyor (tweak/fix modu zaten debug-fix yolunda snapshot'landı → çift
+  yok). Böylece gate-autofix + debug-fix + tüm codegen fazları snapshot'lı → ajan ne silerse silsin git checkpoint
+  veya `~/.mycl/backups`'tan geri alınabilir. Snapshot mesajı nötrleştirildi ("silinen/değişen dosyalar geri
+  alınabilir").
+
 - **feat(oto-cevap güvenli otonomi: snapshot + gate-integrity + darboğazda durmama) [Ümit: "ekle; oto-cevap
   işaretliyse durmasın, kendisi darboğazlarda devam etsin"]:** Oto-cevap AÇIKKEN MyCL artık darboğazları otonom
   geçer, güvenlik ağıyla:

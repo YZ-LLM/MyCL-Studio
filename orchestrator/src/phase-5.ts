@@ -13,6 +13,7 @@ import { appendAudit, readAuditLog, readAuditLogTail } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
 import { designPanelDecision, designSynthesizedInCurrentIteration } from "./design-panel-gate.js";
+import { snapshotBeforeAutofix } from "./fix-snapshot.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
@@ -272,6 +273,10 @@ export class Phase5Controller {
       ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. Backend paths are denied. Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`
       : `Begin Phase 5: build the UI. Backend paths are denied. Write UI files, run \`${installCmd}\` if needed, and run \`${buildCmd}\` to verify. Stop when build succeeds.${designInjection}`;
 
+    // Ümit 2026-06-10: "silme kararı verirse önce yedek al." Codegen ajanı dosya silebilir/üstüne yazabilir
+    // (supersession). Tweak modu zaten debug-fix yolunda snapshot'landı; normal codegen'de burada snapshot al →
+    // ajan ne silerse silsin geri alınabilir (git checkpoint / git yoksa ~/.mycl/backups).
+    if (!isTweakMode) await snapshotBeforeAutofix(this.state.project_root, Date.now());
     // Tasarım paneli/müzakere bittiyse banner'ı codegen'e geri al (staleness yok — her adım kendi etiketi).
     emitPhaseRunning(isTweakMode ? "UI rötuşu yazılıyor" : "UI kodu yazılıyor");
     this.base = createCodegenBackend({
