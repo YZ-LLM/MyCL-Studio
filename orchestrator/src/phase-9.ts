@@ -3,6 +3,7 @@
 // v15.7 (2026-05-27): Dosya header rot düzeltildi (eski "phase-10" yazıyordu).
 // Phase9Controller → Phase 9 = Risk review.
 
+import { escalatedModelEffort } from "./escalation.js";
 import { readFile } from "node:fs/promises";
 import { appendAudit } from "./audit.js";
 import {
@@ -162,12 +163,14 @@ export class Phase9Controller {
     }
 
     const role = this.spec.model_role!;
+    const escMe = escalatedModelEffort(this.state, this.config, "review");
     this.base = createQaAskqBackend({
       tag: "phase-9",
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
+      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
       apiKey: this.config.api_keys.main,
       initialUserMessage: "Begin Phase 9: Risk Review. Walk residual risks.",
       tools: [TOOL_ASK_RISK, TOOL_COMPLETE],

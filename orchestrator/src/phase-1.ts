@@ -4,6 +4,7 @@
 // qa-askq controller'ı çalıştır. Approval geldiğinde özet alanı state'in
 // `intent_summary` alanına gider (Phase 4 input'u olur).
 
+import { escalatedModelEffort } from "./escalation.js";
 import { readFile } from "node:fs/promises";
 import { appendAudit } from "./audit.js";
 import type { QaAskqBackend } from "./base/qa-askq-controller.js";
@@ -158,12 +159,15 @@ export class Phase1Controller {
     }
 
     const role = this.spec.model_role!;
+    // Escalation (Ümit 2026-06-11): model+efor merdivenden (escalation_rung set ise); değilse eski config[role].
+    const escMe = escalatedModelEffort(this.state, this.config, "intent");
     this.base = createQaAskqBackend({
       tag: "phase-1",
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
+      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
       apiKey: this.config.api_keys.main,
       initialUserMessage: "Begin Phase 1 intent clarification now.",
       tools: [TOOL_ASK_CLARIFYING, TOOL_APPROVE_INTENT],

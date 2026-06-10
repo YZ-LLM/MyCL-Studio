@@ -144,7 +144,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
     const sessionId = randomUUID();
     const systemPrompt = opts.systemPrompt + buildOutputInstruction(opts);
     // Oto-efor (Ümit): niyet/netleştirme hafif iş → high tavanı (max gereksiz düşünme).
-    const effort = selectEffortForTask("intent", opts.config.claude_code_flags.effort);
+    const effort = opts.effortOverride ?? selectEffortForTask("intent", opts.config.claude_code_flags.effort);
     // max_questions clarifying turu + onay + birkaç resume/nudge için tampon.
     const maxTurns = askq.max_questions + 4;
 

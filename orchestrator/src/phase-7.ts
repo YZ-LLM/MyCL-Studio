@@ -3,6 +3,7 @@
 // v15.7 (2026-05-27): Dosya header rot düzeltildi (eski "phase-8" yazıyordu).
 // Phase7Controller → Phase 7 = DB tasarımı.
 
+import { escalatedModelEffort } from "./escalation.js";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { appendAudit, appendDecision } from "./audit.js";
 import type { ProductionBackend } from "./base/production-schema-controller.js";
@@ -211,13 +212,15 @@ export class Phase7Controller {
     }
 
     const role = this.spec.model_role!;
+    const escMe = escalatedModelEffort(this.state, this.config, "design");
     this.base = createProductionSchemaBackend({
       tag: "phase-7",
       phaseId: 7,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
+      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
       apiKey: this.config.api_keys.main,
       initialUserMessage: "Begin Phase 7: design the database schema and migration plan.",
       tools: [TOOL_WRITE_DB, TOOL_APPROVAL],

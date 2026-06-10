@@ -3,6 +3,7 @@
 // Faz 2'nin enriched intent_summary'sini alır, tag/stakeholder/constraint
 // yapısına dökerek `.mycl/brief.md` üretir ve onaylatır.
 
+import { escalatedModelEffort } from "./escalation.js";
 import { readFile } from "node:fs/promises";
 import { appendAudit, appendDecision } from "./audit.js";
 import type { ProductionBackend } from "./base/production-schema-controller.js";
@@ -207,13 +208,15 @@ export class Phase3Controller {
     }
 
     const role = this.spec.model_role!;
+    const escMe = escalatedModelEffort(this.state, this.config, "spec");
     this.base = createProductionSchemaBackend({
       tag: "phase-3",
       phaseId: 3,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
+      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
       apiKey: this.config.api_keys.main,
       initialUserMessage: "Begin Phase 3: write the engineering brief.",
       tools: [TOOL_WRITE_BRIEF, TOOL_APPROVAL],

@@ -4,6 +4,7 @@
 // enriched_summary üretir. enriched_summary state.intent_summary üzerine yazılır
 // (Phase 3/4 bunu kullanır).
 
+import { escalatedModelEffort } from "./escalation.js";
 import { readFile } from "node:fs/promises";
 import { appendAudit } from "./audit.js";
 import type { QaAskqBackend } from "./base/qa-askq-controller.js";
@@ -204,12 +205,14 @@ export class Phase2Controller {
     }
 
     const role = this.spec.model_role!;
+    const escMe = escalatedModelEffort(this.state, this.config, "review");
     this.base = createQaAskqBackend({
       tag: "phase-2",
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
+      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
       apiKey: this.config.api_keys.main,
       initialUserMessage:
         "Begin Phase 2 Precision Audit. Walk through the 8 dimensions; COMPLIANCE is last.",

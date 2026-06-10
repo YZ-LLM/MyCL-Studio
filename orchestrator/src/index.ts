@@ -381,8 +381,12 @@ const autoSolveSig = new Map<number, { sig: string; count: number }>();
 let _pendingModelUpgrade: { askqId: string; model: string } | null = null;
 const _declinedModelUpgrades = new Set<string>();
 
-// Escalation merdivenine BAĞLI fazlar (model+eforu escalation_rung'tan çözenler). Yeni faz wire edildikçe ekle.
-const ESCALATION_PHASES = new Set<PhaseId>([4 as PhaseId, 8 as PhaseId]);
+// Escalation CLIMB-RETRY'ye uygun fazlar — ana loop İÇİNDE koşanlar (failPhase → advanceToNextPhase(n-1) ile aynı
+// fazı doğru re-run eder). Faz 1 (intent) loop DIŞINDA koşar → climb-retry path'i kırık → hariç (yine de model'i
+// merdivenden cheap'ten başlar, sadece climb-retry yapmaz). Faz 6 ayrı model kullanmaz; 0 debug; 10-17 mekanik.
+const ESCALATION_PHASES = new Set<PhaseId>(
+  [2, 3, 4, 5, 7, 8, 9].map((n) => n as PhaseId),
+);
 
 /** Hata imzası: faz + lastFailReason'ın ilk ~160 char'ı (sayılar normalize → port/pid/ts gürültüsü eşleşmeyi bozmasın). */
 function failSignature(n: PhaseId, ctrl?: FailReasonHolder): string {
@@ -940,6 +944,7 @@ async function restartPhase1WithIntent(intentText: string): Promise<void> {
   });
   const result = await runController(p1, () => p1.run(intentText), "Niyet toplanıyor");
   if (result === "complete") {
+    await recordRungOutcome(1, true);
     emitChatMessage("system", "Faz 1 tamamlandı — niyet onaylandı.");
     const summary = p1.approvedSummary ?? runtime.state.intent_summary;
     runtime.state = {
@@ -2026,6 +2031,7 @@ async function executeDispatchedIntent(
   const result = await runController(p1, () => p1.run(text), "Niyet toplanıyor");
   log.info("orchestrator", "phase 1 end", { result });
   if (result === "complete") {
+    await recordRungOutcome(1, true);
     emitChatMessage("system", "Faz 1 tamamlandı — niyet onaylandı.");
     // Intent summary'yi state'e kaydet — Phase 4 input olarak okuyacak.
     // _raw alanı Phase 1 ham özetini saklar; Faz 2 enriched üretip
@@ -2278,6 +2284,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
           "system",
           "Faz 2 tamamlandı — niyet 8 boyutta zenginleştirildi.",
         );
+        await recordRungOutcome(2, true);
         cur = 2;
         continue;
       } else if (r === "abandoned") {
@@ -2377,6 +2384,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
           });
           return;
         }
+        await recordRungOutcome(3, true);
         cur = 3;
         continue;
       } else {
@@ -2437,6 +2445,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
             ? `Faz 5 atlandı — proje tipi UI gerektirmiyor (${state.project_type ?? "?"}).`
             : "Faz 5 atlandı — spec'te UI yok.",
         );
+        await recordRungOutcome(5, true);
         cur = 5;
         continue;
       }
@@ -2449,6 +2458,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         runtime.state = state;
         await saveState(state);
         emitChatMessage("system", "Faz 5 tamamlandı — UI hazır.");
+        await recordRungOutcome(5, true);
         cur = 5;
         continue;
       } else {
@@ -2549,6 +2559,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
             ? "Faz 7 atlandı — proje veritabanı kullanmıyor."
             : "Faz 7 atlandı — spec'te veritabanı yok.",
         );
+        await recordRungOutcome(7, true);
         cur = 7;
         continue;
       }
@@ -2557,6 +2568,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       log.info("orchestrator", "phase 7 end", { result: r });
       if (r === "complete") {
         emitChatMessage("system", "Faz 7 tamamlandı — DB tasarımı onaylandı.");
+        await recordRungOutcome(7, true);
         cur = 7;
         continue;
       } else {
@@ -2593,6 +2605,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       const r = await runController(p9, () => p9.run(), "Risk inceleniyor");
       log.info("orchestrator", "phase 9 end", { result: r });
       if (r === "complete") {
+        await recordRungOutcome(9, true);
         emitChatMessage("system", "Faz 9 tamamlandı — risk incelemesi onaylandı.");
         cur = 9;
         continue;

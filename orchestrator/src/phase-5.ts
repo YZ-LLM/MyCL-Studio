@@ -14,6 +14,7 @@ import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js"
 import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
 import { designPanelDecision, designSynthesizedInCurrentIteration } from "./design-panel-gate.js";
 import { snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
+import { escalatedModelEffort } from "./escalation.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
@@ -101,6 +102,7 @@ export class Phase5Controller {
     }
 
     const role = this.spec.model_role!;
+    const escMe = escalatedModelEffort(this.state, this.config, "codegen");
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
       // Backend yolları registry'deki spec.denied_paths'ten gelir — proje
@@ -285,7 +287,8 @@ export class Phase5Controller {
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: this.config.selected_models[role],
+      modelId: this.state.escalation_rung ? escMe.modelId : this.config.selected_models[role],
+      effortOverride: this.state.escalation_rung ? escMe.effort : undefined,
       apiKey: this.config.api_keys.main,
       initialUserMessage,
       tools: TOOLS_CODEGEN as unknown as ToolDef[],

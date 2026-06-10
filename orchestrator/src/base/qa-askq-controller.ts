@@ -29,6 +29,8 @@ export interface QaAskqRunOpts {
   config: MyclConfig;
   systemPrompt: string;
   modelId: string;
+  /** Escalation efor override (Ümit 2026-06-11): set ise config eforu YERİNE bu. */
+  effortOverride?: string;
   apiKey: string;
   initialUserMessage: string;
   /** Faza özgü tool definition'ları — askq + approval tool'ları. */
