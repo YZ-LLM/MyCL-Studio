@@ -74,6 +74,7 @@ import {
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
 import { computeTiersFromModels } from "./model-catalog.js";
+import { buildStrengthReportTR } from "./model-strength-report.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
@@ -4213,6 +4214,12 @@ ipcRouter.register("save_settings", async (data: unknown) => {
 });
 ipcRouter.register("read_selected_models", async () => {
   await handleReadSelectedModels();
+});
+// Model Güç Raporu (Ümit 2026-06-11): composer'daki buton → escalation gözlemlerinden "hangi model hangi alanda
+// iyi" raporunu üret + popup'a yolla.
+ipcRouter.register("get_model_strength_report", async () => {
+  const text = await buildStrengthReportTR();
+  emit("model_strength_report", { text });
 });
 // v15.7 (2026-05-25): Feature flags IPC
 ipcRouter.register("save_features", async (data: unknown) => {

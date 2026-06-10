@@ -175,6 +175,8 @@ interface Props {
   /** WP4 DAST: 🛡️ Güvenlik Taraması butonu — backend açıklama+onay askq'ı açar
    *  (buton DOĞRUDAN taramaz). Yalnız çalışan localhost app'ine. */
   onDastClick?: () => void;
+  /** 2026-06-11: 📊 Model Raporu butonu — escalation model-güç raporunu popup'ta açar. */
+  onModelReportClick?: () => void;
   /** WP4 DAST: tarama sürüyor mu — buton spinner + disabled (çift-tetik koruması). */
   dastRunning?: boolean;
 }
@@ -201,6 +203,7 @@ export function ChatPanel({
   onGuideClick,
   guideAvailable,
   onDastClick,
+  onModelReportClick,
   dastRunning,
 }: Props) {
   const [draft, setDraft] = useState("");
@@ -483,6 +486,19 @@ export function ChatPanel({
           >
             <span className="intent-pill-emoji" aria-hidden>📖</span>
             <span className="intent-pill-label">Kılavuz</span>
+          </button>
+        )}
+        {/* 2026-06-11 (Ümit): 📊 Model Raporu — escalation merdiveninde hangi modelin hangi alanda
+            iyi olduğu raporunu popup'ta açar. */}
+        {onModelReportClick && (
+          <button
+            type="button"
+            className="intent-pill"
+            onClick={onModelReportClick}
+            title="Hangi model hangi işte iyi — escalation gözlemleri raporu"
+          >
+            <span className="intent-pill-emoji" aria-hidden>📊</span>
+            <span className="intent-pill-label">Model Raporu</span>
           </button>
         )}
         {/* v15.7 (2026-05-24): "İş Ekle" buton — composer'daki metni proje

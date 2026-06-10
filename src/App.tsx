@@ -598,6 +598,10 @@ function App() {
   // v15.11: UI kullanma kılavuzu (Kılavuz sekmesi) — içerik user_guide event'inden.
   const [userGuide, setUserGuide] = useState("");
   const [guideModalOpen, setGuideModalOpen] = useState(false);
+  // 2026-06-11 (Ümit): Model Güç Raporu popup — composer'daki "📊 Model Raporu" butonu açar; içerik backend
+  // model_strength_report event'inden gelir.
+  const [modelReportOpen, setModelReportOpen] = useState(false);
+  const [modelReportText, setModelReportText] = useState("");
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
   const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
@@ -688,6 +692,10 @@ function App() {
         };
         if (ev.data.which === "translator") setModelsTranslator(update);
         else setModelsMain(update);
+      } else if (ev.kind === "model_strength_report") {
+        // 2026-06-11: backend rapor metnini yolladı → popup'ı aç.
+        setModelReportText(ev.data.text ?? "");
+        setModelReportOpen(true);
       } else if (ev.kind === "selected_models") {
         setCurrentSelected(ev.data.selected ?? null);
         if (ev.data.effort) setCurrentEffort(ev.data.effort);
@@ -1240,6 +1248,7 @@ function App() {
           onAutoAnswerToggle={handleAutoAnswerToggle}
           onGuideClick={() => setGuideModalOpen(true)}
           guideAvailable={userGuide.trim().length > 0}
+          onModelReportClick={() => void orch.send({ kind: "get_model_strength_report" })}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
         />
@@ -1273,6 +1282,12 @@ function App() {
         open={guideModalOpen}
         content={userGuide}
         onClose={() => setGuideModalOpen(false)}
+      />
+      {/* 2026-06-11 (Ümit): Model Güç Raporu popup — GuideModal markdown gösterimini yeniden kullanır. */}
+      <GuideModal
+        open={modelReportOpen}
+        content={modelReportText}
+        onClose={() => setModelReportOpen(false)}
       />
       <TaskQueuePanel
         open={taskQueueOpen}
