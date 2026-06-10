@@ -6,6 +6,20 @@
 
 ## 2026-06-10
 
+- **fix(her faz-fail araştırılıp çözülür + MyCL kendi bozuk aracını proje hatası saymaz) [Ümit logları: "bi faz
+  hata aldığında sebebini araştırıp çözüm üretmeli"; csp/headers/web-sec hepsi "Cannot find module .../MyCL Studio.app"
+  ile düşüp MyCL'i sqlite3-v6 (kırıcı!) yükseltmeye itmiş]:**
+  (A) `mechanical-runner.isMyclToolBroken`: MyCL'in KENDİ node aracı (csp-check/headers-check) bundle'da kendi
+  modülünü bulamayınca (module-not-found + yol app-bundle'ı işaret eder) → PROJE hatası DEĞİL → `skipped` + dürüst
+  mesaj ("kendi paketleme bug'ım, güvenlik açığı değil"). Projenin KENDİ 'Cannot find module'ı (bare paket/proje
+  yolu) bundle işaretçisi taşımaz → gerçek fail kalır. Ana scan + extra_scans ikisinde de. → sqlite3-v6 felaketi
+  gibi yanlış-fix'in kaynağı kapandı.
+  (B) Mekanik faz gerçek-fail (lint/simplify/...) artık "soft_complete" diye SESSİZCE geçilmiyor — güvenlik (Faz 13)
+  gibi `failPhase` investigate+solve akışına gider: gerçek stderr ile analiz → en iyi çözüm otomatik uygulanır.
+  İmza-bazlı döngü-kıran + non-blocking'de "kuyruğa al, devam et" seçeneği → takılma yok. +4 test (tool-broken
+  ayrımı). Birlikte: artık her faz hatası (geçerli olanlar) araştırılır + çözülür, MyCL-kendi-bug'ları projeye
+  bulaşmaz.
+
 - **fix(KÖR TEŞHİS kökü: dev-server çöküşünün GERÇEK hatasını yakala+göster) [Ümit logları: "bu kadar kolay bişeyi
   çözemedi, node_modules silmeyi düşündü"]:** Log analizi: dev server 3 denemede düşüyordu, ajan port/vite/node_modules
   PROJE fix'lerini DÖNGÜDE deniyordu — ama hiçbiri sonucu değiştirmiyordu (kök neden E2BIG spawn-ortamı). Sebep:

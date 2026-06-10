@@ -145,6 +145,21 @@ export function isMissingCommand(result: {
   );
 }
 
+/**
+ * 2026-06-10 (Ümit logları): MyCL'in KENDİ node aracı (csp-check.mjs / headers-check.mjs) bundle'da
+ * kendi modülünü bulamayınca "Cannot find module '/Applications/MyCL Studio.app/...'" ile çöküyordu →
+ * MyCL bunu PROJE güvenlik hatası sanıp sqlite3'ü v6'ya (kırıcı!) yükseltmeye çalıştı. Bu MyCL'in
+ * paketleme bug'ı, projenin sorunu DEĞİL. Tespit: modül-çözüm hatası + yolun MyCL kurulumunu (app
+ * bundle / _up_ / Applications) işaret etmesi. SAF. Projenin KENDİ "Cannot find module"'ı (bare paket /
+ * proje yolu) bundle işaretçisi taşımaz → yanlışlıkla skip edilmez (gerçek proje hatası fail kalır).
+ */
+export function isMyclToolBroken(result: { code: number; stdout: string; stderr: string }): boolean {
+  const s = `${result.stderr}\n${result.stdout}`;
+  const moduleNotFound = /Cannot find module/i.test(s) || /ERR_MODULE_NOT_FOUND/.test(s);
+  const pointsAtMyclInstall = /(MyCL Studio\.app|\.app\/Contents|[/\\]_up_[/\\]|[/\\]Applications[/\\])/.test(s);
+  return moduleNotFound && pointsAtMyclInstall;
+}
+
 export class MechanicalRunnerBase {
   private aborted = false;
 
@@ -281,6 +296,23 @@ export class MechanicalRunnerBase {
       return "skipped";
     }
 
+    // MyCL'in KENDİ aracı bozuk (bundle path module-not-found) → PROJE hatası DEĞİL → skip + dürüst rapor.
+    // Proje koduna/bağımlılığına DOKUNMA (sqlite3-v6 felaketi buradan çıktı). Güvenlik açığı anlamına gelmez.
+    if (isMyclToolBroken(result)) {
+      await appendAudit(opts.state.project_root, {
+        ts: Date.now(),
+        phase: opts.phaseId,
+        event: `${extra.name}-skipped`,
+        caller: "mycl-orchestrator",
+        detail: `mycl_tool_broken code=${result.code} cmd="${extra.cmd}"`,
+      });
+      emitChatMessage(
+        "system",
+        `⏭ ${extra.name} atlandı — MyCL'in kendi tarama aracı çalışmadı (paketleme bug'ım, proje sorunu DEĞİL; güvenlik açığı anlamına GELMEZ). Bunu kendi tarafımda düzelteceğim.`,
+      );
+      return "skipped";
+    }
+
     // Güvenlik-baseline Unit 3: "araç düzgün çalışmadı" exit kodları (örn. semgrep
     // fatal/bozuk-kural=2, gitleaks eski-sürüm bilinmeyen-komut=126) → BULGU değil →
     // fail değil SKIP. Bozuk custom kural / uyumsuz araç sürümü projeyi yanlış-
@@ -413,6 +445,22 @@ export class MechanicalRunnerBase {
           `⏭ ${this.label} atlandı — bu proje için ilgili komut tanımlı değil.`,
         );
         return { kind: "skipped", reason: "missing_command" };
+      }
+      // MyCL'in kendi aracı bozuk (bundle module-not-found) → proje hatası DEĞİL → skip.
+      if (isMyclToolBroken(scanResult)) {
+        log.warn(opts.tag, "mycl tool broken — skipping (own packaging bug)", { cmd: scanCmd });
+        await appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.phaseId,
+          event: `phase-${opts.phaseId}-skipped`,
+          caller: "mycl-orchestrator",
+          detail: `mycl_tool_broken cmd="${scanCmd}"`,
+        });
+        emitChatMessage(
+          "system",
+          `⏭ ${this.label} atlandı — MyCL'in kendi aracı çalışmadı (paketleme bug'ım, proje sorunu DEĞİL).`,
+        );
+        return { kind: "skipped", reason: "mycl_tool_broken" };
       }
       if (scanResult.code === 0) {
         await appendAudit(opts.state.project_root, {

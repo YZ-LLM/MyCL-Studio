@@ -2712,18 +2712,18 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         runtime.pendingErrorAnalysis = pending;
         return;
       }
-      // Gerçek başarısızlık (örn. gerçek lint hatası) — akışı KIRMA. Her faz
-      // ziyaret edilir; başarısızlık yumuşak uyarı olarak işlenir, akış sonu
-      // özeti başarısızlıkları toplar. Mesajı runner zaten Türkçe yazdı.
-      await appendAuditModule(state.project_root, {
-        ts: Date.now(),
-        phase: next,
-        event: `phase-${next}-complete`,
-        caller: "mycl-orchestrator",
-        detail: "soft_complete_after_fail",
-      });
-      cur = next;
-      continue;
+      // 2026-06-10 (Ümit: "bi faz hata aldığında ya da başaramadığında sebebini araştırıp çözüm üretmeli"):
+      // Eskiden gerçek mekanik fail (lint/simplify/...) sessizce "soft_complete" yazılıp geçiliyordu — araştırma
+      // YOK. Artık güvenlik (Faz 13) gibi investigate+solve akışına gider: failPhase → gerçek stderr ile analiz →
+      // en iyi çözümü otomatik uygula. Döngü-kıran (aynı hata 2× → kullanıcıya sor; non-blocking'de "kuyruğa al,
+      // devam et" seçeneği var → takılma yok). MyCL'in KENDİ bozuk aracı zaten yukarıda skip edildi (proje fix'i yok).
+      const mechHolder: FailReasonHolder = {
+        lastFailReason:
+          `Faz ${next} (${phaseLabelTR(next, spec)}) başarısız.` +
+          (outcome.stderr ? `\n\nThe actual error output (diagnose THIS):\n${outcome.stderr.slice(0, 1500)}` : ""),
+      };
+      await failPhase(next, mechHolder);
+      return;
     }
 
     // Bilinmeyen tip — henüz controller yok.
