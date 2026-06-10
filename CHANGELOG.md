@@ -4,6 +4,22 @@
 > Amaç: eski kararları/kuralları unutup bozmamak; bir işi değiştirmeden önce buraya bak.
 > Eski bir işi değiştirmek/silmek gerekiyorsa ÖNCE Ümit'e sor (kural, 2026-06-03).
 
+## 2026-06-10
+
+- **feat(faz-hatası OTO-ÇÖZÜM + E2BIG öz-iyileştirme) [Ümit ekranı: Faz 5 hatası 00:38'den beri askıda; "kolayca
+  çözebileceği şeyi bile bana soruyor"]:** Üç kök neden, üç düzeltme:
+  (1) **Faz-fail artık sormuyor** — error-analysis JSON'una `best_index` eklendi; `analyzeAndAskError(autoResolve)`
+  askq AÇMADAN en iyi çözümü döndürür, `failPhase` aynı routing'le (handleAskqAnswer → debug akışı → D2 oto-fix)
+  otomatik uygular. Döngü koruması: aynı faza 45 dk'da en çok 2 otomatik deneme, sonra görünür notla askq'ya düşer.
+  Güvenlik override'ı ("Kabul et, devam et") ASLA otomatik seçilmez. F1'in "final kararı kullanıcı verir" tasarımı
+  Ümit talimatıyla TERSİNE DÖNDÜ. (Oto-cevap toggle'ı bu askq'yu zaten kapsamıyordu — 20 saat askıda kalmasının
+  nedeni; artık askq default açılmadığından sorun kökünden kalktı.)
+  (2) **E2BIG öz-iyileştirme (`safe-env.ts`)** — ekrandaki kök neden: shell'de birikerek şişen değişken (uzayan PATH)
+  macOS ARG_MAX'i aşınca MyCL'in TÜM alt süreçleri (npm/vite/claude) çöküyordu, MyCL da kullanıcıya "terminali
+  yeniden başlat" diyordu. Artık `safeEnv` PATH'i kayıpsız dedupe eder + >100KB kalan değişkeni alt sürece AKTARMAZ
+  (bir kez görünür uyarı). `claudeSpawnEnv` PATH'i de dedupe. Dev server/claude/mekanik runner hepsi korunur.
+  (3) Testler: PATH dedupe + şişmiş-PATH küçülmesi + devasa-değişken düşürme + best_index parse/sınır.
+
 ## 2026-06-09
 
 - **feat(hata çözümü OTOMATİK — askq kaldırıldı) [Ümit: "hata çözümü kullanıcıya sormasın; kendisi en iyi çözümü

@@ -9,7 +9,16 @@
 // veya hassas anahtarlar (özellikle *_KEY/*_TOKEN/*_SECRET pattern'leri)
 // dışarda kalır.
 //
-// Bu modül başka hiçbir yan etki üretmez (saf fonksiyon).
+// E2BIG ÖZ-İYİLEŞTİRME (2026-06-10, ekran kanıtı — Faz 5 dev server hiç kalkamadı): kullanıcı
+// shell'inde birikerek şişen değişken (örn. her oturumda uzayan PATH) macOS ARG_MAX (~1MB
+// env+argv) sınırını aşınca MyCL'in başlattığı HER alt süreç (npm/vite/claude/git) E2BIG ile
+// çöker. MyCL bunu kullanıcıya "terminali yeniden başlat" diye SORMAZ, kendisi çözer:
+// (1) PATH kayıpsız dedupe (tekrar eden segmentler atılır); (2) yine de devasa kalan değişken
+// alt sürece AKTARILMAZ + BİR KEZ görünür uyarı (sessiz fallback yok).
+//
+// Bu modülün tek yan etkisi: boyut-budama uyarısı (process başına bir kez, chat'e).
+
+import { emitChatMessage } from "./ipc.js";
 
 const SAFE_ENV_KEYS = new Set([
   // Shell temelleri
@@ -88,5 +97,47 @@ export function safeEnv(): NodeJS.ProcessEnv {
       }
     }
   }
-  return out;
+  return trimOversizedEnv(out);
+}
+
+/** Tek değişken üst sınırı. Normal PATH/değişken <5KB; bunu aşan, birikme/bozulma işaretidir. */
+export const MAX_ENV_VAR_BYTES = 100_000;
+
+/** PATH'i kayıpsız küçült: tekrar eden segmentleri at (sıra korunur). SAF. */
+export function dedupePathValue(path: string): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const p of path.split(":")) {
+    if (p === "" || seen.has(p)) continue;
+    seen.add(p);
+    parts.push(p);
+  }
+  return parts.join(":");
+}
+
+let oversizedWarned = false; // process başına bir uyarı (spam yok)
+
+/**
+ * E2BIG öz-iyileştirme: PATH dedupe + MAX_ENV_VAR_BYTES'ı aşan değişkeni DÜŞÜR (görünür uyarı,
+ * bir kez). Objeyi yerinde düzenleyip döndürür. Export — test edilebilir (warn'sız saf yol için
+ * dedupePathValue kullan).
+ */
+export function trimOversizedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (typeof env.PATH === "string") env.PATH = dedupePathValue(env.PATH);
+  const dropped: string[] = [];
+  for (const key of Object.keys(env)) {
+    const v = env[key];
+    if (typeof v === "string" && Buffer.byteLength(v, "utf8") > MAX_ENV_VAR_BYTES) {
+      delete env[key];
+      dropped.push(key);
+    }
+  }
+  if (dropped.length > 0 && !oversizedWarned) {
+    oversizedWarned = true;
+    emitChatMessage(
+      "system",
+      `⚠️ Kabuk ortamında aşırı büyük değişken(ler) tespit edildi ve alt süreçlere AKTARILMADI: ${dropped.join(", ")} (>${Math.round(MAX_ENV_VAR_BYTES / 1000)}KB). Bu, "argument list too long" (E2BIG) çökmesini önler; kalıcı çözüm için kabuk başlangıç dosyanda (.zshrc/.zshenv) bu değişkenin neden büyüdüğüne bak.`,
+    );
+  }
+  return env;
 }

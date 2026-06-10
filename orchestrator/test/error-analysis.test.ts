@@ -209,3 +209,23 @@ describe("buildErrorAnalysisAskq ↔ parse entegrasyonu (saf zincir)", () => {
     expect(labels(options)).toEqual([OPT_QUEUE, "Çözüm 1", "Çözüm 2", OPT_REANALYZE]);
   });
 });
+
+// 2026-06-10 (Ümit: "hata çözümünü sorma, kendisi çözsün"): best_index parse + sınır.
+describe("parseErrorAnalysisBlock — best_index (oto-çözüm)", () => {
+  it("geçerli best_index aynen alınır", () => {
+    const a = parseErrorAnalysisBlock(
+      '{"kind":"error_analysis","blocking":true,"summary_tr":"özet","solutions_tr":["a","b","c"],"best_index":2}',
+    );
+    expect(a?.best_index).toBe(2);
+  });
+  it("eksik/aralık-dışı best_index → 0 (güvenli varsayılan)", () => {
+    const missing = parseErrorAnalysisBlock(
+      '{"kind":"error_analysis","blocking":false,"summary_tr":"özet","solutions_tr":["a","b"]}',
+    );
+    expect(missing?.best_index).toBe(0);
+    const out = parseErrorAnalysisBlock(
+      '{"kind":"error_analysis","blocking":false,"summary_tr":"özet","solutions_tr":["a","b"],"best_index":9}',
+    );
+    expect(out?.best_index).toBe(0);
+  });
+});

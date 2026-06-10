@@ -40,7 +40,7 @@ import type { CodegenBackend } from "./backend.js";
 import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "../ipc.js";
 import { log } from "../logger.js";
 import { globalConfigDir } from "../paths.js";
-import { safeEnv } from "../safe-env.js";
+import { dedupePathValue, safeEnv } from "../safe-env.js";
 
 /** Tehlikeli bash → CLI --disallowedTools (bash-guard'ın CLI karşılığı, kısmi). */
 const DISALLOWED_TOOLS = [
@@ -134,7 +134,8 @@ export function claudeSpawnEnv(): NodeJS.ProcessEnv {
   const prev = base.PATH ?? "";
   return {
     ...base,
-    PATH: [...extras, prev].filter(Boolean).join(":"),
+    // dedupe: extras zaten PATH'te olabilir; E2BIG öz-iyileştirmesiyle tutarlı (safe-env).
+    PATH: dedupePathValue([...extras, prev].filter(Boolean).join(":")),
     LC_ALL: "C",
     // v15.14 (macOS izin pencereleri): claude'un IDE/tarayıcı oto-bağlanma taraması
     // (DevToolsActivePort: Chrome/Brave/Edge + kurulu-uygulama enumerasyonu) macOS TCC'de

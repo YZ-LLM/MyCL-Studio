@@ -360,17 +360,39 @@ function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): stri
  * analiz null dönerse askq açılmamıştır, branch hiç tetiklenmez). Çağıran kalıbı
  * korur: loop içinde `await failPhase(n, pX); return;`.
  */
+// 2026-06-10 (Ümit: "hata çözümünü sorma, kendisi çözsün") — faz-fail oto-çözüm döngü koruması:
+// aynı faz için 45 dk içinde en çok 2 otomatik deneme; sonra (sonsuz fail→fix→fail döngüsünü
+// kırmak için) seçenekler kullanıcıya sorulur. Pencere dolunca sayaç doğal sıfırlanır.
+const AUTO_SOLVE_MAX = 2;
+const AUTO_SOLVE_WINDOW_MS = 45 * 60_000;
+const autoSolveAttempts = new Map<number, { count: number; ts: number }>();
+
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   const message = phaseFailMessage(n, ctrl);
   emitChatMessage("error", message);
   emitPhaseChanged(n, n, "error");
   if (!runtime.state || !runtime.config) return;
   const errCtx: ErrorContext = { phase: n, message, detail: ctrl?.lastFailReason };
-  runtime.pendingErrorAnalysis = await analyzeAndAskError(
-    runtime.state,
-    runtime.config,
-    errCtx,
-  ).catch(() => null);
+  const rec = autoSolveAttempts.get(n);
+  const recent = rec && Date.now() - rec.ts < AUTO_SOLVE_WINDOW_MS ? rec.count : 0;
+  const autoResolve = recent < AUTO_SOLVE_MAX;
+  if (!autoResolve) {
+    emitChatMessage(
+      "system",
+      `ℹ️ Faz ${n} için ${AUTO_SOLVE_MAX} otomatik çözüm denemesi sonuç vermedi — bu kez seçenekleri sana soruyorum.`,
+    );
+  }
+  runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
+    autoResolve,
+  }).catch(() => null);
+  const pendingAuto = runtime.pendingErrorAnalysis;
+  if (pendingAuto?.auto_selected_solution) {
+    autoSolveAttempts.set(n, { count: recent + 1, ts: Date.now() });
+    // Aynı routing'i (askq-cevap dalı) otomatik sür — soru kartı hiç açılmadı.
+    await handleAskqAnswer(pendingAuto.id, pendingAuto.auto_selected_solution).catch((e: unknown) =>
+      log.error("orchestrator", "auto-solve routing failed", e),
+    );
+  }
 }
 
 /** Config'i yüklemeyi dener, durumu UI'a yollar. */

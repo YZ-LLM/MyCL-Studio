@@ -87,3 +87,28 @@ describe("safeEnv", () => {
     expect(env.PATH).toBe("");
   });
 });
+
+// E2BIG öz-iyileştirme (2026-06-10): şişmiş PATH dedupe + devasa değişken düşürme.
+describe("E2BIG öz-iyileştirme (dedupePathValue + trimOversizedEnv)", () => {
+  it("PATH'teki tekrar eden segmentler kayıpsız atılır (sıra korunur)", async () => {
+    const { dedupePathValue } = await import("../src/safe-env.js");
+    expect(dedupePathValue("/a:/b:/a:/c:/b:/a")).toBe("/a:/b:/c");
+    expect(dedupePathValue("")).toBe("");
+  });
+
+  it("birikmiş (şişmiş) PATH safeEnv'den küçülerek çıkar — E2BIG önlenir", () => {
+    // Her oturumda uzayan PATH senaryosu: aynı 3 dizin binlerce kez.
+    process.env.PATH = Array(5000).fill("/usr/bin:/opt/x:/Users/u/.local/bin").join(":");
+    const out = safeEnv();
+    expect(out.PATH).toBe("/usr/bin:/opt/x:/Users/u/.local/bin");
+  });
+
+  it("dedupe'a rağmen devasa kalan değişken alt sürece AKTARILMAZ", async () => {
+    const { MAX_ENV_VAR_BYTES } = await import("../src/safe-env.js");
+    process.env.PATH = "/usr/bin";
+    process.env.NODE_OPTIONS = "x".repeat(MAX_ENV_VAR_BYTES + 1); // allowlist'te ama devasa
+    const out = safeEnv();
+    expect(out.PATH).toBe("/usr/bin");
+    expect(out.NODE_OPTIONS).toBeUndefined();
+  });
+});

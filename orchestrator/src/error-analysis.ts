@@ -1,7 +1,9 @@
-// error-analysis — F1: bir HATA olunca MyCL analiz etsin, kullanıcıya askq +
-// (OS bildirimi mevcut askq yolundan otomatik) göndersin, FINAL kararı kullanıcı
-// versin. Faz-fail bir helper'dan (failPhase, index.ts) tetiklenir; analiz
-// NON-BLOCKING — askq açar, ana akışı kilitlemez.
+// error-analysis — F1: bir HATA olunca MyCL analiz eder. 2026-06-10 (Ümit: "kolayca
+// çözebileceği şeyi bile soruyor — kendisi en iyi çözümü bulup çözsün"): varsayılan artık
+// OTO-ÇÖZÜM — ajan best_index ile en iyi çözümü seçer, failPhase sormadan uygular (kullanıcı
+// kararı + alternatifleri chat'te görür). askq yalnız fallback: çözüm üretilemedi / oto-deneme
+// limiti (failPhase guard) doldu / güvenlik override (Kabul et, devam et — hep insan kararı).
+// Faz-fail bir helper'dan (failPhase, index.ts) tetiklenir.
 //
 // Backend: ORKESTRATÖR rolü (ana ajana/codegen'e GİTMEZ — kullanıcı kuralı).
 // living-docs.ts deseni birebir: abonelik/CLI modunda runClaudeCli (Read/Grep/
@@ -47,6 +49,8 @@ export interface ErrorAnalysis {
   blocking: boolean;
   summary_tr: string;
   solutions_tr: string[];
+  /** Ajanın UYGULAYACAĞI çözümün 0-tabanlı index'i (doğruluk önce, sonra en düşük risk). */
+  best_index: number;
 }
 
 /**
@@ -67,6 +71,11 @@ export interface PendingErrorAnalysis {
    * undefined → accept-continue seçeneği sunulmadı (normal hata akışı).
    */
   acceptContinuePhase?: number;
+  /**
+   * 2026-06-10 (Ümit: "hata çözümünü sorma, kendisi çözsün"): set ise askq AÇILMAMIŞTIR;
+   * failPhase bu çözümü handleAskqAnswer ile otomatik route eder (aynı yol, soru yok).
+   */
+  auto_selected_solution?: string;
 }
 
 // Sabit seçenek etiketleri (TR — orkestrator çıktısı UI'da gösterilir).
@@ -142,7 +151,12 @@ export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
   const solutions_tr = Array.isArray(rawSolutions)
     ? rawSolutions.filter((s): s is string => typeof s === "string")
     : [];
-  return { blocking, summary_tr: summary.trim(), solutions_tr };
+  const rawBest = (block as Record<string, unknown>).best_index;
+  const best_index =
+    typeof rawBest === "number" && Number.isInteger(rawBest) && rawBest >= 0 && rawBest < solutions_tr.length
+      ? rawBest
+      : 0;
+  return { blocking, summary_tr: summary.trim(), solutions_tr, best_index };
 }
 
 /** Pure: orkestratör analiz prompt'unu kur (test edilebilir). */
@@ -163,12 +177,15 @@ export function buildErrorAnalysisPrompt(errCtx: ErrorContext): string {
     "until it is resolved) or NON-BLOCKING (work could continue and the fix queued).",
     "",
     "Emit EXACTLY ONE JSON object as the LAST thing in your reply, no other JSON:",
-    '{"kind":"error_analysis","blocking":<true|false>,"summary_tr":"<1-3 sentence root-cause summary IN TURKISH>","solutions_tr":["<concrete solution option 1 IN TURKISH>","<option 2>","..."]}',
+    '{"kind":"error_analysis","blocking":<true|false>,"summary_tr":"<1-3 sentence root-cause summary IN TURKISH>","solutions_tr":["<concrete solution option 1 IN TURKISH>","<option 2>","..."],"best_index":<0-based index of the solution YOU would apply>}',
     "",
     "Rules: summary_tr and every solutions_tr entry MUST be written in Turkish (the",
     "developer reads Turkish). Each solution must be a distinct, actionable option",
     "(not a restatement of the error). 2-4 solutions is ideal. Do NOT include a",
     '"queue it" / "re-analyze" option — MyCL adds those automatically.',
+    "best_index: pick the solution YOU would apply (correctness first, then lowest",
+    "risk) — MyCL may AUTO-APPLY it without asking the user. Prefer solutions MyCL",
+    "can execute itself (code/config changes) over ones requiring manual user action.",
   ].join("\n");
 }
 
@@ -188,6 +205,14 @@ export async function analyzeAndAskError(
   state: State,
   config: MyclConfig,
   errCtx: ErrorContext,
+  opts?: {
+    /**
+     * 2026-06-10 (Ümit): true → askq AÇMA; ajanın best_index çözümünü auto_selected_solution
+     * olarak döndür (failPhase otomatik route eder). Çözüm üretilemediyse askq'ya düşer.
+     * "Kabul et, devam et" (güvenlik override) ASLA otomatik seçilmez — o hep insan kararı.
+     */
+    autoResolve?: boolean;
+  },
 ): Promise<PendingErrorAnalysis | null> {
   try {
     // F1: hata analizi ORKESTRATÖR rolüdür — ana ajana (codegen) GİTMEZ.
@@ -253,6 +278,40 @@ export async function analyzeAndAskError(
     });
     const optionLabels = options.map((o) => (typeof o === "string" ? o : o.label));
 
+    const id = `error_analysis_${randomUUID()}`;
+
+    // 2026-06-10 (Ümit: "kolayca çözebileceği şeyi bile soruyor — kendisi çözsün"):
+    // autoResolve + somut çözüm varsa askq AÇILMAZ; en iyi çözüm otomatik seçilir,
+    // failPhase aynı routing'i (handleAskqAnswer) otomatik sürer. Güvenlik override'ı
+    // (Kabul et, devam et) hiçbir zaman otomatik seçilmez — auto yol hep ÇÖZMEYİ dener.
+    const best = analysis.solutions_tr[analysis.best_index];
+    if (opts?.autoResolve && typeof best === "string" && best.trim() !== "") {
+      const others = analysis.solutions_tr.filter((_, i) => i !== analysis.best_index);
+      emitChatMessage(
+        "assistant",
+        `${analysis.summary_tr}\n\n🤖 **En iyi çözüm otomatik seçildi:** ${best}` +
+          (others.length > 0
+            ? `\nDeğerlendirilen alternatifler:\n${others.map((s) => `- ${s}`).join("\n")}`
+            : ""),
+      );
+      await appendAudit(state.project_root, {
+        ts: Date.now(),
+        phase: errCtx.phase,
+        event: "error-analysis",
+        caller: "mycl-orchestrator",
+        detail: `blocking=${blocking} solutions=${analysis.solutions_tr.length} auto_selected=true`,
+      }).catch(() => {});
+      return {
+        id,
+        phase: errCtx.phase,
+        blocking,
+        options: optionLabels,
+        solutions_tr: analysis.solutions_tr,
+        acceptContinuePhase: errCtx.acceptContinuePhase,
+        auto_selected_solution: best.trim(),
+      };
+    }
+
     // UI'da özet (orkestratör TR çıktısı). Bloklayıcı durumu ayrıca yüzeye çıkar.
     emitChatMessage(
       "assistant",
@@ -261,7 +320,6 @@ export async function analyzeAndAskError(
         : `${analysis.summary_tr}\nNasıl ilerleyelim?`,
     );
 
-    const id = `error_analysis_${randomUUID()}`;
     // askq emit → OS bildirimi mevcut askq yolundan OTOMATİK tetiklenir.
     emitAskq({
       id,
