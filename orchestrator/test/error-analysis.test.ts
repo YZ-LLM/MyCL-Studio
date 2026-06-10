@@ -11,6 +11,7 @@ import {
   OPT_REANALYZE,
   OPT_SOLVE,
   parseErrorAnalysisBlock,
+  buildErrorAnalysisPrompt,
 } from "../src/error-analysis.js";
 
 // Etiket sabitleri modülden import edilir — index.ts handleAskqAnswer eşlemesi de
@@ -227,5 +228,19 @@ describe("parseErrorAnalysisBlock — best_index (oto-çözüm)", () => {
       '{"kind":"error_analysis","blocking":false,"summary_tr":"özet","solutions_tr":["a","b"],"best_index":9}',
     );
     expect(out?.best_index).toBe(0);
+  });
+});
+
+// 2026-06-10 (Ümit: "bunu çözmüştük" — API modunda da analiz): prompt no-tools varyantı.
+describe("buildErrorAnalysisPrompt — backend varyantı", () => {
+  const ctx = { phase: 5 as const, message: "dev server chain exhausted", detail: "port_timeout" };
+  it("canInvestigate=true → araç (Read/Grep) ima eder", () => {
+    expect(buildErrorAnalysisPrompt(ctx, true)).toContain("Read/Grep");
+  });
+  it("canInvestigate=false → araç YOK, kanıttan akıl yürüt", () => {
+    const p = buildErrorAnalysisPrompt(ctx, false);
+    expect(p).not.toContain("Read/Grep");
+    expect(p).toContain("no tools available");
+    expect(p).toContain("dev server chain exhausted"); // mesaj + detail prompt'ta
   });
 });

@@ -6,6 +6,14 @@
 
 ## 2026-06-10
 
+- **fix(hata-analizi API modunda da çalışır — CLI-only gate kaldırıldı) [Ümit: "bunu çözmüştük" — ekranda hâlâ
+  "Hata analizi yalnız CLI/abonelik modunda yapılır"]:** `analyzeAndAskError` artık backend-aware: orkestratör
+  cli → `runClaudeCli` (Read/Grep/Bash ile araştırmalı, eskisi gibi); orkestratör api → Anthropic SDK TEK-ATIŞ
+  triage (tool yok — hata mesajı + detail/stderr'den sınıflandır + çözüm öner). `buildErrorAnalysisPrompt(errCtx,
+  canInvestigate)` no-tools varyantı. Derin araştırmayı SEÇİLEN FİX downstream (Faz 0 / SDK) yapar → triage hızlı +
+  yeterli, fix kalitesi korunur. Böylece API modunda faz-fail OTO-ÇÖZÜM zinciri (analiz → en iyi çözüm → otomatik
+  uygula) baştan sona çalışır. +2 test. API-desteği: artık hiçbir LLM yolu CLI-only değil.
+
 - **fix(ayar değişikliği restart'sız aktif + görünür onay) [Ümit: "API moduna geçtim ama kapatıp açmadan anlamadı;
   kapatıp açmadan da aktif olsun seçimim"]:** Backend (api/cli) zaten her save'de `runtime.config` reload edilip
   canlı okunuyordu; ama (1) config-türevi SINGLETON'lar (`setSandboxPolicy` + `setCacheTtl`) yalnız boot/open'da

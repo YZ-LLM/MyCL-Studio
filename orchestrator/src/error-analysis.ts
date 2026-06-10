@@ -16,8 +16,11 @@
 import { randomUUID } from "node:crypto";
 import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
+import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
+import { makeAnthropicClient } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
+import { selectEffortForTask } from "./model-catalog.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
 import { log } from "./logger.js";
 import type { PhaseId, State } from "./types.js";
@@ -159,11 +162,13 @@ export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
   return { blocking, summary_tr: summary.trim(), solutions_tr, best_index };
 }
 
-/** Pure: orkestratör analiz prompt'unu kur (test edilebilir). */
-export function buildErrorAnalysisPrompt(errCtx: ErrorContext): string {
+/** Pure: orkestratör analiz prompt'unu kur (test edilebilir). canInvestigate=false → API tek-atış (tool yok). */
+export function buildErrorAnalysisPrompt(errCtx: ErrorContext, canInvestigate = true): string {
   return [
     "You are MyCL Studio's orchestrator. A phase in the build pipeline just FAILED.",
-    "Inspect the codebase (Read/Grep/Glob/Bash are available) to understand the failure,",
+    canInvestigate
+      ? "Inspect the codebase (Read/Grep/Glob/Bash are available) to understand the failure,"
+      : "Reason from the error message and raw detail below (no tools available — use the given evidence),",
     "then produce a short root-cause analysis and concrete next steps for the developer.",
     "",
     `Failed phase: ${errCtx.phase}`,
@@ -195,8 +200,8 @@ export function buildErrorAnalysisPrompt(errCtx: ErrorContext): string {
  * kilitlemez. Fail-closed: claude hatası / blok üretilememesi → görünür hata
  * mesajı + audit + null (caller askq açmaz, sessiz fallback YOK).
  *
- * v15.13 deseni (living-docs): orkestratör rolü CLI/abonelik modunda runClaudeCli.
- * API modunda görünür not + null (sessiz değil) — sonraki tur API yolu eklenir.
+ * Backend-aware (2026-06-10): orkestratör cli → runClaudeCli (araştırmalı); api → Anthropic SDK
+ * tek-atış triage (tool yok; derin araştırmayı seçilen fix downstream yapar). İkisi de aynı JSON'u üretir.
  *
  * @returns PendingErrorAnalysis (caller runtime.pendingErrorAnalysis'e yazar) ya
  *   da analiz başarısızsa null.
@@ -214,58 +219,73 @@ export async function analyzeAndAskError(
     autoResolve?: boolean;
   },
 ): Promise<PendingErrorAnalysis | null> {
+  const fail = async (msg: string, detail: string): Promise<null> => {
+    // Görünür hata (sadece log.warn değil) — fail-closed.
+    emitChatMessage("error", `⚠️ ${msg}`);
+    await appendAudit(state.project_root, {
+      ts: Date.now(),
+      phase: errCtx.phase,
+      event: "error-analysis-failed",
+      caller: "mycl-orchestrator",
+      detail: detail.slice(0, 200),
+    }).catch(() => {});
+    return null;
+  };
   try {
-    // F1: hata analizi ORKESTRATÖR rolüdür — ana ajana (codegen) GİTMEZ.
-    if (backendForRole(config, "orchestrator") !== "cli") {
-      emitChatMessage(
-        "system",
-        "ℹ️ Hata analizi şu an yalnız CLI/abonelik modunda yapılır (orkestratör rolü).",
-      );
-      return null;
-    }
-    // Orkestratör modeli (yoksa main'e fallback — SelectedModels.orchestrator opsiyonel).
+    // Hata analizi ORKESTRATÖR rolüdür. Backend'e göre: cli → araştırmalı (Read/Grep/Bash);
+    // api → tek-atış triage (Ümit 2026-06-10 "bunu çözmüştük" — API modunda da çalışmalı).
+    // Tek-atışta derin araştırmayı SEÇİLEN FİX downstream (Faz 0 / SDK) yapar → triage hızlı + yeterli.
     const analysisModel = config.selected_models.orchestrator ?? config.selected_models.main;
-    const prompt = buildErrorAnalysisPrompt(errCtx);
-
+    const useCli = backendForRole(config, "orchestrator") === "cli";
     emitChatMessage("system", "🔎 Hata analiz ediliyor (orkestratör)…");
-    emitClaudeStream({
-      sub: "init",
-      text: "cli-error-analysis",
-      model: analysisModel,
-      cwd: state.project_root,
-    });
-    const res = await runClaudeCli({
-      systemPrompt: prompt,
-      userMessage: "Inspect the failure and emit the error_analysis JSON block now.",
-      modelId: analysisModel,
-      cwd: state.project_root,
-      allowedTools: ["Read", "Grep", "Glob", "Bash"],
-      disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
-      effort: config.claude_code_flags.effort,
-      onText: (t) => emitClaudeStream({ sub: "text", text: t }),
-      observer: (tu) =>
-        emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
-      timeoutMs: 300_000,
-    });
-    if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
-
-    const fail = async (msg: string, detail: string): Promise<null> => {
-      // Görünür hata (sadece log.warn değil) — fail-closed.
-      emitChatMessage("error", `⚠️ ${msg}`);
-      await appendAudit(state.project_root, {
-        ts: Date.now(),
-        phase: errCtx.phase,
-        event: "error-analysis-failed",
-        caller: "mycl-orchestrator",
-        detail: detail.slice(0, 200),
-      }).catch(() => {});
-      return null;
-    };
-
-    if (!res.ok) {
-      return await fail("Hata analizi yapılamadı (claude hatası).", String(res.error ?? ""));
+    let analysisText: string;
+    if (useCli) {
+      emitClaudeStream({ sub: "init", text: "cli-error-analysis", model: analysisModel, cwd: state.project_root });
+      const res = await runClaudeCli({
+        systemPrompt: buildErrorAnalysisPrompt(errCtx, true),
+        userMessage: "Inspect the failure and emit the error_analysis JSON block now.",
+        modelId: analysisModel,
+        cwd: state.project_root,
+        allowedTools: ["Read", "Grep", "Glob", "Bash"],
+        disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+        effort: selectEffortForTask("verification", config.claude_code_flags.effort),
+        onText: (t) => emitClaudeStream({ sub: "text", text: t }),
+        observer: (tu) =>
+          emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
+        timeoutMs: 300_000,
+      });
+      if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
+      if (!res.ok) return await fail("Hata analizi yapılamadı (claude hatası).", String(res.error ?? ""));
+      analysisText = res.text;
+    } else {
+      // API yolu — Anthropic SDK tek-atış (tool yok; hata mesajı + detail'den triage).
+      try {
+        const client = makeAnthropicClient(
+          config.api_keys.orchestrator ?? config.api_keys.main,
+          { timeoutMs: 120_000 },
+        );
+        const response = await client.messages.create({
+          model: analysisModel,
+          max_tokens: 2048,
+          system: buildErrorAnalysisPrompt(errCtx, false),
+          messages: [
+            {
+              role: "user",
+              content:
+                "Emit the error_analysis JSON block now, reasoning from the error message and detail provided.",
+            },
+          ],
+        });
+        analysisText = response.content
+          .filter((c): c is Anthropic.TextBlock => c.type === "text")
+          .map((c) => c.text)
+          .join("\n");
+      } catch (e) {
+        return await fail("Hata analizi yapılamadı (API hatası).", String(e));
+      }
     }
-    const analysis = parseErrorAnalysisBlock(res.text);
+
+    const analysis = parseErrorAnalysisBlock(analysisText);
     if (!analysis) {
       return await fail("Hata analizi bloğu üretilemedi.", "no valid {kind:error_analysis} block");
     }
