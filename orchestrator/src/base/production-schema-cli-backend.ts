@@ -118,7 +118,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
       kind: "write",
       ...(schemaToSkeleton(writeSchema) as Record<string, unknown>),
     });
-    const effort = opts.config.claude_code_flags.effort;
+    const effort = opts.effortOverride ?? opts.config.claude_code_flags.effort;
 
     emitClaudeStream({
       sub: "init",

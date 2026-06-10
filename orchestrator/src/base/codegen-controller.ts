@@ -114,6 +114,8 @@ export interface CodegenRunOpts {
   config: MyclConfig;
   systemPrompt: string;
   modelId: string;
+  /** Escalation efor override (Ümit 2026-06-11): set ise config.claude_code_flags.effort YERİNE bu kullanılır. */
+  effortOverride?: string;
   apiKey: string;
   initialUserMessage: string;
   tools: ToolDef[];

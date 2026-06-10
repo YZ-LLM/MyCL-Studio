@@ -14,7 +14,7 @@ import type { MyclConfig } from "./config.js";
 import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
 import { translate } from "./translator.js";
-import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
+import { escalatedModelEffort } from "./escalation.js";
 import { blindspotLensDecision } from "./pre-commit-lens-gate.js";
 import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
 import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
@@ -238,16 +238,18 @@ export class Phase4Controller {
       // spec.md yok → ilk spec; varsayılan mesaj kalır.
     }
 
-    // "Kaliteli hız": spec her şeyi sürer → KALİTE-kritik → strong tier (güçlü model) seçilir + gösterilir.
-    const modelChoice = selectModelForTask("spec", this.config.selected_models.model_tiers);
-    emitChatMessage("system", formatModelChoice("spec", modelChoice));
+    // Escalation (Ümit 2026-06-11): spec model+eforu MERDİVENden (escalation_rung set ise) — en düşükten başla,
+    // sorun çıktıkça tırman. Set değilse eski "spec→strong" davranışı. Config kral.
+    const me = escalatedModelEffort(this.state, this.config, "spec");
+    emitChatMessage("system", `🧠 Spec: **${me.modelLabel}** · efor ${me.effort}${this.state.escalation_rung ? " (merdiven)" : ""}`);
     this.base = createProductionSchemaBackend({
       tag: "phase-4",
       phaseId: 4,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: modelChoice.modelId,
+      modelId: me.modelId,
+      effortOverride: me.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage,
       tools: [TOOL_WRITE_SPEC, TOOL_REQUEST_APPROVAL],

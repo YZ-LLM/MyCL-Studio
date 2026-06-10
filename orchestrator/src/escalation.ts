@@ -7,7 +7,15 @@
 //
 // Saf + deterministik (test edilebilir). Tier→model çözümü + tırmanma kararı dışarıda (escalation-state, wiring).
 
-import { modelForTier, type ModelTier } from "./model-catalog.js";
+import {
+  modelForTier,
+  selectModelForTask,
+  selectEffortForTask,
+  type ModelTier,
+  type TaskKind,
+} from "./model-catalog.js";
+import type { State } from "./types.js";
+import type { MyclConfig } from "./config.js";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -72,6 +80,28 @@ export function resolveRung(
 ): { modelId: string; modelLabel: string; effort: Effort; tier: ModelTier } {
   const m = modelForTier(rung.tier, tierModels);
   return { modelId: m.id, modelLabel: m.label, effort: rung.effort, tier: rung.tier };
+}
+
+/**
+ * Bir fazın model+eforu: escalation_rung set ise ONDAN çöz (merdiven aktif — config kral: tier→model config'ten);
+ * değilse eski task-relevance davranışı (selectModelForTask + selectEffortForTask). Tek çoke point — fazlar bunu
+ * çağırır → merdiven tüm fazlara uygulanır. index ve fazlar buradan import eder (döngü yok).
+ */
+export function escalatedModelEffort(
+  state: State,
+  config: MyclConfig,
+  fallbackTask: TaskKind,
+): { modelId: string; modelLabel: string; effort: string } {
+  if (state.escalation_rung) {
+    const r = resolveRung(state.escalation_rung, config.selected_models.model_tiers);
+    return { modelId: r.modelId, modelLabel: r.modelLabel, effort: r.effort };
+  }
+  const m = selectModelForTask(fallbackTask, config.selected_models.model_tiers);
+  return {
+    modelId: m.modelId,
+    modelLabel: m.label,
+    effort: selectEffortForTask(fallbackTask, config.claude_code_flags.effort),
+  };
 }
 
 /** Geçerli bir Rung mu (state.json'dan okurken doğrulama). */

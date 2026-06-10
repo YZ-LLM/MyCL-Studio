@@ -1,5 +1,15 @@
 ## 2026-06-11
 
+- **feat(escalation L3: merdiven CANLI — sorun çıktıkça tırman + rapor) [Ümit: en düşük model+efordan başla; sorun
+  çıktıkça yükselt; rapora yaz]:** Yeni iterasyon `escalation_rung=firstRung` (cheap·low) ile başlar. Spec (Faz 4) +
+  codegen (Faz 8) model+eforu artık `escalatedModelEffort` ile MERDİVENden çözülür (config kral: tier→model
+  config'ten; efor rung'tan, CLI'da `effortOverride`). Bir faz FAIL olunca `failPhase` merkezi hook'u (yalnız
+  ESCALATION_PHASES={4,8}, Oto-cevap açık): denemeyi rapora yazar → `nextRung` ile tırmanır (önce efor, sonra tier) →
+  AYNI fazı tekrar dener (debug'a kaçmadan). Tepeye (strong·max) gelince escalation biter → mevcut derin çözüm akışı.
+  Başarıda da rapora yazılır. Böylece kolay iş ucuzda biter, zor iş gerektiği kadar tırmanır + rapor hangi modelin
+  hangi alanda iyi olduğunu öğrenir (composer "📊 Model Raporu" butonunda görünür). DİĞER fazlar (intent/review/db)
+  henüz merdivene bağlı değil — sıradaki adımda eklenecek (failPhase boşa re-run yapmasın diye küme ile sınırlı).
+
 - **fix(model politikası: ayarlar tek doğruluk kaynağı + keşif SORAR + translator SABİT) [Ümit: "ayarlar dikkate
   alınmıyor; otomatik keşiften sonra bozuldu; yeni model çıkınca geçeyim mi diye sorsun; translator modeli sabit
   olsun"]:**

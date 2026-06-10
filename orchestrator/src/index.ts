@@ -74,7 +74,8 @@ import {
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
 import { computeTiersFromModels } from "./model-catalog.js";
-import { buildStrengthReportTR } from "./model-strength-report.js";
+import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
+import { firstRung, nextRung, resolveRung, rungLabel } from "./escalation.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
@@ -380,6 +381,9 @@ const autoSolveSig = new Map<number, { sig: string; count: number }>();
 let _pendingModelUpgrade: { askqId: string; model: string } | null = null;
 const _declinedModelUpgrades = new Set<string>();
 
+// Escalation merdivenine BAĞLI fazlar (model+eforu escalation_rung'tan çözenler). Yeni faz wire edildikçe ekle.
+const ESCALATION_PHASES = new Set<PhaseId>([4 as PhaseId, 8 as PhaseId]);
+
 /** Hata imzası: faz + lastFailReason'ın ilk ~160 char'ı (sayılar normalize → port/pid/ts gürültüsü eşleşmeyi bozmasın). */
 function failSignature(n: PhaseId, ctrl?: FailReasonHolder): string {
   const raw = (ctrl?.lastFailReason ?? "")
@@ -388,6 +392,23 @@ function failSignature(n: PhaseId, ctrl?: FailReasonHolder): string {
     .replace(/\s+/g, " ")
     .slice(0, 160);
   return `${n}:${raw}`;
+}
+
+// Escalation (Ümit 2026-06-11): faz → domain etiketi (rapor + "hangi işi hangi modelle yaptık").
+function phaseDomain(n: PhaseId): string {
+  const map: Partial<Record<number, string>> = {
+    0: "debug", 1: "intent", 2: "audit", 3: "briefing", 4: "spec",
+    5: "ui-codegen", 6: "ui-review", 7: "db-design", 8: "tdd-codegen", 9: "risk-review",
+  };
+  return map[n] ?? `phase-${n}`;
+}
+
+/** Escalation merdiveninde bu fazın deneme sonucunu rapora yaz (hangi model hangi işte iyi). */
+async function recordRungOutcome(n: PhaseId, success: boolean): Promise<void> {
+  if (!runtime.state || !runtime.config) return;
+  const rung = runtime.state.escalation_rung ?? firstRung();
+  const model = resolveRung(rung, runtime.config.selected_models.model_tiers).modelId;
+  await recordStrength({ domain: phaseDomain(n), rung: rungLabel(rung), model, success }, Date.now());
 }
 
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
@@ -403,6 +424,31 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   emitPhaseChanged(n, n, "error");
   if (!runtime.state || !runtime.config) return;
   const errCtx: ErrorContext = { phase: n, message, detail: ctrl?.lastFailReason };
+  // ESCALATION (Ümit 2026-06-11): sorun çıktı → bir ÜST basamağa çık + AYNI fazı tekrar dene (debug/oto-çözüme
+  // KAÇMADAN). Yalnız Oto-cevap açıkken + LLM fazlarında (1-9; mekanik gate'ler 10-17 araç koşar, model'e duyarsız
+  // → escalation anlamsız → mevcut akış). Her deneme rapora kaydedilir. Tepeye (strong·max) gelince escalation
+  // biter → mevcut derin çözüm (debug/oto-çözüm) akışına düşülür.
+  // Yalnız MERDİVENE BAĞLI fazlarda escalation (model+eforu escalation_rung'tan çözenler) — yoksa tırmanma boşa
+  // re-run olur. Şimdilik spec (4) + codegen (8). Yeni faz bağlandıkça bu kümeye eklenir.
+  if (autoAnswerSuggested() && ESCALATION_PHASES.has(n)) {
+    await recordRungOutcome(n, false);
+    const cur = runtime.state.escalation_rung ?? firstRung();
+    const up = nextRung(cur);
+    if (up) {
+      const model = resolveRung(up, runtime.config.selected_models.model_tiers).modelId;
+      runtime.state = { ...runtime.state, escalation_rung: up, updated_at: Date.now() };
+      await saveState(runtime.state);
+      emitChatMessage(
+        "system",
+        `🔼 Faz ${n} ${rungLabel(cur)} ile çözemedi → ${rungLabel(up)} (${model}) ile aynı işi tekrar deniyorum.`,
+      );
+      await advanceToNextPhase((n - 1) as PhaseId);
+      return;
+    }
+    // Tepeye gelindi (strong·max) da çözemedi → escalation bitti; rung sıfırla + mevcut derin çözüm akışına düş.
+    runtime.state = { ...runtime.state, escalation_rung: undefined, updated_at: Date.now() };
+    emitChatMessage("system", `⛰ Faz ${n} en güçlü basamakta da çözemedi — derin çözüm akışına geçiyorum.`);
+  }
   // Oto-çözüm YALNIZ "Oto-cevap" açıkken (Ümit: "oto-cevap işaretliyse yapar onları"). Kapalıyken MyCL
   // otomatik kod değiştirmez — seçenekleri kullanıcıya sorar (otonomi = kullanıcı opt-in'i). Ek olarak
   // döngü-kıran: AYNI imza AUTO_SOLVE_MAX kez denendiyse yine sor (sahte-yeşil/sonsuz-döngü önleme).
@@ -1940,6 +1986,9 @@ async function executeDispatchedIntent(
       needed_phases: undefined,
       needed_phases_proposed: undefined,
       iteration_count: newIter,
+      // Escalation (Ümit 2026-06-11): yeni iterasyon EN DÜŞÜK basamaktan başlar (cheap·low) — sorun çıktıkça
+      // failPhase tırmandırır. (Tırmanmış basamak iterasyon içinde taşınır; yeni iterasyonda sıfırlanır.)
+      escalation_rung: firstRung(),
       // Boot-resume scope sınırı — bu iterasyonun başlangıcı (audit tail'e bağlı
       // kalmadan detectInterruptedPhase2To9 doğru scope hesaplasın).
       iteration_started_at: Date.now(),
@@ -2340,6 +2389,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       const r = await runController(p4, () => p4.run(), "Spec yazılıyor");
       log.info("orchestrator", "phase 4 end", { result: r });
       if (r === "complete") {
+        await recordRungOutcome(4, true); // escalation: bu basamak spec'i çözdü → rapora başarı
         state = { ...state, ...p4.statePatch };
         runtime.state = state;
         await saveState(state);
@@ -2523,6 +2573,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       const r = await runController(p8, () => p8.run(), "TDD uygulanıyor");
       log.info("orchestrator", "phase 8 end", { result: r });
       if (r === "complete") {
+        await recordRungOutcome(8, true); // escalation: bu basamak codegen'i çözdü → rapora başarı
         state = { ...state, ...p8.statePatch };
         runtime.state = state;
         await saveState(state);

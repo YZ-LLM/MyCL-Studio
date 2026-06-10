@@ -22,7 +22,7 @@ import { safeEnv } from "./safe-env.js";
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
 import { snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
-import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
+import { escalatedModelEffort } from "./escalation.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import type { ToolDef } from "./claude-api.js";
@@ -367,17 +367,18 @@ export class Phase8Controller {
     // Ümit 2026-06-10: "silme kararı → önce yedek." TDD codegen ajanı dosya silebilir/üstüne yazabilir. Fix modu
     // zaten debug-fix yolunda snapshot'landı; normal TDD'de burada snapshot al → silinen geri alınabilir.
     if (!this.isFixMode) await snapshotBeforeAutofix(this.state.project_root, Date.now());
-    // "Kaliteli hız" (Ümit): codegen KALİTE-kritik → strong tier (güçlü model) SEÇİLİR + chat'te gösterilir.
-    // Hafif fazlar zaten sonnet (hızlı, config). config.model_tiers.strong'dan çözülür; geçersiz → güvenli fallback.
-    const modelChoice = selectModelForTask("codegen", this.config.selected_models.model_tiers);
-    emitChatMessage("system", formatModelChoice("codegen", modelChoice));
+    // Escalation (Ümit 2026-06-11): model+efor MERDİVENden çözülür (escalation_rung set ise) — en düşükten başla,
+    // sorun çıktıkça failPhase tırmandırır. Set değilse eski "codegen→strong" davranışı (geriye-uyumlu). Config kral.
+    const me = escalatedModelEffort(this.state, this.config, "codegen");
+    emitChatMessage("system", `🧠 Codegen: **${me.modelLabel}** · efor ${me.effort}${this.state.escalation_rung ? " (merdiven)" : ""}`);
     this.base = createCodegenBackend({
       tag: "phase-8",
       phaseId: 8,
       state: this.state,
       config: this.config,
       systemPrompt,
-      modelId: modelChoice.modelId,
+      modelId: me.modelId,
+      effortOverride: me.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage: initialMessage,
       tools: TOOLS_CODEGEN as unknown as ToolDef[],

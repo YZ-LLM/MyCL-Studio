@@ -199,7 +199,7 @@ export class CliCodegenBackend implements CodegenBackend {
     if (!guardSandboxOrWarn()) {
       return { kind: "failed", reason: "sandbox kurulamadı (policy=enforce) — codegen çalıştırılmadı" };
     }
-    const effort = opts.config.claude_code_flags.effort ?? "max";
+    const effort = opts.effortOverride ?? opts.config.claude_code_flags.effort ?? "max";
     const args = this.buildArgs(effort);
 
     const skillsDir = resolveSkillsDir();
