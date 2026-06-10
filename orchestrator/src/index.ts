@@ -449,8 +449,8 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
       await advanceToNextPhase((n - 1) as PhaseId);
       return;
     }
-    // Tepeye gelindi (strong·max) da çözemedi → escalation bitti; rung sıfırla + mevcut derin çözüm akışına düş.
-    runtime.state = { ...runtime.state, escalation_rung: undefined, updated_at: Date.now() };
+    // Tepeye gelindi (strong·max) da çözemedi → escalation bitti; mevcut derin çözüm akışına düş.
+    // "Düşürme yok" (Ümit): rung'ı SIFIRLAMA — en üstte (strong·max) KALSIN; sonraki iş de güçlüden başlasın.
     emitChatMessage("system", `⛰ Faz ${n} en güçlü basamakta da çözemedi — derin çözüm akışına geçiyorum.`);
   }
   // Oto-çözüm YALNIZ "Oto-cevap" açıkken (Ümit: "oto-cevap işaretliyse yapar onları"). Kapalıyken MyCL
@@ -1991,9 +1991,10 @@ async function executeDispatchedIntent(
       needed_phases: undefined,
       needed_phases_proposed: undefined,
       iteration_count: newIter,
-      // Escalation (Ümit 2026-06-11): yeni iterasyon EN DÜŞÜK basamaktan başlar (cheap·low) — sorun çıktıkça
-      // failPhase tırmandırır. (Tırmanmış basamak iterasyon içinde taşınır; yeni iterasyonda sıfırlanır.)
-      escalation_rung: firstRung(),
+      // Escalation (Ümit 2026-06-11): "yeni iterasyon baştan başlamasın; önceki tecrübeler önemli; yükseltme var
+      // düşürme yok." → escalation_rung'ı SIFIRLAMA — önceki iterasyonun tırmandığı seviye TAŞINIR (monotonik:
+      // yalnız yükselir). İlk-ever iterasyonda unset → escalatedModelEffort/failPhase `?? firstRung()` ile cheap·low.
+      // (escalation_rung BİLEREK burada set EDİLMİYOR — mevcut değer korunur.)
       // Boot-resume scope sınırı — bu iterasyonun başlangıcı (audit tail'e bağlı
       // kalmadan detectInterruptedPhase2To9 doğru scope hesaplasın).
       iteration_started_at: Date.now(),
