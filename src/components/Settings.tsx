@@ -48,6 +48,8 @@ interface Props {
   /** Settings ekranı zorla açıldıysa (model selection missing gibi) kapatılamasın. */
   forceModelSetup?: boolean;
   currentSelected: { translator?: string; main?: string; orchestrator?: string } | null;
+  /** 2026-06-11 (Ümit): tırmanılan per-domain escalation seviyeleri — read-only gösterim. */
+  currentEscalationRungs?: Record<string, { tier: string; effort: string }>;
   modelsTranslator: ModelsList;
   modelsMain: ModelsList;
   onFetchModels: (which: "translator" | "main", force: boolean) => void;
@@ -94,6 +96,7 @@ function ModelDropdown({
   loading,
   onChange,
   onRefresh,
+  locked,
 }: {
   label: string;
   selected: string | undefined;
@@ -101,6 +104,8 @@ function ModelDropdown({
   loading: boolean;
   onChange: (id: string) => void;
   onRefresh: () => void;
+  /** 2026-06-11 (Ümit): model seçimi escalation merdivenine devredildi → picker kilitli (read-only). */
+  locked?: boolean;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -118,8 +123,9 @@ function ModelDropdown({
         <select
           value={selected ?? ""}
           onChange={(e) => onChange(e.target.value)}
-          disabled={loading || models.length === 0}
-          style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12 }}
+          disabled={locked || loading || models.length === 0}
+          title={locked ? "Sabit — model escalation merdiveninden otomatik seçilir, değiştirilemez" : undefined}
+          style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12, opacity: locked ? 0.6 : 1 }}
         >
           {!selected && <option value="">— seçin —</option>}
           {models.map((m) => (
@@ -128,23 +134,65 @@ function ModelDropdown({
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          style={{ fontSize: 11 }}
-          title="Modelleri yeniden çek"
-        >
-          {loading ? "..." : "↻"}
-        </button>
+        {!locked && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            style={{ fontSize: 11 }}
+            title="Modelleri yeniden çek"
+          >
+            {loading ? "..." : "↻"}
+          </button>
+        )}
       </div>
       <span style={{ fontSize: 10, color: "var(--fg-dim)" }}>
-        {loading
-          ? "Modeller yükleniyor..."
-          : models.length === 0
-            ? "Liste boş — 'Yenile' butonuna basın"
-            : `${models.length} model · en yeni başta`}
+        {locked
+          ? "🔒 Sabit — model escalation merdiveninden (iş-bazlı, otomatik tırmanan) seçilir"
+          : loading
+            ? "Modeller yükleniyor..."
+            : models.length === 0
+              ? "Liste boş — 'Yenile' butonuna basın"
+              : `${models.length} model · en yeni başta`}
       </span>
+    </div>
+  );
+}
+
+/**
+ * 2026-06-11 (Ümit): "tırmanılan ayarı göster orada" — escalation merdiveninde her iş-alanının (domain) o anki
+ * model+efor basamağı read-only listelenir. Veri yoksa açıklayıcı not.
+ */
+function EscalationLevels({ rungs }: { rungs?: Record<string, { tier: string; effort: string }> }) {
+  const entries = Object.entries(rungs ?? {});
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        padding: "8px 10px",
+        border: "1px solid var(--fg-dim)",
+        borderRadius: 4,
+        opacity: 0.85,
+      }}
+    >
+      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-dim)", marginBottom: 6 }}>
+        Tırmanılan seviyeler (escalation)
+      </div>
+      {entries.length === 0 ? (
+        <div style={{ fontSize: 11, color: "var(--fg-dim)" }}>
+          Henüz veri yok — işler koştukça her iş-alanı (intent, spec, codegen…) en düşük basamaktan başlar,
+          sorun çıktıkça yükselir. Tırmanılan seviyeler burada görünecek.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {entries.map(([domain, r]) => (
+            <div key={domain} style={{ fontSize: 12, fontFamily: "var(--font-mono)", display: "flex", justifyContent: "space-between" }}>
+              <span>{domain}</span>
+              <span style={{ color: "var(--accent)" }}>{r.tier} · {r.effort}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -219,6 +267,7 @@ export function Settings({
   effort,
   currentBackends,
   currentModelTiers,
+  currentEscalationRungs,
   currentDesignWorkflow,
   currentAgentTeamsOptIn,
   currentMultiAgentSelection,
@@ -424,6 +473,8 @@ export function Settings({
                   onChange={(v) => setBackend("translator", v)}
                 />
               </div>
+              {/* 2026-06-11 (Ümit): Main + Orkestrator model seçimi de SABİT — model artık escalation
+                  merdiveninden (iş-bazlı, otomatik tırmanan) seçilir, elle değiştirilemez. Backend seçilebilir. */}
               <div>
                 <ModelDropdown
                   label="Main Modeli"
@@ -432,28 +483,30 @@ export function Settings({
                   loading={modelsMain.loading}
                   onChange={setMainSel}
                   onRefresh={() => onFetchModels("main", true)}
+                  locked
                 />
                 <BackendSelector
                   value={backends.main}
                   onChange={(v) => setBackend("main", v)}
                 />
               </div>
-              {/* v15.5 Orkestrator Agent Model — opsiyonel. Main model
-                  fallback olduğundan boş bırakılabilir. */}
               <div>
                 <ModelDropdown
-                  label="Orkestrator Ajan Model (opsiyonel)"
+                  label="Orkestrator Ajan Model"
                   selected={orchestratorSel || undefined}
                   models={modelsMain.models}
                   loading={modelsMain.loading}
                   onChange={setOrchestratorSel}
                   onRefresh={() => onFetchModels("main", true)}
+                  locked
                 />
                 <BackendSelector
                   value={backends.orchestrator}
                   onChange={(v) => setBackend("orchestrator", v)}
                 />
               </div>
+              {/* Tırmanılan seviyeler — read-only (Ümit: "tırmanılan ayarı göster orada"). */}
+              <EscalationLevels rungs={currentEscalationRungs} />
               <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: 0 }}>
                 Boş bırakırsan main model kullanılır. Agent kullanıcı niyetini
                 doğru anlamak için daha güçlü model seçilebilir (örn. Opus).

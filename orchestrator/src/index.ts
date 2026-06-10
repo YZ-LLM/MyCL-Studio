@@ -1253,6 +1253,8 @@ async function handleReadSelectedModels(): Promise<void> {
       agent_teams_optin: flags.agent_teams_optin ?? false,
       multi_agent_selection: flags.multi_agent_selection ?? false,
       cache_ttl: flags.cache_ttl ?? "5m",
+      // 2026-06-11 (Ümit): tırmanılan per-domain escalation seviyeleri — ayarlarda read-only gösterilir.
+      escalation_rungs: runtime.state?.escalation_rungs ?? {},
     });
   } catch (err) {
     log.error("orchestrator", "read_selected_models failed", err);

@@ -625,6 +625,10 @@ function App() {
   const [currentAgentTeamsOptIn, setCurrentAgentTeamsOptIn] = useState<boolean | undefined>(undefined);
   const [currentMultiAgentSelection, setCurrentMultiAgentSelection] = useState<boolean | undefined>(undefined);
   const [currentCacheTtl, setCurrentCacheTtl] = useState<"5m" | "1h" | undefined>(undefined);
+  // 2026-06-11 (Ümit): tırmanılan per-domain escalation seviyeleri — Settings'te read-only gösterilir.
+  const [currentEscalationRungs, setCurrentEscalationRungs] = useState<
+    Record<string, { tier: string; effort: string }>
+  >({});
   /**
    * Boot history load guard: request yolda iken effect re-fire ederse 2.
    * send'i bloklar. onProjectSelected'ta reset (yeni proje = fresh request).
@@ -707,6 +711,7 @@ function App() {
         if (typeof ev.data.multi_agent_selection === "boolean")
           setCurrentMultiAgentSelection(ev.data.multi_agent_selection);
         if (ev.data.cache_ttl) setCurrentCacheTtl(ev.data.cache_ttl);
+        if (ev.data.escalation_rungs) setCurrentEscalationRungs(ev.data.escalation_rungs);
       } else if (ev.kind === "phases_list") {
         setPhasesList(ev.data.phases);
       } else if (ev.kind === "features_value") {
@@ -1084,6 +1089,7 @@ function App() {
       currentSelected={currentSelected}
       currentBackends={currentBackends}
       currentModelTiers={currentModelTiers}
+      currentEscalationRungs={currentEscalationRungs}
       currentDesignWorkflow={currentDesignWorkflow}
       currentAgentTeamsOptIn={currentAgentTeamsOptIn}
       currentMultiAgentSelection={currentMultiAgentSelection}

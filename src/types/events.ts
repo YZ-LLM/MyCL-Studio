@@ -188,6 +188,8 @@ export interface SelectedModelsEvent {
     multi_agent_selection?: boolean;
     /** v15.14 (F2): prompt cache ömrü (5m/1h). */
     cache_ttl?: "5m" | "1h";
+    /** 2026-06-11 (Ümit): tırmanılan per-domain escalation seviyeleri (domain → {tier,effort}) — read-only gösterim. */
+    escalation_rungs?: Record<string, { tier: string; effort: string }>;
   };
 }
 
