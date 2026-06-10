@@ -188,9 +188,20 @@ export function buildErrorAnalysisPrompt(errCtx: ErrorContext, canInvestigate = 
     "developer reads Turkish). Each solution must be a distinct, actionable option",
     "(not a restatement of the error). 2-4 solutions is ideal. Do NOT include a",
     '"queue it" / "re-analyze" option — MyCL adds those automatically.',
+    "",
+    "DIAGNOSE THE ACTUAL ERROR, not generic causes. If a 'Spawn output' / 'actual error'",
+    "is provided above, the root cause is IN THAT OUTPUT — read it. Common classes:",
+    "- 'argument list too long' / E2BIG → the ENVIRONMENT (shell env too large), NOT the",
+    "  project. Fix: trim env / new shell — do NOT touch project code, deps, or ports.",
+    "- 'command not found' / ENOENT → missing script or dependency, NOT a port issue.",
+    "- 'EADDRINUSE' / port in use → port conflict (free the port / pick another).",
+    "- the SAME failure persists after a fix → the cause is NOT what you changed; widen",
+    "  the diagnosis (environment/external), do NOT repeat project-level edits.",
     "best_index: pick the solution YOU would apply (correctness first, then lowest",
-    "risk) — MyCL may AUTO-APPLY it without asking the user. Prefer solutions MyCL",
-    "can execute itself (code/config changes) over ones requiring manual user action.",
+    "risk) — MyCL may AUTO-APPLY it without asking the user. RANK by reversibility &",
+    "cost: cheap reversible code/config edits FIRST; slow/destructive actions (deleting",
+    "node_modules, full reinstall, wiping caches) LAST and only if the error output",
+    "clearly points to corrupted deps. Prefer fixes MyCL can execute over manual ones.",
   ].join("\n");
 }
 

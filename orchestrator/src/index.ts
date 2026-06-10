@@ -360,12 +360,23 @@ function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): stri
  * analiz null dönerse askq açılmamıştır, branch hiç tetiklenmez). Çağıran kalıbı
  * korur: loop içinde `await failPhase(n, pX); return;`.
  */
-// 2026-06-10 (Ümit: "hata çözümünü sorma, kendisi çözsün") — faz-fail oto-çözüm döngü koruması:
-// aynı faz için 45 dk içinde en çok 2 otomatik deneme; sonra (sonsuz fail→fix→fail döngüsünü
-// kırmak için) seçenekler kullanıcıya sorulur. Pencere dolunca sayaç doğal sıfırlanır.
+// 2026-06-10 (Ümit: "bu kadar kolay bişeyi çözemedi, node_modules silmeyi düşündü") — faz-fail oto-çözüm
+// döngü-kıranı İMZA bazlı: aynı faz + aynı hata-imzası AUTO_SOLVE_MAX kez otomatik denenip ÇÖZÜLEMEDİYSE,
+// bir daha aynı hatayı otomatik tamir etmeye çalışma (fix işe yaramıyor → kök neden başka) → kullanıcıya sor.
+// Zaman PENCERESİ YOK: logda aynı hata saatlerce tekrarladı, 45-dk pencere sıfırlanınca döngü sürdü.
+// FARKLI hata imzası → sayaç sıfır (yeni sorun meşru, otomatik denenir).
 const AUTO_SOLVE_MAX = 2;
-const AUTO_SOLVE_WINDOW_MS = 45 * 60_000;
-const autoSolveAttempts = new Map<number, { count: number; ts: number }>();
+const autoSolveSig = new Map<number, { sig: string; count: number }>();
+
+/** Hata imzası: faz + lastFailReason'ın ilk ~160 char'ı (sayılar normalize → port/pid/ts gürültüsü eşleşmeyi bozmasın). */
+function failSignature(n: PhaseId, ctrl?: FailReasonHolder): string {
+  const raw = (ctrl?.lastFailReason ?? "")
+    .toLowerCase()
+    .replace(/\d+/g, "#")
+    .replace(/\s+/g, " ")
+    .slice(0, 160);
+  return `${n}:${raw}`;
+}
 
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   const message = phaseFailMessage(n, ctrl);
@@ -373,13 +384,16 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   emitPhaseChanged(n, n, "error");
   if (!runtime.state || !runtime.config) return;
   const errCtx: ErrorContext = { phase: n, message, detail: ctrl?.lastFailReason };
-  const rec = autoSolveAttempts.get(n);
-  const recent = rec && Date.now() - rec.ts < AUTO_SOLVE_WINDOW_MS ? rec.count : 0;
-  const autoResolve = recent < AUTO_SOLVE_MAX;
+  // Döngü-kıran: AYNI imza zaten AUTO_SOLVE_MAX kez otomatik denendiyse otomatik tamir DUR → kullanıcıya sor.
+  const sig = failSignature(n, ctrl);
+  const prev = autoSolveSig.get(n);
+  const sameSig = prev?.sig === sig;
+  const priorCount = sameSig ? prev!.count : 0;
+  const autoResolve = priorCount < AUTO_SOLVE_MAX;
   if (!autoResolve) {
     emitChatMessage(
       "system",
-      `ℹ️ Faz ${n} için ${AUTO_SOLVE_MAX} otomatik çözüm denemesi sonuç vermedi — bu kez seçenekleri sana soruyorum.`,
+      `ℹ️ Aynı hata ${AUTO_SOLVE_MAX} otomatik çözüm denemesine rağmen sürüyor — demek ki sorun değiştirdiğim yerde DEĞİL. Otomatik tamiri durdurdum; seçenekleri sana soruyorum (gerçek hatayı yukarıdaki "asıl hata" çıktısından gör).`,
     );
   }
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
@@ -387,7 +401,7 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   }).catch(() => null);
   const pendingAuto = runtime.pendingErrorAnalysis;
   if (pendingAuto?.auto_selected_solution) {
-    autoSolveAttempts.set(n, { count: recent + 1, ts: Date.now() });
+    autoSolveSig.set(n, { sig, count: priorCount + 1 });
     // Aynı routing'i (askq-cevap dalı) otomatik sür — soru kartı hiç açılmadı.
     await handleAskqAnswer(pendingAuto.id, pendingAuto.auto_selected_solution).catch((e: unknown) =>
       log.error("orchestrator", "auto-solve routing failed", e),

@@ -244,3 +244,19 @@ describe("buildErrorAnalysisPrompt — backend varyantı", () => {
     expect(p).toContain("dev server chain exhausted"); // mesaj + detail prompt'ta
   });
 });
+
+// 2026-06-10 (Ümit: "kolay bişeyi çözemedi, node_modules silmeyi düşündü"): prompt gerçek-hatayı
+// teşhise + yıkıcı-fix-sona yönlendiriyor mu (genel ders).
+describe("buildErrorAnalysisPrompt — kör-teşhis + yıkıcı-fix önlemi", () => {
+  const ctx = { phase: 5 as const, message: "x", detail: "argument list too long" };
+  it("E2BIG/ortam sınıfını projeden ayırmayı öğütler", () => {
+    const p = buildErrorAnalysisPrompt(ctx, false);
+    expect(p).toContain("argument list too long");
+    expect(p.toLowerCase()).toContain("environment");
+  });
+  it("yıkıcı/yavaş fix (node_modules sil) SONA + en ucuz reversible ÖNCE der", () => {
+    const p = buildErrorAnalysisPrompt(ctx, true);
+    expect(p).toContain("node_modules");
+    expect(p.toLowerCase()).toContain("reversible");
+  });
+});

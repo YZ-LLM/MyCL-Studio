@@ -36,6 +36,13 @@ export interface DevServerHandle {
    *  güvenilmez (handle.pid = SHELL wrapper'ı; alttaki vite strictPort-exit etse de
    *  wrapper canlı kalabilir). waitForDevServer bunu kontrol edip erken çıkar. */
   exited: boolean;
+  /**
+   * 2026-06-10 (Ümit: "bu kadar kolay bişeyi çözemedi" — kör teşhis kökü): spawn'ın
+   * GERÇEK çıktısı (stderr+stdout son ~4KB + spawn 'error' olayı = E2BIG/ENOENT).
+   * Eskiden hiç okunmuyordu → çöküş "timeout" diye raporlanıp ajan yanlış yeri tamir
+   * ediyordu. Drain ayrıca OS-buffer-dolu hang'ini de önler.
+   */
+  recentOutput: () => string;
 }
 
 /**
@@ -75,16 +82,33 @@ export function spawnDevServer(
     cmd,
     port,
   });
+  // GERÇEK çıktı yakalama (kör-teşhis fix): stderr+stdout son ~4KB ring buffer'a +
+  // spawn 'error' (E2BIG "argument list too long" / ENOENT "command not found").
+  // Drain ayrıca pipe-buffer-dolu hang'ini önler (stdio:pipe tüketilmezse child asılır).
+  let outputBuf = "";
+  const MAX_OUTPUT = 4000;
+  const capture = (chunk: Buffer | string) => {
+    outputBuf = (outputBuf + (typeof chunk === "string" ? chunk : chunk.toString("utf8"))).slice(-MAX_OUTPUT);
+  };
+  child.stdout?.on("data", capture);
+  child.stderr?.on("data", capture);
   const handle: DevServerHandle = {
     pid: child.pid ?? -1,
     port,
     stdout: child.stdout ?? null,
     stderr: child.stderr ?? null,
     exited: false,
+    recentOutput: () => outputBuf.trim(),
   };
   // Event-driven exit — strictPort-exit / crash'i KESİN yakala (pid-poll değil;
   // shell:true wrapper pid'i yanıltıcı). waitForDevServer her turda kontrol eder.
   child.on("exit", () => {
+    handle.exited = true;
+  });
+  // KRİTİK: spawn HATASI ('error' olayı) — E2BIG/ENOENT burada gelir, stderr'de DEĞİL.
+  // Handler yoksa hata yutulur (süreç sadece "öldü" görünür → kör teşhis). Yakala + işaretle.
+  child.on("error", (err) => {
+    capture(`\n[spawn error] ${String((err as { message?: string }).message ?? err)}`);
     handle.exited = true;
   });
   return handle;
@@ -256,6 +280,8 @@ export interface DevServerAttempt {
     | "port_timeout"
     | "port_occupied_unforceable" // hedef port başka app'te + bu komutta port zorlanamıyor → false-match yerine dürüst fail
     | "no_free_port"; // hiç boş port bulunamadı
+  /** Spawn'ın GERÇEK çıktısı (stderr/stdout son ~4KB + spawn-error). Kör-teşhis fix — analiz buna bakar. */
+  output?: string;
 }
 
 // ───────────────── SAF: port sahiplik / boş-port / komut-augment ─────────────────
@@ -398,17 +424,20 @@ export async function tryDevServerChain(
       return { ok: true, handle, cmd, attempts };
     }
 
-    // Bu aday fail — process tree'sini öldür, sonraki adaya geç.
+    // Bu aday fail — process tree'sini öldür, sonraki adaya geç. GERÇEK çıktıyı sakla.
+    const output = handle.recentOutput();
     attempts.push({
       cmd: cand.cmd,
       port: target,
       reason: handle.exited ? "process_died" : "port_timeout",
+      ...(output ? { output } : {}),
     });
     killProcessTree(handle.pid);
     log.warn("dev-server-launcher", "chain attempt failed", {
       cmd,
       port: target,
       exited: handle.exited,
+      output: output.slice(-500),
       next: attempts.length < candidates.length ? "trying next" : "exhausted",
     });
   }

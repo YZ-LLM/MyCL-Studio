@@ -6,6 +6,19 @@
 
 ## 2026-06-10
 
+- **fix(KÖR TEŞHİS kökü: dev-server çöküşünün GERÇEK hatasını yakala+göster) [Ümit logları: "bu kadar kolay bişeyi
+  çözemedi, node_modules silmeyi düşündü"]:** Log analizi: dev server 3 denemede düşüyordu, ajan port/vite/node_modules
+  PROJE fix'lerini DÖNGÜDE deniyordu — ama hiçbiri sonucu değiştirmiyordu (kök neden E2BIG spawn-ortamı). Sebep:
+  `tryDevServerChain` çöküşü bare "process_died/port_timeout" diye raporluyordu; **spawn stderr'i hiç okunmuyordu +
+  E2BIG/ENOENT bir spawn `'error'` olayıdır (stderr değil) ve handler YOKTU** → gerçek hata yutuluyordu → kör teşhis.
+  Düzeltmeler (genel, her spawn için): (1) `spawnDevServer` stdout/stderr'i ring-buffer'a (son 4KB) drain eder +
+  `child.on("error")` ile spawn-error (E2BIG/ENOENT) yakalar — `handle.recentOutput()`. Drain pipe-hang'ini de önler.
+  (2) `DevServerAttempt.output` + chain fail'de yakalanır; phase-5 `lastFailReason`'a GERÇEK çıktı konur → error-analysis
+  "asıl hatayı" görür. (3) error-analysis prompt: hata-sınıflarını tanı (E2BIG=ortam, projeye dokunma; ENOENT=eksik
+  dep/script; EADDRINUSE=port) + yıkıcı/yavaş fix (node_modules sil/reinstall) EN SONA, ucuz-reversible ÖNCE.
+  (4) faz-fail döngü-kıranı sayaç→İMZA bazlı (zaman-penceresiz): aynı hata 2 oto-fix'e rağmen sürerse "sorun
+  değiştirdiğim yerde değil" → otomatik tamir DUR, kullanıcıya sor (saatlerce süren döngü logda görülmüştü). +2 test.
+
 - **fix(hata-analizi API modunda da çalışır — CLI-only gate kaldırıldı) [Ümit: "bunu çözmüştük" — ekranda hâlâ
   "Hata analizi yalnız CLI/abonelik modunda yapılır"]:** `analyzeAndAskError` artık backend-aware: orkestratör
   cli → `runClaudeCli` (Read/Grep/Bash ile araştırmalı, eskisi gibi); orkestratör api → Anthropic SDK TEK-ATIŞ

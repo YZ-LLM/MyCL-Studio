@@ -510,21 +510,33 @@ export class Phase5Controller {
       const attemptsLog = chainResult.attempts
         .map((a) => `  • \`${a.cmd}\` (port=${a.port}, ${a.reason})`)
         .join("\n");
+      // GERÇEK spawn çıktısı (kör-teşhis fix, Ümit 2026-06-10): stderr/spawn-error.
+      // E2BIG/ENOENT/script-eksik artık görünür → analiz DOĞRU yeri tamir eder, node_modules silmez.
+      const realOutput = chainResult.attempts
+        .map((a) => a.output)
+        .filter((o): o is string => !!o)
+        .join("\n---\n")
+        .slice(-1500);
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 5,
         event: "phase-5-dev-server-fail",
         caller: "mycl-orchestrator",
-        detail: `attempts=${chainResult.attempts.length} timeout=${DEV_SERVER_TIMEOUT_MS}ms`,
+        detail: `attempts=${chainResult.attempts.length} timeout=${DEV_SERVER_TIMEOUT_MS}ms${realOutput ? ` output=${realOutput.slice(-300)}` : ""}`,
       });
       emitChatMessage(
         "error",
-        `${diagnostic}\n\nDenenen komutlar (hepsi başarısız):\n${attemptsLog}`,
+        `${diagnostic}\n\nDenenen komutlar (hepsi başarısız):\n${attemptsLog}` +
+          (realOutput ? `\n\n**Sürecin gerçek çıktısı (asıl hata):**\n\`\`\`\n${realOutput}\n\`\`\`` : ""),
       );
       log.warn("phase-5", "dev server chain exhausted", {
         attempts: chainResult.attempts,
       });
-      this.lastFailReason = `dev server chain exhausted (${chainResult.attempts.length} attempts)`;
+      // lastFailReason → failPhase → error-analysis detail. GERÇEK çıktı buraya konur ki
+      // analiz "timeout" değil ASIL hatayı (E2BIG vb.) görsün → doğru fix, döngü kırılır.
+      this.lastFailReason =
+        `dev server chain exhausted (${chainResult.attempts.length} attempts)` +
+        (realOutput ? `\n\nSpawn output (the actual error — diagnose THIS, not generic causes):\n${realOutput}` : "");
       return "fail";
     }
     const handle = chainResult.handle;
