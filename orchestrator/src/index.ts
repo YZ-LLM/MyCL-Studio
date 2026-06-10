@@ -379,6 +379,13 @@ function failSignature(n: PhaseId, ctrl?: FailReasonHolder): string {
 }
 
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
+  // Kullanıcı çalışan fazı yönlendirmeyle durdurduysa bu bir HATA değil — analiz/oto-çözüm BAŞLATMA.
+  // (Ümit: "beni dinlemedi" — durdurma sonrası MyCL kendi analizine dalmasın, kullanıcının isteğine geçsin.)
+  if (isUserInitiatedAbort()) {
+    clearUserInitiatedAbort();
+    emitChatMessage("system", `⏹ Faz ${n} durduruldu (sen yönlendirdin).`);
+    return;
+  }
   const message = phaseFailMessage(n, ctrl);
   emitChatMessage("error", message);
   emitPhaseChanged(n, n, "error");
@@ -1217,12 +1224,39 @@ async function handleCommandDirect(
 // tüm fazı await ettiğinden bayrak işlem boyunca tutulur; abort_phase AYRI handler olduğu için bloklanmaz
 // (durdurma çalışmaya devam eder). Sessiz reddetme değil — görünür "işleniyor" mesajı.
 let _handlingUserMessage = false;
+// 2026-06-10 (Ümit: "beni dinlemedi" — logda: faz çalışırken "Faz 10'dan devam et" dedi, MyCL iki kez
+// "önce mevcut faza cevap ver" deyip reddetti). DOĞRU davranış: kullanıcının AÇIK yönlendirmesi çalışan
+// fazı EZER → çalışanı durdur (abort), yeni isteği lock boşalınca işle. Reddetme YOK.
+let _pendingRedirect: string | null = null;
+let _userInitiatedAbort = false;
+
+/** Çalışan fazı/işi kullanıcı yönlendirmesi nedeniyle durdurmak için (failPhase analizini atlatır). */
+function isUserInitiatedAbort(): boolean {
+  return _userInitiatedAbort;
+}
+function clearUserInitiatedAbort(): void {
+  _userInitiatedAbort = false;
+}
+
 async function handleUserMessage(text: string): Promise<void> {
   if (_handlingUserMessage) {
-    emitChatMessage(
-      "system",
-      "⏳ Önceki mesaj/faz hâlâ işleniyor — bitmesini bekle ya da üstteki ⏹ ile durdur.",
-    );
+    // REDDETME (eski "beni dinlemedi" hatası): kullanıcı çalışan iş varken yeni bir şey yazdıysa,
+    // bu açık bir yönlendirmedir → çalışanı DURDUR + bu mesajı sıraya al; lock boşalınca işlenir.
+    _pendingRedirect = text;
+    if (
+      runtime.controller &&
+      "abort" in runtime.controller &&
+      typeof runtime.controller.abort === "function"
+    ) {
+      _userInitiatedAbort = true;
+      runtime.controller.abort();
+      emitChatMessage(
+        "system",
+        "⏹ Çalışan işi durduruyorum — sen yönlendirdin, isteğini işleyeceğim.",
+      );
+    } else {
+      emitChatMessage("system", "⏳ Önceki mesaj işleniyor — biter bitmez bu isteğini işleyeceğim.");
+    }
     return;
   }
   _handlingUserMessage = true;
@@ -1230,6 +1264,13 @@ async function handleUserMessage(text: string): Promise<void> {
     await handleUserMessageInner(text);
   } finally {
     _handlingUserMessage = false;
+  }
+  // Lock boşaldı — kullanıcı çalışan fazı durdurup yönlendirdiyse, o yönlendirmeyi ŞİMDİ işle.
+  if (_pendingRedirect !== null) {
+    const next = _pendingRedirect;
+    _pendingRedirect = null;
+    _userInitiatedAbort = false;
+    await handleUserMessage(next);
   }
 }
 async function handleUserMessageInner(text: string): Promise<void> {
@@ -3415,9 +3456,16 @@ async function emitPhaseRunAskq(phaseId: number): Promise<void> {
     return;
   }
   if (runtime.controller) {
+    // Ümit "beni dinlemedi": dead-end YOK. Kullanıcı açıkça başka faz başlatmak istiyor →
+    // çalışanı DURDUR (sen yönlendirdin) + hangi fazı istediğini söyle. Durunca tekrar 'Çalıştır'
+    // ile (ya da yazılı "Faz N'den devam et" ile — o otomatik durdurup işler) başlatılır.
+    if ("abort" in runtime.controller && typeof runtime.controller.abort === "function") {
+      _userInitiatedAbort = true;
+      runtime.controller.abort();
+    }
     emitChatMessage(
       "system",
-      "Şu an bir faz çalışıyor. Önce mevcut faza cevap ver, sonra yeni faz başlat.",
+      `⏹ Çalışan fazı durdurdum (sen Faz ${phaseId}'i istedin). Durunca **Çalıştır**'a tekrar bas — ya da chat'e "Faz ${phaseId}'den devam et" yaz, otomatik geçeyim.`,
     );
     return;
   }
