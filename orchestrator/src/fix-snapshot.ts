@@ -4,7 +4,7 @@
 
 import { cp, mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { createCheckpoint } from "./git.js";
+import { createCheckpoint, restoreCheckpoint } from "./git.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { globalConfigDir } from "./paths.js";
@@ -39,7 +39,9 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
   const cp1 = await createCheckpoint(projectRoot).catch(() => ({ ok: false as const, ref: undefined }));
   if (cp1.ok && "ref" in cp1 && cp1.ref) {
     emitChatMessage("system", "📌 Snapshot alındı (git) — bu adımda silinen/değişen dosyalar gerekirse geri alınabilir.");
-    return { method: "git", ref: cp1.ref };
+    const snap: FixSnapshot = { method: "git", ref: cp1.ref };
+    armRollback(snap);
+    return snap;
   }
   // 2. Git yok/kirli → kaynak ağacını yedekle. Hedef proje DIŞINDA (~/.mycl/backups) — `fs.cp` bir dizini kendi
   // alt-dizinine kopyalayamaz; ayrıca yedek projeyi kirletmez + proje işlemlerinden etkilenmez.
@@ -59,13 +61,59 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
       "system",
       "📌 Snapshot alındı (`~/.mycl/backups`) — git yok ama kaynak yedeklendi; silinen/yanlış değişen dosya oradan geri alınır.",
     );
-    return { method: "copy", dir };
+    const snap: FixSnapshot = { method: "copy", dir };
+    armRollback(snap);
+    return snap;
   } catch (e) {
     log.warn("fix-snapshot", "snapshot failed (non-fatal)", e);
     emitChatMessage(
       "system",
       "⚠️ Snapshot alınamadı — otomatik düzeltme yine de uygulanacak ama GERİ ALMA yok. Dikkatli ol.",
     );
+    disarmRollback();
     return { method: "none" };
   }
+}
+
+/**
+ * Bir snapshot'tan projeyi GERİ YÜKLE. git → restoreCheckpoint (checkout+clean, fix'in eklediği dosyalar da gider);
+ * copy → yedek dizini proje üstüne kopyalanır (silinen/değişen dosyalar döner; fix'in eklediği fazlalık kalabilir).
+ */
+export async function restoreSnapshot(snap: FixSnapshot, projectRoot: string): Promise<boolean> {
+  try {
+    if (snap.method === "git" && snap.ref) {
+      const ok = await restoreCheckpoint(projectRoot, snap.ref);
+      return ok;
+    }
+    if (snap.method === "copy" && snap.dir) {
+      await cp(snap.dir, projectRoot, { recursive: true, force: true });
+      return true;
+    }
+    return false;
+  } catch (e) {
+    log.warn("fix-snapshot", "restore failed", e);
+    return false;
+  }
+}
+
+// ───────── Rollback noktası (Ümit 2026-06-10: "oto-cevap açıksa ve geri almaktan başka çare yoksa MyCL kendi geri
+// alsın"). Bir düzeltme-dizisinin EN TEMİZ hali = ilk fix denemesinden ÖNCEki snapshot (FIRST-wins). Diziyi
+// çözen başarı veya yeni kullanıcı turu disarm eder; tükenmede failPhase bunu restore eder. ─────────
+let _rollback: FixSnapshot | null = null;
+
+/** İlk-kazanır: dizinin ilk (en temiz) snapshot'ını rollback noktası yap (sonrakiler ezmez — junk birikmesin). */
+export function armRollback(snap: FixSnapshot): void {
+  if (_rollback === null && (snap.method === "git" || snap.method === "copy")) {
+    _rollback = snap;
+  }
+}
+/** Rollback noktasını al + temizle (restore edildikten sonra). */
+export function takeRollback(): FixSnapshot | null {
+  const r = _rollback;
+  _rollback = null;
+  return r;
+}
+/** Dizi çözüldü/yeni tur → rollback noktasını at (bayat restore olmasın). */
+export function disarmRollback(): void {
+  _rollback = null;
 }

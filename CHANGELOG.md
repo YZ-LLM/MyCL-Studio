@@ -6,6 +6,14 @@
 
 ## 2026-06-10
 
+- **feat(otomatik geri alma: Oto-cevap açık + çare kalmadıysa MyCL kendi geri alır) [Ümit: "oto-cevap açıksa ve
+  geri almaktan başka çare yoksa mycl kendisi geri alsın"]:** `fix-snapshot.ts`: `restoreSnapshot` (git →
+  restoreCheckpoint checkout+clean; copy → yedeği proje üstüne) + rollback-registry (`armRollback` ilk-kazanır =
+  dizinin en temiz hali, `takeRollback`, `disarmRollback`). snapshotBeforeAutofix her snapshot'ı arm eder; yeni
+  kullanıcı turu disarm eder (bayat restore yok). failPhase'de TÜKENME (aynı hata AUTO_SOLVE_MAX denemeye rağmen
+  sürüyor, Oto-cevap açık) = "geri almaktan başka çare yok" → MyCL ilk-fix-öncesi temiz snapshot'a **otomatik geri
+  döner** ("↩️ başarısız değişiklikleri geri aldım") + seçenekleri sorar. Junk birikmiş bozuk halde bırakmaz.
+
 - **feat(silme öncesi MUTLAKA yedek — codegen fazları da snapshot'lı) [Ümit: "herhangi bir şeyi silme kararı
   verdiyse yedeğini almadan silmesin; ilerde sorun olursa geri yükler"]:** Codegen ajanı dosya silebilir/üstüne
   yazabilir (supersession: eski sayfa/route'u kaldır). CLI ajanının tek tek `rm`'lerini MyCL araya giremediği için

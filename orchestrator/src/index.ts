@@ -109,7 +109,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
-import { snapshotBeforeAutofix } from "./fix-snapshot.js";
+import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
 import { autoAnswerSuggested, setAutoAnswerSuggested } from "./auto-answer.js";
@@ -406,13 +406,31 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   const sameSig = prev?.sig === sig;
   const priorCount = sameSig ? prev!.count : 0;
   const autoResolve = otoCevap && priorCount < AUTO_SOLVE_MAX;
+  const exhausted = otoCevap && priorCount >= AUTO_SOLVE_MAX;
   if (!autoResolve) {
     emitChatMessage(
       "system",
       !otoCevap
         ? "ℹ️ Oto-cevap kapalı — hatayı otomatik düzeltmiyorum; seçenekleri sana soruyorum (Oto-cevap'ı açarsan otomatik çözer)."
-        : `ℹ️ Aynı hata ${AUTO_SOLVE_MAX} otomatik çözüm denemesine rağmen sürüyor — demek ki sorun değiştirdiğim yerde DEĞİL. Otomatik tamiri durdurdum; seçenekleri sana soruyorum (gerçek hatayı yukarıdaki "asıl hata" çıktısından gör).`,
+        : `ℹ️ Aynı hata ${AUTO_SOLVE_MAX} otomatik çözüm denemesine rağmen sürüyor — demek ki sorun değiştirdiğim yerde DEĞİL.`,
     );
+  }
+  // Ümit 2026-06-10: "oto-cevap açıksa ve geri almaktan başka çare yoksa MyCL kendi geri alsın."
+  // Tükenme = aynı hata MAX denemeye rağmen sürüyor → denemeler işe yaramadı, üstelik junk biriktirmiş olabilir.
+  // Oto-cevap açıkken: dizinin EN TEMİZ snapshot'ına (ilk fix öncesi) otomatik GERİ DÖN, sonra seçenekleri sor.
+  if (exhausted) {
+    const rb = takeRollback();
+    if (rb) {
+      const ok = await restoreSnapshot(rb, runtime.state.project_root);
+      emitChatMessage(
+        "system",
+        ok
+          ? `↩️ Otomatik düzeltmeler bu hatayı çözmedi — başarısız değişiklikleri **geri aldım** (${rb.method === "git" ? "git checkpoint" : "yedek"}; ilk denemeden önceki temiz hale). Şimdi seçenekleri sana soruyorum.`
+          : `⚠️ Geri alma denedim ama tam başarılı olamadı (${rb.method}). Değişiklikleri elle kontrol etmen gerekebilir; seçenekleri sana soruyorum.`,
+      );
+    } else {
+      emitChatMessage("system", "Seçenekleri sana soruyorum (geri alınacak snapshot yok).");
+    }
   }
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
     autoResolve,
@@ -1290,6 +1308,9 @@ async function handleUserMessageInner(text: string): Promise<void> {
     emitError("no active project", null);
     return;
   }
+  // Yeni kullanıcı turu = yeni düzeltme-dizisi → eski rollback noktasını at (önceki turun bayat snapshot'ı
+  // bu turun bir hatasında yanlışlıkla restore edilmesin). Tur içi snapshot'lar kendi rollback'ini arm eder.
+  disarmRollback();
   // History persistence: user mesajını yaz. Frontend setMainState ile UI'a
   // ekledi ama backend echo etmiyordu → tarihte yer almıyordu. Açılışta
   // history_chunk'tan gelmediği için kaybolmuş gibi görünüyordu (kullanıcı
