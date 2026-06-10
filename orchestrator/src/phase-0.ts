@@ -34,6 +34,7 @@ import { clearHistory } from "./history.js";
 // silinince bu helper'lar bu modülde gereksiz. Faz 5 (UI tweak mode) ve
 // command handler kendi modüllerinde reuse ediyor.
 import {
+  emitAskq,
   emitChatMessage,
   emitClaudeStream,
   emitError,
@@ -669,6 +670,37 @@ export class Phase0Controller {
       .filter((_, i) => i !== recIdx)
       .map((o) => `- ${o.label} — ${o.description}`)
       .join("\n");
+    // GUARDRAIL 1 (Ümit 2026-06-10): TÜM PIPELINE'I yeniden başlatan (full-stack/new-iteration) bir çözüm
+    // ASLA otomatik uygulanmaz — pipeline-restart kullanıcı kararıdır (yanlışsa tüm ilerleme yok olur). Bu sınıfta
+    // oto-seçim yapma → askq aç, kullanıcı onaylasın. Diğerleri (ui-only/backend-only odaklı) otomatik kalır.
+    const restartsPipeline = chosen.planKind === "full-stack" || chosen.planKind === "new-iteration";
+    if (restartsPipeline) {
+      emitChatMessage(
+        "system",
+        `🤔 Önerilen çözüm tüm pipeline'ı yeniden başlatmayı gerektiriyor (kapsamlı): **${chosen.label}**\n` +
+          `Bu büyük bir karar — otomatik uygulamıyorum, onayını istiyorum.` +
+          (alternatives ? `\n\nDiğer seçenekler:\n${alternatives}` : ""),
+      );
+      const askqId = randomUUID();
+      emitAskq({
+        id: askqId,
+        question: "Bu kapsamlı çözüm tüm pipeline'ı yeniden başlatır. Onaylıyor musun?",
+        options: [...optionsTR.map((o) => o.label), "Vazgeç"],
+        allow_other: false,
+      });
+      this.statePatch = {
+        pending_diagnostic: {
+          phase: "D2_WAITING",
+          askq_id: askqId,
+          rootCauseTR,
+          options: optionsTR,
+          affected,
+          ts: Date.now(),
+        },
+      };
+      this.lastOutcome = { kind: "d1_root_cause", rootCauseTR, options: optionsTR };
+      return "complete";
+    }
     emitChatMessage(
       "system",
       `🤖 **En iyi çözüm otomatik seçildi:** ${chosen.label}\n${chosen.description}` +

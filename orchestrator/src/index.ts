@@ -3432,10 +3432,13 @@ export async function handleAskqAnswer(
       await saveState(runtime.state);
       await advanceToNextPhase(7 as PhaseId);
     } else {
-      // full-stack veya new-iteration — kapsamlı değişiklik, yeni iterasyon
+      // full-stack veya new-iteration — kapsamlı değişiklik, yeni iterasyon.
+      // GUARDRAIL 2 (Ümit 2026-06-10): bu MyCL'in KENDİ otomatik düzeltmesi — KULLANICI feature isteği DEĞİL.
+      // Eskiden fixPayload "Fix request: ..." Faz 1'e gidip "Kullanıcı X istiyor" diye FABRİKLENİYORDU. Artık
+      // intent açıkça işaretli: ajan bunu "uygulanan düzeltme" diye betimler, asla "kullanıcı istiyor" demez.
       emitChatMessage(
         "system",
-        `🔧 Kapsamlı değişiklik: **${selected.label}**\n\nYeni iterasyon başlatılıyor (Faz 1'den).`,
+        `🔧 Kapsamlı düzeltme (MyCL — pipeline hatasını gidermek için): **${selected.label}**\n\nYeni iterasyon olarak uygulanıyor.`,
       );
       runtime.state = {
         ...runtime.state,
@@ -3443,13 +3446,16 @@ export async function handleAskqAnswer(
         updated_at: Date.now(),
       };
       await saveState(runtime.state);
+      const autoFixIntent =
+        `[MyCL AUTOMATED FIX — NOT a user feature request. Describe this as a fix being applied to resolve a ` +
+        `failed pipeline phase; NEVER phrase it as "the user wants ...".]\n\n${fixPayload}`;
       await executeAgentDecision(
         {
           action: "develop_new_or_iter",
-          reason: `Phase 0 fix planı kapsamlı (${kind}); yeni iterasyon olarak ele alıyorum.`,
+          reason: `MyCL kendi düzeltmesini kapsamlı (${kind}) olduğu için yeni iterasyon olarak uyguluyor (kullanıcı isteği değil).`,
           topic_slug: "debug-full-stack-fix",
         },
-        fixPayload,
+        autoFixIntent,
       );
     }
     return;

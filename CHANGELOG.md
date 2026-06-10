@@ -6,6 +6,15 @@
 
 ## 2026-06-10
 
+- **fix(2 guardrail: gate-fail asla oto-yeni-iterasyon + MyCL kararını "kullanıcı istiyor" diye yazmaz) [Ümit
+  vakası: Faz 11 fix'i full-stack→yeni iterasyon→"Kullanıcı tsconfig istiyor" fabrikasyonu]:**
+  (1) **Pipeline-restart asla otomatik değil:** Faz 0 oto-seçimi, planKind `full-stack`/`new-iteration` (tüm
+  pipeline'ı yeniden başlatan) bir çözümü AUTO uygulamaz — bu büyük karar kullanıcıya askq ile sorulur (yanlışsa
+  tüm ilerleme yok olur). Odaklı fix'ler (ui-only/backend-only) otomatik kalır.
+  (2) **Fabrikasyon yok:** yeni-iterasyona giden düzeltme intent'i artık `[MyCL AUTOMATED FIX — NOT a user feature
+  request; describe as a fix, never "the user wants..."]` ile işaretli + kullanıcı-mesajı "MyCL pipeline hatasını
+  gidermek için" diyor. Faz 1 artık MyCL'in kendi kararını "Kullanıcı X istiyor" diye sunamaz.
+
 - **feat(KÖK FİX: ajanlara PROJE-GERÇEKLERİ ver — JS/TS körlüğü) [Ümit: "MyCL salak; orkestra ajanı işini yapmıyor;
   bağlamı iyi veremiyorlar; proje bilgisini cömertçe verelim"]:** Vaka: Faz 11 `ts-prune` (TS-only) JS projesinde
   çöktü → hata-analizi ajanı (API tek-atış, bağlamsız) yalnız hata metnini görüp "tsconfig oluştur" dedi → full-stack
