@@ -11,6 +11,7 @@ import { TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js";
 import type { ToolDef } from "./claude-api.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
+import { buildProjectFacts } from "./project-facts.js";
 import type { MyclConfig } from "./config.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -25,10 +26,12 @@ export async function runGateAutofix(
   gateLabel: string,
   errors: string,
 ): Promise<boolean> {
+  const facts = await buildProjectFacts(state.project_root).catch(() => null);
   const systemPrompt = [
     `You are fixing ONLY the errors reported by the "${gateLabel}" static-check gate. This is the dedicated`,
     "gate phase doing its job: resolve the reported errors IN PLACE — do not defer, do not escalate.",
     "",
+    ...(facts?.summary ? [facts.summary, ""] : []),
     "Reported errors:",
     errors.slice(0, 3000),
     "",

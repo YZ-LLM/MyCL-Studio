@@ -6,6 +6,17 @@
 
 ## 2026-06-10
 
+- **feat(KÖK FİX: ajanlara PROJE-GERÇEKLERİ ver — JS/TS körlüğü) [Ümit: "MyCL salak; orkestra ajanı işini yapmıyor;
+  bağlamı iyi veremiyorlar; proje bilgisini cömertçe verelim"]:** Vaka: Faz 11 `ts-prune` (TS-only) JS projesinde
+  çöktü → hata-analizi ajanı (API tek-atış, bağlamsız) yalnız hata metnini görüp "tsconfig oluştur" dedi → full-stack
+  → yeni iterasyon → "Kullanıcı tsconfig istiyor" diye FABRİKLEDİ. Kök: (a) detectStack JS/TS ayırmıyor (sadece
+  node-npm), (b) ajan promptlarında proje-gerçeği YOK. FIX: yeni `project-facts.ts` — dil (JS/TS/mixed), framework,
+  tsconfig/config varlığı, paket yöneticisi + enjekte edilebilir özet (deterministik, ucuz). Bu özet artık
+  ORKESTRATÖR (context-builder), HATA-ANALİZİ ve GATE-AUTOFIX promptlarına enjekte ediliyor → ajan "bu JS projesi,
+  TS aracı uygulanmaz" bilgisiyle karar veriyor. Ayrıca `mechanical-runner.isTsToolNotApplicable` — TS aracı
+  (ts-prune/ts-morph/tsc) tsconfig'siz çökerse SKIP (proje hatası değil; tsconfig oluşturma yok). +5 test.
+  KALAN (sıradaki): gate-fail asla yeni-iterasyon tetiklemesin; MyCL kendi kararını "kullanıcı istiyor" diye yazmasın.
+
 - **fix(debug dönüş noktası: hata hangi fazda çıktıysa orada düzelt+doğrula — Faz 8'e geri dönme) [Ümit: "bitirdiğin
   Faz 8'e geri dönmen saçma; üstelik bunu Faz 10'da aldığın hatayı debug ederken yaptın — döneceği yeri yanlış
   hesaplamış"]:** Kanıt: debug-fix routing plan_kind'a göre SABİT faza dönüyordu (backend-only → current_phase=7 →

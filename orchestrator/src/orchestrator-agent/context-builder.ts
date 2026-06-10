@@ -15,6 +15,7 @@ import type { HandoffRecord, WtfRecord } from "../audit.js";
 import { peekProjectMap, formatProjectMap } from "../onboarding/project-map.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
+import { buildProjectFacts } from "../project-facts.js";
 import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
 import {
   readProjectMemory,
@@ -401,14 +402,18 @@ export async function buildAgentSystemPrompt(
   const staticPart = await loadStaticSystemPrompt();
   // Doğru-karar/recall: userMessage varsa relevance-tabanlı geri-çağırmayı da paralel
   // çek (ekstra gecikme gizlenir). Boş/triviyal → "" (bölüm eklenmez). Fail-safe.
-  const [ctx, conv, relevantRecall] = await Promise.all([
+  const [ctx, conv, relevantRecall, facts] = await Promise.all([
     buildAgentContext(state),
     buildConversationContext(config, state),
     userMessage
       ? buildRelevantOrchestratorContext(config, state, userMessage).catch(() => "")
       : Promise.resolve(""),
+    // Ümit 2026-06-10: beyin (orkestratör) projenin temel gerçeklerini (dil JS/TS, framework) BİLSİN —
+    // körüne karar vermesin. "Proje bilgisini cömertçe ver → daha iyi yanıt."
+    buildProjectFacts(state.project_root).catch(() => null),
   ]);
   const askqSection = renderActiveAskqSection(getActiveAskq());
   const convSection = renderConversationSection(conv);
-  return `${staticPart}\n${renderContextSection(ctx)}${convSection}${relevantRecall}${askqSection}`;
+  const factsSection = facts?.summary ? `\n\n### Proje gerçekleri\n${facts.summary}` : "";
+  return `${staticPart}\n${renderContextSection(ctx)}${factsSection}${convSection}${relevantRecall}${askqSection}`;
 }

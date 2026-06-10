@@ -32,3 +32,17 @@ describe("isMyclToolBroken (MyCL kendi aracı bozuk → skip, proje hatası değ
     expect(isMissingCommand({ code: 127, stdout: "", stderr: "command not found" })).toBe(true);
   });
 });
+
+// 2026-06-10 (Ümit): TS-only araç JS projesinde → uygulanamaz (skip), proje hatası değil.
+import { isTsToolNotApplicable } from "../src/base/mechanical-runner.js";
+describe("isTsToolNotApplicable (TS aracı JS projesinde)", () => {
+  it("ts-morph FileNotFoundError → true", () => {
+    expect(isTsToolNotApplicable({ code: 1, stdout: "", stderr: "@ts-morph/common ... throw this.getFileNotFoundErrorIfNecessary(err, filePath)" })).toBe(true);
+  });
+  it("ts-prune + tsconfig not found → true", () => {
+    expect(isTsToolNotApplicable({ code: 1, stdout: "", stderr: "ts-prune: could not find a tsconfig.json" })).toBe(true);
+  });
+  it("normal lint hatası → false (gerçek fail kalır)", () => {
+    expect(isTsToolNotApplicable({ code: 1, stdout: "", stderr: "ESLint: 'x' is assigned but never used" })).toBe(false);
+  });
+});

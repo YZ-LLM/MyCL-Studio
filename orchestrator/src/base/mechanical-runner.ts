@@ -160,6 +160,23 @@ export function isMyclToolBroken(result: { code: number; stdout: string; stderr:
   return moduleNotFound && pointsAtMyclInstall;
 }
 
+/**
+ * 2026-06-10 (Ümit): TypeScript-only bir araç (ts-prune/ts-morph/tsc) JS projesinde (tsconfig yok) çöktüğünde
+ * bu PROJE hatası DEĞİL — araç bu proje tipine UYGULANAMAZ. Eski davranış: ts-prune ts-morph FileNotFoundError
+ * ile patlıyor → MyCL "proje hatası" sanıp "tsconfig oluştur + yeni iterasyon" gibi saçma fix'e gidiyordu.
+ * Tespit: ts-morph/ts-prune/tsc imzası + (FileNotFoundError | tsconfig bulunamadı). SAF.
+ */
+export function isTsToolNotApplicable(result: { code: number; stdout: string; stderr: string }): boolean {
+  const s = `${result.stderr}\n${result.stdout}`;
+  const tsTool = /ts-morph|ts-prune|\btsc\b/i.test(s);
+  const configMiss =
+    /FileNotFoundError/i.test(s) ||
+    /could not find a? ?tsconfig/i.test(s) ||
+    /tsconfig\.json['"]? ?(not found|does not exist|bulunamadı)/i.test(s) ||
+    /No inputs were found in config/i.test(s);
+  return tsTool && configMiss;
+}
+
 export class MechanicalRunnerBase {
   private aborted = false;
 
@@ -312,6 +329,21 @@ export class MechanicalRunnerBase {
       );
       return "skipped";
     }
+    // TS-only araç JS projesinde (tsconfig yok) → uygulanamaz → skip (tsconfig oluştur saçmalığı yok).
+    if (isTsToolNotApplicable(result)) {
+      await appendAudit(opts.state.project_root, {
+        ts: Date.now(),
+        phase: opts.phaseId,
+        event: `${extra.name}-skipped`,
+        caller: "mycl-orchestrator",
+        detail: `ts_tool_not_applicable code=${result.code} cmd="${extra.cmd}"`,
+      });
+      emitChatMessage(
+        "system",
+        `⏭ ${extra.name} atlandı — bu TypeScript aracı JS projesine (tsconfig yok) uygulanamaz. Bu bir proje hatası DEĞİL; tsconfig oluşturmuyorum.`,
+      );
+      return "skipped";
+    }
 
     // Güvenlik-baseline Unit 3: "araç düzgün çalışmadı" exit kodları (örn. semgrep
     // fatal/bozuk-kural=2, gitleaks eski-sürüm bilinmeyen-komut=126) → BULGU değil →
@@ -461,6 +493,23 @@ export class MechanicalRunnerBase {
           `⏭ ${this.label} atlandı — MyCL'in kendi aracı çalışmadı (paketleme bug'ım, proje sorunu DEĞİL).`,
         );
         return { kind: "skipped", reason: "mycl_tool_broken" };
+      }
+      // TS-only araç (ts-prune/ts-morph/tsc) JS projesinde (tsconfig yok) → uygulanamaz → skip.
+      // Ümit vakası: Faz 11 ts-prune JS projesinde çöküp "tsconfig oluştur + yeni iterasyon" saçmalığına yol açtı.
+      if (isTsToolNotApplicable(scanResult)) {
+        log.warn(opts.tag, "TS tool not applicable (no tsconfig / JS project) — skipping", { cmd: scanCmd });
+        await appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.phaseId,
+          event: `phase-${opts.phaseId}-skipped`,
+          caller: "mycl-orchestrator",
+          detail: `ts_tool_not_applicable cmd="${scanCmd}"`,
+        });
+        emitChatMessage(
+          "system",
+          `⏭ ${this.label} atlandı — bu TypeScript aracı JS projesine (tsconfig yok) uygulanamaz. Proje hatası DEĞİL; tsconfig oluşturmuyorum.`,
+        );
+        return { kind: "skipped", reason: "ts_tool_not_applicable" };
       }
       if (scanResult.code === 0) {
         await appendAudit(opts.state.project_root, {

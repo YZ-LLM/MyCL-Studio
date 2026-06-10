@@ -21,6 +21,7 @@ import { runClaudeCli } from "./cli-run.js";
 import { makeAnthropicClient } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { selectEffortForTask } from "./model-catalog.js";
+import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
 import { log } from "./logger.js";
 import type { PhaseId, State } from "./types.js";
@@ -162,8 +163,13 @@ export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
   return { blocking, summary_tr: summary.trim(), solutions_tr, best_index };
 }
 
-/** Pure: orkestratör analiz prompt'unu kur (test edilebilir). canInvestigate=false → API tek-atış (tool yok). */
-export function buildErrorAnalysisPrompt(errCtx: ErrorContext, canInvestigate = true): string {
+/** Pure: orkestratör analiz prompt'unu kur (test edilebilir). canInvestigate=false → API tek-atış (tool yok).
+ *  projectFacts: proje-gerçekleri özeti (dil JS/TS, framework...) — ajan körüne karar vermesin. */
+export function buildErrorAnalysisPrompt(
+  errCtx: ErrorContext,
+  canInvestigate = true,
+  projectFacts?: string,
+): string {
   return [
     "You are MyCL Studio's orchestrator. A phase in the build pipeline just FAILED.",
     canInvestigate
@@ -171,6 +177,15 @@ export function buildErrorAnalysisPrompt(errCtx: ErrorContext, canInvestigate = 
       : "Reason from the error message and raw detail below (no tools available — use the given evidence),",
     "then produce a short root-cause analysis and concrete next steps for the developer.",
     "",
+    ...(projectFacts && projectFacts.trim()
+      ? [
+          projectFacts.trim(),
+          "Use these facts: do NOT propose changes that contradict the project's nature (e.g. adding a tsconfig",
+          "or TypeScript tooling to a JavaScript project). A tool that doesn't fit the project type is the TOOL's",
+          "problem (skip it), not a project defect.",
+          "",
+        ]
+      : []),
     `Failed phase: ${errCtx.phase}`,
     "Error message shown to the developer:",
     errCtx.message,
@@ -248,12 +263,15 @@ export async function analyzeAndAskError(
     // Tek-atışta derin araştırmayı SEÇİLEN FİX downstream (Faz 0 / SDK) yapar → triage hızlı + yeterli.
     const analysisModel = config.selected_models.orchestrator ?? config.selected_models.main;
     const useCli = backendForRole(config, "orchestrator") === "cli";
+    // Proje-gerçeklerini ajana ver (Ümit: "proje bilgisini cömertçe ver → daha iyi yanıt"; ajan JS/TS bilsin).
+    const facts = await buildProjectFacts(state.project_root).catch(() => null);
+    const factsSummary = facts?.summary;
     emitChatMessage("system", "🔎 Hata analiz ediliyor (orkestratör)…");
     let analysisText: string;
     if (useCli) {
       emitClaudeStream({ sub: "init", text: "cli-error-analysis", model: analysisModel, cwd: state.project_root });
       const res = await runClaudeCli({
-        systemPrompt: buildErrorAnalysisPrompt(errCtx, true),
+        systemPrompt: buildErrorAnalysisPrompt(errCtx, true, factsSummary),
         userMessage: "Inspect the failure and emit the error_analysis JSON block now.",
         modelId: analysisModel,
         cwd: state.project_root,
@@ -278,7 +296,7 @@ export async function analyzeAndAskError(
         const response = await client.messages.create({
           model: analysisModel,
           max_tokens: 2048,
-          system: buildErrorAnalysisPrompt(errCtx, false),
+          system: buildErrorAnalysisPrompt(errCtx, false, factsSummary),
           messages: [
             {
               role: "user",
