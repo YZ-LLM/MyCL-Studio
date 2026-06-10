@@ -6,6 +6,14 @@
 
 ## 2026-06-10
 
+- **feat(tasarım paneli çatışma çıtası yükseltildi) [Ümit: 401-vs-403 gibi "çok basit konularda mı çatışma
+  oluşmuş?" → "çok iyi tespit, yap"]:** `design-synthesizer.md`'ye CONFLICT BAR eklendi: yerleşik sektör-standardı
+  cevabı olan / saf konvansiyon soruları (HTTP status semantiği, isimlendirme, dosya düzeni) ÇATIŞMA DEĞİL —
+  sentezleyici kendisi karara bağlar + Decisions log'a yazar. conflicts'e yalnız projeye-özgü + davranış/veri/
+  güvenlik/maliyeti maddi değiştiren anlaşmazlıklar gider ("iki kıdemli mühendis BU projede bunu gerçekten tartışır
+  mıydı?" testi). Müzakere turları kısalır; adminpanel koşusundaki 3 çatışmanın 2'si (şema migrasyonu — spec
+  varsayımını yanlışladı; anket idempotency) yine giderdi, 401/403 gitmezdi.
+
 - **fix(boot-resume: faz başa sarmasın + chat geçmişi geri gelsin) [Ümit ekranı: "kapatıp açtığımda kaldığı
   yerden başlamıyor, fazın başına gidiyor; chat ekranı bile aynı kalmalı"]:** İki kök neden:
   (1) **Chat boş geliyordu** — boot 48s/2000-event yüklüyor ama yoğun codegen oturumunda en yeni 2000 event'in

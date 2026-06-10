@@ -27,5 +27,12 @@ deterministically, still RECORD it in "conflicts" (so a follow-up negotiation ca
 ALSO make the best provisional decision and reflect it in design_markdown. If there is no genuine
 unresolved disagreement, return "conflicts": []. Do not invent conflicts.
 
+CONFLICT BAR (keep it HIGH): do NOT flag questions that have a settled industry-standard answer or
+are pure convention choices (e.g. HTTP status code semantics, naming style, default file layout) —
+DECIDE those yourself and record the one-line reason in the Decisions log. Flag ONLY disagreements
+that are project-specific AND materially change behavior, data, security, or cost. A good test:
+"would two senior engineers genuinely argue about this for THIS project?" If not, it is a decision,
+not a conflict.
+
 Be decisive and concrete. The design_markdown is written to .mycl/design.md and is the single source
 of truth the implementation phase will follow.
