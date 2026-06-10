@@ -211,6 +211,7 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
             tools: opts.tools,
             max_tokens: 4096,
             betas: opts.betas,
+            effortOverride: opts.effortOverride, // escalation: API modunda efor merdiveni
             // v15.8: retry turn'ünde tool çağrısını zorla (Haiku düz-metin fix).
             tool_choice: forceToolNextTurn ? { type: "any" } : undefined,
           },

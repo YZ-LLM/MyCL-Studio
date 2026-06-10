@@ -169,6 +169,7 @@ export class ProductionSchemaBaseController implements ProductionBackend {
             tools: opts.tools,
             max_tokens: 8192,
             betas: opts.betas,
+            effortOverride: opts.effortOverride, // escalation: API modunda efor merdiveni
           },
           (ev) => this.handleStreamEvent(ev),
         );

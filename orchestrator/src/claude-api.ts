@@ -176,6 +176,11 @@ export interface RunTurnOptions {
   betas?: string[];
   /** Tool result vermeden conversation finalize ediliyorsa stop_reason burada. */
   stopOnToolUse?: boolean;
+  /**
+   * Escalation efor override (Ümit 2026-06-11): set ise `config.claude_code_flags.effort` YERİNE bu kullanılır →
+   * API modunda da merdiven eforu (low→medium→high→xhigh→max) `output_config.effort`'a yansır (CLI paritesi).
+   */
+  effortOverride?: string;
 }
 
 export interface TurnUsage {
@@ -345,7 +350,8 @@ export async function runTurn(
   // budget_tokens yolu Opus 4.8'de 400 verir); eski modeller → legacy budget yolu. Forced
   // tool_choice (any/tool) → thinking YOK (mevcut davranış). ultracode → effort:"max" + reminder.
   // ultracode DIŞI effort ARTIK API'ye geçer (eskiden sessizce düşüyordu).
-  const effort = config.claude_code_flags?.effort;
+  // Escalation: opts.effortOverride set ise (merdiven aktif) config eforunu EZER → API'da da efor tırmanır.
+  const effort = opts.effortOverride ?? config.claude_code_flags?.effort;
   const thinkingPlan = thinkingConfigFor(
     effort,
     opts.tool_choice,
