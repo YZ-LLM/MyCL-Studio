@@ -21,7 +21,7 @@ import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
-import { snapshotBeforeAutofix } from "./fix-snapshot.js";
+import { snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
 import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
@@ -609,6 +609,7 @@ export class Phase8Controller {
       } catch (e) {
         log.warn("phase-8", "handoff write failed (non-blocking)", e);
       }
+      disarmRollback(); // faz başarıyla bitti → iyi işi kilitle (geri-alınmasın)
       return "complete";
     }
     // Fail nedenini kullanıcıya görünür yap

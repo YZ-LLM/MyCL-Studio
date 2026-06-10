@@ -6,6 +6,12 @@
 
 ## 2026-06-10
 
+- **fix(geri-alma veri kaybı yapmasın: faz geçince rollback kilitlenir) [Ümit: "veri kaybına yol açmayanı tercih
+  ederim"]:** Otomatik geri-alma, başka bir hatanın tükenmesinde önceki BAŞARILI bir fazı/düzeltmeyi geri alabiliyordu
+  (iyi işi kaybetme). Fix: bir faz başarıyla bitince (`disarmRollback`) rollback noktası temizleniyor — mekanik-pass,
+  gate-autofix-resolved, phase-5/8 codegen başarısı + yeni kullanıcı turu. Böylece geri-alma yalnız o anki BAŞARISIZ
+  düzeltme-dizisini kapsar; tamamlanmış iyi iş asla geri alınmaz.
+
 - **feat(otomatik geri alma: Oto-cevap açık + çare kalmadıysa MyCL kendi geri alır) [Ümit: "oto-cevap açıksa ve
   geri almaktan başka çare yoksa mycl kendisi geri alsın"]:** `fix-snapshot.ts`: `restoreSnapshot` (git →
   restoreCheckpoint checkout+clean; copy → yedeği proje üstüne) + rollback-registry (`armRollback` ilk-kazanır =

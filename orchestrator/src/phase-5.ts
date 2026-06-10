@@ -13,7 +13,7 @@ import { appendAudit, readAuditLog, readAuditLogTail } from "./audit.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
 import { designPanelDecision, designSynthesizedInCurrentIteration } from "./design-panel-gate.js";
-import { snapshotBeforeAutofix } from "./fix-snapshot.js";
+import { snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
@@ -419,6 +419,7 @@ export class Phase5Controller {
         "Tweak uygulandı. Dev server zaten ayakta — HMR ile browser otomatik yenilenir.",
       );
       log.info("phase-5", "tweak complete (dev server skipped)");
+      disarmRollback(); // faz başarıyla bitti → iyi işi kilitle (geri-alınmasın)
       return "complete";
     }
 
@@ -492,6 +493,7 @@ export class Phase5Controller {
         detail: `external dev server detected on port ${existing.p} (not spawned)`,
       });
       log.info("phase-5", "complete (external dev server)", { port: existing.p });
+      disarmRollback(); // faz başarıyla bitti → iyi işi kilitle (geri-alınmasın)
       return "complete";
     }
     emitChatMessage(
@@ -593,6 +595,7 @@ export class Phase5Controller {
       detail: `output_verified + dev server ready on port ${handle.port}`,
     });
     log.info("phase-5", "complete");
+    disarmRollback(); // faz başarıyla bitti → iyi işi kilitle (geri-alınmasın)
     return "complete";
   }
 }

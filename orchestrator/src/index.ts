@@ -2726,6 +2726,9 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         outcome: outcome.kind,
       });
       if (outcome.kind === "pass" || outcome.kind === "skipped") {
+        // Faz GEÇTİ → iyi ilerlemeyi KİLİTLE: rollback noktasını temizle ki sonraki bir hatanın geri-alması
+        // bu başarılı fazı UNDO etmesin (Ümit: "veri kaybına yol açmayanı tercih ederim").
+        disarmRollback();
         // Skipped (örn. missing command) akışı kırmaz — phase-N-complete
         // yazılır ki ardışık akış devam etsin. Runner zaten skip event'i
         // (phase-N-skipped) + sade Türkçe mesaj yazmış olur.
@@ -2826,6 +2829,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
             emit("phase_idle", { ts: Date.now() });
           }
           if (reOutcome.kind === "pass" || reOutcome.kind === "skipped") {
+            disarmRollback(); // geçti → iyi düzeltmeyi kilitle (sonra geri-alınmasın)
             await appendAuditModule(state.project_root, {
               ts: Date.now(),
               phase: next,
