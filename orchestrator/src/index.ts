@@ -2757,17 +2757,13 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         runtime.pendingErrorAnalysis = pending;
         return;
       }
-      // 2026-06-10 (Ümit: "lint ayrı bir faz; o faza gelince ÇALIŞMASI=düzeltip geçmesi gerekiyordu"):
-      // Auto-düzeltilebilir gate (fix_cmd VAR — lint) deterministik fix'le (eslint --fix) çözülemediyse (örn.
-      // no-unused-vars eslint'in otomatik silmediği bir sınıf), FAZIN İÇİNDE odaklı-minimal düzeltme dene + gate'i
-      // YENİDEN koş. Geçerse faz tamam — debug→Faz 8 gibi orantısız eskalasyona GEREK YOK. Bir deneme (gateAutofixTried),
-      // olmazsa normal investigate+solve'a düşer.
-      if (
-        outcome.kind === "fail" &&
-        spec.type === "mechanical" &&
-        spec.mechanical_config?.fix_cmd &&
-        !gateAutofixTried.has(next)
-      ) {
+      // 2026-06-10 (Ümit: "bitirdiğin bir faz olan Faz 8'e geri dönmen saçma; debug'dan sonra döneceği yeri yanlış
+      // hesaplamış"): KÖK SORUN — gate (örn. Faz 10 lint) fail olunca düzeltme plan_kind'a göre SABİT erken faza
+      // (backend→Faz 7/8) route edilip TAMAMLANMIŞ Faz 8 yeniden koşuyordu. Doğrusu: hata HANGİ fazda çıktıysa düzeltme
+      // ORADA yapılıp ORASI yeniden doğrulanır — geri dönüş yok. Bu yüzden HER mekanik gate fail'inde (yalnız fix_cmd'li
+      // lint değil) önce FAZIN İÇİNDE odaklı-minimal düzeltme + gate'i YENİDEN koş. Bir deneme (gateAutofixTried);
+      // olmazsa investigate+solve. (Faz 13 güvenlik yukarıda kendi dalında döner — buraya düşmez.)
+      if (outcome.kind === "fail" && spec.type === "mechanical" && !gateAutofixTried.has(next)) {
         gateAutofixTried.add(next);
         emitChatMessage(
           "system",

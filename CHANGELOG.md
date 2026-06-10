@@ -6,6 +6,15 @@
 
 ## 2026-06-10
 
+- **fix(debug dönüş noktası: hata hangi fazda çıktıysa orada düzelt+doğrula — Faz 8'e geri dönme) [Ümit: "bitirdiğin
+  Faz 8'e geri dönmen saçma; üstelik bunu Faz 10'da aldığın hatayı debug ederken yaptın — döneceği yeri yanlış
+  hesaplamış"]:** Kanıt: debug-fix routing plan_kind'a göre SABİT faza dönüyordu (backend-only → current_phase=7 →
+  advanceToNextPhase(7) → TAMAMLANMIŞ Faz 8 yeniden koşar), hatanın çıktığı fazı (Faz 10) hiç dikkate almıyordu.
+  Fix: gate-autofix (önceki commit, yalnız fix_cmd'li lint'e bağlıydı) artık HER mekanik gate fail'inde (10-17, Faz 13
+  güvenlik hariç — kendi dalı var) çalışıyor → hata fazın İÇİNDE odaklı-minimal düzeltilir + o gate YENİDEN koşulup
+  doğrulanır. Geçerse faz tamam. Böylece geç-faz hatası artık erken-faza (Faz 8) geri dönmüyor; "döneceği yer" =
+  hatanın çıktığı faz. Olmazsa (1 deneme) investigate+solve.
+
 - **feat(Lint fazı kendi içinde düzeltir — debug'a kaçmaz) [Ümit: "lint ayrı bir faz; o faza gelince ÇALIŞMASI
   (düzeltip geçmesi) gerekiyordu"]:** Audit kanıtı: lint fazı reach edildi, `eslint --fix`'i koştu (scan→fix→rescan)
   ama `no-unused-vars`'ı ESLint otomatik SİLMEZ → faz fail → 1 satırlık iş debug→Faz 8 codegen döngüsüne gitti
