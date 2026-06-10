@@ -73,7 +73,7 @@ import {
   type PendingErrorAnalysis,
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
-import { setLiveTiersFromModels } from "./model-catalog.js";
+import { computeTiersFromModels } from "./model-catalog.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
@@ -374,6 +374,11 @@ function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): stri
 const AUTO_SOLVE_MAX = 6;
 const autoSolveSig = new Map<number, { sig: string; count: number }>();
 
+// Model yükseltme önerisi (Ümit 2026-06-11): keşif yeni güçlü model bulunca OTOMATİK uygulamaz, SORAR.
+// _pendingModelUpgrade: açık askq + önerilen model. _declinedModelUpgrades: bu oturumda "hayır" denenler (tekrar sorma).
+let _pendingModelUpgrade: { askqId: string; model: string } | null = null;
+const _declinedModelUpgrades = new Set<string>();
+
 /** Hata imzası: faz + lastFailReason'ın ilk ~160 char'ı (sayılar normalize → port/pid/ts gürültüsü eşleşmeyi bozmasın). */
 function failSignature(n: PhaseId, ctrl?: FailReasonHolder): string {
   const raw = (ctrl?.lastFailReason ?? "")
@@ -671,27 +676,36 @@ async function handleOpenProject(path: string): Promise<void> {
       log.warn("orchestrator", "agent-skills kurulum hatası (non-fatal)", e),
     );
 
-    // Model AUTO-KEŞİF (Ümit): LLM WEB'de Anthropic'in resmi dökümanlarından güncel modelleri bulur (API key
-    // GEREKMEZ → abonelikte de çalışır) → en yeni sürümü tier'lara ata (opus→strong, sonnet→balanced, haiku→cheap).
-    // Yeni sürüm (opus-4-9) çıkınca strong otomatik yükselir. Başarısız → statik katalog. Non-blocking.
+    // Model AUTO-KEŞİF (Ümit 2026-06-11): LLM WEB'de Anthropic dökümanlarından güncel modelleri bulur → ASLA
+    // OTOMATİK UYGULAMAZ (eski davranış kullanıcı ayarını eziyordu = "ondan sonra bozuldu"). Yalnız: yeni GÜÇLÜ
+    // model config'tekinden farklıysa → "main + strong görevler için geçeyim mi?" diye SORAR. Kabul edilirse
+    // config'e yazılır; reddedilirse bu oturumda tekrar sorulmaz. Kullanıcı ayarı tek doğruluk kaynağı.
     if (runtime.config) {
       const cfg = runtime.config;
       const root = runtime.state.project_root;
       void discoverModelsViaWeb(cfg, root)
         .then((models) => {
-          if (models.length === 0) return; // keşif başarısız → statik katalog geçerli
-          const t = setLiveTiersFromModels(models);
+          if (models.length === 0) return; // keşif başarısız → kullanıcı ayarı/statik katalog geçerli
+          const t = computeTiersFromModels(models);
           log.info("orchestrator", "model auto-keşif (web)", t);
-          const fresh = t.newFamilies.length
-            ? ` (yeni aile otomatik tier'landı + kullanımda: ${t.newFamilies.slice(0, 3).join(", ")})`
-            : "";
-          emitChatMessage(
-            "system",
-            `🔄 Güncel modeller (web) → güçlü: ${t.strong ?? "?"}, dengeli: ${t.balanced ?? "?"}, hızlı: ${t.cheap ?? "?"}${fresh}`,
-          );
+          const currentStrong = cfg.selected_models.model_tiers?.strong ?? cfg.selected_models.main;
+          if (t.strong && t.strong !== currentStrong && !_declinedModelUpgrades.has(t.strong)) {
+            const askqId = randomUUID();
+            _pendingModelUpgrade = { askqId, model: t.strong };
+            emitChatMessage(
+              "system",
+              `🆕 Güncel güçlü model bulundu: **${t.strong}** (şu an: ${currentStrong}). Geçmek istersen soruyorum — ayarların korunur, ben otomatik değiştirmiyorum.`,
+            );
+            emitAskq({
+              id: askqId,
+              question: `Yeni güçlü model ${t.strong} çıkmış. Main ajan + strong (kalite-kritik) görevler için buna geçeyim mi?`,
+              options: ["Evet, geç", "Hayır, kalsın"],
+              allow_other: false,
+            });
+          }
         })
         .catch((e: unknown) =>
-          log.warn("orchestrator", "model auto-keşif (web) başarısız (statik katalog geçerli)", e),
+          log.warn("orchestrator", "model auto-keşif (web) başarısız (kullanıcı ayarı geçerli)", e),
         );
     }
 
@@ -2946,6 +2960,29 @@ export async function handleAskqAnswer(
   // ile programatik cevap verdiyse askq kartı kullanıcı için artık aktif değil.
   emitAskqResolved(id);
   const selectedText = Array.isArray(selected) ? selected.join(", ") : selected;
+
+  // Model yükseltme önerisi cevabı (Ümit 2026-06-11): "Evet" → main + strong tier config'e yazılır + reload;
+  // "Hayır" → bu oturumda tekrar sorma. Ayarlar tek doğruluk kaynağı; kabul edince config'e işlenir.
+  if (_pendingModelUpgrade && id === _pendingModelUpgrade.askqId) {
+    const model = _pendingModelUpgrade.model;
+    _pendingModelUpgrade = null;
+    const yes = /evet|geç|yes/i.test(selectedText);
+    if (yes && runtime.config) {
+      const sel = runtime.config.selected_models;
+      await persistSelectedModels({
+        ...sel,
+        main: model,
+        model_tiers: { ...(sel.model_tiers ?? {}), strong: model },
+      } as SelectedModels);
+      runtime.config = null;
+      await emitConfigStatus(); // reload + applyConfigDerivedSettings (restart'sız aktif)
+      emitChatMessage("system", `✅ Main ajan + strong görevler artık **${model}** kullanıyor — ayarların güncellendi.`);
+    } else {
+      _declinedModelUpgrades.add(model);
+      emitChatMessage("system", `👍 Tamam, ${model}'e geçmedim; mevcut modelin korunuyor. (Bu oturumda tekrar sormam.)`);
+    }
+    return;
+  }
   // History persistence: askq seçimi user mesajı olarak yazılır.
   if (runtime.state?.project_root) {
     appendHistory(runtime.state.project_root, {

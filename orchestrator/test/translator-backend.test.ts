@@ -35,6 +35,7 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { translate } from "../src/translator.js";
+import { TRANSLATOR_MODEL } from "../src/model-catalog.js";
 
 function makeConfig(translatorBackend: AgentBackend): MyclConfig {
   return {
@@ -75,12 +76,12 @@ describe("translate — backend yönlendirme", () => {
     const res = await translate(makeConfig("cli"), "Hello world", "en-to-tr");
 
     expect(res.text).toBe("Merhaba dünya");
-    expect(res.model).toBe("claude-sonnet-4-6");
+    expect(res.model).toBe(TRANSLATOR_MODEL); // SABİT model (config.selected_models.translator yok sayılır)
     expect(runClaudeCliMock).toHaveBeenCalledTimes(1);
     expect(sdkCreateMock).not.toHaveBeenCalled();
 
     const opts = runClaudeCliMock.mock.calls[0][0];
-    expect(opts.modelId).toBe("claude-sonnet-4-6");
+    expect(opts.modelId).toBe(TRANSLATOR_MODEL); // SABİT model
     expect(opts.userMessage).toContain("Hello world");
     expect(opts.userMessage).toContain("<text_to_translate>");
     expect(typeof opts.systemPrompt).toBe("string");

@@ -108,6 +108,13 @@ function defaultModelForTier(tier: ModelTier): ModelInfo {
   return m ?? MODEL_CATALOG[0];
 }
 
+/**
+ * Translator modeli — SABİT, kullanıcı DEĞİŞTİREMEZ (Ümit 2026-06-11: "translator için model seçme kısmını sabit
+ * yap, değiştirilemesin"). Çeviri mekanik bir iş (akıl yürütme değil) → hızlı/ucuz tier yeter; teknik token'lar
+ * zaten verbatim geçer. config.selected_models.translator YOK SAYILIR; her zaman bu kullanılır.
+ */
+export const TRANSLATOR_MODEL: string = defaultModelForTier("cheap").id;
+
 // ───────── CANLI keşif (Ümit: "açılışta güncel modelleri çek + otomatik tier'la; yeni sürümü 1-2 yukarı taşı") ─────────
 // Anthropic Models API'sinden (API key ile) gelen GÜNCEL modeller → en yeni opus=strong, sonnet=balanced, haiku=cheap.
 // Yeni sürüm (opus-4-9) çıkınca strong otomatik ona taşınır. API key yoksa (subscription-only) bu boş kalır →
@@ -117,7 +124,6 @@ interface TierModel {
   id: string;
   label: string;
 }
-let _liveTiers: Partial<Record<ModelTier, TierModel>> = {};
 
 /** Bilinen aile → deterministik tier (güvenlik ağı; LLM tier hatasını ezer). Bilinmeyen → undefined. */
 function knownFamilyTier(id: string): ModelTier | undefined {
@@ -134,7 +140,7 @@ function knownFamilyTier(id: string): ModelTier | undefined {
  * model otomatik tier'lanıp KULLANILIR (Ümit: "yeni model geldiyse o kullanılsın, manuel bırakma"). İlk (en
  * yetenekli) per-tier kazanır. SAF.
  */
-export function setLiveTiersFromModels(
+export function computeTiersFromModels(
   modelsBestFirst: Array<{ id: string; display_name: string; tier?: ModelTier }>,
 ): { strong?: string; balanced?: string; cheap?: string; newFamilies: string[] } {
   const result: Partial<Record<ModelTier, TierModel>> = {};
@@ -146,18 +152,14 @@ export function setLiveTiersFromModels(
     if (!known && !newFamilies.includes(m.id)) newFamilies.push(m.id);
     if (!result[tier]) result[tier] = { id: m.id, label: m.display_name }; // ilk = en yetenekli, kazanır
   }
-  _liveTiers = result;
+  // SAF — cache YOK (Ümit 2026-06-11: keşif kullanıcı ayarını EZMEZ; bu sadece "en güncel ne var" hesaplar,
+  // index.ts bunu config ile karşılaştırıp gerekirse "geçeyim mi?" diye SORAR). selectModelForTask config okur.
   return {
     strong: result.strong?.id,
     balanced: result.balanced?.id,
     cheap: result.cheap?.id,
     newFamilies,
   };
-}
-
-/** Test/yeniden-init için canlı tier'ları temizle. */
-export function clearLiveTiers(): void {
-  _liveTiers = {};
 }
 
 export interface ModelChoice {
@@ -176,11 +178,9 @@ export function selectModelForTask(
   tierModels?: Partial<Record<ModelTier, string>>,
 ): ModelChoice {
   const rel = TASK_RELEVANCE[taskKind];
-  // Öncelik: CANLI keşif (en güncel sürüm) > kullanıcı config tier'ı > statik katalog varsayılanı.
-  const live = _liveTiers[rel.tier];
-  if (live) {
-    return { modelId: live.id, label: live.label, tier: rel.tier, reason: rel.reason };
-  }
+  // Öncelik: KULLANICI config tier'ı > statik katalog varsayılanı. (Ümit 2026-06-11: "ayarlar dikkate alınmıyor;
+  // otomatik keşiften sonra bozuldu." Canlı keşif ARTIK otomatik EZMEZ — yalnız yeni model ÖNERİR (askq); kabul
+  // edilince config.selected_models'e yazılır → buradan okunur. Kullanıcı ayarı tek doğruluk kaynağı.)
   const fromConfig = tierModels?.[rel.tier];
   const resolved =
     fromConfig && findModel(fromConfig) ? findModel(fromConfig)! : defaultModelForTier(rel.tier);

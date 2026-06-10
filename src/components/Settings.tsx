@@ -398,14 +398,27 @@ export function Settings({
                 (production, codegen) için kullanılır. Liste Anthropic API'den çekilir.
               </p>
               <div>
-                <ModelDropdown
-                  label="Translator Modeli"
-                  selected={translatorSel}
-                  models={modelsTranslator.models}
-                  loading={modelsTranslator.loading}
-                  onChange={setTranslatorSel}
-                  onRefresh={() => onFetchModels("translator", true)}
-                />
+                {/* Ümit 2026-06-11: Translator modeli SABİT — değiştirilemez. Çeviri mekanik bir iş;
+                    hızlı/ucuz model yeterli (teknik token'lar verbatim geçer). Backend (API/Abonelik) seçilebilir. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 11, color: "var(--fg-dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    Translator Modeli
+                  </span>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--fg-dim)",
+                      padding: "7px 9px",
+                      border: "1px solid var(--fg-dim)",
+                      borderRadius: 4,
+                      opacity: 0.7,
+                      fontFamily: "var(--font-mono)",
+                    }}
+                    title="Çeviri mekanik bir iştir; hızlı/ucuz model yeterli. Değiştirilemez."
+                  >
+                    🔒 Sabit — hızlı çeviri modeli (otomatik, değiştirilemez)
+                  </div>
+                </div>
                 <BackendSelector
                   value={backends.translator}
                   onChange={(v) => setBackend("translator", v)}

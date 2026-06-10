@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   MODEL_CATALOG,
   TASK_RELEVANCE,
   selectModelForTask,
   findModel,
-  setLiveTiersFromModels,
-  clearLiveTiers,
+  computeTiersFromModels,
+  TRANSLATOR_MODEL,
   selectEffortForTask,
   type TaskKind,
 } from "../src/model-catalog.js";
@@ -73,11 +73,9 @@ describe("selectModelForTask", () => {
   });
 });
 
-describe("canlı keşif (auto-discovery: güncel modelleri tier'la)", () => {
-  afterEach(() => clearLiveTiers());
-
+describe("computeTiersFromModels (keşif ÖNERİSİ — kullanıcı ayarını EZMEZ, saf)", () => {
   it("EN YENİ sürümü tier'lara atar (opus→strong, sonnet→balanced, haiku→cheap)", () => {
-    const t = setLiveTiersFromModels([
+    const t = computeTiersFromModels([
       { id: "claude-opus-4-9", display_name: "Opus 4.9" }, // newest-first
       { id: "claude-opus-4-8", display_name: "Opus 4.8" },
       { id: "claude-sonnet-4-7", display_name: "Sonnet 4.7" },
@@ -88,26 +86,33 @@ describe("canlı keşif (auto-discovery: güncel modelleri tier'la)", () => {
     expect(t.cheap).toBe("claude-haiku-4-6");
   });
 
-  it("canlı tier config'i GEÇER (auto-bump: yeni sürüm kazanır)", () => {
-    setLiveTiersFromModels([{ id: "claude-opus-4-9", display_name: "Opus 4.9" }]);
+  it("KRİTİK: keşif config'i EZMEZ — selectModelForTask KULLANICI config'ini kullanır (Ümit: ayarlar dikkate alınmalı)", () => {
+    // Eski bug: canlı keşif config'i geçiyordu ("ayarlar dikkate alınmıyor"). Artık saf — yalnız hesaplar; öneri için.
+    computeTiersFromModels([{ id: "claude-opus-4-9", display_name: "Opus 4.9" }]);
     const c = selectModelForTask("codegen", { strong: "claude-opus-4-8" });
-    expect(c.modelId).toBe("claude-opus-4-9"); // canlı (yeni) config'i geçer
-    expect(c.label).toBe("Opus 4.9");
+    expect(c.modelId).toBe("claude-opus-4-8"); // KULLANICI config'i kazanır, keşif değil
   });
 
-  it("YENİ aile (mythos) LLM-tier'ı ile OTOMATİK atanır + kullanılır (Ümit: yeni model kullanılsın)", () => {
-    const t = setLiveTiersFromModels([
+  it("YENİ aile (mythos) hesaplanır + newFamilies'te (öneri) ama OTOMATİK kullanılmaz (önce SORULUR)", () => {
+    const t = computeTiersFromModels([
       { id: "claude-mythos-1", display_name: "Mythos 1", tier: "strong" }, // LLM dök-tier
     ]);
-    expect(t.strong).toBe("claude-mythos-1"); // yeni aile strong'a atandı, KULLANILIR
+    expect(t.strong).toBe("claude-mythos-1");
     expect(t.newFamilies).toContain("claude-mythos-1");
-    // selectModelForTask artık bunu codegen'e (strong) verir:
-    expect(selectModelForTask("codegen", undefined).modelId).toBe("claude-mythos-1");
+    // selectModelForTask config/katalog kullanır — mythos otomatik DEĞİL (askq ile sorulur):
+    expect(selectModelForTask("codegen", undefined).modelId).not.toBe("claude-mythos-1");
   });
 
   it("yeni aile + tier YOK → atanmaz (körlemesine değil)", () => {
-    const t = setLiveTiersFromModels([{ id: "claude-mythos-1", display_name: "Mythos 1" }]);
+    const t = computeTiersFromModels([{ id: "claude-mythos-1", display_name: "Mythos 1" }]);
     expect(t.strong).toBeUndefined();
+  });
+});
+
+describe("TRANSLATOR_MODEL (Ümit: sabit hızlı çeviri modeli — değiştirilemez)", () => {
+  it("cheap (hızlı/ucuz) tier'dan geçerli bir model", () => {
+    expect(TRANSLATOR_MODEL).toBeTruthy();
+    expect(findModel(TRANSLATOR_MODEL)?.tier).toBe("cheap");
   });
 });
 

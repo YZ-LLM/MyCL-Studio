@@ -11,6 +11,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { makeAnthropicClient } from "./claude-api.js";
+import { TRANSLATOR_MODEL } from "./model-catalog.js";
 import type { MyclConfig } from "./config.js";
 import { backendForRole, isAutoMode } from "./config.js";
 import { API_LABEL, CLI_LABEL } from "./cli-rate-limit.js";
@@ -42,9 +43,10 @@ Rules:
 2. **If the input is already in ${targetLanguage}**, output it VERBATIM (no
    round-trip translation, no rephrasing). This is a no-op for already-correct text.
 3. Translate the input exactly. Do not add, remove, or reinterpret content.
-4. Keep these unchanged regardless of language: technical terms (API, JWT,
-   OAuth, etc.), file paths, code snippets, URLs, numbers, version strings,
-   language names.
+4. Keep these unchanged regardless of language (VERBATIM — never translate or
+   rephrase): technical terms (API, JWT, OAuth, etc.), file paths, code snippets,
+   code identifiers (function/variable/class/type names like runController or
+   selected_models), CLI flags, URLs, numbers, version strings, language names.
 5. Do not promote or demote ambiguous verbs (do not change "list" to "render
    a paginated table" — that is Phase 3's job).
 6. Output ONLY the translation. No preamble, no explanation, no quotes, no
@@ -209,7 +211,9 @@ export async function translate(
   dir: TranslationDir,
 ): Promise<TranslateResult> {
   const startTs = Date.now();
-  const model = config.selected_models.translator;
+  // SABİT hızlı model (Ümit 2026-06-11): config.selected_models.translator YOK SAYILIR — translator hep hızlı/ucuz
+  // tier'da, kullanıcı değiştiremez. Çeviri mekanik; hız önemli; teknik token'lar verbatim geçer (system prompt).
+  const model = TRANSLATOR_MODEL;
   const chunks = splitForChunking(text);
 
   // Bir backend ile TÜM chunk'ları çevir (closure: startTs/model/chunks/dir).

@@ -1,3 +1,17 @@
+## 2026-06-11
+
+- **fix(model politikası: ayarlar tek doğruluk kaynağı + keşif SORAR + translator SABİT) [Ümit: "ayarlar dikkate
+  alınmıyor; otomatik keşiften sonra bozuldu; yeni model çıkınca geçeyim mi diye sorsun; translator modeli sabit
+  olsun"]:**
+  (A) **Ayarlar dikkate alınıyor:** `selectModelForTask`'tan canlı-keşif override'ı (`_liveTiers`) KALDIRILDI — keşif
+  kullanıcı `config.selected_models`'ını eziyordu ("ondan sonra bozuldu" buydu). Artık config tek doğruluk kaynağı.
+  `setLiveTiersFromModels` → saf `computeTiersFromModels` (cache yok).
+  (B) **Keşif otomatik uygulamaz, SORAR:** boot'ta web-keşfi yeni güçlü model bulursa "main + strong görevler için
+  geçeyim mi?" askq'sı; "Evet" → config'e yazılır + reload; "Hayır" → oturumda tekrar sorulmaz.
+  (C) **Translator modeli SABİT:** `TRANSLATOR_MODEL` (cheap/hızlı tier) — `config.selected_models.translator` yok
+  sayılır; ayarlar sayfasında seçici 🔒 kilitli (değiştirilemez). Backend (API/Abonelik) seçilebilir kalır. Translator
+  prompt'u kod tanımlayıcılarını da verbatim geçirir. Testler güncellendi (keşif config'i EZMEZ + TRANSLATOR_MODEL cheap).
+
 # MyCL Studio — Değişiklik Günlüğü
 
 > AI (Claude) tarafından yapılan işlerin zaman damgalı kaydı. Yeni → eski.
