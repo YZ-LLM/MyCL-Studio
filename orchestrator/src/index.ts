@@ -497,6 +497,8 @@ async function recordRungOutcome(n: PhaseId, success: boolean): Promise<void> {
 
 // Verify-up yükseltme sınırı: faz başına en çok 2 (maliyet emniyeti; merdiven zaten sonlu). İterasyon başında temizlenir.
 const _verifyUpRaises = new Map<number, number>();
+// Faz 13 güvenlik oto-çözüm sayacı (Oto-cevap açıkken otomatik fix denemesi sınırı; iterasyon başında sıfırlanır).
+let _securityAutoResolveCount = 0;
 
 /**
  * Faz tamamlandı → (Ümit 2026-06-11) "yetersizliği NET anla": işi bir ÜST basamağa (önce efor+1, efor tepedeyse
@@ -2212,6 +2214,7 @@ async function executeDispatchedIntent(
     // v15.6: yeni iterasyon — NDJSON metadata bağlamı update.
     setRecordContext({ iteration: newIter, phase: 1 });
     _verifyUpRaises.clear(); // verify-up yükseltme bütçesi iterasyon-başına
+    _securityAutoResolveCount = 0;
     emitChatMessage(
       "system",
       `🔄 Yeni iterasyon başlıyor (#${newIter}). Eski spec.md/kod referans olarak korunuyor; Claude Faz 1'de Read ile bakabilir.`,
@@ -3051,14 +3054,23 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       if (next === 13) {
         emitPhaseChanged(13, 13, "error");
         let pending: PendingErrorAnalysis | null = null;
+        // Ümit 2026-06-11: "Oto-cevap açık ama soruyu cevaplamadı." Faz 13 güvenlik dalı autoResolve geçmiyordu →
+        // hep askq açıp bekliyordu. Oto-cevap açıkken (ve döngü-bütçesi varken) en iyi FİX otomatik seçilir; güvenlik
+        // "Kabul et, devam et" (insan kararı) ASLA otomatik seçilmez — analyzeAndAskError best_index'i fix seçer.
+        const secAuto = autoAnswerSuggested() && _securityAutoResolveCount < 3;
         if (runtime.state && runtime.config) {
-          pending = await analyzeAndAskError(runtime.state, runtime.config, {
-            phase: 13,
-            message: "Faz 13 (Güvenlik) gate'i başarısız — çözülmeden tamamlandı sayılmaz.",
-            detail: outcome.stderr,
-            allowAcceptContinue: true,
-            acceptContinuePhase: 13,
-          }).catch(() => null);
+          pending = await analyzeAndAskError(
+            runtime.state,
+            runtime.config,
+            {
+              phase: 13,
+              message: "Faz 13 (Güvenlik) gate'i başarısız — çözülmeden tamamlandı sayılmaz.",
+              detail: outcome.stderr,
+              allowAcceptContinue: true,
+              acceptContinuePhase: 13,
+            },
+            { autoResolve: secAuto },
+          ).catch(() => null);
         }
         if (!pending) {
           // Analiz yapılamadı (örn. API modu — orkestratör rolü CLI değil). Dead-end YOK:
@@ -3083,6 +3095,13 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
           });
         }
         runtime.pendingErrorAnalysis = pending;
+        // Oto-cevap auto-route: en iyi fix otomatik uygulanır (failPhase ile aynı; askq kartı açılmadan).
+        if (pending?.auto_selected_solution) {
+          _securityAutoResolveCount++;
+          await handleAskqAnswer(pending.id, pending.auto_selected_solution).catch((e: unknown) =>
+            log.error("orchestrator", "faz-13 auto-solve routing failed", e),
+          );
+        }
         return;
       }
       // 2026-06-10 (Ümit: "bitirdiğin bir faz olan Faz 8'e geri dönmen saçma; debug'dan sonra döneceği yeri yanlış
