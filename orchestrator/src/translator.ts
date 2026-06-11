@@ -16,6 +16,7 @@ import type { MyclConfig } from "./config.js";
 import { backendForRole, isAutoMode } from "./config.js";
 import { API_LABEL, CLI_LABEL } from "./cli-rate-limit.js";
 import { runClaudeCli } from "./cli-run.js";
+import { getPersistentSession } from "./persistent-cli-session.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { emitChatMessage, emitError, emitTranslation } from "./ipc.js";
 import { log } from "./logger.js";
@@ -162,27 +163,49 @@ async function callApi(
 // sarmalı SDK yoluyla birebir aynı. cwd read-only (dosya erişimi gerekmez) →
 // process.cwd() zararsız. Spawn cold-start için timeout ≥60s. !ok → throw, dış
 // withExpBackoff retry'lar (SDK ile aynı hata yolu).
+function stripTranslateTags(s: string): string {
+  return s
+    .trim()
+    .replace(/^<text_to_translate>\s*/i, "")
+    .replace(/\s*<\/text_to_translate>\s*$/i, "")
+    .trim();
+}
+
 async function callCli(
   model: string,
   text: string,
   timeoutMs: number,
   dir: TranslationDir,
 ): Promise<string> {
+  const userMessage = `<text_to_translate>\n${text}\n</text_to_translate>`;
+  const to = Math.max(timeoutMs, 60_000);
+  // Ümit 2026-06-11: KALICI oturum (rol+yön başına tek süreç, respawn yok → ısı↓; biriken bağlam tutarlı çeviri).
+  // Doğrulandı: katı promptla turlar boyunca sağlam çevirir. BAŞARISIZSA eski cold-start'a düş (fail-safe, regresyon yok).
+  try {
+    const session = getPersistentSession({
+      id: `translator-${dir}`,
+      modelId: model,
+      systemPrompt: buildSystemPrompt(dir),
+      cwd: process.cwd(),
+      disallowedTools: ["Write", "Edit", "Bash"], // saf çeviri — araç yok
+    });
+    const r = await session.send(userMessage, to);
+    if (r.ok && r.text.trim()) return stripTranslateTags(r.text);
+    log.warn("translator", "kalıcı oturum başarısız → cold-start fallback", { dir, error: r.error });
+  } catch (e) {
+    log.warn("translator", "kalıcı oturum hata → cold-start fallback", { dir, error: String(e) });
+  }
   const res = await runClaudeCli({
     systemPrompt: buildSystemPrompt(dir),
-    userMessage: `<text_to_translate>\n${text}\n</text_to_translate>`,
+    userMessage,
     modelId: model,
     cwd: process.cwd(),
-    timeoutMs: Math.max(timeoutMs, 60_000),
+    timeoutMs: to,
   });
   if (!res.ok) {
     throw new Error(res.error ?? "claude CLI translate failed");
   }
-  return res.text
-    .trim()
-    .replace(/^<text_to_translate>\s*/i, "")
-    .replace(/\s*<\/text_to_translate>\s*$/i, "")
-    .trim();
+  return stripTranslateTags(res.text);
 }
 
 async function withExpBackoff<T>(
