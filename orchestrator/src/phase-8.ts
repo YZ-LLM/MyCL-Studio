@@ -715,7 +715,24 @@ export class Phase8Controller {
       cmd = this.lastTestCmd;
       source = "ajanın son test komutu";
     }
-    if (!cmd) return; // ne profil ne ajan test komutu → çapa yok (gate greens'e güvenir)
+    if (!cmd) {
+      // Ümit 2026-06-11 (tehlike taraması): ne profil ne ajan test komutu → MyCL BAĞIMSIZ doğrulayamıyor.
+      // SESSİZCE self-report'a GÜVENME (sahte-yeşil riski) → görünür uyar + `tdd-unverified` audit (Faz 9 düşman-gözü
+      // bunu açık risk sayar; harness de görür). Güven modeli: doğrulanamayan "yeşil" yeşil sayılmaz.
+      await appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 8,
+        event: "tdd-unverified",
+        caller: "mycl-orchestrator",
+        detail: "no test command (profile+agent) — agent green self-report NOT independently verified",
+      });
+      emitChatMessage(
+        "system",
+        "⚠️ Faz 8: çalıştırılabilir test komutu yok (profil + ajan) — ajanın 'yeşil' raporu **bağımsız doğrulanMADI**. " +
+          "Risk olarak işaretlendi (Faz 9 risk incelemesi bunu ele alır). Bir test script'i (örn. package.json `test`) gerekir.",
+      );
+      return;
+    }
 
     emitChatMessage(
       "system",
@@ -723,11 +740,20 @@ export class Phase8Controller {
     );
     const res = await this.runCmdResult(cmd);
 
-    // Test script/runner yok → regresyon değil; çapa atla (yanlış-red yazma).
+    // Test script/runner yok → regresyon değil (yanlış-red yazma) AMA bağımsız doğrulama da YAPILAMADI →
+    // sessizce geçirme: self-report doğrulanmadı (Ümit tehlike-taraması) → `tdd-unverified` + görünür uyarı.
     if (isMissingCommand(res)) {
+      await appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 8,
+        event: "tdd-unverified",
+        caller: "mycl-orchestrator",
+        detail: `test runner/script missing ('${cmd.slice(0, 40)}') — green NOT independently verified`,
+      });
       emitChatMessage(
         "system",
-        `ℹ️ Faz 8 final doğrulama atlandı — '${cmd.slice(0, 40)}' test komutu/script'i bulunamadı.`,
+        `⚠️ Faz 8 final doğrulama yapılamadı — '${cmd.slice(0, 40)}' test komutu/script'i bulunamadı; ajanın 'yeşil' ` +
+          "raporu **bağımsız doğrulanMADI** (risk olarak işaretlendi, Faz 9 ele alır).",
       );
       return;
     }
