@@ -12,6 +12,14 @@ vi.mock("../src/cli-run.js", () => ({
   runClaudeCli: (...a: unknown[]) => runClaudeCliMock(...a),
 }));
 
+// Kalıcı oturum: bu testler BACKEND YÖNLENDİRMESİNİ (cli vs api) doğruluyor. Kalıcı oturumu bypass et (ok:false)
+// → CLI yolu runClaudeCli fallback'ine düşer (mevcut iddialar korunur). Kalıcı oturum kendi (empirik) doğrulamasında.
+vi.mock("../src/persistent-cli-session.js", () => ({
+  getPersistentSession: () => ({ send: async () => ({ ok: false, text: "", error: "test-bypass" }) }),
+  shortHash: () => "test",
+  disposeAllPersistentSessions: () => {},
+}));
+
 let claudeAvailable = true;
 vi.mock("../src/codegen/cli-backend.js", () => ({
   isClaudeAvailable: () => claudeAvailable,

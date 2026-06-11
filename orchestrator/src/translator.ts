@@ -189,7 +189,7 @@ async function callCli(
       cwd: process.cwd(),
       disallowedTools: ["Write", "Edit", "Bash"], // saf çeviri — araç yok
     });
-    const r = await session.send(userMessage, to);
+    const r = await session.send(userMessage, { timeoutMs: to });
     if (r.ok && r.text.trim()) return stripTranslateTags(r.text);
     log.warn("translator", "kalıcı oturum başarısız → cold-start fallback", { dir, error: r.error });
   } catch (e) {

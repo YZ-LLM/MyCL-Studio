@@ -27,6 +27,8 @@ export interface PersistentSessionOpts {
   id: string;
   modelId: string;
   systemPrompt: string;
+  /** Açılış eforu (low/medium/high/xhigh/max). Sonra send(opts.effort) ile oturum-içi değişebilir. */
+  effort?: string;
   /** claude'un çalışacağı dizin. Tek-atış/çevirmen için zararsız (tool yok). */
   cwd: string;
   allowedTools?: string[];
@@ -58,8 +60,16 @@ export class PersistentClaudeSession {
     resolve: (r: SessionTurnResult) => void;
     sawRateLimitBlocked: boolean;
   } | null = null;
+  // Oturum-içi model/efor durumu — control_request ile değişir (respawn yok).
+  private curModel: string;
+  private curEffort: string | undefined;
+  private ctlSeq = 0;
+  private pendingControls = new Map<string, (ok: boolean) => void>();
 
-  constructor(private opts: PersistentSessionOpts) {}
+  constructor(private opts: PersistentSessionOpts) {
+    this.curModel = opts.modelId;
+    this.curEffort = opts.effort;
+  }
 
   private buildArgs(): string[] {
     const args = [
@@ -80,6 +90,7 @@ export class PersistentClaudeSession {
       "--append-system-prompt",
       this.opts.systemPrompt,
     ];
+    if (this.curEffort && this.curEffort !== "ultracode") args.push("--effort", this.curEffort);
     if (this.opts.allowedTools?.length) args.push("--allowedTools", ...this.opts.allowedTools);
     if (this.opts.disallowedTools?.length) args.push("--disallowedTools", ...this.opts.disallowedTools);
     // Çevirmen/tek-atış read-only → sandbox (cwd hapsi). ultracode yok.
@@ -122,6 +133,8 @@ export class PersistentClaudeSession {
         this.pending = null;
         pend.resolve({ ok: false, text: pend.texts.join(""), error: `session exited code=${code}` });
       }
+      for (const r of this.pendingControls.values()) r(false);
+      this.pendingControls.clear();
       this.child = null;
       this.rl = null;
     });
@@ -131,7 +144,7 @@ export class PersistentClaudeSession {
 
   private onLine(line: string): void {
     const trimmed = line.trim();
-    if (!trimmed || !this.pending) return;
+    if (!trimmed) return;
     let ev: Record<string, unknown>;
     try {
       ev = JSON.parse(trimmed) as Record<string, unknown>;
@@ -139,6 +152,18 @@ export class PersistentClaudeSession {
       return; // banner / NDJSON-dışı
     }
     const type = ev.type;
+    // control_response: model/efor değişim cevabı — turdan bağımsız gelir (pending olmayabilir).
+    if (type === "control_response") {
+      const resp = (ev.response ?? {}) as Record<string, unknown>;
+      const rid = String(resp.request_id ?? "");
+      const cb = this.pendingControls.get(rid);
+      if (cb) {
+        this.pendingControls.delete(rid);
+        cb(resp.subtype === "success");
+      }
+      return;
+    }
+    if (!this.pending) return;
     if (type === "rate_limit_event") {
       const info = ev.rate_limit_info as RateLimitInfo | undefined;
       noteRateLimitEvent(info);
@@ -183,14 +208,58 @@ export class PersistentClaudeSession {
     }
   }
 
-  /** Bir turu gönder (seri kuyruk). Süreç yoksa açar. timeoutMs içinde result gelmezse {ok:false}. */
-  send(userText: string, timeoutMs = 180_000): Promise<SessionTurnResult> {
+  /** control_request gönder + cevabı bekle (model/efor değişimi). 10sn'de cevap yoksa false. */
+  private sendControl(request: Record<string, unknown>): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const child = this.child;
+      if (!child) {
+        resolve(false);
+        return;
+      }
+      const rid = `ctl-${++this.ctlSeq}`;
+      let done = false;
+      const finish = (ok: boolean): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        this.pendingControls.delete(rid);
+        resolve(ok);
+      };
+      const t = setTimeout(() => finish(false), 10_000);
+      this.pendingControls.set(rid, finish);
+      try {
+        child.stdin.write(JSON.stringify({ type: "control_request", request_id: rid, request }) + "\n");
+      } catch {
+        finish(false);
+      }
+    });
+  }
+
+  /** Oturum-içi model+efor'u istenen değere getir (değişmişse). Doğrulandı: set_model + apply_flag_settings. */
+  private async ensureModelEffort(model?: string, effort?: string): Promise<void> {
+    if (model && model !== this.curModel) {
+      if (await this.sendControl({ subtype: "set_model", model })) this.curModel = model;
+    }
+    if (effort && effort !== this.curEffort && effort !== "ultracode") {
+      if (await this.sendControl({ subtype: "apply_flag_settings", settings: { effort } })) this.curEffort = effort;
+    }
+  }
+
+  /**
+   * Bir turu gönder (seri kuyruk). opts.model/effort verilirse turdan ÖNCE oturum-içi değiştirilir (respawn yok).
+   * Süreç yoksa açar. opts.timeoutMs içinde result gelmezse {ok:false}.
+   */
+  send(userText: string, opts: { model?: string; effort?: string; timeoutMs?: number } = {}): Promise<SessionTurnResult> {
+    const timeoutMs = opts.timeoutMs ?? 180_000;
     const run = (): Promise<SessionTurnResult> =>
       new Promise<SessionTurnResult>((resolve) => {
+        void (async () => {
         if (!this.alive && !this.start()) {
           resolve({ ok: false, text: "", error: "session start failed" });
           return;
         }
+        // Model/efor istenen değilse oturum-içi değiştir (control_request — respawn yok).
+        await this.ensureModelEffort(opts.model, opts.effort);
         const child = this.child;
         if (!child) {
           resolve({ ok: false, text: "", error: "no child" });
@@ -224,6 +293,7 @@ export class PersistentClaudeSession {
         } catch (e) {
           finish({ ok: false, text: "", error: `stdin write failed: ${String(e)}` });
         }
+        })();
       });
     // Seri kuyruk: bir tur bitmeden sonraki başlamasın (tek konuşma).
     const next = this.queue.then(run, run);
@@ -233,15 +303,32 @@ export class PersistentClaudeSession {
 
   private kill(): void {
     this.alive = false;
+    const child = this.child;
     try {
       this.rl?.close();
     } catch {
       /* yut */
     }
+    // GRACEFUL: stdin EOF → claude turu bitirip çıkar (sandbox-exec sarmalı olsa bile stdin geçişli → torun da kapanır,
+    // orphan yok). Ardından emniyet için SIGTERM, hâlâ canlıysa SIGKILL — sandbox-exec sarmalayıcı takılmasın.
     try {
-      this.child?.kill("SIGTERM");
+      child?.stdin.end();
     } catch {
       /* yut */
+    }
+    try {
+      child?.kill("SIGTERM");
+    } catch {
+      /* yut */
+    }
+    if (child && child.pid) {
+      setTimeout(() => {
+        try {
+          if (!child.killed) child.kill("SIGKILL");
+        } catch {
+          /* yut */
+        }
+      }, 2000);
     }
     this.child = null;
     this.rl = null;

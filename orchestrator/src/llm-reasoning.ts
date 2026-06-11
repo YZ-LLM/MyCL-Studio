@@ -39,14 +39,16 @@ export async function runReasoning(
     // Ümit 2026-06-11: KALICI oturum (read-only reasoning — verify-up/audit/vb.). Süreç-tipi (systemPrompt+model)
     // başına tek canlı süreç → respawn yok → ısı↓; biriken bağlam tutarlılık. Başarısızsa cold-start'a düş.
     try {
+      // Oturum systemPrompt'a göre anahtarlanır (model DEĞİL) → model/efor oturum-İÇİNDE değişir (respawn yok).
       const session = getPersistentSession({
-        id: `reasoning-${shortHash(opts.systemPrompt + opts.modelId)}`,
+        id: `reasoning-${shortHash(opts.systemPrompt)}`,
         modelId: opts.modelId,
         systemPrompt: opts.systemPrompt,
+        effort: opts.effort,
         cwd: opts.projectRoot,
         disallowedTools: ["Write", "Edit", "Bash"],
       });
-      const r = await session.send(opts.userMessage, 180_000);
+      const r = await session.send(opts.userMessage, { model: opts.modelId, effort: opts.effort, timeoutMs: 180_000 });
       if (r.ok && r.text.trim()) return { ok: true, text: r.text };
       log.warn("llm-reasoning", "kalıcı oturum başarısız → cold-start", { error: r.error });
     } catch (e) {
