@@ -21,6 +21,18 @@ describe("buildProjectFacts (Ümit: ajan JS/TS bilsin)", () => {
     expect(f.summary).toMatch(/ts-prune|NOT applicable/i);
   });
 
+
+  it("tsconfig VAR ama hiç .ts yok (kalıntı) → javascript (Ümit: vacuous-pass bug'ı)", async () => {
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "tsconfig.json"), "{}");
+    await writeFile(join(dir, "package.json"), JSON.stringify({ dependencies: { react: "^18" } }));
+    await writeFile(join(dir, "src", "App.jsx"), "export default () => null;\n");
+    await writeFile(join(dir, "src", "util.js"), "export const x = 1;\n");
+    const f = await buildProjectFacts(dir);
+    expect(f.language).toBe("javascript"); // tsconfig kalıntısı TS yapmaz
+    expect(f.summary).toMatch(/leftover|JavaScript/i);
+  });
+
   it("tsconfig VAR → typescript", async () => {
     await mkdir(join(dir, "src"), { recursive: true });
     await writeFile(join(dir, "tsconfig.json"), "{}");

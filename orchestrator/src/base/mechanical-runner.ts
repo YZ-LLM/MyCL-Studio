@@ -12,6 +12,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { appendAudit } from "../audit.js";
+import { buildProjectFacts } from "../project-facts.js";
 import { emitChatMessage, emitClaudeStream } from "../ipc.js";
 import { log } from "../logger.js";
 import {
@@ -166,6 +167,15 @@ export function isMyclToolBroken(result: { code: number; stdout: string; stderr:
  * ile patlıyor → MyCL "proje hatası" sanıp "tsconfig oluştur + yeni iterasyon" gibi saçma fix'e gidiyordu.
  * Tespit: ts-morph/ts-prune/tsc imzası + (FileNotFoundError | tsconfig bulunamadı). SAF.
  */
+/**
+ * 2026-06-11 (Ümit: "Faz 12 1 saniyede geçti — normal mi?"): gate script'i GERÇEK kontrol değil, echo-stub
+ * ("vite build && echo 'perf check passed'" gibi). Echo'yla "geçti" basan script o boyutu DOĞRULAMAZ → gate
+ * görünür biçimde atlanır (sahte-yeşil sayılmaz). SAF.
+ */
+export function isStubGateCommand(cmd: string): boolean {
+  return /echo\s+['"][^'"]*(pass|passed|ok|success|check)[^'"]*['"]/i.test(cmd);
+}
+
 export function isTsToolNotApplicable(result: { code: number; stdout: string; stderr: string }): boolean {
   const s = `${result.stderr}\n${result.stdout}`;
   const tsTool = /ts-morph|ts-prune|\btsc\b/i.test(s);
@@ -224,6 +234,7 @@ export class MechanicalRunnerBase {
 
     const extras = opts.mechanical.extra_scans;
     if (!extras || extras.length === 0) {
+      if (mainOutcome.kind === "pass") emitChatMessage("system", `✅ ${this.label} — geçti.`);
       return mainOutcome;
     }
 
@@ -247,6 +258,8 @@ export class MechanicalRunnerBase {
         stderr,
       };
     }
+    // TÜM alt-taramalar da geçti → şimdi dürüstçe "geçti" denebilir.
+    if (mainOutcome.kind === "pass") emitChatMessage("system", `✅ ${this.label} — geçti (tüm alt-taramalar dahil).`);
     return mainOutcome;
   }
 
@@ -433,6 +446,41 @@ export class MechanicalRunnerBase {
       emitChatMessage("system", userMsg);
       return { kind: "skipped", reason: "profile_resolve_null" };
     }
+    // 2026-06-11 (Ümit "1 saniyede geçti — normal mi?"): echo-stub script (gerçek kontrol değil) → bu boyut
+    // DOĞRULANMAZ; sahte-yeşil yerine görünür skip.
+    if (isStubGateCommand(scanCmd)) {
+      await appendAudit(opts.state.project_root, {
+        ts: Date.now(),
+        phase: opts.phaseId,
+        event: `phase-${opts.phaseId}-skipped`,
+        caller: "mycl-orchestrator",
+        detail: `stub_script cmd="${scanCmd}"`,
+      });
+      emitChatMessage(
+        "system",
+        `⚠️ ${this.label} atlandı — script gerçek bir kontrol içermiyor (echo-stub: "${scanCmd.slice(0, 80)}"). Bu boyut DOĞRULANMADI; gerçek bir kontrol komutu ekleyin.`,
+      );
+      return { kind: "skipped", reason: "stub_script" };
+    }
+    // TS-only araç (ts-prune/tsc) + JS projesi (tsconfig kalıntısı olsa bile .ts kaynağı yok) → koşmak anlamsız
+    // (boş tarama = sahte-yeşil). project-facts dile bakar (kaynak dosyalardan).
+    if (/ts-prune|\btsc\b/.test(scanCmd)) {
+      const facts = await buildProjectFacts(opts.state.project_root).catch(() => null);
+      if (facts?.language === "javascript") {
+        await appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.phaseId,
+          event: `phase-${opts.phaseId}-skipped`,
+          caller: "mycl-orchestrator",
+          detail: `ts_tool_js_project cmd="${scanCmd}"`,
+        });
+        emitChatMessage(
+          "system",
+          `⏭ ${this.label} atlandı — TypeScript aracı ama proje JavaScript (kaynakta .ts yok${facts.hasTsconfig ? "; tsconfig.json kalıntı görünüyor" : ""}). Boş tarama "geçti" sayılmaz.`,
+        );
+        return { kind: "skipped", reason: "ts_tool_js_project" };
+      }
+    }
     const fixCmd = opts.mechanical.fix_cmd
       ? await resolveMechanicalCmd(opts.mechanical.fix_cmd, opts.state, opts.changedScope)
       : null;
@@ -519,7 +567,8 @@ export class MechanicalRunnerBase {
           caller: "mycl-orchestrator",
           detail: `cmd="${scanCmd}" rescans=${rescans}`,
         });
-        emitChatMessage("system", `✅ ${this.label} — geçti.`);
+        // "geçti" mesajı BURADA atılmaz (Ümit 2026-06-11: Faz 13 'geçti' dedi, semgrep sonra fail oldu —
+        // yanıltıcı). Final mesajı run() tüm extra taramalar bitince atar.
         return { kind: "pass", rescans };
       }
 

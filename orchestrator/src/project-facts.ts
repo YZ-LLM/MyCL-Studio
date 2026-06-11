@@ -85,8 +85,10 @@ export async function buildProjectFacts(projectRoot: string): Promise<ProjectFac
   const { ts, js } = await countSourceLangs(projectRoot);
 
   let language: ProjectFacts["language"] = "unknown";
-  if (hasTsconfig || tsDep) language = ts > 0 && js > ts ? "mixed" : "typescript";
-  else if (js > 0 && ts === 0) language = "javascript";
+  // Ümit 2026-06-11 (vacuous-pass bug'ı): tsconfig VARLIĞI tek başına TS yapmaz — kaynakta HİÇ .ts yokken çok .js
+  // varsa bu bir JS projesidir (tsconfig muhtemelen kalıntı/yanlış eklenmiş). Önce kaynak dosyalara bak.
+  if (ts === 0 && js > 0) language = "javascript";
+  else if (hasTsconfig || tsDep) language = ts > 0 && js > ts ? "mixed" : "typescript";
   else if (ts > 0 && js === 0) language = "typescript";
   else if (ts > 0 || js > 0) language = ts >= js ? "typescript" : "javascript";
 
@@ -95,6 +97,7 @@ export async function buildProjectFacts(projectRoot: string): Promise<ProjectFac
   const summary =
     `Project facts (detected): language=${language}` +
     `${hasTsconfig ? "" : " (NO tsconfig.json — do NOT assume TypeScript tooling applies)"}` +
+    `${hasTsconfig && language === "javascript" ? " (a tsconfig.json EXISTS but there are NO .ts sources — likely a leftover; treat as JavaScript)" : ""}` +
     `, framework=${framework}, packageManager=${packageManager}.` +
     (language === "javascript"
       ? " This is a JavaScript project — TypeScript-only tools (tsc, ts-prune, ts-morph) are NOT applicable; do not add a tsconfig or TS tooling unless the user explicitly asks."

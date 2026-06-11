@@ -46,3 +46,17 @@ describe("isTsToolNotApplicable (TS aracı JS projesinde)", () => {
     expect(isTsToolNotApplicable({ code: 1, stdout: "", stderr: "ESLint: 'x' is assigned but never used" })).toBe(false);
   });
 });
+
+// 2026-06-11 (Ümit "1 saniyede geçti — normal mi?"): echo-stub gate + tsconfig-kalıntılı JS projesi.
+import { isStubGateCommand } from "../src/base/mechanical-runner.js";
+describe("isStubGateCommand (echo-stub gate = doğrulama değil)", () => {
+  it("echo 'perf check passed' → stub", () => {
+    expect(isStubGateCommand("vite build --mode production && echo 'perf check passed'")).toBe(true);
+    expect(isStubGateCommand('echo "ok"')).toBe(true);
+  });
+  it("gerçek komutlar → stub değil", () => {
+    expect(isStubGateCommand("vitest run")).toBe(false);
+    expect(isStubGateCommand("eslint . --max-warnings 0")).toBe(false);
+    expect(isStubGateCommand("npx ts-prune --error")).toBe(false);
+  });
+});
