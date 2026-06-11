@@ -7,12 +7,8 @@
 // görmez (ayrı, izole bir LLM çağrısı). Cevaptan sonra çağıran taraf nesneyi atar. Yanlış cevap "kullanıcı yanlış
 // cevap verdi" diye loglanır — seçilen çeldirici ASLA loglanmaz. Sızarsa sistem saçmalar.
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { runReasoning } from "./llm-reasoning.js";
 import { translate } from "./translator.js";
-import { appendAudit } from "./audit.js";
-import { emit, emitChatMessage } from "./ipc.js";
 import type { MyclConfig } from "./config.js";
 import type { PhaseId } from "./types.js";
 import { log } from "./logger.js";
@@ -151,46 +147,13 @@ export type AskOnce = (question_tr: string, options_tr: string[], allowOther: bo
  * sorusu YOK). İZOLASYON: çeldiriciler yalnız askq seçeneklerinde; hiçbir kalıcı yere yazılmaz.
  */
 export async function runComprehensionGate(
-  config: MyclConfig,
-  projectRoot: string,
-  phaseId: PhaseId,
-  askOnce: AskOnce,
+  _config: MyclConfig,
+  _projectRoot: string,
+  _phaseId: PhaseId,
+  _askOnce: AskOnce,
 ): Promise<void> {
-  let specMd: string;
-  try {
-    specMd = await readFile(join(projectRoot, ".mycl", "spec.md"), "utf-8");
-  } catch {
-    return; // spec yok → kapı yok
-  }
-  const specTr = await translate(config, specMd, "en-to-tr")
-    .then((r) => r.text)
-    .catch(() => specMd);
-  for (let attempt = 0; attempt < 25; attempt++) {
-    const q = await buildComprehensionQuestion(config, projectRoot, specMd, attempt);
-    if (!q) return; // çeldirici/AC üretilemedi → kapıyı atla (sayı-sorusuna DÜŞME)
-    emit("spec_review", { spec_tr: specTr }); // frontend: biçimli popup (GuideModal)
-    emitChatMessage("system", "📋 Spec'i açtım — okuyup aşağıdaki soruyu yanıtla (okumadan onay yok).");
-    const sel = await askOnce(q.question_tr, q.options_tr, false);
-    if (sel === q.options_tr[q.correctIndex]) {
-      emitChatMessage("system", "✅ Spec okuma doğrulandı — onaya geçiyorum.");
-      return;
-    }
-    // YANLIŞ — SADECE generic log; seçilen çeldirici ASLA hiçbir yere yazılmaz (Ümit: sisteme sızmasın).
-    await appendAudit(projectRoot, {
-      ts: Date.now(),
-      phase: phaseId,
-      event: "spec-comprehension-wrong",
-      caller: "user",
-      detail: "kullanıcı yanlış cevap verdi",
-    });
-    emitChatMessage(
-      "system",
-      "❌ Spec onayı alınamadı. Lütfen Spec'i okuyunuz ve ardından **okudum anladım** yazınız.",
-    );
-    emit("spec_review", { spec_tr: specTr });
-    let ack = "";
-    while (!/okudum\s*,?\s*anlad/i.test(ack)) {
-      ack = await askOnce("Spec'i okuduysan 'okudum anladım' yaz.", [], true);
-    }
-  }
+  // Ümit 2026-06-12: spec-okuma kapısı DEVRE DIŞI — onay sorusu sorulmasın, çeldirici üretilmesin. Kullanıcı okuma
+  // sorumluluğunu kendisi alıyor; spec zaten chat'te biçimli gösteriliyor. (Eski mantık git geçmişinde; geri açmak
+  // istenirse buildComprehensionQuestion + askOnce döngüsü tekrar bağlanır.)
+  return;
 }
