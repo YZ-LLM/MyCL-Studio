@@ -23,6 +23,7 @@ import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
 import { localizeOptionLabels, t } from "../i18n.js";
 import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
+import { runComprehensionGate } from "../spec-comprehension.js";
 import { log } from "../logger.js";
 import { translate } from "../translator.js";
 import {
@@ -272,8 +273,27 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
     return { kind: "failed", reason: `${opts.tag}: MAX_TURNS (${MAX_TURNS}) aşıldı` };
   }
 
+  /** Tek askq emit + cevabı bekle (pendingResolver). allowOther=serbest metin ("okudum anladım"). */
+  private async askOnce(question_tr: string, options_tr: string[], allowOther: boolean): Promise<string> {
+    const askqId = randomUUID();
+    this.currentAskqId = askqId;
+    this.pendingAskq = { options_en: options_tr, options_tr };
+    emitAskq({ id: askqId, question: question_tr, options: options_tr, allow_other: allowOther });
+    const sel = await new Promise<string>((resolve, reject) => {
+      this.pendingResolver = resolve;
+      this.pendingRejecter = reject;
+    });
+    this.pendingAskq = null;
+    this.currentAskqId = null;
+    return sel;
+  }
+
   /** SDK base'iyle birebir: Approve/Revise/Cancel askq (i18n + translate). */
   private async askApproval(pitch_en: string): Promise<"approve" | "revise" | "cancel"> {
+    // #6 deliği (Ümit): spec'i okumadan onay YOK — CLI modunda da. Paylaşılan kapı (AC yoksa atlar).
+    await runComprehensionGate(this.opts.config, this.opts.state.project_root, this.opts.phaseId, (q, o, a) =>
+      this.askOnce(q, o, a),
+    );
     const suffixKey = this.opts.production.approval_suffix_key ?? "generic";
     const options_en = ["Approve", "Revise", "Cancel"];
     const options_tr = localizeOptionLabels(options_en, "tr");

@@ -64,6 +64,7 @@ export type OrchestratorEvent =
   | FeaturesValueEvent
   | UserGuideEvent
   | ModelStrengthReportEvent
+  | SpecReviewEvent
   | ErrorEvent;
 
 /**
@@ -117,6 +118,12 @@ export interface UserGuideEvent {
 export interface ModelStrengthReportEvent {
   kind: "model_strength_report";
   data: { text: string };
+}
+
+/** 2026-06-11 (Ümit, #6): Spec okuma kapısı — onaydan önce spec'i biçimli popup'ta göster (okumadan onay yok). */
+export interface SpecReviewEvent {
+  kind: "spec_review";
+  data: { spec_tr: string };
 }
 
 export interface ConfigStatusEvent {

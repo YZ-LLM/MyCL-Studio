@@ -602,6 +602,9 @@ function App() {
   // model_strength_report event'inden gelir.
   const [modelReportOpen, setModelReportOpen] = useState(false);
   const [modelReportText, setModelReportText] = useState("");
+  // 2026-06-11 (Ümit, #6): Spec okuma kapısı popup — onaydan önce spec'i biçimli gösterir.
+  const [specReviewOpen, setSpecReviewOpen] = useState(false);
+  const [specReviewText, setSpecReviewText] = useState("");
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
   const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
@@ -700,6 +703,10 @@ function App() {
         // 2026-06-11: backend rapor metnini yolladı → popup'ı aç.
         setModelReportText(ev.data.text ?? "");
         setModelReportOpen(true);
+      } else if (ev.kind === "spec_review") {
+        // 2026-06-11 (#6): spec okuma kapısı → spec'i biçimli popup'ta aç.
+        setSpecReviewText(ev.data.spec_tr ?? "");
+        setSpecReviewOpen(true);
       } else if (ev.kind === "selected_models") {
         setCurrentSelected(ev.data.selected ?? null);
         if (ev.data.effort) setCurrentEffort(ev.data.effort);
@@ -1294,6 +1301,12 @@ function App() {
         open={modelReportOpen}
         content={modelReportText}
         onClose={() => setModelReportOpen(false)}
+      />
+      {/* 2026-06-11 (Ümit, #6): Spec okuma kapısı popup — onaydan önce spec'i biçimli (markdown) gösterir. */}
+      <GuideModal
+        open={specReviewOpen}
+        content={specReviewText}
+        onClose={() => setSpecReviewOpen(false)}
       />
       <TaskQueuePanel
         open={taskQueueOpen}

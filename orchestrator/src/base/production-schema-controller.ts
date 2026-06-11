@@ -19,6 +19,7 @@ import { localizeOptionLabels, t } from "../i18n.js";
 import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import { translate } from "../translator.js";
+import { runComprehensionGate } from "../spec-comprehension.js";
 import type { PhaseId, ProductionConfig, State } from "../types.js";
 
 // Tur sınırı yok — Claude doğal end_turn ile çıkar veya kullanıcı abort eder.
@@ -291,10 +292,29 @@ export class ProductionSchemaBaseController implements ProductionBackend {
     }
   }
 
+  /** Tek askq emit + cevabı bekle (pendingResolver). allowOther=serbest metin ("okudum anladım"). */
+  private async askOnce(question_tr: string, options_tr: string[], allowOther: boolean): Promise<string> {
+    const askqId = randomUUID();
+    this.currentAskqId = askqId;
+    this.pendingAskq = { options_en: options_tr, options_tr };
+    emitAskq({ id: askqId, question: question_tr, options: options_tr, allow_other: allowOther });
+    const sel = await new Promise<string>((resolve, reject) => {
+      this.pendingResolver = resolve;
+      this.pendingRejecter = reject;
+    });
+    this.pendingAskq = null;
+    this.currentAskqId = null;
+    return sel;
+  }
+
   private async askApproval(
     pitch_en: string,
     suffixKey: string,
   ): Promise<"approve" | "revise" | "cancel"> {
+    // #6 deliği (Ümit): spec'i okumadan onay YOK. Paylaşılan kapı doğru cevap gelene dek döner (AC yoksa atlar).
+    await runComprehensionGate(this.opts.config, this.opts.state.project_root, this.opts.phaseId, (q, o, a) =>
+      this.askOnce(q, o, a),
+    );
     const options_en = ["Approve", "Revise", "Cancel"];
     const options_tr = localizeOptionLabels(options_en, "tr");
     // Translate fail durumunda fallback YOK (Ümit kuralı). Throw eder; run()
