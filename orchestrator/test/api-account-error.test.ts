@@ -16,3 +16,18 @@ describe("isApiAccountError (Ümit: kredi/hesap hatası ≠ proje hatası, tırm
     expect(isApiAccountError("Anthropic API rate limit aşıldı")).toBe(false); // transient, hesap değil
   });
 });
+
+import { isEnvironmentError } from "../src/claude-api.js";
+describe("isEnvironmentError (Ümit: escalation yalnız PROJE hatasında)", () => {
+  it("dev-ortam hataları → true (tırmanma YOK)", () => {
+    expect(isEnvironmentError("spawn claude E2BIG")).toBe(true);
+    expect(isEnvironmentError("listen EADDRINUSE: address already in use :::5173")).toBe(true);
+    expect(isEnvironmentError("Your credit balance is too low")).toBe(true); // hesap da ortam
+    expect(isEnvironmentError("sh: vite: command not found")).toBe(true);
+  });
+  it("proje/kod hatası → false (tırmanma ÇALIŞIR)", () => {
+    expect(isEnvironmentError("TypeError: x is not a function")).toBe(false);
+    expect(isEnvironmentError("Test failed: expected 3 got 5")).toBe(false);
+    expect(isEnvironmentError("lint: 'foo' is assigned but never used")).toBe(false);
+  });
+});

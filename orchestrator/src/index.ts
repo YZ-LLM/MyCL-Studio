@@ -75,7 +75,8 @@ import {
 import { listModels } from "./models.js";
 import { computeTiersFromModels } from "./model-catalog.js";
 import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
-import { isApiAccountError } from "./claude-api.js";
+import { isApiAccountError, isEnvironmentError } from "./claude-api.js";
+import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
@@ -471,11 +472,28 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // zayıflığı DEĞİL. Her API çağrısı aynı hatayı verir → escalation (modeli pahalıya tırmandırma) + hata-analizi
   // (o da API çağrısı) ANLAMSIZ ve kısır döngü. DUR + net söyle; tırmanma/analiz/fix YAPMA.
   if (isApiAccountError(ctrl?.lastFailReason ?? "") || isApiAccountError(message)) {
+    // Ümit 2026-06-11: "API hata verince aboneliğe OTOMATİK geçmeli." Abonelik (claude CLI) varsa + şu an API'deysek
+    // → tüm rolleri CLI'ye geçir (restart'sız) + kaldığı fazdan devam. Yoksa dur + net söyle.
+    const onApi = (runtime.config.agent_backends?.main ?? "api") !== "cli";
+    if (onApi && isClaudeAvailable()) {
+      await persistAgentBackends({ orchestrator: "cli", translator: "cli", main: "cli" });
+      runtime.config = null;
+      await emitConfigStatus(); // reload + applyConfigDerivedSettings (restart'sız aktif)
+      emitChatMessage(
+        "system",
+        "⚠️ Anthropic API krediniz/bakiyeniz yetersiz → **aboneliğe (Claude Code CLI) otomatik geçtim**, kaldığım " +
+          "yerden devam ediyorum (API faturası kullanılmaz). Krediyi yükleyince Ayarlar'dan API'ye dönebilirsin.",
+      );
+      if (n >= 2) {
+        await advanceToNextPhase((n - 1) as PhaseId); // aynı fazı CLI ile tekrar koş
+      }
+      return;
+    }
     emitChatMessage(
       "system",
-      "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** — bu bir ortam sorunu, proje hatası DEĞİL. " +
-        "Plans & Billing'den kredi yükleyin (ya da CLI/abonelik moduna geçin), sonra **'Çalıştır'** ile kaldığınız " +
-        "yerden devam edin. Otomatik tırmanma/düzeltme/analiz YAPMADIM — hepsi API gerektirir, aynı hatayı verirdi.",
+      "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** + abonelik (`claude`) yok — bu bir ortam sorunu, proje hatası " +
+        "DEĞİL. Plans & Billing'den kredi yükleyin (ya da `claude` kurup CLI moduna geçin), sonra **'Çalıştır'** ile " +
+        "devam edin. Otomatik tırmanma/analiz YAPMADIM — hepsi API gerektirir, aynı hatayı verirdi.",
     );
     return; // STOP — escalation YOK, analiz YOK, fix YOK.
   }
@@ -485,7 +503,10 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // biter → mevcut derin çözüm (debug/oto-çözüm) akışına düşülür.
   // Yalnız MERDİVENE BAĞLI fazlarda escalation (model+eforu escalation_rung'tan çözenler) — yoksa tırmanma boşa
   // re-run olur. Şimdilik spec (4) + codegen (8). Yeni faz bağlandıkça bu kümeye eklenir.
-  if (autoAnswerSuggested() && ESCALATION_PHASES.has(n)) {
+  // Ümit 2026-06-11: escalation YALNIZ proje/kod hatasında tırmanır. Ortam hatasında (kredi/dev-server/port/komut)
+  // daha güçlü model çözmez → tırmanma anlamsız + pahalı. Ortam hatası ise escalation'ı ATLA (normal akışa düş).
+  const projectError = !isEnvironmentError(ctrl?.lastFailReason ?? "") && !isEnvironmentError(message);
+  if (autoAnswerSuggested() && ESCALATION_PHASES.has(n) && projectError) {
     const domain = phaseDomain(n);
     await recordRungOutcome(n, false);
     const cur = rungForDomain(runtime.state, domain);

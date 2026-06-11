@@ -72,6 +72,18 @@ export function isApiAccountError(text: string): boolean {
 }
 
 /**
+ * ORTAM hatası mı? (Ümit 2026-06-11: "sadece PROJE hatalarında tırman".) Hesap/kredi (isApiAccountError) + dev-ortam
+ * (E2BIG/env çok büyük, port dolu, komut yok, spawn) — bunlar model zayıflığı DEĞİL → escalation merdiveni tırmanmamalı
+ * (daha güçlü/pahalı model bu hatayı çözmez). Yalnız genuine proje/kod hatasında tırman. SAF.
+ */
+export function isEnvironmentError(text: string): boolean {
+  if (isApiAccountError(text)) return true;
+  return /E2BIG|argument list too long|EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)|spawn \w+ ENOENT|command not found|: not found|EACCES|ECONNREFUSED|ENOTFOUND/i.test(
+    text,
+  );
+}
+
+/**
  * Hatanın geçici (transient) olup olmadığını döndürür. Transient hatalar
  * exponential backoff ile retry edilir; kalıcı hatalar (auth, permission,
  * invalid_request) anında bubble up eder. Translator pattern'ı (translator.ts)
