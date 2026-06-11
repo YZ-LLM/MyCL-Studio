@@ -1305,12 +1305,14 @@ function App() {
         open={modelReportOpen}
         content={modelReportText}
         onClose={() => setModelReportOpen(false)}
+        title="📊 Model Güç Raporu"
       />
       {/* 2026-06-11 (Ümit, #6): Spec okuma kapısı popup — onaydan önce spec'i biçimli (markdown) gösterir. */}
       <GuideModal
         open={specReviewOpen}
         content={specReviewText}
         onClose={() => setSpecReviewOpen(false)}
+        title="📋 Spec İncelemesi"
       />
       {/* 2026-06-11 (Ümit): Kalite Kontrol — denetim ajanı popup (düzenlenebilir sorular + başlat). */}
       <QualityAuditModal

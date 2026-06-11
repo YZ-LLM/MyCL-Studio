@@ -384,6 +384,10 @@ const autoSolveSig = new Map<number, { sig: string; count: number }>();
 let _pendingModelUpgrade: { askqId: string; model: string } | null = null;
 const _declinedModelUpgrades = new Set<string>();
 
+// Ümit 2026-06-11: kullanıcı çalışan fazı başka faza yönlendirdi → abort tamamlanınca BU fazdan OTOMATİK devam
+// (tekrar yazdırma yok). failPhase'in user-abort dalı tüketir.
+let _resumePhaseAfterAbort: PhaseId | null = null;
+
 // Escalation CLIMB-RETRY'ye uygun fazlar — ana loop İÇİNDE koşanlar (failPhase → advanceToNextPhase(n-1) ile aynı
 // fazı doğru re-run eder). Faz 1 (intent) loop DIŞINDA koşar → climb-retry path'i kırık → hariç (yine de model'i
 // merdivenden cheap'ten başlar, sadece climb-retry yapmaz). Faz 6 ayrı model kullanmaz; 0 debug; 10-17 mekanik.
@@ -462,6 +466,17 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   if (isUserInitiatedAbort()) {
     clearUserInitiatedAbort();
     emitChatMessage("system", `⏹ Faz ${n} durduruldu (sen yönlendirdin).`);
+    // Ümit 2026-06-11: kullanıcı hedef fazı zaten söyledi → OTOMATİK oradan devam (tekrar yazdırma yok).
+    // setTimeout: önce bu (eski) advance-döngüsü tamamen kapansın, sonra yeni faz temiz başlasın.
+    const resume = _resumePhaseAfterAbort;
+    if (resume !== null) {
+      _resumePhaseAfterAbort = null;
+      setTimeout(() => {
+        void handleRunPhase(resume, "advance").catch((e) =>
+          log.error("orchestrator", "resume-after-abort failed", e),
+        );
+      }, 100);
+    }
     return;
   }
   const message = phaseFailMessage(n, ctrl);
@@ -515,8 +530,10 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // Yalnız MERDİVENE BAĞLI fazlarda escalation (model+eforu escalation_rung'tan çözenler) — yoksa tırmanma boşa
   // re-run olur. Şimdilik spec (4) + codegen (8). Yeni faz bağlandıkça bu kümeye eklenir.
   // Ümit 2026-06-11: escalation YALNIZ proje/kod hatasında tırmanır. Ortam hatasında (kredi/dev-server/port/komut)
-  // daha güçlü model çözmez → tırmanma anlamsız + pahalı. Ortam hatası ise escalation'ı ATLA (normal akışa düş).
-  const projectError = !isEnvironmentError(ctrl?.lastFailReason ?? "") && !isEnvironmentError(message);
+  // daha güçlü model çözmez → tırmanma anlamsız + pahalı. Kesme/abort da hata değil (rapora yazma, tırmanma).
+  const failReason = ctrl?.lastFailReason ?? "";
+  const projectError =
+    !isEnvironmentError(failReason) && !isEnvironmentError(message) && !/\babort/i.test(failReason);
   if (autoAnswerSuggested() && ESCALATION_PHASES.has(n) && projectError) {
     const domain = phaseDomain(n);
     await recordRungOutcome(n, false);
@@ -1468,6 +1485,8 @@ async function handleUserMessageInner(text: string): Promise<void> {
   // Yeni kullanıcı turu = yeni düzeltme-dizisi → eski rollback noktasını at (önceki turun bayat snapshot'ı
   // bu turun bir hatasında yanlışlıkla restore edilmesin). Tur içi snapshot'lar kendi rollback'ini arm eder.
   disarmRollback();
+  // Bayat otomatik-faz-geçişi de iptal — kullanıcı yeni bir şey söylüyor, eski yönlendirme geçersiz.
+  _resumePhaseAfterAbort = null;
   // History persistence: user mesajını yaz. Frontend setMainState ile UI'a
   // ekledi ama backend echo etmiyordu → tarihte yer almıyordu. Açılışta
   // history_chunk'tan gelmediği için kaybolmuş gibi görünüyordu (kullanıcı
@@ -3751,16 +3770,16 @@ async function emitPhaseRunAskq(phaseId: number): Promise<void> {
     return;
   }
   if (runtime.controller) {
-    // Ümit "beni dinlemedi": dead-end YOK. Kullanıcı açıkça başka faz başlatmak istiyor →
-    // çalışanı DURDUR (sen yönlendirdin) + hangi fazı istediğini söyle. Durunca tekrar 'Çalıştır'
-    // ile (ya da yazılı "Faz N'den devam et" ile — o otomatik durdurup işler) başlatılır.
+    // Ümit 2026-06-11: "kullanıcı zaten Faz 11 yazdı, tekrar yazdırmanın anlamı yok." Kullanıcı hangi fazı
+    // istediğini SÖYLEDİ → durunca OTOMATİK o fazdan devam et (yeniden yazdırma/yeniden bastırma YOK).
     if ("abort" in runtime.controller && typeof runtime.controller.abort === "function") {
       _userInitiatedAbort = true;
+      _resumePhaseAfterAbort = phaseId as PhaseId;
       runtime.controller.abort();
     }
     emitChatMessage(
       "system",
-      `⏹ Çalışan fazı durdurdum (sen Faz ${phaseId}'i istedin). Durunca **Çalıştır**'a tekrar bas — ya da chat'e "Faz ${phaseId}'den devam et" yaz, otomatik geçeyim.`,
+      `⏹ Çalışan fazı durdurdum — durunca **Faz ${phaseId}'den otomatik devam edeceğim** (bir şey yazmana gerek yok).`,
     );
     return;
   }
@@ -4436,6 +4455,9 @@ ipcRouter.register("abort_phase", () => {
     log.info("orchestrator", "abort_phase", {
       phase: runtime.state?.current_phase,
     });
+    // Ümit 2026-06-11: durdur-butonu = KULLANICI kesmesi — başarısızlık DEĞİL. Bu bayrak olmadan failPhase
+    // kesmeyi gerçek hata sanıp escalation'a kaydediyordu (rapor %0'larla doldu) + analiz başlatıyordu.
+    _userInitiatedAbort = true;
     runtime.controller.abort();
     emitChatMessage(
       "system",

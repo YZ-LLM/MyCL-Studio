@@ -11,6 +11,8 @@ interface Props {
   open: boolean;
   content: string;
   onClose: () => void;
+  /** 2026-06-11 (Ümit: "Model raporunda başlık yanlış"): popup başlığı — verilmezse Kullanma Kılavuzu. */
+  title?: string;
 }
 
 function renderMarkdown(md: string): ReactNode[] {
@@ -50,7 +52,7 @@ function renderMarkdown(md: string): ReactNode[] {
   return out;
 }
 
-export function GuideModal({ open, content, onClose }: Props) {
+export function GuideModal({ open, content, onClose, title }: Props) {
   if (!open) return null;
   const hasContent = content.trim().length > 0;
   return (
@@ -87,7 +89,7 @@ export function GuideModal({ open, content, onClose }: Props) {
             borderBottom: "1px solid var(--border)",
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>📖 Kullanma Kılavuzu</h2>
+          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{title ?? "📖 Kullanma Kılavuzu"}</h2>
           <button
             type="button"
             onClick={onClose}
