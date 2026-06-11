@@ -19,7 +19,7 @@ import {
   type RateLimitInfo,
 } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
-import { recordTokenUsage } from "./ipc.js";
+import { emitChatMessage, recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 
 export interface PersistentSessionOpts {
@@ -65,6 +65,10 @@ export class PersistentClaudeSession {
   private curEffort: string | undefined;
   private ctlSeq = 0;
   private pendingControls = new Map<string, (ok: boolean) => void>();
+  // Sağlık (Ümit 2026-06-11): art arda hata = bozuk oturum → oto-yenileme. _fails ardışık başarısızlık sayısı.
+  private fails = 0;
+  /** Oturum kalıcı olarak kararsız mı (çok yenilendi) — caller buna bakıp cold-start/API'ye düşebilir. */
+  unhealthy = false;
 
   constructor(private opts: PersistentSessionOpts) {
     this.curModel = opts.modelId;
@@ -295,10 +299,37 @@ export class PersistentClaudeSession {
         }
         })();
       });
-    // Seri kuyruk: bir tur bitmeden sonraki başlamasın (tek konuşma).
-    const next = this.queue.then(run, run);
+    // Seri kuyruk: bir tur bitmeden sonraki başlamasın (tek konuşma). Her sonuçtan sonra sağlık değerlendir.
+    const next = this.queue.then(run, run).then((r) => {
+      this.applyHealth(r);
+      return r;
+    });
     this.queue = next.catch(() => undefined);
     return next;
+  }
+
+  /**
+   * Sağlık değerlendirme (Ümit: "sürekli açık oturumdan hata olursa tespit et → yeni oturum"). Başarı → sayaç sıfır.
+   * Başarısızlık → süreci kapat (sonraki send TAZE başlar = oto-yenileme) + görünür mesaj. 3+ ardışık → unhealthy
+   * (caller cold-start/API'ye düşebilir). Bu, orkestratörün gördüğü "MyCL bozuk oturumu yeniledi" davranışıdır.
+   */
+  private applyHealth(r: SessionTurnResult): void {
+    if (r.ok) {
+      this.fails = 0;
+      this.unhealthy = false;
+      return;
+    }
+    this.fails++;
+    if (this.alive) this.kill(); // bozuk olabilir → kapat, sonraki çağrı taze oturum açar
+    if (this.fails >= 3) {
+      this.unhealthy = true;
+      emitChatMessage(
+        "system",
+        `⚠️ "${this.opts.id}" kalıcı oturumu ${this.fails} kez üst üste hata verdi — kararsız sayıldı; geçici olarak cold-start/eski yola düşülüyor.`,
+      );
+    } else {
+      log.warn("persistent-cli", `${this.opts.id}: hata → oturum yenilenecek (taze açılacak)`, { fails: this.fails });
+    }
   }
 
   private kill(): void {
@@ -339,15 +370,30 @@ export class PersistentClaudeSession {
   }
 }
 
-// Rol-başına singleton kayıt — aynı (id) için tek kalıcı süreç paylaşılır.
+// Rol-başına singleton kayıt — aynı (id) için tek kalıcı süreç paylaşılır. Map ekleme-sırasını korur → LRU.
 const _sessions = new Map<string, PersistentClaudeSession>();
+// Süreç sayısı tavanı (ısı/RAM emniyeti): codegen oturumları faz-başına birikebilir → en eski kullanılmayan kapatılır.
+// 3 ajan + birkaç reasoning/codegen oturumu için yeterli; aşılırsa LRU eviction.
+const MAX_LIVE_SESSIONS = 6;
 
-/** id'ye göre kalıcı oturumu al/oluştur. opts yalnız ilk çağrıda kullanılır (model/prompt sabit varsayılır). */
+/** id'ye göre kalıcı oturumu al/oluştur. LRU: erişilen sona taşınır; havuz dolarsa en eski (kullanılmayan) kapatılır. */
 export function getPersistentSession(opts: PersistentSessionOpts): PersistentClaudeSession {
   let s = _sessions.get(opts.id);
-  if (!s) {
-    s = new PersistentClaudeSession(opts);
+  if (s) {
+    _sessions.delete(opts.id); // LRU: sona taşı
     _sessions.set(opts.id, s);
+    return s;
+  }
+  s = new PersistentClaudeSession(opts);
+  _sessions.set(opts.id, s);
+  // Tavanı aş → en eski oturumu kapat (oturum-başına süreç sınırlı kalsın).
+  while (_sessions.size > MAX_LIVE_SESSIONS) {
+    const oldestId = _sessions.keys().next().value as string | undefined;
+    if (oldestId === undefined) break;
+    const old = _sessions.get(oldestId);
+    _sessions.delete(oldestId);
+    old?.dispose();
+    log.info("persistent-cli", "LRU eviction — en eski oturum kapatıldı", { evicted: oldestId });
   }
   return s;
 }
