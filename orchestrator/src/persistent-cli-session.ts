@@ -18,9 +18,49 @@ import {
   finalizeCliRateLimit,
   type RateLimitInfo,
 } from "./cli-rate-limit.js";
+import { appendFile, readFile } from "node:fs/promises";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import { emitChatMessage, recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
+import { globalConfigFile } from "./paths.js";
+
+// Oturum transcript'i (Ümit 2026-06-11: "arka plan oturumları kör noktada kalmasın, herşey loglansın, orkestratör
+// ne düşündüklerini bulabilsin"). Her kalıcı tur buraya yazılır → orkestratör readSessionTranscript ile bulur.
+const SESSION_TRANSCRIPT = globalConfigFile("session-transcripts.jsonl");
+
+function recordSessionTurn(rec: {
+  id: string;
+  model: string;
+  effort?: string;
+  ok: boolean;
+  input: string;
+  output: string;
+}): void {
+  const line =
+    JSON.stringify({
+      ts: Date.now(),
+      id: rec.id,
+      model: rec.model,
+      effort: rec.effort,
+      ok: rec.ok,
+      input: rec.input.slice(0, 800), // önizleme (bloat değil, ama "ne düşündü" görünür)
+      output: rec.output.slice(0, 2000),
+    }) + "\n";
+  appendFile(SESSION_TRANSCRIPT, line, "utf-8").catch(() => {});
+}
+
+/** Orkestratör için: son N kalıcı-oturum turunu oku (kör nokta yok — ne düşündüklerini bul). Best-effort. */
+export async function readSessionTranscript(
+  limit = 50,
+): Promise<Array<{ ts: number; id: string; model: string; effort?: string; ok: boolean; input: string; output: string }>> {
+  try {
+    const raw = await readFile(SESSION_TRANSCRIPT, "utf-8");
+    const lines = raw.trim().split("\n").filter(Boolean).slice(-limit);
+    return lines.map((l) => JSON.parse(l)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 export interface PersistentSessionOpts {
   /** Rol kimliği — log/teşhis için (örn. "translator-en-tr"). */
@@ -302,6 +342,8 @@ export class PersistentClaudeSession {
     // Seri kuyruk: bir tur bitmeden sonraki başlamasın (tek konuşma). Her sonuçtan sonra sağlık değerlendir.
     const next = this.queue.then(run, run).then((r) => {
       this.applyHealth(r);
+      // Transcript: her tur retrievable (orkestratör kör noktada kalmasın — ne düşündüklerini bulabilsin).
+      recordSessionTurn({ id: this.opts.id, model: this.curModel, effort: this.curEffort, ok: r.ok, input: userText, output: r.text });
       return r;
     });
     this.queue = next.catch(() => undefined);

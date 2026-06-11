@@ -6,6 +6,7 @@
 // değişikliği gerektirir (kullanıcı geliştiriciye iletir). Denetim ajanı main'e DOĞRUDAN gitmez — translator köprü.
 
 import { readAuditLogTail } from "./audit.js";
+import { readSessionTranscript } from "./persistent-cli-session.js";
 import { runReasoning } from "./llm-reasoning.js";
 import { translate } from "./translator.js";
 import { emitChatMessage } from "./ipc.js";
@@ -80,7 +81,21 @@ async function gatherEvidence(state: State): Promise<string> {
     .filter((e) => (e.ts ?? 0) >= since || true) // son iterasyon + biraz öncesi (bağlam)
     .slice(-160)
     .map((e) => `[p${e.phase ?? "?"}] ${e.event}: ${String(e.detail ?? "").slice(0, 160)}`);
-  return rows.join("\n").slice(0, 12000);
+  let evidence = rows.join("\n").slice(0, 12000);
+  // Ümit 2026-06-11: arka plan kalıcı oturumları (çevirmen/reasoning/codegen) KÖR NOKTADA kalmasın — ne
+  // düşündüklerini de denetime kat (transcript). Orkestratör "ne düşündüler" diye baktığında görünür.
+  try {
+    const turns = await readSessionTranscript(40);
+    if (turns.length) {
+      const tx = turns
+        .map((t) => `[${t.id}${t.ok ? "" : " FAIL"}] in: ${t.input.slice(0, 120)} → out: ${t.output.slice(0, 200)}`)
+        .join("\n");
+      evidence += `\n\nBACKGROUND SESSION TRANSCRIPT (persistent claude sessions — what they reasoned):\n${tx.slice(0, 8000)}`;
+    }
+  } catch {
+    // transcript yoksa audit ile devam
+  }
+  return evidence;
 }
 
 /**
