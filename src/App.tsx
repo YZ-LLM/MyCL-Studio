@@ -1100,6 +1100,7 @@ function App() {
       currentBackends={currentBackends}
       currentModelTiers={currentModelTiers}
       currentEscalationRungs={currentEscalationRungs}
+      onResetLadder={() => void orch.send({ kind: "reset_escalation_ladder" })}
       currentDesignWorkflow={currentDesignWorkflow}
       currentAgentTeamsOptIn={currentAgentTeamsOptIn}
       currentMultiAgentSelection={currentMultiAgentSelection}

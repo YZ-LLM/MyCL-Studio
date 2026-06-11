@@ -6,7 +6,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
-import { makeAnthropicClient } from "./claude-api.js";
+import { makeAnthropicClient, modelSupportsAdaptive } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 
 export interface ReasoningResult {
@@ -28,6 +28,8 @@ export async function runReasoning(
     modelId: string;
     projectRoot: string;
     maxTokens?: number;
+    /** Verify-up (Ümit 2026-06-11): kontrolcü eforu — CLI'da --effort; API'da yalnız destekleyen modelde output_config. */
+    effort?: string;
   },
 ): Promise<ReasoningResult> {
   const backend = backendForRole(config, "main");
@@ -37,6 +39,7 @@ export async function runReasoning(
       userMessage: opts.userMessage,
       modelId: opts.modelId,
       cwd: opts.projectRoot,
+      effort: opts.effort,
       allowedTools: [], // saf reasoning
       disallowedTools: ["Write", "Edit", "Bash"],
     });
@@ -50,6 +53,10 @@ export async function runReasoning(
       max_tokens: opts.maxTokens ?? 4096,
       system: opts.systemPrompt,
       messages: [{ role: "user", content: opts.userMessage }],
+      // Efor yalnız destekleyen modelde (aksi 400) — haiku'da atlanır, model seviyesi asıl kaldıraç.
+      ...(opts.effort && modelSupportsAdaptive(opts.modelId)
+        ? { output_config: { effort: opts.effort as "low" | "medium" | "high" | "xhigh" | "max" } }
+        : {}),
     });
     const text = response.content
       .filter((c): c is Anthropic.TextBlock => c.type === "text")

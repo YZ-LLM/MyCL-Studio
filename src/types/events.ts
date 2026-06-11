@@ -476,4 +476,5 @@ export type OrchestratorCommand =
   | { kind: "save_features"; data: { playwright_enabled?: boolean } }
   | { kind: "read_features" }
   | { kind: "get_model_strength_report" }
-  | { kind: "start_quality_audit"; data: { questions: string } };
+  | { kind: "start_quality_audit"; data: { questions: string } }
+  | { kind: "reset_escalation_ladder" };

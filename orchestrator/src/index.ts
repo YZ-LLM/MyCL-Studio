@@ -73,9 +73,10 @@ import {
   type PendingErrorAnalysis,
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
-import { computeTiersFromModels } from "./model-catalog.js";
+import { computeTiersFromModels, modelForTier } from "./model-catalog.js";
 import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
+import { verifyWorkAtHigherRung } from "./verify-up.js";
 import { isApiAccountError, isEnvironmentError, environmentErrorAdvice } from "./claude-api.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
@@ -388,6 +389,40 @@ const _declinedModelUpgrades = new Set<string>();
 // (tekrar yazdırma yok). failPhase'in user-abort dalı tüketir.
 let _resumePhaseAfterAbort: PhaseId | null = null;
 
+// Ümit 2026-06-11: "en yüksek model+efor yetmezse SDK'dan güncelleri çek, onlara geç." Oturum içinde aynı modeli
+// tekrar tekrar benimsememek için (sonsuz döngü kıran).
+const _adoptedNewerModels = new Set<string>();
+
+/**
+ * Tepe-tükenmesinde Anthropic SDK'dan (models.list) güncel modelleri çek; mevcut strong'dan FARKLI/daha yeni bir
+ * güçlü model varsa config'e yaz (strong tier + main) + reload → benimsenen model id döner. Yoksa/çekilemezse null.
+ */
+async function tryAdoptNewerStrongModel(): Promise<string | null> {
+  if (!runtime.config || !runtime.state) return null;
+  const apiKey = runtime.config.api_keys.main || runtime.config.api_keys.translator;
+  if (!apiKey) return null; // API anahtarı yok (salt-abonelik) → SDK listesi çekilemez
+  let fetched: Awaited<ReturnType<typeof listModels>>;
+  try {
+    fetched = await listModels(apiKey, true);
+  } catch (e) {
+    log.warn("orchestrator", "topout model fetch failed", e);
+    return null;
+  }
+  const t = computeTiersFromModels(fetched.models.map((m) => ({ id: m.id, display_name: m.display_name })));
+  const sel = runtime.config.selected_models;
+  const currentStrong = sel.model_tiers?.strong ?? modelForTier("strong", sel.model_tiers).id;
+  if (!t.strong || t.strong === currentStrong || _adoptedNewerModels.has(t.strong)) return null;
+  _adoptedNewerModels.add(t.strong);
+  await persistSelectedModels({
+    ...sel,
+    main: t.strong,
+    model_tiers: { ...(sel.model_tiers ?? {}), strong: t.strong },
+  } as SelectedModels);
+  runtime.config = null;
+  await emitConfigStatus(); // reload + restart'sız aktif
+  return t.strong;
+}
+
 // Escalation CLIMB-RETRY'ye uygun fazlar — ana loop İÇİNDE koşanlar (failPhase → advanceToNextPhase(n-1) ile aynı
 // fazı doğru re-run eder). Faz 1 (intent) loop DIŞINDA koşar → climb-retry path'i kırık → hariç (yine de model'i
 // merdivenden cheap'ten başlar, sadece climb-retry yapmaz). Faz 6 ayrı model kullanmaz; 0 debug; 10-17 mekanik.
@@ -458,6 +493,59 @@ async function recordRungOutcome(n: PhaseId, success: boolean): Promise<void> {
   const rung = rungForDomain(runtime.state, domain);
   const model = resolveRung(rung, runtime.config.selected_models.model_tiers).modelId;
   await recordStrength({ domain, rung: rungLabel(rung), model, success }, Date.now());
+}
+
+// Verify-up yükseltme sınırı: faz başına en çok 2 (maliyet emniyeti; merdiven zaten sonlu). İterasyon başında temizlenir.
+const _verifyUpRaises = new Map<number, number>();
+
+/**
+ * Faz tamamlandı → (Ümit 2026-06-11) "yetersizliği NET anla": işi bir ÜST basamağa (önce efor+1, efor tepedeyse
+ * model+1) KONTROL ettir. Yeterli → basamak kalır + rapora başarı. Yetersiz → rapora başarısızlık + domain basamağı
+ * KONTROLCÜYE yükselir + faz o seviyede yeniden koşar ("rerun"). Oto-cevap kapalı / merdiven-dışı faz / tepe →
+ * yalnız başarı kaydı (kontrol yok).
+ */
+async function completePhaseWithVerify(n: PhaseId): Promise<"ok" | "rerun"> {
+  if (!runtime.state || !runtime.config) return "ok";
+  const domain = phaseDomain(n);
+  if (!autoAnswerSuggested() || !ESCALATION_PHASES.has(n)) {
+    await recordRungOutcome(n, true);
+    return "ok";
+  }
+  const raises = _verifyUpRaises.get(n) ?? 0;
+  if (raises >= 2) {
+    await recordRungOutcome(n, true);
+    emitChatMessage("system", `ℹ️ Faz ${n}: üst-kontrol yükseltme sınırına ulaşıldı — mevcut sonuç kabul edildi.`);
+    return "ok";
+  }
+  emitChatMessage("system", `🔍 Üst-basamak kontrolü: bir üst seviye Faz ${n} işini denetliyor…`);
+  const v = await verifyWorkAtHigherRung(
+    runtime.config,
+    runtime.state,
+    n,
+    domain,
+    phaseLabelTR(n, PHASE_SPECS[n]!),
+  );
+  if (v.verdict === "inadequate" && v.checker) {
+    await recordRungOutcome(n, false); // bu basamak işi YETERSİZ çözdü → rapor gerçeği bilsin
+    _verifyUpRaises.set(n, raises + 1);
+    const model = resolveRung(v.checker, runtime.config.selected_models.model_tiers).modelId;
+    runtime.state = {
+      ...runtime.state,
+      escalation_rungs: { ...(runtime.state.escalation_rungs ?? {}), [domain]: v.checker },
+      updated_at: Date.now(),
+    };
+    await saveState(runtime.state);
+    emitChatMessage(
+      "system",
+      `🔼 Üst-kontrol: iş YETERSİZ${v.reasons.length ? ` (${v.reasons.slice(0, 2).join("; ")})` : ""} → ${rungLabel(v.checker)} (${model}) seviyesine yükseltildi; Faz ${n} yeniden koşuyor.`,
+    );
+    return "rerun";
+  }
+  await recordRungOutcome(n, true);
+  if (v.verdict === "adequate") {
+    emitChatMessage("system", "✅ Üst-kontrol: iş yeterli — basamak korunuyor.");
+  }
+  return "ok";
 }
 
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
@@ -555,9 +643,19 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
       await advanceToNextPhase((n - 1) as PhaseId);
       return;
     }
-    // Tepeye gelindi (strong·max) da çözemedi → escalation bitti; mevcut derin çözüm akışına düş.
-    // "Düşürme yok" (Ümit): rung'ı SIFIRLAMA — en üstte (strong·max) KALSIN; sonraki iş de güçlüden başlasın.
-    emitChatMessage("system", `⛰ Faz ${n} en güçlü basamakta da çözemedi — derin çözüm akışına geçiyorum.`);
+    // Tepeye gelindi (strong·max) da çözemedi → ÖNCE Anthropic SDK'dan güncel modellere bak (Ümit 2026-06-11:
+    // "elindeki en yüksek model+efor yetmezse SDK'dan güncelleri çek, onlara geç"). Daha yeni güçlü model varsa
+    // otomatik geç + aynı fazı onunla dene. Yoksa derin çözüm akışına düş. "Düşürme yok": rung strong·max kalır.
+    const adopted = await tryAdoptNewerStrongModel();
+    if (adopted) {
+      emitChatMessage(
+        "system",
+        `🆕 En güçlü basamak yetmedi → Anthropic'ten güncel modeli çektim: **${adopted}** strong tier'a alındı; aynı işi onunla deniyorum.`,
+      );
+      await advanceToNextPhase((n - 1) as PhaseId);
+      return;
+    }
+    emitChatMessage("system", `⛰ Faz ${n} en güçlü basamakta da çözemedi (daha yeni model de yok) — derin çözüm akışına geçiyorum.`);
   }
   // Oto-çözüm YALNIZ "Oto-cevap" açıkken (Ümit: "oto-cevap işaretliyse yapar onları"). Kapalıyken MyCL
   // otomatik kod değiştirmez — seçenekleri kullanıcıya sorar (otonomi = kullanıcı opt-in'i). Ek olarak
@@ -2113,6 +2211,7 @@ async function executeDispatchedIntent(
     await saveState(runtime.state);
     // v15.6: yeni iterasyon — NDJSON metadata bağlamı update.
     setRecordContext({ iteration: newIter, phase: 1 });
+    _verifyUpRaises.clear(); // verify-up yükseltme bütçesi iterasyon-başına
     emitChatMessage(
       "system",
       `🔄 Yeni iterasyon başlıyor (#${newIter}). Eski spec.md/kod referans olarak korunuyor; Claude Faz 1'de Read ile bakabilir.`,
@@ -2402,7 +2501,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
           "system",
           "Faz 2 tamamlandı — niyet 8 boyutta zenginleştirildi.",
         );
-        await recordRungOutcome(2, true);
+        if ((await completePhaseWithVerify(2)) === "rerun") { cur = 1 as PhaseId; continue; }
         cur = 2;
         continue;
       } else if (r === "abandoned") {
@@ -2502,7 +2601,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
           });
           return;
         }
-        await recordRungOutcome(3, true);
+        if ((await completePhaseWithVerify(3)) === "rerun") { cur = 2 as PhaseId; continue; }
         cur = 3;
         continue;
       } else {
@@ -2515,7 +2614,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       const r = await runController(p4, () => p4.run(), "Spec yazılıyor");
       log.info("orchestrator", "phase 4 end", { result: r });
       if (r === "complete") {
-        await recordRungOutcome(4, true); // escalation: bu basamak spec'i çözdü → rapora başarı
+        if ((await completePhaseWithVerify(4)) === "rerun") { cur = 3 as PhaseId; continue; } // verify-up: yetersizse yükselt+yeniden
         state = { ...state, ...p4.statePatch };
         runtime.state = state;
         await saveState(state);
@@ -2563,7 +2662,6 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
             ? `Faz 5 atlandı — proje tipi UI gerektirmiyor (${state.project_type ?? "?"}).`
             : "Faz 5 atlandı — spec'te UI yok.",
         );
-        await recordRungOutcome(5, true);
         cur = 5;
         continue;
       }
@@ -2576,7 +2674,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         runtime.state = state;
         await saveState(state);
         emitChatMessage("system", "Faz 5 tamamlandı — UI hazır.");
-        await recordRungOutcome(5, true);
+        if ((await completePhaseWithVerify(5)) === "rerun") { cur = 4 as PhaseId; continue; }
         cur = 5;
         continue;
       } else {
@@ -2677,7 +2775,6 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
             ? "Faz 7 atlandı — proje veritabanı kullanmıyor."
             : "Faz 7 atlandı — spec'te veritabanı yok.",
         );
-        await recordRungOutcome(7, true);
         cur = 7;
         continue;
       }
@@ -2686,7 +2783,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       log.info("orchestrator", "phase 7 end", { result: r });
       if (r === "complete") {
         emitChatMessage("system", "Faz 7 tamamlandı — DB tasarımı onaylandı.");
-        await recordRungOutcome(7, true);
+        if ((await completePhaseWithVerify(7)) === "rerun") { cur = 6 as PhaseId; continue; }
         cur = 7;
         continue;
       } else {
@@ -2703,7 +2800,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       const r = await runController(p8, () => p8.run(), "TDD uygulanıyor");
       log.info("orchestrator", "phase 8 end", { result: r });
       if (r === "complete") {
-        await recordRungOutcome(8, true); // escalation: bu basamak codegen'i çözdü → rapora başarı
+        if ((await completePhaseWithVerify(8)) === "rerun") { cur = 7 as PhaseId; continue; } // verify-up: yetersizse yükselt+yeniden
         state = { ...state, ...p8.statePatch };
         runtime.state = state;
         await saveState(state);
@@ -2723,7 +2820,7 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       const r = await runController(p9, () => p9.run(), "Risk inceleniyor");
       log.info("orchestrator", "phase 9 end", { result: r });
       if (r === "complete") {
-        await recordRungOutcome(9, true);
+        if ((await completePhaseWithVerify(9)) === "rerun") { cur = 8 as PhaseId; continue; }
         emitChatMessage("system", "Faz 9 tamamlandı — risk incelemesi onaylandı.");
         cur = 9;
         continue;
@@ -4402,6 +4499,17 @@ ipcRouter.register("read_selected_models", async () => {
 ipcRouter.register("get_model_strength_report", async () => {
   const text = await buildStrengthReportTR();
   emit("model_strength_report", { text });
+});
+// Merdiven sıfırlama (Ümit 2026-06-11): ayarlardaki buton → tüm domain'ler cheap·low'dan yeniden başlar.
+ipcRouter.register("reset_escalation_ladder", async () => {
+  if (!runtime.state) {
+    emitError("no active project", null);
+    return;
+  }
+  runtime.state = { ...runtime.state, escalation_rungs: {}, updated_at: Date.now() };
+  await saveState(runtime.state);
+  emitChatMessage("system", "🪜 Model merdiveni sıfırlandı — tüm işler en düşük basamaktan (cheap · low) yeniden başlayacak.");
+  await handleReadSelectedModels(); // Settings'teki "Tırmanılan seviyeler" anında tazelensin
 });
 // Denetim Ajanı (Ümit 2026-06-11): "MyCL Kalite Kontrol Testi" butonu → (düzenlenmiş) sorularla orkestratörü
 // denetle → rapor → MyCL-içi çözülebilirler vs kaynak-kodu-değişikliği gerekenler ayrımı → chat.

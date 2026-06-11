@@ -50,6 +50,8 @@ interface Props {
   currentSelected: { translator?: string; main?: string; orchestrator?: string } | null;
   /** 2026-06-11 (Ümit): tırmanılan per-domain escalation seviyeleri — read-only gösterim. */
   currentEscalationRungs?: Record<string, { tier: string; effort: string }>;
+  /** 2026-06-11 (Ümit): merdiven sıfırlama — tüm domain'ler cheap·low'dan başlar. */
+  onResetLadder?: () => void;
   modelsTranslator: ModelsList;
   modelsMain: ModelsList;
   onFetchModels: (which: "translator" | "main", force: boolean) => void;
@@ -163,7 +165,13 @@ function ModelDropdown({
  * 2026-06-11 (Ümit): "tırmanılan ayarı göster orada" — escalation merdiveninde her iş-alanının (domain) o anki
  * model+efor basamağı read-only listelenir. Veri yoksa açıklayıcı not.
  */
-function EscalationLevels({ rungs }: { rungs?: Record<string, { tier: string; effort: string }> }) {
+function EscalationLevels({
+  rungs,
+  onReset,
+}: {
+  rungs?: Record<string, { tier: string; effort: string }>;
+  onReset?: () => void;
+}) {
   const entries = Object.entries(rungs ?? {});
   return (
     <div
@@ -192,6 +200,16 @@ function EscalationLevels({ rungs }: { rungs?: Record<string, { tier: string; ef
             </div>
           ))}
         </div>
+      )}
+      {onReset && (
+        <button
+          type="button"
+          onClick={onReset}
+          style={{ marginTop: 8, fontSize: 11 }}
+          title="Tüm iş-alanları en düşük basamaktan (cheap · low) yeniden başlar"
+        >
+          🪜 Merdiveni sıfırla (cheap · low'dan başla)
+        </button>
       )}
     </div>
   );
@@ -268,6 +286,7 @@ export function Settings({
   currentBackends,
   currentModelTiers,
   currentEscalationRungs,
+  onResetLadder,
   currentDesignWorkflow,
   currentAgentTeamsOptIn,
   currentMultiAgentSelection,
@@ -506,7 +525,7 @@ export function Settings({
                 />
               </div>
               {/* Tırmanılan seviyeler — read-only (Ümit: "tırmanılan ayarı göster orada"). */}
-              <EscalationLevels rungs={currentEscalationRungs} />
+              <EscalationLevels rungs={currentEscalationRungs} onReset={onResetLadder} />
               <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: 0 }}>
                 Boş bırakırsan main model kullanılır. Agent kullanıcı niyetini
                 doğru anlamak için daha güçlü model seçilebilir (örn. Opus).

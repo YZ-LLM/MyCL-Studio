@@ -1,5 +1,21 @@
 ## 2026-06-11
 
+- **feat(6'lı paket: kalite + merdiven iyileştirmeleri) [Ümit log incelemesi]:**
+  (1) Popup başlıkları: GuideModal title prop — Model Raporu artık "📊 Model Güç Raporu", spec kapısı "📋 Spec
+  İncelemesi" (yanlış "Kullanma Kılavuzu" başlığı gitti).
+  (2) Yönlendirmede otomatik geçiş: kullanıcı hedef fazı söylediyse durdur+tekrar-yazdır YOK — abort bitince
+  hedef fazdan otomatik devam (_resumePhaseAfterAbort).
+  (3) Kesme≠başarısızlık: durdur-butonu (abort_phase) _userInitiatedAbort set eder; /abort/ gerekçesi escalation'a
+  kaydedilmez (rapor %0 kirliliği biter). Faz 5/7 SKIP dallarındaki yanlış başarı kayıtları silindi.
+  (4) Ayarlar → "🪜 Merdiveni sıfırla": reset_escalation_ladder IPC — tüm domain'ler cheap·low'dan başlar.
+  (5) Tepe + yetersizlik → Anthropic SDK'dan (models.list) güncel modeller çekilir; mevcut strong'dan farklı/yeni
+  güçlü model varsa OTOMATİK strong tier+main'e alınır + aynı faz onunla denenir (oturum-içi tekrar-benimseme kırıcı).
+  (6) VERIFY-UP ("yetersizliği net anla"): faz tamamlanınca işi BİR ÜST basamak (önce efor+1, efor tepedeyse model+1)
+  KONTROL eder (verify-up.ts; runReasoning'e effort eklendi — CLI --effort, API yalnız destekleyen modelde
+  output_config). Yeterli → basamak kalır; YETERSİZ → rapora başarısızlık + domain basamağı kontrolcüye yükselir +
+  faz yeniden koşar (faz başına 2 yükseltme sınırı, iterasyon-başına sıfırlanır; tepe basamakta kontrolcü yok →
+  atlanır; kontrolcü hatası fail-open). Fazlar 2,3,4,5,7,8,9 bağlı.
+
 - **feat(escalation L3: merdiven CANLI — sorun çıktıkça tırman + rapor) [Ümit: en düşük model+efordan başla; sorun
   çıktıkça yükselt; rapora yaz]:** Yeni iterasyon `escalation_rung=firstRung` (cheap·low) ile başlar. Spec (Faz 4) +
   codegen (Faz 8) model+eforu artık `escalatedModelEffort` ile MERDİVENden çözülür (config kral: tier→model
