@@ -121,10 +121,12 @@ task as an **extension** of that work, not a green-field rewrite.
    ayrıca `npx playwright install chromium --with-deps` çalıştır (eğer
    network izinli ise; değilse skip — Phase 16 soft_complete eder).
 7. Run `npm run build` (or equivalent) to verify the UI compiles.
-8. When the build passes, **just stop** — emit no further tool calls. The
-   orchestrator verifies success by checking the disk: at least one
-   ui-file-write audit event AND package.json present. Do not start a dev
-   server — the orchestrator handles browser launch.
+8. When the build passes, **just stop** — emit no further tool calls. MyCL
+   verifies success ITSELF (it observes your file writes + checks the build on
+   disk) — you do NOTHING to signal completion. **Do NOT create or write any
+   audit/logging/emitter file or anything under `.mycl/`/`audit.log`** — that is
+   MyCL's own infrastructure, never project code. Do not start a dev server —
+   the orchestrator handles browser launch.
 
 ## Tweak mode (re-invocation after Phase 7)
 

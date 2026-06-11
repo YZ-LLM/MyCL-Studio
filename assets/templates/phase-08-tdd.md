@@ -25,10 +25,11 @@ ek işi için test ekle.
 2. **Spec.md ile karşılaştır**: spec'teki AC'leri mevcut testlerle eşleştir. Eksik olanlar → BU iterasyonun konusu.
 3. **Edge case — her şey zaten green**: Eğer `npm test` zaten her şeyin yeşil olduğunu gösteriyorsa ve bu iterasyon sadece refactor/dokümantasyon ise → tek bir smoke test eklemen yeterli; final suite koş + dur. Phase tamamlanır.
 
-Yeni testler `agent-decisions.jsonl` veya `audit.log`'a yansıyacak `_iter`
-metadata field'ı taşır (otomatik) — gate sadece bu iterasyonun tdd-green
-event'lerini sayar. Önceki iterasyonların green'leri bu gate'e SAYILMAZ
-(sahte güven yaratmasınlar diye).
+BU iterasyonda eklenen/değişen AC'ler için **gerçek, çalışan testler** yaz;
+önceki iterasyonların testlerine güvenme (onlar bu işi kapsamaz). MyCL testleri
+**kendisi koşar** (otoriter anchor) — yani yorum/stub/print ile "yeşil gibi
+göstermek" İŞE YARAMAZ; yalnız gerçekten geçen testler sayılır. Hiçbir audit/
+metadata olayını elle üretme; MyCL kaydı otomatik tutar.
 
 **Strateji**: Her AC için ayrı RED-GREEN-REFACTOR YAPMA. Bunun yerine:
 
