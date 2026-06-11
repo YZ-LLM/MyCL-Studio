@@ -83,6 +83,23 @@ export function isEnvironmentError(text: string): boolean {
   );
 }
 
+/** Ortam hatasına özel Türkçe rehber (proje hatası değil — döngüye girmeden kullanıcıya ne yapacağını söyle). SAF. */
+export function environmentErrorAdvice(text: string): string {
+  if (/E2BIG|argument list too long/i.test(text)) {
+    return "Ortam değişkenleri (env) çok büyük → işlem başlatılamadı (E2BIG). Bu bir PROJE hatası DEĞİL. MyCL'i yeni bir terminal/oturumda yeniden açın (env'i küçültür), sonra 'Çalıştır' ile devam edin.";
+  }
+  if (/EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)/i.test(text)) {
+    return "Port dolu (başka bir süreç kullanıyor) — proje hatası DEĞİL. Portu tutan süreci kapatın (ya da dev sunucusu otomatik boş port seçecek), sonra 'Çalıştır' ile devam edin.";
+  }
+  if (/command not found|: not found|spawn \w+ ENOENT/i.test(text)) {
+    return "Gerekli bir araç/komut kurulu değil (ortam eksiği, proje hatası DEĞİL). Aracı kurun, sonra 'Çalıştır' ile devam edin.";
+  }
+  if (/ECONNREFUSED|ENOTFOUND/i.test(text)) {
+    return "Ağ/bağlantı sorunu (ortam, proje hatası DEĞİL). Bağlantıyı kontrol edip 'Çalıştır' ile devam edin.";
+  }
+  return "Bu bir ORTAM sorunu (proje/kod hatası DEĞİL) — kod kurcalayarak çözülmez. Ortamı düzeltip 'Çalıştır' ile devam edin. Otomatik tırmanma/düzeltme YAPMADIM (boşuna olurdu).";
+}
+
 /**
  * Hatanın geçici (transient) olup olmadığını döndürür. Transient hatalar
  * exponential backoff ile retry edilir; kalıcı hatalar (auth, permission,

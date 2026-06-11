@@ -76,7 +76,7 @@ import { listModels } from "./models.js";
 import { computeTiersFromModels } from "./model-catalog.js";
 import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
-import { isApiAccountError, isEnvironmentError } from "./claude-api.js";
+import { isApiAccountError, isEnvironmentError, environmentErrorAdvice } from "./claude-api.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
@@ -497,6 +497,16 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
         "devam edin. Otomatik tırmanma/analiz YAPMADIM — hepsi API gerektirir, aynı hatayı verirdi.",
     );
     return; // STOP — escalation YOK, analiz YOK, fix YOK.
+  }
+  // GENEL ORTAM hatası (Ümit 2026-06-11, E2BIG-döngüsü logu): E2BIG/port-dolu/komut-yok/spawn → PROJE hatası DEĞİL,
+  // model zayıflığı DEĞİL. Debug/oto-çözüm döngüsü (proje kodunu kurcalar) ANLAMSIZ + ajan döngüye girer (logda
+  // AC-marker'ı stub/yorumla geçmeye çalışıp sahte-yeşile kaydı). DUR + ortama-özel net rehber; tırmanma/analiz/fix YOK.
+  {
+    const envReason = `${ctrl?.lastFailReason ?? ""}\n${message}`;
+    if (isEnvironmentError(envReason)) {
+      emitChatMessage("system", `⛔ ${environmentErrorAdvice(envReason)}`);
+      return; // STOP — proje-fix döngüsüne GİRME.
+    }
   }
   // ESCALATION (Ümit 2026-06-11): sorun çıktı → bir ÜST basamağa çık + AYNI fazı tekrar dene (debug/oto-çözüme
   // KAÇMADAN). Yalnız Oto-cevap açıkken + LLM fazlarında (1-9; mekanik gate'ler 10-17 araç koşar, model'e duyarsız
