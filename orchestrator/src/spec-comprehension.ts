@@ -17,6 +17,15 @@ import type { MyclConfig } from "./config.js";
 import type { PhaseId } from "./types.js";
 import { log } from "./logger.js";
 
+/** Seçeneği kısalt (Ümit 2026-06-12): ilk cümle, ~70 karakter, kelime sınırında "…". Okunabilir + ayırt edilebilir. SAF. */
+export function shortenOption(text: string): string {
+  const firstSentence = text.trim().split(/(?<=[.!?:])\s/)[0] ?? text.trim();
+  if (firstSentence.length <= 70) return firstSentence;
+  const cut = firstSentence.slice(0, 70);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trimEnd() + "…";
+}
+
 /** spec.md'den kabul kriteri (AC) METİNLERİNİ ayrıştırır. `- **AC1**: metin` deseni (Faz 4 spec formatı). SAF. */
 export function parseAcTexts(specMd: string): string[] {
   const re = /^\s*-\s+\*\*AC\d+\*\*:\s*(.+?)\s*$/gm;
@@ -112,9 +121,12 @@ export async function buildComprehensionQuestion(
   const distractorsEn = await generateDistractors(config, projectRoot, specMd, acs, 3);
   if (distractorsEn.length < 2) return null; // yeterli çeldirici yok → kapıyı atla (sayı-sorusuna düşme)
 
-  // TR'ye çevir (kullanıcı Türkçe görür). Gerçek AC + çeldiriciler.
-  const realTr = await TR(config, realEn);
-  const distractorsTr = await Promise.all(distractorsEn.slice(0, 3).map((d) => TR(config, d)));
+  // TR'ye çevir (kullanıcı Türkçe görür). Gerçek AC + çeldiriciler. Ümit 2026-06-12: KISA tut — uzun seçenekler
+  // okumayı zorlaştırıyor. İlk cümle/clause + ~70 karakter (kelime sınırında kes).
+  const realTr = shortenOption(await TR(config, realEn));
+  const distractorsTr = await Promise.all(
+    distractorsEn.slice(0, 3).map((d) => TR(config, d).then(shortenOption)),
+  );
 
   // Karıştır: gerçek AC'yi nonce'a göre bir konuma koy (deterministik, denemeye göre değişir).
   const options = [...distractorsTr];
@@ -122,8 +134,7 @@ export async function buildComprehensionQuestion(
   options.splice(correctIndex, 0, realTr);
 
   return {
-    question_tr:
-      "Spec'i okuduğunu doğrulayalım: Aşağıdakilerden hangisi bu spec'in GERÇEK bir kabul kriteri? (Diğerleri bu spec'te YOK.)",
+    question_tr: "Hangisi bu spec'te GERÇEK bir kabul kriteri?",
     options_tr: options,
     correctIndex,
   };
