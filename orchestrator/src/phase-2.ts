@@ -148,7 +148,12 @@ export class Phase2Controller {
   async run(): Promise<"complete" | "fail" | "abandoned"> {
     log.info("phase-2", "run start");
 
-    if (!this.state.intent_summary) {
+    // Ümit 2026-06-12 (saçma soru bug'ı): Faz 2 HER ZAMAN Faz 1'in HAM niyetini (intent_summary_raw) denetler —
+    // intent_summary'yi DEĞİL. Çünkü Faz 2 enriched çıktısını intent_summary'ye yazar; yeniden koşunca (escalation/
+    // verify-up/yeni-iter) o enriched/kısmi çıktıyı "denetlenecek niyet" sanıp DÖNGÜSEL self-audit yapıyordu →
+    // "boyutlar/belirtim sağlanmadı, BLOCKED" → saçma onay sorusu. raw = Faz 1'in temiz niyeti (recovery alanı).
+    const auditIntent = this.state.intent_summary_raw ?? this.state.intent_summary;
+    if (!auditIntent) {
       emitError("phase-2: intent_summary missing — Phase 1 önce tamamlanmalı", null);
       this.lastFailReason = "intent_summary missing (Phase 1 incomplete)";
       return "fail";
@@ -170,18 +175,18 @@ export class Phase2Controller {
     const existingSpecDigest = await buildRelevantSpecDigest(
       this.config,
       this.state,
-      this.state.intent_summary,
+      auditIntent,
     );
     const abandonedDigest = await buildRelevantAbandonedDigest(
       this.config,
       this.state,
-      this.state.intent_summary,
+      auditIntent,
     );
     // v15.11: mevcut özellik dökümantasyonu — ajan gereksiz/kapsam-dışı soru sormasın.
     const featuresDigest = await buildRelevantFeatureDigest(
       this.config,
       this.state,
-      this.state.intent_summary,
+      auditIntent,
     );
 
     let systemPrompt: string;
@@ -191,7 +196,7 @@ export class Phase2Controller {
         .then((c) => renderConversationSection(c, { forMainAgent: true }))
         .catch(() => "");
       systemPrompt = substitute(tmpl, {
-        INTENT_SUMMARY: this.state.intent_summary,
+        INTENT_SUMMARY: auditIntent,
         EXISTING_SPEC_DIGEST: existingSpecDigest,
         EXISTING_FEATURES_DIGEST: featuresDigest,
         ABANDONED_INTENTS_DIGEST: abandonedDigest,
