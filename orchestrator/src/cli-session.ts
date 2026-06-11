@@ -16,7 +16,7 @@ import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import {
   noteRateLimitEvent,
   noteCliRateLimitError,
-  noteCliSuccess,
+  finalizeCliRateLimit,
   detectCliRateLimit,
   type RateLimitInfo,
 } from "./cli-rate-limit.js";
@@ -233,14 +233,14 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
 
     child.on("close", (code) => {
       const ok = code === 0 && (!resultSeen || !resultIsError);
-      // Auto Mode: hata usage/rate-limit imzası taşıyorsa CLI'yi limitli işaretle (hata-yolu) → fallback.
+      // Auto Mode: hata usage/rate-limit imzası taşıyorsa CLI'yi limitli işaretle (hata-yolu).
       if (!ok) {
         const rl = detectCliRateLimit(`${resultErrorText} ${stderrTail}`);
         if (rl) noteCliRateLimitError(rl);
-      } else {
-        // Ümit 2026-06-11: CLI rate-limit'siz BAŞARDI → limit (varsa) gerçekten açılmış (kredi/erken reset) → temizle.
-        noteCliSuccess();
       }
+      // Ümit 2026-06-11 "denesin zaten çalışacak": kararı çağrı SONUCUNA göre ver — başardıysa (overage karşıladı)
+      // limitleme + eski limiti temizle; gerçekten başarısız + blocked-event görülmüşse ŞİMDİ API'ye geç.
+      finalizeCliRateLimit(ok);
       done({
         ok,
         text: texts.join(""),

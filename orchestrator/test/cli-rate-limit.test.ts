@@ -8,6 +8,7 @@ import {
   isBlockedStatus,
   isLimited,
   noteRateLimitEvent,
+  finalizeCliRateLimit,
   resetCliRateLimitState,
   resolveAuto,
 } from "../src/cli-rate-limit.js";
@@ -121,27 +122,31 @@ describe("cli-rate-limit · noteRateLimitEvent + cliCurrentlyLimited (state)", (
     expect(cliCurrentlyLimited()).toBe(false);
   });
 
-  it("status=rejected + gelecek resetsAt → limit set + cliCurrentlyLimited true", () => {
-    const resetsAt = Math.floor(Date.now() / 1000) + 3600; // 1 saat sonra
+  // Ümit 2026-06-11 "denesin zaten çalışacak": rejected event ARTIK ANINDA limitlemez — çağrı SONUCUNU bekler.
+  it("rejected event TEK BAŞINA limitlemez (pending); finalize(false) → ŞİMDİ limitli", () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600;
     noteRateLimitEvent({ status: "rejected", resetsAt, rateLimitType: "five_hour" });
+    expect(cliCurrentlyLimited()).toBe(false); // çağrı henüz bitmedi — preemptive switch YOK
+    finalizeCliRateLimit(false); // çağrı GERÇEKTEN başarısız → şimdi limitle
     expect(getCliLimitedUntilMs()).toBe(resetsAt * 1000);
     expect(cliCurrentlyLimited()).toBe(true);
   });
 
-  it("geçmiş resetsAt'li rejected → kısa backoff (limit yine de set, gelecekte)", () => {
-    const past = Math.floor(Date.now() / 1000) - 10;
-    noteRateLimitEvent({ status: "rejected", resetsAt: past });
-    const until = getCliLimitedUntilMs();
-    expect(until).toBeDefined();
-    expect(until!).toBeGreaterThan(Date.now()); // backoff penceresi gelecekte
+  it("rejected event + çağrı BAŞARDI (overage) → finalize(true) → limit YOK", () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+    noteRateLimitEvent({ status: "rejected", resetsAt, rateLimitType: "five_hour" });
+    finalizeCliRateLimit(true); // overage karşıladı, çağrı başardı
+    expect(getCliLimitedUntilMs()).toBeUndefined();
+    expect(cliCurrentlyLimited()).toBe(false);
   });
 
-  it("reset geçince cliCurrentlyLimited → false ve state temizlenir", () => {
-    const resetsAt = Math.floor(Date.now() / 1000) + 1; // ~1 sn sonra
-    noteRateLimitEvent({ status: "rejected", resetsAt });
-    expect(cliCurrentlyLimited()).toBe(true);
-    // until'i geçmişe taşımak için yeniden note (saf isLimited zaten test edildi);
-    // burada reset davranışını isLimited üzerinden dolaylı doğruladık.
+  it("geçmiş resetsAt'li rejected + finalize(false) → kısa backoff (gelecekte)", () => {
+    const past = Math.floor(Date.now() / 1000) - 10;
+    noteRateLimitEvent({ status: "rejected", resetsAt: past });
+    finalizeCliRateLimit(false);
+    const until = getCliLimitedUntilMs();
+    expect(until).toBeDefined();
+    expect(until!).toBeGreaterThan(Date.now());
   });
 });
 

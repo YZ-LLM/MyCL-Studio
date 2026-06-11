@@ -72,6 +72,9 @@ let _limitedUntilMs: number | undefined;
 // açmış olabilir — resetsAt yanıltıcı). Başarılıysa noteCliSuccess temizler.
 let _lastProbeMs = 0;
 const PROBE_INTERVAL_MS = 120_000; // 2 dk
+// Çağrı-içinde görülen blocked rate_limit_event'i çağrı SONUCU karar verene dek beklet (overage çağrıyı kurtarabilir).
+let _pendingBlockUntil: number | undefined;
+let _pendingBlockType: string | undefined;
 let _lastResetsAtMs: number | undefined; // en son görülen resetsAt (servis edilmiş event'lerden de)
 let _switchEmittedUntil: number | undefined; // hangi pencere için "API'ye geçildi" mesajı verildi
 let _resumeArmed = false; // limit set edildi → reset geçince "CLI'ye dönüldü" mesajı verilecek
@@ -112,8 +115,12 @@ export function noteRateLimitEvent(info: RateLimitInfo | undefined): void {
   if (untilCandidate !== undefined) _lastResetsAtMs = untilCandidate;
 
   if (isBlockedStatus(info.status)) {
-    const until = untilCandidate ?? _lastResetsAtMs ?? nowMs + 15 * 60_000; // reset bilinmiyorsa kısa backoff
-    enterLimited(until, info.rateLimitType);
+    // Ümit 2026-06-11: "hiç denemediği için böyle yapıyor — denesin zaten çalışacak." rate_limit_event{rejected}
+    // çağrı-İÇİNDE gelir ama overage (ekstra kullanım) krediniz varsa çağrı YİNE DE BAŞARABİLİR. O yüzden BURADA
+    // API'ye GEÇME (enterLimited yok) — sadece bekleyen-blok işaretle. Çağrı bitince finalizeCliRateLimit karar
+    // verir: başardıysa limit YOK (overage karşıladı), gerçekten başarısızsa O ZAMAN limitle.
+    _pendingBlockUntil = untilCandidate ?? _lastResetsAtMs ?? nowMs + 15 * 60_000;
+    _pendingBlockType = info.rateLimitType;
   } else if (
     typeof info.status === "string" &&
     info.status.length > 0 &&
@@ -198,6 +205,25 @@ export function noteCliSuccess(): void {
   log.info("cli-rate-limit", "limit cleared on successful CLI call (early)");
 }
 
+/**
+ * CLI çağrısı bitti → blocked rate_limit_event GÖRÜLDÜYSE kararı ŞİMDİ ver (Ümit 2026-06-11: "denesin zaten
+ * çalışacak"). ok → çağrı BAŞARDI (overage karşıladı / limit yanıltıcı) → limitleme; bekleyen-blok at + (varsa eski)
+ * limiti temizle. !ok → çağrı GERÇEKTEN başarısız + blocked görülmüştü → ŞİMDİ API'ye geç (enterLimited).
+ */
+export function finalizeCliRateLimit(ok: boolean): void {
+  if (ok) {
+    _pendingBlockUntil = undefined;
+    _pendingBlockType = undefined;
+    noteCliSuccess(); // önceki bir limit varsa temizle + görünür mesaj
+    return;
+  }
+  if (_pendingBlockUntil !== undefined) {
+    enterLimited(_pendingBlockUntil, _pendingBlockType);
+    _pendingBlockUntil = undefined;
+    _pendingBlockType = undefined;
+  }
+}
+
 /** Test/teşhis: state'i sıfırla. */
 export function resetCliRateLimitState(): void {
   _limitedUntilMs = undefined;
@@ -205,6 +231,8 @@ export function resetCliRateLimitState(): void {
   _switchEmittedUntil = undefined;
   _resumeArmed = false;
   _lastProbeMs = 0;
+  _pendingBlockUntil = undefined;
+  _pendingBlockType = undefined;
 }
 
 /** Test/teşhis: aktif limitedUntil (ms) veya undefined. */
