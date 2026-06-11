@@ -475,4 +475,5 @@ export type OrchestratorCommand =
   | { kind: "set_auto_answer"; data: { enabled: boolean } }
   | { kind: "save_features"; data: { playwright_enabled?: boolean } }
   | { kind: "read_features" }
-  | { kind: "get_model_strength_report" };
+  | { kind: "get_model_strength_report" }
+  | { kind: "start_quality_audit"; data: { questions: string } };

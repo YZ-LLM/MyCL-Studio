@@ -177,6 +177,8 @@ interface Props {
   onDastClick?: () => void;
   /** 2026-06-11: 📊 Model Raporu butonu — escalation model-güç raporunu popup'ta açar. */
   onModelReportClick?: () => void;
+  /** 2026-06-11: 🕵️ Kalite Kontrol butonu — denetim ajanı popup'ını açar. */
+  onQualityAuditClick?: () => void;
   /** WP4 DAST: tarama sürüyor mu — buton spinner + disabled (çift-tetik koruması). */
   dastRunning?: boolean;
 }
@@ -204,6 +206,7 @@ export function ChatPanel({
   guideAvailable,
   onDastClick,
   onModelReportClick,
+  onQualityAuditClick,
   dastRunning,
 }: Props) {
   const [draft, setDraft] = useState("");
@@ -499,6 +502,18 @@ export function ChatPanel({
           >
             <span className="intent-pill-emoji" aria-hidden>📊</span>
             <span className="intent-pill-label">Model Raporu</span>
+          </button>
+        )}
+        {/* 2026-06-11 (Ümit): 🕵️ Kalite Kontrol — denetim ajanı orkestratörü kalite sorularına göre denetler. */}
+        {onQualityAuditClick && (
+          <button
+            type="button"
+            className="intent-pill"
+            onClick={onQualityAuditClick}
+            title="Denetim ajanı: orkestratörün son koşusunu kalite sorularına göre denetler"
+          >
+            <span className="intent-pill-emoji" aria-hidden>🕵️</span>
+            <span className="intent-pill-label">Kalite Kontrol</span>
           </button>
         )}
         {/* v15.7 (2026-05-24): "İş Ekle" buton — composer'daki metni proje

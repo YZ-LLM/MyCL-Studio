@@ -75,6 +75,7 @@ import {
 import { listModels } from "./models.js";
 import { computeTiersFromModels } from "./model-catalog.js";
 import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
+import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
 import { isApiAccountError, isEnvironmentError } from "./claude-api.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
@@ -4372,6 +4373,39 @@ ipcRouter.register("read_selected_models", async () => {
 ipcRouter.register("get_model_strength_report", async () => {
   const text = await buildStrengthReportTR();
   emit("model_strength_report", { text });
+});
+// Denetim Ajanı (Ümit 2026-06-11): "MyCL Kalite Kontrol Testi" butonu → (düzenlenmiş) sorularla orkestratörü
+// denetle → rapor → MyCL-içi çözülebilirler vs kaynak-kodu-değişikliği gerekenler ayrımı → chat.
+ipcRouter.register("start_quality_audit", async (data: unknown) => {
+  if (!runtime.state || !runtime.config) {
+    emitError("no active project", null);
+    return;
+  }
+  const questions = String((data as { questions?: unknown })?.questions ?? "").trim() || DEFAULT_QUALITY_QUESTIONS;
+  const res = await runQualityAudit(runtime.config, runtime.state, questions);
+  if (!res) return;
+  // Raporu göster (TR).
+  emitChatMessage("system", `🕵️ **Denetim Raporu**\n\n${res.reportTr}`);
+  const rep = res.report;
+  if (rep) {
+    // Orkestratör triage: MyCL-içi ele alınabilirler (runtime) vs kaynak-kodu (geliştiriciye iletilecek).
+    if (rep.fixable_in_mycl.length) {
+      emitChatMessage(
+        "system",
+        `✅ **MyCL içinde ele alabileceklerim:**\n` + rep.fixable_in_mycl.map((x) => `• ${x}`).join("\n"),
+      );
+    }
+    if (rep.needs_source_change.length) {
+      emitChatMessage(
+        "system",
+        `🔧 **Bunları yapabilmem için kaynak kodumun geliştirilmesi gerekiyor** (kopyalayıp geliştiriciye/Claude'a yapıştırabilirsin):\n\n` +
+          rep.needs_source_change.map((x, i) => `${i + 1}. ${x}`).join("\n"),
+      );
+    }
+    if (!rep.fixable_in_mycl.length && !rep.needs_source_change.length) {
+      emitChatMessage("system", "✅ Denetim temiz — bu koşuda kayda değer bir kalite sorunu bulunmadı.");
+    }
+  }
 });
 // v15.7 (2026-05-25): Feature flags IPC
 ipcRouter.register("save_features", async (data: unknown) => {

@@ -6,6 +6,7 @@ import { Splash } from "./components/Splash";
 import { Settings } from "./components/Settings";
 import { AgentThinkingModal } from "./components/AgentThinkingModal";
 import { GuideModal } from "./components/GuideModal";
+import { QualityAuditModal } from "./components/QualityAuditModal";
 import { AppHeader } from "./components/AppHeader";
 import { PhaseSidebar } from "./components/PhaseSidebar";
 import {
@@ -605,6 +606,8 @@ function App() {
   // 2026-06-11 (Ümit, #6): Spec okuma kapısı popup — onaydan önce spec'i biçimli gösterir.
   const [specReviewOpen, setSpecReviewOpen] = useState(false);
   const [specReviewText, setSpecReviewText] = useState("");
+  // 2026-06-11 (Ümit): Kalite Kontrol (denetim ajanı) popup.
+  const [qualityAuditOpen, setQualityAuditOpen] = useState(false);
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
   const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
@@ -1262,6 +1265,7 @@ function App() {
           onGuideClick={() => setGuideModalOpen(true)}
           guideAvailable={userGuide.trim().length > 0}
           onModelReportClick={() => void orch.send({ kind: "get_model_strength_report" })}
+          onQualityAuditClick={() => setQualityAuditOpen(true)}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
         />
@@ -1307,6 +1311,12 @@ function App() {
         open={specReviewOpen}
         content={specReviewText}
         onClose={() => setSpecReviewOpen(false)}
+      />
+      {/* 2026-06-11 (Ümit): Kalite Kontrol — denetim ajanı popup (düzenlenebilir sorular + başlat). */}
+      <QualityAuditModal
+        open={qualityAuditOpen}
+        onClose={() => setQualityAuditOpen(false)}
+        onStart={(questions) => void orch.send({ kind: "start_quality_audit", data: { questions } })}
       />
       <TaskQueuePanel
         open={taskQueueOpen}
