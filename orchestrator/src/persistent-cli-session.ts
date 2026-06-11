@@ -370,32 +370,55 @@ export class PersistentClaudeSession {
   }
 }
 
-// Rol-başına singleton kayıt — aynı (id) için tek kalıcı süreç paylaşılır. Map ekleme-sırasını korur → LRU.
+// Oturum kaydı — aynı (id) için tek kalıcı süreç. Ümit 2026-06-11: "istediğimiz kadar claude açabiliriz" → YAPAY
+// sayı sınırı YOK; yalnız BOŞTA kalan (uzun süre kullanılmayan) oturumlar temizlenir (RAM emniyeti). Karışmaması
+// gereken / farklı sistem-promptlu her iş kendi oturumunu açar.
 const _sessions = new Map<string, PersistentClaudeSession>();
-// Süreç sayısı tavanı (ısı/RAM emniyeti): codegen oturumları faz-başına birikebilir → en eski kullanılmayan kapatılır.
-// 3 ajan + birkaç reasoning/codegen oturumu için yeterli; aşılırsa LRU eviction.
-const MAX_LIVE_SESSIONS = 6;
+const _lastUsed = new Map<string, number>();
+const IDLE_DISPOSE_MS = 20 * 60_000; // 20 dk boşta → kapat (aktif olanlar sınırsız kalır)
+const SAFETY_CAP = 40; // yalnız kaçak-koruma (gerçek kullanımda erişilmez); aşılırsa en eski boşta kapanır
 
-/** id'ye göre kalıcı oturumu al/oluştur. LRU: erişilen sona taşınır; havuz dolarsa en eski (kullanılmayan) kapatılır. */
-export function getPersistentSession(opts: PersistentSessionOpts): PersistentClaudeSession {
-  let s = _sessions.get(opts.id);
-  if (s) {
-    _sessions.delete(opts.id); // LRU: sona taşı
-    _sessions.set(opts.id, s);
-    return s;
+function sweepIdle(nowMs: number): void {
+  for (const [id, s] of _sessions) {
+    if (nowMs - (_lastUsed.get(id) ?? 0) > IDLE_DISPOSE_MS) {
+      _sessions.delete(id);
+      _lastUsed.delete(id);
+      s.dispose();
+      log.info("persistent-cli", "boşta oturum kapatıldı", { id });
+    }
   }
+}
+
+/** id'ye göre kalıcı oturumu al/oluştur. Boşta-temizlik + (yalnız emniyet) sayı tavanı. */
+export function getPersistentSession(opts: PersistentSessionOpts): PersistentClaudeSession {
+  const now = nowMsSafe();
+  sweepIdle(now);
+  _lastUsed.set(opts.id, now);
+  let s = _sessions.get(opts.id);
+  if (s) return s;
   s = new PersistentClaudeSession(opts);
   _sessions.set(opts.id, s);
-  // Tavanı aş → en eski oturumu kapat (oturum-başına süreç sınırlı kalsın).
-  while (_sessions.size > MAX_LIVE_SESSIONS) {
-    const oldestId = _sessions.keys().next().value as string | undefined;
+  // Emniyet tavanı (kaçak koruma): en eski-boşta kapanır. Normalde erişilmez.
+  while (_sessions.size > SAFETY_CAP) {
+    let oldestId: string | undefined;
+    let oldestTs = Infinity;
+    for (const [id, ts] of _lastUsed) {
+      if (id !== opts.id && ts < oldestTs) {
+        oldestTs = ts;
+        oldestId = id;
+      }
+    }
     if (oldestId === undefined) break;
-    const old = _sessions.get(oldestId);
+    _sessions.get(oldestId)?.dispose();
     _sessions.delete(oldestId);
-    old?.dispose();
-    log.info("persistent-cli", "LRU eviction — en eski oturum kapatıldı", { evicted: oldestId });
+    _lastUsed.delete(oldestId);
   }
   return s;
+}
+
+// Date.now sarmalı (test/erişilebilirlik) — bu modül workflow değil, normal Node; Date.now serbest.
+function nowMsSafe(): number {
+  return Date.now();
 }
 
 /** Kısa deterministik hash (oturum id'si için — systemPrompt+model → kararlı kısa anahtar). SAF. */
