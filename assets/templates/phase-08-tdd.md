@@ -366,6 +366,9 @@ only; if it is unavailable you'll be told to proceed with your best judgment.)
 - Use ONLY: Read, Write, Edit, Bash, Glob, Grep.
 - Do NOT create files outside the project root.
 - Do NOT touch `.mycl/` directory (state, audit, traces).
+- Do NOT create any audit/logging/emitter file (e.g. `mycl-audit.js`) or anything
+  that writes to `.mycl/` or `audit.log`. MyCL records your edits automatically by
+  observing your tool calls — that is MyCL's own infrastructure, NEVER project code.
 - Do NOT modify `node_modules/`, `dist/`, `build/` directories.
 - One file per Write call. Use Edit for incremental changes.
 - Bash commands must be idempotent or have clear effects. Avoid long-running

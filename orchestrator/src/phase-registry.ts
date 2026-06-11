@@ -326,8 +326,8 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           // config, path sorunu yok), dil-agnostik, gitleaks'in sürüm/komut/scope
           // kırılganlığı yok. Eksik→skip, semgrep-crash (exit 2)→skip (tool_error_codes).
           name: "semgrep-secrets",
-          cmd: "semgrep --config p/secrets src/ --error --quiet",
-          scoped_cmd_template: "semgrep --config p/secrets {files} --error --quiet",
+          cmd: "semgrep --config p/secrets src/ --exclude='mycl-audit*' --error --quiet",
+          scoped_cmd_template: "semgrep --config p/secrets {files} --exclude='mycl-audit*' --error --quiet",
           tool_error_codes: [2],
         },
         // tool_error_codes:[2]: semgrep fatal/crash (registry fetch hatası, bozuk hedef
@@ -335,20 +335,20 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
         // (Unit 3 robustness; review landmine). exit 1 (gerçek bulgu) blocking kalır.
         {
           name: "semgrep",
-          cmd: "semgrep --config auto src/ --error --quiet",
-          scoped_cmd_template: "semgrep --config auto {files} --error --quiet",
+          cmd: "semgrep --config auto src/ --exclude='mycl-audit*' --error --quiet",
+          scoped_cmd_template: "semgrep --config auto {files} --exclude='mycl-audit*' --error --quiet",
           tool_error_codes: [2],
         },
         {
           name: "semgrep-security-audit",
-          cmd: "semgrep --config p/security-audit src/ --error --quiet",
-          scoped_cmd_template: "semgrep --config p/security-audit {files} --error --quiet",
+          cmd: "semgrep --config p/security-audit src/ --exclude='mycl-audit*' --error --quiet",
+          scoped_cmd_template: "semgrep --config p/security-audit {files} --exclude='mycl-audit*' --error --quiet",
           tool_error_codes: [2],
         },
         {
           name: "semgrep-owasp-top-ten",
-          cmd: "semgrep --config p/owasp-top-ten src/ --error --quiet",
-          scoped_cmd_template: "semgrep --config p/owasp-top-ten {files} --error --quiet",
+          cmd: "semgrep --config p/owasp-top-ten src/ --exclude='mycl-audit*' --error --quiet",
+          scoped_cmd_template: "semgrep --config p/owasp-top-ten {files} --exclude='mycl-audit*' --error --quiet",
           tool_error_codes: [2],
         },
         {
@@ -364,16 +364,16 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           // tehlikeli sink'lere (innerHTML/dangerouslySetInnerHTML/eval/SQL-concat) akıyor mu.
           // Custom semgrep YAML (mutlak yol); bozuk/fatal kural exit 2 → skip (yanlış-blocking yok).
           name: "data-sanitization",
-          cmd: `semgrep --config "${securityRulePath("data-sanitization.yml")}" src/ --error --quiet`,
-          scoped_cmd_template: `semgrep --config "${securityRulePath("data-sanitization.yml")}" {files} --error --quiet`,
+          cmd: `semgrep --config "${securityRulePath("data-sanitization.yml")}" src/ --exclude='mycl-audit*' --error --quiet`,
+          scoped_cmd_template: `semgrep --config "${securityRulePath("data-sanitization.yml")}" {files} --exclude='mycl-audit*' --error --quiet`,
           tool_error_codes: [2],
         },
         {
           // Web güvenliği: CORS yanlış-yapılandırma (* origin) + güvensiz cookie
           // (httpOnly/secure/sameSite — XSS/transport/CSRF). Custom semgrep (mutlak yol).
           name: "web-security",
-          cmd: `semgrep --config "${securityRulePath("web-security.yml")}" src/ --error --quiet`,
-          scoped_cmd_template: `semgrep --config "${securityRulePath("web-security.yml")}" {files} --error --quiet`,
+          cmd: `semgrep --config "${securityRulePath("web-security.yml")}" src/ --exclude='mycl-audit*' --error --quiet`,
+          scoped_cmd_template: `semgrep --config "${securityRulePath("web-security.yml")}" {files} --exclude='mycl-audit*' --error --quiet`,
           tool_error_codes: [2],
         },
         {

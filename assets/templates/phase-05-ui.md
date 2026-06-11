@@ -136,8 +136,12 @@ are running in tweak mode. In this mode:
 - Backend paths remain denied.
 - The dev server is already running; HMR will reflect your changes — do not
   attempt to start it or open the browser.
-- Stop when `npm run build` passes. The orchestrator verifies success by
-  checking for at least one `ui-tweak-applied` audit event in this run.
+- Stop when `npm run build` passes. MyCL records your file edits AUTOMATICALLY
+  by observing your Write/Edit tool calls — you do NOTHING to make this happen.
+  **Do NOT create or write any audit/logging/emitter file** (e.g. a `mycl-audit.js`,
+  an audit emitter, anything that writes to `.mycl/` or `audit.log`). Those are
+  MyCL's own infrastructure — never the project's code. Just make the requested
+  edits; MyCL handles all verification/audit itself.
 
 ## Hata Kodları Sayfası (MANDATORY for any project with a UI)
 
