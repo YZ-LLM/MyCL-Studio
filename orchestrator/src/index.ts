@@ -407,6 +407,43 @@ function phaseDomain(n: PhaseId): string {
   return map[n] ?? `phase-${n}`;
 }
 
+/**
+ * #1 deliği (Ümit 2026-06-11): pipeline-end doğrulama şeffaflığı. Bu iterasyonda hangi kalite gate'i (10-17)
+ * GEÇTİ vs hangisi ATLANDI (araç yok / uygulanamaz) — atlanan gate "geçti" gibi görünmesin. Audit'ten okur.
+ */
+async function emitVerificationSummary(state: State): Promise<void> {
+  const GATE_DIMS: Record<number, string> = {
+    10: "Lint", 11: "Sadeleştirme", 12: "Performans", 13: "Güvenlik",
+    14: "Birim test", 15: "Entegrasyon", 16: "E2E", 17: "Yük testi",
+  };
+  let audit: Awaited<ReturnType<typeof readAuditLogTail>>;
+  try {
+    audit = await readAuditLogTail(state.project_root, 500);
+  } catch {
+    return;
+  }
+  const since = state.iteration_started_at ?? 0;
+  const thisIter = audit.filter((e) => (e.ts ?? 0) >= since);
+  const passed: string[] = [];
+  const skipped: string[] = [];
+  for (const [nStr, dim] of Object.entries(GATE_DIMS)) {
+    const n = Number(nStr);
+    const skip = thisIter.find((e) => e.event === `phase-${n}-skipped`);
+    const done = thisIter.some((e) => e.event === `phase-${n}-complete`);
+    if (skip) skipped.push(`${dim}${skip.detail ? ` (${String(skip.detail).split(" ")[0]})` : ""}`);
+    else if (done) passed.push(dim);
+  }
+  const lines = [`🔎 **Doğrulama özeti**`];
+  if (passed.length) lines.push(`✅ Doğrulandı: ${passed.join(", ")}`);
+  if (skipped.length) {
+    lines.push(
+      `⚠️ **DOĞRULANMADI (atlandı)**: ${skipped.join(", ")}`,
+      `Bu boyutlar bu koşuda kontrol EDİLMEDİ (araç yok/uygulanamaz). "Geçti" anlamına gelmez — bilerek kabul et veya aracı ekle.`,
+    );
+  }
+  emitChatMessage("system", lines.join("\n"));
+}
+
 /** Escalation merdiveninde bu fazın (domain'in) deneme sonucunu rapora yaz (hangi model hangi işte iyi). */
 async function recordRungOutcome(n: PhaseId, success: boolean): Promise<void> {
   if (!runtime.state || !runtime.config) return;
@@ -2106,7 +2143,10 @@ async function shouldRunMechanical(
  * undefined ise eski davranış (tüm fazlar çalışır).
  */
 function isPhaseSkippedByScope(state: State, phaseId: number): boolean {
-  if (phaseId !== 5 && phaseId !== 6 && phaseId !== 7 && phaseId !== 8) return false;
+  // Ümit 2026-06-11 (#2 deliği): Faz 8 (TDD/testler) ARTIK ZORUNLU — atlanırsa hiç test yazılmaz → test-temelli
+  // doğrulama (Faz 14) boşalır → kontrol delinir. Yalnız 5 (UI)/6 (UI review)/7 (DB) gerçekten opsiyonel
+  // (UI/DB yoksa). Faz 8/9 + zorunlu mekanik gate'ler her zaman çalışır.
+  if (phaseId !== 5 && phaseId !== 6 && phaseId !== 7) return false;
   if (!state.needed_phases || state.needed_phases.length === 0) return false;
   return !state.needed_phases.includes(phaseId);
 }
@@ -2198,6 +2238,10 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
         runtime.state = state;
         await saveState(state);
       }
+      // #1 deliği (Ümit 2026-06-11): sessiz gate-atlama şeffaflığı. Pipeline bitince hangi kalite boyutunun
+      // GERÇEKTEN doğrulandığını, hangisinin ATLANDIĞINI (araç yok / uygulanamaz) açıkça göster — atlanan gate
+      // "geçti" gibi görünmesin. Kullanıcı neyin doğrulanmadığını bilerek kabul etsin.
+      await emitVerificationSummary(state);
       // v15.7 (2026-05-25) BUG FIX: Akış son fazda (örn. Faz 17) bittiğinde
       // son emitPhaseChanged hâlâ "running" idi → sidebar mavi (running)
       // kalıyordu. Loop break öncesi son fazı "complete" işaretle.

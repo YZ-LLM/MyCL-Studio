@@ -477,10 +477,11 @@ export function getSpec(phase: PhaseId): PhaseSpec | undefined {
 // insan-incelemesinin yerini alır; atlanırsa kontrol delinir). Runtime zaten 9'u atlamıyor (isPhaseSkippedByScope
 // yalnız 5-8); bu set'ler de artık gerçeği yansıtır.
 export const REQUIRED_PHASES: ReadonlySet<PhaseId> = new Set([
-  1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+  1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
 ]);
 
-export const OPTIONAL_PHASES: ReadonlySet<PhaseId> = new Set([5, 6, 7, 8]);
+// Yalnız 5 (UI)/6 (UI review)/7 (DB) gerçekten opsiyonel (UI/DB yoksa atlanır). Faz 8 (TDD) artık ZORUNLU.
+export const OPTIONAL_PHASES: ReadonlySet<PhaseId> = new Set([5, 6, 7]);
 
 export function isRequiredPhase(phase: PhaseId): boolean {
   return REQUIRED_PHASES.has(phase);

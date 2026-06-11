@@ -270,16 +270,18 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
   const hasComplete = (events: AuditEvent[], n: number) =>
     hasIn(events, `phase-${n}-complete`) || hasIn(events, `phase-0${n}-complete`);
 
-  it("spine: 2→17 tam geçiş, 5/6/7/8 scope-skip, decisions + cost yazıldı", async () => {
-    neededForTest = []; // opsiyonel fazlar atlanır
+  it("spine: 2→17 tam geçiş, 5/6/7 scope-skip (Faz 8 ZORUNLU), decisions + cost yazıldı", async () => {
+    neededForTest = []; // opsiyonel fazlar (5/6/7) atlanır; Faz 8 zorunlu → koşar
     const events = await driveFromPhase1();
 
     for (let n = 2; n <= 17; n++) {
       expect(hasComplete(events, n), `phase-${n}-complete bekleniyor`).toBe(true);
     }
-    for (const n of [5, 6, 7, 8]) {
+    // Ümit 2026-06-11 (#2 deliği): Faz 8 ZORUNLU oldu → scope-skip EDİLMEZ (koşar). Yalnız 5/6/7 opsiyonel.
+    for (const n of [5, 6, 7]) {
       expect(hasIn(events, `phase-${n}-skipped-by-scope`), `phase-${n}-skipped-by-scope`).toBe(true);
     }
+    expect(hasIn(events, `phase-8-skipped-by-scope`), "Faz 8 scope-skip EDİLMEMELİ (zorunlu)").toBe(false);
     const decisions = await readDecisions(projectRoot);
     expect(decisions.length).toBeGreaterThanOrEqual(2);
     expect(decisions.some((d) => d.phase === 4)).toBe(true);
