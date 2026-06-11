@@ -16,6 +16,7 @@ import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import {
   noteRateLimitEvent,
   noteCliRateLimitError,
+  noteCliSuccess,
   detectCliRateLimit,
   type RateLimitInfo,
 } from "./cli-rate-limit.js";
@@ -236,6 +237,9 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
       if (!ok) {
         const rl = detectCliRateLimit(`${resultErrorText} ${stderrTail}`);
         if (rl) noteCliRateLimitError(rl);
+      } else {
+        // Ümit 2026-06-11: CLI rate-limit'siz BAŞARDI → limit (varsa) gerçekten açılmış (kredi/erken reset) → temizle.
+        noteCliSuccess();
       }
       done({
         ok,

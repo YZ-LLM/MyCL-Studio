@@ -1114,8 +1114,8 @@ async function detectInterruptedPhase1(
 async function detectInterruptedPhase2To9(
   state: State,
 ): Promise<{ phaseId: PhaseId } | null> {
-  // Ucuz erken-çıkış — audit okumadan (saf modülde de aynı guard var, IO'dan kaçın).
-  if (state.current_phase < 2 || state.current_phase > 9) return null;
+  // Ucuz erken-çıkış — audit okumadan (saf modülde de aynı guard var, IO'dan kaçın). 2-17 (mekanik dahil).
+  if (state.current_phase < 2 || state.current_phase > 17) return null;
   let audit;
   try {
     audit = await readAuditLogTail(state.project_root, 300);

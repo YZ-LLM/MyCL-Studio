@@ -68,6 +68,10 @@ export function resolveAuto(configured: string, limited: boolean): "api" | "cli"
 // ───────────────────────── Impure global state ─────────────────────────
 
 let _limitedUntilMs: number | undefined;
+// Optimistik probe (Ümit 2026-06-11): limitliyken en geç bu aralıkta bir kez CLI denenir (kullanıcı kredi/limit
+// açmış olabilir — resetsAt yanıltıcı). Başarılıysa noteCliSuccess temizler.
+let _lastProbeMs = 0;
+const PROBE_INTERVAL_MS = 120_000; // 2 dk
 let _lastResetsAtMs: number | undefined; // en son görülen resetsAt (servis edilmiş event'lerden de)
 let _switchEmittedUntil: number | undefined; // hangi pencere için "API'ye geçildi" mesajı verildi
 let _resumeArmed = false; // limit set edildi → reset geçince "CLI'ye dönüldü" mesajı verilecek
@@ -82,6 +86,8 @@ function fmtClock(ms: number): string {
 function enterLimited(untilMs: number, rateLimitType?: string): void {
   _limitedUntilMs = untilMs;
   _resumeArmed = true;
+  // Probe sayacını limit-set anına çek → ilk optimistik probe 2 dk SONRA (hemen değil; aksi ilk çağrı hep probe'lar).
+  _lastProbeMs = Date.now();
   if (_switchEmittedUntil !== untilMs) {
     _switchEmittedUntil = untilMs;
     const mins = Math.max(1, Math.round((untilMs - Date.now()) / 60000));
@@ -152,7 +158,17 @@ export function detectCliRateLimit(text: string): string | null {
  */
 export function cliCurrentlyLimited(): boolean {
   const nowMs = Date.now();
-  if (isLimited(_limitedUntilMs, nowMs)) return true;
+  if (isLimited(_limitedUntilMs, nowMs)) {
+    // Ümit 2026-06-11: "ekstra kullanım için para yükledim, niye anlamadı." resetsAt YANILTICI olabilir — kullanıcı
+    // limiti erken açmış olabilir. OPTIMISTIK PROBE: aralıkla bir CLI denemesine izin ver. Başarılı olursa
+    // noteCliSuccess() limiti temizler + CLI'de kalınır; hâlâ limitliyse rate_limit_event yeniden limitler.
+    if (nowMs - _lastProbeMs >= PROBE_INTERVAL_MS) {
+      _lastProbeMs = nowMs;
+      log.info("cli-rate-limit", "limit probe — CLI deneniyor (kullanıcı erken açmış olabilir)");
+      return false;
+    }
+    return true;
+  }
   // Limit geçti / hiç yoktu:
   if (_limitedUntilMs !== undefined) {
     _limitedUntilMs = undefined;
@@ -166,12 +182,29 @@ export function cliCurrentlyLimited(): boolean {
   return false;
 }
 
+/**
+ * CLI çağrısı rate-limit OLMADAN başarıyla tamamlandı → limit (varsa) GERÇEKTEN açılmış (kullanıcı kredi yükledi /
+ * pencere erken açıldı). Cache'i temizle + görünür mesaj. CLI backend'i her başarılı turdan sonra çağırır.
+ */
+export function noteCliSuccess(): void {
+  if (_limitedUntilMs === undefined) return;
+  _limitedUntilMs = undefined;
+  _switchEmittedUntil = undefined;
+  _resumeArmed = false;
+  emitChatMessage(
+    "system",
+    "✅ Claude Code aboneliği yeniden çalışıyor (limit açılmış / kredi yüklenmiş) — CLI'ye dönüldü.",
+  );
+  log.info("cli-rate-limit", "limit cleared on successful CLI call (early)");
+}
+
 /** Test/teşhis: state'i sıfırla. */
 export function resetCliRateLimitState(): void {
   _limitedUntilMs = undefined;
   _lastResetsAtMs = undefined;
   _switchEmittedUntil = undefined;
   _resumeArmed = false;
+  _lastProbeMs = 0;
 }
 
 /** Test/teşhis: aktif limitedUntil (ms) veya undefined. */

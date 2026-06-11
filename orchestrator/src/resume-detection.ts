@@ -24,7 +24,9 @@ export function detectInterruptedPhase2To9Pure(
   audit: AuditEvent[],
 ): { phaseId: PhaseId } | null {
   const cp = state.current_phase;
-  if (cp < 2 || cp > 9) return null;
+  // Ümit 2026-06-11: "devam için faz tıklatma — neyi çalıştıracağı belli." 2-9 → 2-17: MEKANİK fazlar (10-17,
+  // örn. Faz 13 Güvenlik) yarıda kalınca da boot'ta OTOMATİK devam (tıklat-prompt'una düşmesin).
+  if (cp < 2 || cp > 17) return null;
   const iterCount = state.iteration_count ?? 1;
   let scopeStartTs = 0;
   if (iterCount > 1) {
@@ -33,9 +35,10 @@ export function detectInterruptedPhase2To9Pure(
       audit.find((e) => e.event === `iteration-${iterCount}-start`)?.ts ??
       0;
   }
-  const completed = audit.some(
-    (e) => e.ts > scopeStartTs && e.event === `phase-${cp}-complete`,
+  // complete VEYA skipped → o faz ele alındı (skip kasıtlı, yeniden koşma). Yoksa yarıda kalmış → resume.
+  const handled = audit.some(
+    (e) => e.ts > scopeStartTs && (e.event === `phase-${cp}-complete` || e.event === `phase-${cp}-skipped`),
   );
-  if (completed) return null;
+  if (handled) return null;
   return { phaseId: cp as PhaseId };
 }

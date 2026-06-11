@@ -15,9 +15,13 @@ type S = Pick<
 >;
 
 describe("resume-detection · detectInterruptedPhase2To9Pure", () => {
-  it("faz 1 / 10+ → null (kapsam dışı)", () => {
+  it("faz 1 / 18+ → null (kapsam dışı); 10-17 artık KAPSAMDA (Ümit 2026-06-11: mekanik fazlar da oto-resume)", () => {
     expect(detectInterruptedPhase2To9Pure({ current_phase: 1 } as S, [])).toBeNull();
-    expect(detectInterruptedPhase2To9Pure({ current_phase: 10 } as S, [])).toBeNull();
+    expect(detectInterruptedPhase2To9Pure({ current_phase: 0 } as S, [])).toBeNull();
+    // Faz 13 (mekanik güvenlik) yarıda + handled-event yok → resume sinyali ver (tıklat-prompt yerine oto-devam).
+    expect(detectInterruptedPhase2To9Pure({ current_phase: 13 } as S, [])).toEqual({ phaseId: 13 });
+    // phase-13-skipped varsa kasıtlı atlanmış → resume YOK.
+    expect(detectInterruptedPhase2To9Pure({ current_phase: 13 } as S, [ev(100, "phase-13-skipped")])).toBeNull();
   });
 
   it("iter 1, phase-6-complete YOK → resume {phaseId:6}", () => {
