@@ -12,6 +12,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
+import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js";
 import {
   noteRateLimitEvent,
   finalizeCliRateLimit,
@@ -30,6 +31,10 @@ export interface PersistentSessionOpts {
   cwd: string;
   allowedTools?: string[];
   disallowedTools?: string[];
+  /** Assistant metin parçaları (UI stream köprüsü — codegen/orkestratör için). */
+  onText?: (text: string) => void;
+  /** Her tool_use (codegen observer köprüsü). */
+  observer?: (toolUse: { name: string; input: Record<string, unknown> }) => void;
 }
 
 export interface SessionTurnResult {
@@ -85,9 +90,15 @@ export class PersistentClaudeSession {
   private start(): boolean {
     if (!guardSandboxOrWarn()) return false;
     const bin = resolveClaudePath() ?? "claude";
+    const args = this.buildArgs();
+    // macOS folder-guard (TCC penceresini kaynağında kes): Bash YOK ise sandbox-exec ile sar (cli-run ile aynı karar).
+    // Kalıcı süreç bir kez açıldığı için tarama da bir kez olur — cold-start'tan daha az TCC teması.
+    const spawnCmd = shouldFolderGuard({ allowedTools: this.opts.allowedTools })
+      ? wrapReadOnlyClaude(bin, args)
+      : { cmd: bin, args };
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(bin, this.buildArgs(), {
+      child = spawn(spawnCmd.cmd, spawnCmd.args, {
         cwd: this.opts.cwd,
         env: claudeSpawnEnv(),
         stdio: ["pipe", "pipe", "pipe"],
@@ -139,7 +150,12 @@ export class PersistentClaudeSession {
       const msg = ev.message as { content?: unknown[] } | undefined;
       for (const b of Array.isArray(msg?.content) ? msg!.content : []) {
         const blk = b as Record<string, unknown>;
-        if (blk.type === "text" && typeof blk.text === "string") this.pending.texts.push(blk.text);
+        if (blk.type === "text" && typeof blk.text === "string") {
+          this.pending.texts.push(blk.text);
+          this.opts.onText?.(blk.text); // UI stream köprüsü
+        } else if (blk.type === "tool_use" && typeof blk.name === "string") {
+          this.opts.observer?.({ name: blk.name, input: (blk.input ?? {}) as Record<string, unknown> });
+        }
       }
     } else if (type === "result") {
       // Tur bitti. is_error → başarısız.
@@ -247,6 +263,13 @@ export function getPersistentSession(opts: PersistentSessionOpts): PersistentCla
     _sessions.set(opts.id, s);
   }
   return s;
+}
+
+/** Kısa deterministik hash (oturum id'si için — systemPrompt+model → kararlı kısa anahtar). SAF. */
+export function shortHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
 /** Tümünü kapat (shutdown / proje değişimi). */

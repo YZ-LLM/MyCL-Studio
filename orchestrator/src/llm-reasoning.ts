@@ -6,8 +6,10 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
+import { getPersistentSession, shortHash } from "./persistent-cli-session.js";
 import { makeAnthropicClient, modelSupportsAdaptive } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
+import { log } from "./logger.js";
 
 export interface ReasoningResult {
   ok: boolean;
@@ -34,6 +36,22 @@ export async function runReasoning(
 ): Promise<ReasoningResult> {
   const backend = backendForRole(config, "main");
   if (backend === "cli") {
+    // Ümit 2026-06-11: KALICI oturum (read-only reasoning — verify-up/audit/vb.). Süreç-tipi (systemPrompt+model)
+    // başına tek canlı süreç → respawn yok → ısı↓; biriken bağlam tutarlılık. Başarısızsa cold-start'a düş.
+    try {
+      const session = getPersistentSession({
+        id: `reasoning-${shortHash(opts.systemPrompt + opts.modelId)}`,
+        modelId: opts.modelId,
+        systemPrompt: opts.systemPrompt,
+        cwd: opts.projectRoot,
+        disallowedTools: ["Write", "Edit", "Bash"],
+      });
+      const r = await session.send(opts.userMessage, 180_000);
+      if (r.ok && r.text.trim()) return { ok: true, text: r.text };
+      log.warn("llm-reasoning", "kalıcı oturum başarısız → cold-start", { error: r.error });
+    } catch (e) {
+      log.warn("llm-reasoning", "kalıcı oturum hata → cold-start", { error: String(e) });
+    }
     const res = await runClaudeCli({
       systemPrompt: opts.systemPrompt,
       userMessage: opts.userMessage,
