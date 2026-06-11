@@ -64,9 +64,8 @@ export interface CliRunResult {
   usage?: TokenUsage;
 }
 
-// IDLE timeout (mutlak değil): her stdout/stderr satırında sıfırlanır →
-// uzun-ama-aktif tur öldürülmez; yalnız bu süre HİÇ çıktı gelmezse asılı sayılır.
-const DEFAULT_TIMEOUT_MS = 300_000;
+// IDLE timeout: Ümit 2026-06-11 "idle timeout'u sınırsız yap" — 0 = idle-kill YOK (takılırsa Abort ile durdurulur).
+const DEFAULT_TIMEOUT_MS = 0;
 
 function buildArgs(opts: CliRunOpts): string[] {
   const args: string[] = [
@@ -163,6 +162,7 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     // IDLE-bazlı: her çıktı satırında sıfırlanır → uzun ama aktif tur öldürülmez.
     const resetTimer = (): void => {
       clearTimeout(timer);
+      if (timeoutMs <= 0) return; // sınırsız (Ümit): idle-kill kapalı
       timer = setTimeout(() => {
         log.warn("cli-run", "idle timeout — killing claude", { timeoutMs });
         done({ ok: false, text: texts.join(""), toolUses, turns, usage, error: `cli idle timeout ${timeoutMs}ms` });

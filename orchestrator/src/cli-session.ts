@@ -63,10 +63,9 @@ export interface CliSessionResult {
   usage?: TokenUsage;
 }
 
-// IDLE timeout: claude'tan bu kadar süre HİÇ çıktı gelmezse (gerçekten asılı)
-// öldür. Her stdout/stderr satırında sıfırlanır → uzun-ama-aktif tur (tool-yoğun
-// Faz 9 risk-review, 32k thinking) cezalandırılmaz. Mutlak değil, idle.
-const DEFAULT_TIMEOUT_MS = 300_000;
+// IDLE timeout: Ümit 2026-06-11 "idle timeout'u sınırsız yap" — 0 = idle-kill YOK. Uzun codegen/thinking
+// öldürülmesin; takılırsa kullanıcı Abort ile durdurur. (Çıktı geldikçe zaten sıfırlanıyordu; artık hiç kesmez.)
+const DEFAULT_TIMEOUT_MS = 0;
 
 function buildArgs(opts: CliSessionTurnOpts): string[] {
   // v15.12: her main-ajan user mesajına İngilizce-çıktı hatırlatması (ilk + resume
@@ -162,6 +161,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
     // gelmezse (gerçekten asılı) öldürür.
     const resetTimer = (): void => {
       clearTimeout(timer);
+      if (timeoutMs <= 0) return; // sınırsız (Ümit): idle-kill kapalı
       timer = setTimeout(() => {
         log.warn("cli-session", "idle timeout — killing claude", { timeoutMs, resume: opts.resume });
         done({ ok: false, text: texts.join(""), toolUses, turns, usage, error: `cli idle timeout ${timeoutMs}ms` });
