@@ -259,7 +259,13 @@ describe("agent-sandbox · defense-in-depth: permissions.deny paritesi (macOS)",
     const permDeny = (settings.permissions as { deny: string[] }).deny;
     expect(permDeny).toContain(`Read(/${HOME}/Music)`);
     expect(permDeny).toContain(`Read(/${HOME}/Music/**)`); // prompt-katmanı HER İKİ formu korur
-    // darwin: çekirdek denyRead dir-only (/** redundant, E2BIG için), permDeny iki-form → 2×.
-    expect(permDeny.length).toBe(denyRead.length * 2);
+    // darwin: çekirdek denyRead dir-only (/** redundant, E2BIG için), permDeny iki-form → 2× + 2 .git write-deny.
+    expect(permDeny.length).toBe(denyRead.length * 2 + 2);
+    // Ümit 2026-06-11 tehlike-taraması: .git YAZMA reddi (hook-persistence vektörü) hem permDeny hem denyWrite'ta.
+    expect(permDeny).toContain("Write(/tmp/x/.git/**)");
+    expect(permDeny).toContain("Edit(/tmp/x/.git/**)");
+    const denyWrite = (settings.sandbox as { filesystem: { denyWrite: string[] } }).filesystem.denyWrite;
+    expect(denyWrite).toContain("/tmp/x/.git");
+    expect(denyWrite).toContain("/tmp/x/.git/**");
   });
 });

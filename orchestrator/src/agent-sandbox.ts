@@ -236,16 +236,23 @@ export function buildAgentSandboxSettings(params: {
     }
     permDeny.push(`Read(/${entry})`, `Read(/${entry}/**)`);
   }
+  // Ümit 2026-06-11 tehlike-taraması (EMPİRİK DOĞRULANDI): CLI sandbox cwd'ye hapsediyor ama `.git`'i (cwd altında)
+  // YAZILABİLİR bırakıyordu → ajan `.git/hooks/pre-commit` yazabilir → kullanıcı `git commit` yapınca sandbox-DIŞI,
+  // makinede kod çalışır (kalıcılık/escalation). API yolu (tool-handlers denied_paths) `.git`'i zaten reddediyordu;
+  // CLI yolu etmiyordu (asimetri). FIX: filesystem.denyWrite ile `.git` (READ açık — git status/log için; yalnız
+  // YAZMA kapalı). Doğrulandı: .git yazımı engellenir, normal proje yazımı bozulmaz.
+  const gitDir = pathPosix.join(projectRoot, ".git");
+  const denyWrite = [gitDir, `${gitDir}/**`];
   const settings: Record<string, unknown> = {
     ...base,
     sandbox: {
       enabled: true,
       allowUnsandboxedCommands: false, // bash kaçış kapısı kapalı
       failIfUnavailable, // sandbox kurulamazsa claude fail-closed (enforce)
-      filesystem: { denyRead },
+      filesystem: { denyRead, denyWrite },
     },
-    // Defense-in-depth: Read tool'unu da (prompt katmanı) reddet — `//abs` mutlak yol.
-    permissions: { deny: permDeny },
+    // Defense-in-depth: Read tool'unu da (prompt katmanı) reddet — `//abs` mutlak yol. Write(.git) de prompt-katmanı.
+    permissions: { deny: [...permDeny, `Write(${gitDir}/**)`, `Edit(${gitDir}/**)`] },
   };
   return { settings, denyCount: denyRead.length };
 }
