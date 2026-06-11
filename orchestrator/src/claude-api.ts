@@ -60,6 +60,18 @@ export function humanizeAnthropicError(err: unknown): string {
 }
 
 /**
+ * HESAP/ORTAM hatası mı? (Ümit 2026-06-11: kredi bitti → MyCL Faz 8 başarısızlığı sanıp modeli opus·max'a tırmandırdı
+ * + analiz denedi, ikisi de daha fazla API çağrısı = aynı hata.) Kredi/bakiye yetersiz, fatura, auth/permission,
+ * kota — bunlar PROJE hatası DEĞİL, model zayıflığı DEĞİL. Her API çağrısı bu hatayı verir → escalation/analiz
+ * ANLAMSIZ. Caller: dur + net söyle ("kredi yükle"), tırmanma/analiz/fix YAPMA. SAF.
+ */
+export function isApiAccountError(text: string): boolean {
+  return /credit balance|too low to access|purchase credits|plans ?& ?billing|\bbilling\b|insufficient (credit|quota|fund|balance)|quota (exceeded|exhausted)|authentication_error|anahtarı geçersiz veya yetersiz|erişim izni vermiyor|permission_error/i.test(
+    text,
+  );
+}
+
+/**
  * Hatanın geçici (transient) olup olmadığını döndürür. Transient hatalar
  * exponential backoff ile retry edilir; kalıcı hatalar (auth, permission,
  * invalid_request) anında bubble up eder. Translator pattern'ı (translator.ts)

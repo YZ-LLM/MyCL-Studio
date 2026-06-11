@@ -75,6 +75,7 @@ import {
 import { listModels } from "./models.js";
 import { computeTiersFromModels } from "./model-catalog.js";
 import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
+import { isApiAccountError } from "./claude-api.js";
 import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
 import { discoverModelsViaWeb } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
@@ -466,6 +467,18 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   emitPhaseChanged(n, n, "error");
   if (!runtime.state || !runtime.config) return;
   const errCtx: ErrorContext = { phase: n, message, detail: ctrl?.lastFailReason };
+  // HESAP/ORTAM hatası (Ümit 2026-06-11): kredi/bakiye yetersiz, fatura, auth/kota → PROJE hatası DEĞİL, model
+  // zayıflığı DEĞİL. Her API çağrısı aynı hatayı verir → escalation (modeli pahalıya tırmandırma) + hata-analizi
+  // (o da API çağrısı) ANLAMSIZ ve kısır döngü. DUR + net söyle; tırmanma/analiz/fix YAPMA.
+  if (isApiAccountError(ctrl?.lastFailReason ?? "") || isApiAccountError(message)) {
+    emitChatMessage(
+      "system",
+      "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** — bu bir ortam sorunu, proje hatası DEĞİL. " +
+        "Plans & Billing'den kredi yükleyin (ya da CLI/abonelik moduna geçin), sonra **'Çalıştır'** ile kaldığınız " +
+        "yerden devam edin. Otomatik tırmanma/düzeltme/analiz YAPMADIM — hepsi API gerektirir, aynı hatayı verirdi.",
+    );
+    return; // STOP — escalation YOK, analiz YOK, fix YOK.
+  }
   // ESCALATION (Ümit 2026-06-11): sorun çıktı → bir ÜST basamağa çık + AYNI fazı tekrar dene (debug/oto-çözüme
   // KAÇMADAN). Yalnız Oto-cevap açıkken + LLM fazlarında (1-9; mekanik gate'ler 10-17 araç koşar, model'e duyarsız
   // → escalation anlamsız → mevcut akış). Her deneme rapora kaydedilir. Tepeye (strong·max) gelince escalation
