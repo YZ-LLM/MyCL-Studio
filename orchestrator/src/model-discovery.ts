@@ -122,7 +122,10 @@ async function discoverViaCli(modelId: string, projectRoot: string): Promise<str
     modelId,
     cwd: projectRoot,
     allowedTools: ["WebSearch", "WebFetch"],
-    folderGuard: false, // web-arama; dosya yazmaz, sandbox-exec sarmaya gerek yok (nesting önle)
+    // Ümit 2026-06-11: folder-guard AÇIK — WebSearch/WebFetch'te Bash YOK → nesting yok; sandbox-exec claude'un
+    // startup Desktop/klasör taramasını + tccd'yi keser → "Masaüstü'ne erişmek istiyor" TCC penceresi çıkmaz.
+    // (Profil default-allow + yalnız korunan-klasör/tccd deny → ağ/web-arama serbest çalışır.)
+    folderGuard: true,
   });
   if (!res.ok) throw new Error(res.error ?? "cli web keşif başarısız");
   return res.text;
