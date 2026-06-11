@@ -84,6 +84,11 @@ export function safeEnv(): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   const src = process.env;
   for (const key of Object.keys(src)) {
+    // Ümit 2026-06-11 tehlike-taraması: sır-deseni İSTİSNASI — allowlist/prefix eşleşse BİLE sır geçmez. Asıl vektör:
+    // `npm_` prefix'i `npm_config__authtoken` / `npm_config_//registry/:_authtoken` gibi npm auth token'larını
+    // (npm lifecycle env'ine export eder) ajana sızdırabilirdi. Hiçbir meşru allowlist anahtarı bu deseni taşımaz →
+    // yanlış-düşürme yok. Ajan Bash ile env okuyabildiğinden bu fail-closed olmalı.
+    if (/auth|token|secret|password|passwd|credential|apikey|api[_-]?key|private[_-]?key/i.test(key)) continue;
     if (SAFE_ENV_KEYS.has(key)) {
       const v = src[key];
       if (v !== undefined) out[key] = v;
