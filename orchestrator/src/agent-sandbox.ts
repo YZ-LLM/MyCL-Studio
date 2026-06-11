@@ -242,7 +242,11 @@ export function buildAgentSandboxSettings(params: {
   // CLI yolu etmiyordu (asimetri). FIX: filesystem.denyWrite ile `.git` (READ açık — git status/log için; yalnız
   // YAZMA kapalı). Doğrulandı: .git yazımı engellenir, normal proje yazımı bozulmaz.
   const gitDir = pathPosix.join(projectRoot, ".git");
-  const denyWrite = [gitDir, `${gitDir}/**`];
+  // .mycl: ajan buraya YAZARSA sahte audit olayı (tdd-green/phase-complete) enjekte edip gate'leri oyunlayabilir
+  // (sahte-yeşil — güven-modelinin kalbi; EMPİRİK doğrulandı sandbox izin veriyordu). MyCL'in KENDİ (orkestratör
+  // süreci) .mycl yazımı etkilenmez — bu yalnız AJAN sandbox'ı. READ açık (spec.md/patterns.md okunur).
+  const myclDir = pathPosix.join(projectRoot, ".mycl");
+  const denyWrite = [gitDir, `${gitDir}/**`, myclDir, `${myclDir}/**`];
   const settings: Record<string, unknown> = {
     ...base,
     sandbox: {
@@ -251,8 +255,10 @@ export function buildAgentSandboxSettings(params: {
       failIfUnavailable, // sandbox kurulamazsa claude fail-closed (enforce)
       filesystem: { denyRead, denyWrite },
     },
-    // Defense-in-depth: Read tool'unu da (prompt katmanı) reddet — `//abs` mutlak yol. Write(.git) de prompt-katmanı.
-    permissions: { deny: [...permDeny, `Write(${gitDir}/**)`, `Edit(${gitDir}/**)`] },
+    // Defense-in-depth (prompt katmanı): .git + .mycl YAZMA reddi (hook-persistence + audit-forge vektörleri).
+    permissions: {
+      deny: [...permDeny, `Write(${gitDir}/**)`, `Edit(${gitDir}/**)`, `Write(${myclDir}/**)`, `Edit(${myclDir}/**)`],
+    },
   };
   return { settings, denyCount: denyRead.length };
 }
