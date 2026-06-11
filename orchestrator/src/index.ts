@@ -3053,6 +3053,56 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       // sürdürür (takılma yok — kullanıcı override edebilir).
       if (next === 13) {
         emitPhaseChanged(13, 13, "error");
+        // Ümit 2026-06-11 ("Faz 11/13'teydim niye Faz 8'e döndü"): Faz 13 güvenlik bulgusunu ÖNCE FAZIN İÇİNDE
+        // odaklı-minimal düzelt + Faz 13'ü YENİDEN doğrula (diğer mekanik gate'ler gibi). Çözülürse Faz 8'e/codegen'e
+        // HİÇ dönmez (8→9→…→13 yeniden-koşma yok). Yalnız Oto-cevap açıkken + bir kez (gateAutofixTried).
+        if (
+          outcome.kind === "fail" &&
+          autoAnswerSuggested() &&
+          !gateAutofixTried.has(13) &&
+          runtime.state &&
+          runtime.config
+        ) {
+          gateAutofixTried.add(13);
+          emitChatMessage(
+            "system",
+            "🔧 Faz 13 (Güvenlik) — bulguları fazın içinde düzeltiyorum + güvenliği yeniden doğruluyorum (Faz 8'e dönmeden).",
+          );
+          const fixRan = await runGateAutofix(state, cfg, 13, phaseLabelTR(13, spec), outcome.stderr);
+          if (fixRan) {
+            const reRunner = new MechanicalRunnerBase({
+              tag: "phase-13",
+              displayLabel: phaseLabelTR(13, spec),
+              phaseId: 13,
+              state,
+              mechanical: spec.mechanical_config,
+              pass_event: passEvent,
+              fail_event: failEvent,
+              changedScope: state.changed_scope?.files,
+            });
+            emit("phase_running", { label: phaseLabelTR(13, spec), ts: Date.now() });
+            let reOutcome;
+            try {
+              reOutcome = await reRunner.run();
+            } finally {
+              emit("phase_idle", { ts: Date.now() });
+            }
+            if (reOutcome.kind === "pass" || reOutcome.kind === "skipped") {
+              disarmRollback();
+              await appendAuditModule(state.project_root, {
+                ts: Date.now(),
+                phase: 13,
+                event: "phase-13-complete",
+                caller: "mycl-orchestrator",
+                detail: "gate_autofix_resolved",
+              });
+              emitChatMessage("system", "✅ Faz 13 kendi içinde düzeltildi — güvenlik geçti (Faz 8'e dönülmedi).");
+              cur = 13;
+              continue;
+            }
+            outcome = reOutcome; // hâlâ fail → güncel çıktıyla aşağıdaki analiz/accept-continue'a düş
+          }
+        }
         let pending: PendingErrorAnalysis | null = null;
         // Ümit 2026-06-11: "Oto-cevap açık ama soruyu cevaplamadı." Faz 13 güvenlik dalı autoResolve geçmiyordu →
         // hep askq açıp bekliyordu. Oto-cevap açıkken (ve döngü-bütçesi varken) en iyi FİX otomatik seçilir; güvenlik
