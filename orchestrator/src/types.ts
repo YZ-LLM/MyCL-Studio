@@ -398,12 +398,6 @@ export interface State {
    */
   fix_checkpoint_ref?: string;
   /**
-   * Ümit 2026-06-12 (#2): Faz 13 (Güvenlik) gate'i fix gerektirdi → fix sonrası Faz 13 yeniden taranırken
-   * SCOPED değil TAM (whole-project) tara. Güvenlik fix'inin etkisi değişen-dosya dışına taşabilir + eksik
-   * fix (örn. eklenmemiş Helmet) yakalanmalı. Faz 13 fix denenince set, yeniden-tarama tüketince temizlenir.
-   */
-  pending_security_reverify?: boolean;
-  /**
    * Toplam UI tweak iterasyon sayısı; Phase 6 başarıyla tamamlandığında
    * sıfırlanır. MAX_UI_TWEAKS (5) aşıldığında force-complete Phase 7'e geçer.
    */

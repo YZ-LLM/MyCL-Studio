@@ -3,15 +3,47 @@
 // bunu kullanır → lint/güvenlik/birim-test yalnız değişen koda + onu import
 // edenlere koşar. Tamamen deterministik (git + AST grafiği; LLM yok).
 //
-// Boş kapsam (değişiklik yok / git yok) → available:false → caller tüm-proje
-// fallback yapar (asla "temiz" varsayma — false-confidence engeli).
+// Ümit 2026-06-12 "yalnız değişen dosyaları denetle": git YOKSA (non-git proje, örn. adminpanel) git diff boş
+// dönüyor → eskiden scoped HİÇ uygulanmıyor, gate'ler tüm-projeyi tarayıp ALAKASIZ açık (survey-sanitize) flag'liyordu.
+// Çözüm: git boşsa codegen'in AUDIT'e yazdığı dosyalardan (tdd-prod-write/code-edit/ui-file-write) değişen-dosya türet.
+// Boş kapsam (değişiklik yok / git+audit ikisi de boş) → available:false → caller tüm-proje fallback (false-confidence engeli).
 
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { getChangedFiles } from "../git.js";
+import { readAuditLog } from "../audit.js";
 import { log } from "../logger.js";
 import { buildReverseImportGraph, getAffected } from "./dep-graph/index.js";
 import { hasSourceExt } from "./evidence.js";
+
+// Dosyaya yazan/değiştiren TÜM audit event'leri — hepsinin detail'i file_path.
+// EKSİK-kapsam tehlikeli (gate dokunulan dosyayı atlar → false-green), fazla-kapsam
+// zararsız (zaten yalnız codegen'in dokunduğu dosyalar, tüm-proje değil) → kuşkuda DAHİL ET.
+// Faz 8: tdd-prod-write/tdd-test-write/code-edit · Faz 5: ui-file-write (Write) / ui-tweak-applied (Edit).
+const WRITE_EVENTS: ReadonlySet<string> = new Set([
+  "tdd-prod-write",
+  "tdd-test-write",
+  "code-edit",
+  "ui-file-write",
+  "ui-tweak-applied",
+]);
+
+/** Non-git fallback: codegen'in bu iterasyonda yazdığı dosyalar (audit write-event'lerinden). Deterministik. */
+async function changedFilesFromAudit(projectRoot: string, sinceTs: number): Promise<string[]> {
+  const events = await readAuditLog(projectRoot).catch(() => []);
+  const out = new Set<string>();
+  for (const e of events) {
+    if (e.ts < sinceTs || !e.detail) continue;
+    if (WRITE_EVENTS.has(e.event)) {
+      // detail = file_path (hepsi). Claude Code tool'ları MUTLAK yol verir → projeye göre
+      // relative'e indir (getChangedFiles ile tutarlı); zaten relative ise olduğu gibi kalır.
+      const t = e.detail.trim();
+      const rel = t.startsWith(projectRoot) ? t.slice(projectRoot.length).replace(/^[/\\]+/, "") : t;
+      if (rel) out.add(rel);
+    }
+  }
+  return [...out];
+}
 
 export interface ChangedScope {
   /** Değişen kaynak dosyalar ∪ blast-radius (projectRoot-relative). */
@@ -52,12 +84,18 @@ export function shouldComputeScope(state: {
 export async function computeChangedScope(
   projectRoot: string,
   since?: string,
+  iterationStartTs?: number,
 ): Promise<ChangedScope> {
   let changed: string[] = [];
   try {
     changed = await getChangedFiles(projectRoot, since);
   } catch (err) {
     log.warn("fix/scope", "getChangedFiles failed (non-fatal)", err);
+  }
+  // Ümit 2026-06-12: git diff boş (non-git proje / git yok) → audit write-event'lerinden değişen dosyaları türet
+  // → scoped non-git'te de çalışır ("yalnız değişen dosyaları denetle"; yoksa full → alakasız flag).
+  if (changed.length === 0 && iterationStartTs !== undefined) {
+    changed = await changedFilesFromAudit(projectRoot, iterationStartTs).catch(() => []);
   }
 
   // Yalnız var-olan kaynak dosyalar (lint/test argümanı olabilir; silinmiş/
