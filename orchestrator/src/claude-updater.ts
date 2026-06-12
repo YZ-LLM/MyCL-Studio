@@ -5,6 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
+import { wrapReadOnlyClaude } from "./claude-folder-guard.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 
@@ -70,7 +71,10 @@ export async function autoUpdateClaude(): Promise<void> {
     // NONESSENTIAL_TRAFFIC'i ÇIKAR: o güncelleme ağ çağrısını engelleyebilir, update'in çalışması lazım.
     const updaterEnv = { ...claudeSpawnEnv() };
     delete updaterEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC;
-    const child = spawn(claudeBin, ["update"], {
+    // Ümit 2026-06-12: env tek başına yetmiyordu → `claude update`'i de folder-guard (sandbox-exec) ile
+    // sar. Read-only (Bash yok); update ağ + kendi install dizinini kullanır (guarded-dir değil → açık).
+    const guarded = wrapReadOnlyClaude(claudeBin, ["update"]);
+    const child = spawn(guarded.cmd, guarded.args, {
       stdio: ["ignore", "pipe", "pipe"],
       env: updaterEnv,
     });

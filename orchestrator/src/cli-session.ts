@@ -21,6 +21,7 @@ import {
   type RateLimitInfo,
 } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
+import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 
@@ -129,6 +130,13 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
   const args = buildArgs(opts);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const claudeBin = resolveClaudePath() ?? "claude";
+  // Ümit 2026-06-12 (TCC penceresi kökü): cli-session ATLANMIŞTI — folder-guard yalnız cli-run +
+  // persistent-cli-session'a eklenmişti. Oysa cli-session translator + production-schema (Faz 2/3/4/7
+  // ONAY fazları) + qa-askq + quality-audit + llm-reasoning'in backbone'u → onay fazlarında her claude
+  // başlatıldığında klasör/medya TCC penceresi çıkıyordu. Bash YOK ise sandbox-exec ile sar (aynı karar).
+  const spawnCmd = shouldFolderGuard({ allowedTools: opts.allowedTools })
+    ? wrapReadOnlyClaude(claudeBin, args)
+    : { cmd: claudeBin, args };
 
   return new Promise<CliSessionResult>((resolve) => {
     let settled = false;
@@ -141,7 +149,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
     let stderrTail = "";
     let usage: TokenUsage | undefined;
 
-    const child = spawn(claudeBin, args, {
+    const child = spawn(spawnCmd.cmd, spawnCmd.args, {
       cwd: opts.cwd,
       env: claudeSpawnEnv(), // API key YOK → abonelik; PATH zenginleştirilir
       stdio: ["ignore", "pipe", "pipe"],
