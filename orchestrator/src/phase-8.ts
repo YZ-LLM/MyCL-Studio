@@ -24,6 +24,7 @@ import { safeEnv } from "./safe-env.js";
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
 import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, type FixSnapshot } from "./fix-snapshot.js";
+import { parseFailures, computeRegression } from "./regression-diff.js";
 import { escalatedModelEffort } from "./escalation.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
@@ -171,6 +172,10 @@ export class Phase8Controller {
   // Ümit 2026-06-12 ("kullanıcı hiç bir şeyi elle yapmayacak"): rollback artık git-only DEĞİL. FixSnapshot
   // git temizse checkpoint, git yoksa ~/.mycl/backups kaynak-kopyası kullanır → her durumda OTOMATİK geri alma.
   private fixSnapshot: FixSnapshot | null = null;
+  // Ümit 2026-06-12: regresyon baseline — fix ÖNCESİ tam-suite'in fail seti (+ yeşil miydi). Anchor fix SONRASI
+  // yalnız YENİ düşen testte fail eder; önceden-kırık/alakasız fix'in suçu sayılmaz. null = baseline kurulamadı
+  // (test komutu yok / runner ayrıştırılamadı) → anchor mutlak davranışa düşer (güvenli).
+  private baseline: { failures: Set<string>; green: boolean } | null = null;
 
   private readonly state: State;
   private readonly config: MyclConfig;
@@ -422,6 +427,27 @@ export class Phase8Controller {
         this.fixSnapshot = snap;
         // checkpointRef yalnız git'te set (getChangedFiles + scoped-scope köprüsü git-ref ister); copy'de null.
         this.checkpointRef = snap.method === "git" ? (snap.ref ?? null) : null;
+      }
+      // Ümit 2026-06-12: REGRESYON baseline. Fix ÖNCESİ tam-suite'i koş → hangi testler ZATEN kırık kaydet.
+      // (adminpanel kökü: 18 alakasız fail + 2 boş suite → doğru fix yanlışlıkla fail+rollback+eskalasyon oluyordu.)
+      // Profil test komutu yoksa / runner ayrıştırılamazsa baseline=null → anchor mutlak davranışa düşer (güvenli).
+      const baseCmd = await resolveMechanicalCmd({ type: "profile_key", key: "test" }, this.state);
+      if (baseCmd) {
+        emitChatMessage("system", "📋 Fix öncesi test temeli alınıyor (regresyonu önceden-var kırmızıdan ayırmak için)…");
+        const baseRes = await this.runCmdResult(baseCmd);
+        if (!isMissingCommand(baseRes)) {
+          const failures = parseFailures(`${baseRes.stdout}\n${baseRes.stderr}`);
+          // Kırmızı ama 0 fail ayrıştırıldı → parser bu runner'ı anlamadı → baseline GÜVENİLMEZ (mutlak'a düş).
+          if (baseRes.code === 0 || failures.size > 0) {
+            this.baseline = { failures, green: baseRes.code === 0 };
+            emitChatMessage(
+              "system",
+              baseRes.code === 0
+                ? "📋 Test temeli YEŞİL — fix sonrası HERHANGİ bir kırmızı regresyon sayılır."
+                : `📋 Test temeli: ${failures.size} test fix-ÖNCESİ de KIRIK (fix-dışı). Fix sonrası yalnız YENİ kırılma gate'i düşürür.`,
+            );
+          }
+        }
       }
     }
 
@@ -782,26 +808,48 @@ export class Phase8Controller {
       return;
     }
 
-    const pass = res.code === 0;
-    const detail = pass
-      ? `final suite (MyCL anchor, ${source}): pass`
-      : `final suite (MyCL anchor, ${source}): FAIL — ${(res.stderr || res.stdout).slice(0, 120)}`;
+    let pass = res.code === 0;
+    let verdictMsg = pass
+      ? "✅ Faz 8 final tam-suite (MyCL doğrulaması): GEÇTİ."
+      : "🔴 Faz 8 final tam-suite (MyCL doğrulaması): BAŞARISIZ — gate fail (regresyon / sessiz teknik borç önlendi).";
+    let detailTail = pass ? "pass" : `FAIL — ${(res.stderr || res.stdout).slice(0, 120)}`;
+    // Ümit 2026-06-12: REGRESYON-farkında verdict. Kırmızı suite + baseline varsa → yalnız YENİ düşen test
+    // (fix'in KIRDIĞI) gate'i düşürür; önceden-kırık/alakasız (başka özellik testi, boş placeholder dosya)
+    // fix'in suçu DEĞİL. parser kırmızıda 0 fail çıkarırsa (runner anlaşılamadı) baseline'a güvenme → mutlak kal.
+    if (!pass && this.baseline) {
+      const after = parseFailures(`${res.stdout}\n${res.stderr}`);
+      if (after.size > 0) {
+        const reg = computeRegression(this.baseline.failures, after);
+        if (reg.regressed.length === 0) {
+          pass = true; // YENİ kırılma yok → fix temiz
+          detailTail = `no-regression (pre-existing ${reg.preExistingCount} fail, fix added 0)`;
+          verdictMsg =
+            `✅ Faz 8: final suite mutlak KIRMIZI ama ${reg.preExistingCount} kırık testin HEPSİ fix-ÖNCESİ de ` +
+            `kırıktı (alakasız/fix-dışı) — fix YENİ bir şey KIRMADI → REGRESYON YOK, gate geçti. ` +
+            `(Önceden-var kırıklar projenin ayrı sorunu; fix'in suçu değil.)`;
+        } else {
+          detailTail = `REGRESYON: ${reg.regressed.slice(0, 5).join(" | ").slice(0, 200)}`;
+          verdictMsg =
+            `🔴 Faz 8: fix REGRESYON yaptı — önce GEÇEN şu test(ler) şimdi DÜŞÜYOR: ` +
+            `${reg.regressed.slice(0, 5).join(" | ").slice(0, 200)}` +
+            `${reg.regressed.length > 5 ? ` (+${reg.regressed.length - 5} daha)` : ""}. ` +
+            `(Önceden-var ${reg.preExistingCount} fail ayrı — onlar fix-dışı.)`;
+        }
+      }
+    }
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 8,
       event: pass ? "tdd-green" : "tdd-red",
       caller: "mycl-orchestrator",
-      detail,
+      detail: `final suite (MyCL anchor, ${source}): ${detailTail}`,
     });
-    emitChatMessage(
-      "system",
-      pass
-        ? "✅ Faz 8 final tam-suite (MyCL doğrulaması): GEÇTİ."
-        : "🔴 Faz 8 final tam-suite (MyCL doğrulaması): BAŞARISIZ — gate fail (regresyon / sessiz teknik borç önlendi).",
-    );
+    emitChatMessage("system", verdictMsg);
     // Ümit 2026-06-12 (güveni kökten sağlamlaştır): testler YEŞİL — ama gerçekten koruyor mu? MUTASYON PROB'u:
     // değişen bir dosyayı küçük boz, test KIRMIZIYA dönmeli; dönmüyorsa testler sahte-yeşil. Görünür uyarı + audit.
-    if (pass) await this.runMutationProbe(cmd);
+    // Mutasyon prob'u YALNIZ gerçek-yeşil suite'te anlamlı (mutasyon yeşili kırmızıya döndürmeli). Suite mutlak
+    // kırmızıyken (regresyon-yok ile pass=true olsa bile) mutasyon→hâlâ-kırmızı hiçbir şey söylemez → atla.
+    if (res.code === 0) await this.runMutationProbe(cmd);
   }
 
   /**
