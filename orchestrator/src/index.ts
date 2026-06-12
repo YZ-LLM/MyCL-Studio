@@ -3395,9 +3395,13 @@ async function handleRunDastRequest(): Promise<void> {
     "assistant",
     "🛡️ **Güvenlik Taraması (DAST)**: çalışan uygulamana AKTİF güvenlik testleri " +
       "(nuclei) gönderir — gerçek istekler atıp davranışı zorlayarak açık arar. " +
-      "**Yalnız localhost/127.0.0.1** hedeflenir; üretim veya uzak sunucuya ASLA " +
-      "çalışmaz. Aktif test olduğu için uygulamada geçici yük / yan etki olabilir " +
-      "(geliştirme ortamında çalıştır). Onaylıyor musun?",
+      "**Tüm projeyi tarar**: önce uygulamayı gezip (katana ile) tüm sayfa/route'ları " +
+      "bulur, her birini test eder — yalnız ana sayfayı değil. **Yalnız localhost/127.0.0.1** " +
+      "hedeflenir; üretim veya uzak sunucuya ASLA çalışmaz. Gezme gerçek GET istekleri attığı " +
+      "için durum-değiştiren bağlantılar tetiklenebilir — `logout`/`delete`/`purge` gibi açıkça " +
+      "yıkıcı görünen yollar güvenlik için atlanır, ama özel durum-değiştiren GET endpoint'lerin " +
+      "olabilir. Aktif test + tüm-app gezme nedeniyle geçici yük / yan etki olabilir ve tarama " +
+      "birkaç dakika sürebilir (geliştirme ortamında çalıştır). Onaylıyor musun?",
   );
   emitAskq({
     id: askqId,
