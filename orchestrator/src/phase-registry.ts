@@ -282,6 +282,16 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           // bozuk kural 2 değil 7 verir). Gerçek bulgu=1 → fail (skip değil).
           tool_error_codes: [2, 7],
         },
+        {
+          // Birim 2 (Ümit 2026-06-12): mimari sınır guardrail'i — KESİN-client kodu (use
+          // client / .vue|.svelte / RSC-olmayan SPA component) DB-sürücüsü veya node
+          // server-builtin import edemez. Minik evrensel set (RSC-güvenli; belirsiz .tsx'e
+          // dokunmaz). orchestrator-kökü .mjs, MUTLAK yol (runner cwd=hedef-proje).
+          name: "architecture",
+          cmd: `node "${securityToolPath("arch-check.mjs")}" --project .`,
+          scoped_cmd_template: `node "${securityToolPath("arch-check.mjs")}" {files}`,
+          tool_error_codes: [2], // beklenmeyen hata → skip (kendi script'im; semgrep değil → 7 yok)
+        },
       ],
     },
   },
