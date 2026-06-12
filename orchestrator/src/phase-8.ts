@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { appendAudit, appendHandoff, readAuditLogTail } from "./audit.js";
 import { isMissingCommand, resolveMechanicalCmd } from "./base/mechanical-runner.js";
+import { probeTestValidity } from "./test-validity.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
@@ -774,6 +775,43 @@ export class Phase8Controller {
       pass
         ? "✅ Faz 8 final tam-suite (MyCL doğrulaması): GEÇTİ."
         : "🔴 Faz 8 final tam-suite (MyCL doğrulaması): BAŞARISIZ — gate fail (regresyon / sessiz teknik borç önlendi).",
+    );
+    // Ümit 2026-06-12 (güveni kökten sağlamlaştır): testler YEŞİL — ama gerçekten koruyor mu? MUTASYON PROB'u:
+    // değişen bir dosyayı küçük boz, test KIRMIZIYA dönmeli; dönmüyorsa testler sahte-yeşil. Görünür uyarı + audit.
+    if (pass) await this.runMutationProbe(cmd);
+  }
+
+  /**
+   * Mutasyon prob'u (sahte-yeşil panzehiri): değişen kaynağa davranışsal mutasyon → test KIRMIZI bekle → geri al.
+   * Yakalayamazsa testler zayıf → `tdd-tests-weak` audit + görünür uyarı (Faz 9 düşman-gözü de ele alır). Hata-güvenli.
+   */
+  private async runMutationProbe(testCmd: string): Promise<void> {
+    const changed = this.state.changed_scope?.files ?? [];
+    if (changed.length === 0) return; // değişen dosya bilinmiyor → prob atla
+    emitChatMessage("system", "🧬 Test-geçerliliği prob'u — kodu küçük bozup testlerin gerçekten yakaladığını doğruluyorum…");
+    const r = await probeTestValidity({
+      config: this.config,
+      projectRoot: this.state.project_root,
+      testCmd,
+      candidateFiles: changed,
+      runCmd: (c) => this.runCmdResult(c),
+    });
+    if (!r.checked) return; // prob koşamadı (aday yok/mutasyon üretilemedi) — sessiz, sahte-alarm verme
+    if (r.caught) {
+      emitChatMessage("system", `✅ Test-geçerliliği: testler bozulan davranışı yakaladı (${r.file}) — koruma gerçek.`);
+      return;
+    }
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 8,
+      event: "tdd-tests-weak",
+      caller: "mycl-orchestrator",
+      detail: `mutation NOT caught in ${r.file} — tests may be shallow/false-green`,
+    });
+    emitChatMessage(
+      "system",
+      `⚠️ Test-geçerliliği UYARISI: \`${r.file}\` küçük bir davranış-bozumunda testler HÂLÂ geçti — testler o davranışı ` +
+        "gerçekten sınamıyor olabilir (sahte-yeşil riski). Faz 9 risk incelemesi bunu ele alır.",
     );
   }
 
