@@ -56,6 +56,8 @@ import {
   emitChatMessage,
   emitError,
   emitPhaseChanged,
+  emitPhaseRunning,
+  emitPhaseIdle,
   emitUserGuide,
   getActiveAskq,
   setHistoryRoot,
@@ -294,12 +296,13 @@ async function runController<T>(
   // Ümit: "çalışırken ne yaptığını söylesin her zaman." Faz controller'ı çalıştığı SÜRECE
   // sticky banner (⏳ + ne yaptığı). try/finally ile zorunlu kapanış (takılı spinner yok).
   // askq'da fn() döner → finally → idle (bekleme ≠ çalışma). Sonraki turda tekrar açılır.
-  if (runningLabel) emit("phase_running", { label: runningLabel, ts: Date.now() });
+  // emitPhaseRunning/Idle = sticky banner + 30sn heartbeat (uzun işte "şu anki adım" bildirimi).
+  if (runningLabel) emitPhaseRunning(runningLabel);
   try {
     return await fn();
   } finally {
     runtime.controller = null;
-    if (runningLabel) emit("phase_idle", { ts: Date.now() });
+    if (runningLabel) emitPhaseIdle();
   }
 }
 
@@ -3083,12 +3086,12 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       });
       // Ümit: "çalışırken ne yaptığını söylesin." Mekanik faz (lint/test/build — yavaş olabilir)
       // çalıştığı sürece sticky banner. try/finally → takılı spinner yok.
-      emit("phase_running", { label: phaseLabelTR(next, spec), ts: Date.now() });
+      emitPhaseRunning(phaseLabelTR(next, spec));
       let outcome;
       try {
         outcome = await runner.run();
       } finally {
-        emit("phase_idle", { ts: Date.now() });
+        emitPhaseIdle();
       }
       log.info("orchestrator", `phase ${next} mechanical end`, {
         outcome: outcome.kind,
@@ -3151,12 +3154,12 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               fail_event: failEvent,
               changedScope: state.changed_scope?.files,
             });
-            emit("phase_running", { label: phaseLabelTR(13, spec), ts: Date.now() });
+            emitPhaseRunning(phaseLabelTR(13, spec));
             let reOutcome;
             try {
               reOutcome = await reRunner.run();
             } finally {
-              emit("phase_idle", { ts: Date.now() });
+              emitPhaseIdle();
             }
             if (reOutcome.kind === "pass" || reOutcome.kind === "skipped") {
               disarmRollback();
@@ -3263,12 +3266,12 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             fail_event: failEvent,
             changedScope: state.changed_scope?.files,
           });
-          emit("phase_running", { label: phaseLabelTR(next, spec), ts: Date.now() });
+          emitPhaseRunning(phaseLabelTR(next, spec));
           let reOutcome;
           try {
             reOutcome = await reRunner.run();
           } finally {
-            emit("phase_idle", { ts: Date.now() });
+            emitPhaseIdle();
           }
           if (reOutcome.kind === "pass" || reOutcome.kind === "skipped") {
             disarmRollback(); // geçti → iyi düzeltmeyi kilitle (sonra geri-alınmasın)
@@ -3494,11 +3497,7 @@ export async function handleAskqAnswer(
     const st = runtime.state;
     // Sticky "çalışıyor" banner'ı (buton spinner bundan türetilir) — try/finally
     // ile ZORUNLU kapanış (takılı spinner yok).
-    emit("phase_running", {
-      label: DAST_RUNNING_LABEL,
-      detail: "nuclei — yalnız localhost",
-      ts: Date.now(),
-    });
+    emitPhaseRunning(DAST_RUNNING_LABEL, "nuclei — yalnız localhost");
     try {
       await appendAuditModule(st.project_root, {
         ts: Date.now(),
@@ -3524,7 +3523,7 @@ export async function handleAskqAnswer(
         `Güvenlik taraması başarısız: ${String(err).slice(0, 200)}`,
       );
     } finally {
-      emit("phase_idle", { ts: Date.now() });
+      emitPhaseIdle();
     }
     return;
   }
