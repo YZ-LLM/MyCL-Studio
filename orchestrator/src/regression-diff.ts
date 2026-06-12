@@ -6,7 +6,17 @@
 // KRİTİK İÇGÖRÜ: parser mükemmel olmak ZORUNDA DEĞİL — yalnız iki koşu arasında TUTARLI olması yeter. Fark
 // (sonra ∖ önce) yeni kırılmaları verir; tutarlı gürültü iki tarafta da olur → farkta iptal olur. Çapraz-runner
 // (vitest/jest/pytest/cargo/go) için yaygın fail-satır desenleri; runner anlaşılamazsa (kırmızı ama 0 fail
-// ayrıştırıldı) ÇAĞIRAN mutlak davranışa düşer (sahte-yeşil önleme — bkz parsedAny).
+// ayrıştırıldı) ÇAĞIRAN mutlak davranışa düşer (sahte-yeşil önleme).
+
+// ANSI escape (renk/CSI) kodlarını soy. KÖK NEDEN (Ümit 2026-06-12, reprodüksiyonla doğrulandı): MyCL test
+// komutunu execAsync ile koşar; bu bağlamda `npm test → vitest` çıktısı RENKLİ gelir (ESC[31m × ESC[39m
+// backend/...), terminal-redirect'te ise renksiz. Renkli olunca `^\s*[×✕✗✖]` eşleşmez (× öncesi escape var) →
+// 0 fail ayrıştırılır → baseline=null → regresyon-farkı devre dışı kalıyordu. Önce SOY, sonra eşleştir.
+// new RegExp + fromCharCode(27): ESC karakterini regex-literal kaçışı olmadan güvenle yaz.
+const ANSI_RE = new RegExp(String.fromCharCode(27) + "\\[[0-9;?]*[ -/]*[@-~]", "g");
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "");
+}
 
 /** Yaygın test-runner fail-satır desenleri. Yakalanan grup = testin (koşular arası sabit) kimliği. */
 const FAIL_PATTERNS: RegExp[] = [
@@ -20,10 +30,10 @@ const FAIL_PATTERNS: RegExp[] = [
   /^\s*---\s*FAIL:\s*(.+?)(?:\s*\(.*\))?\s*$/,
 ];
 
-/** Çıktıdan fail-eden test kimliklerini çıkar (normalize: trim + boşluk daralt). */
+/** Çıktıdan fail-eden test kimliklerini çıkar (ANSI soy → normalize: trim + boşluk daralt). */
 export function parseFailures(output: string): Set<string> {
   const out = new Set<string>();
-  for (const raw of output.split(/\r?\n/)) {
+  for (const raw of stripAnsi(output).split(/\r?\n/)) {
     const line = raw.replace(/\s+$/, "");
     for (const re of FAIL_PATTERNS) {
       const m = line.match(re);

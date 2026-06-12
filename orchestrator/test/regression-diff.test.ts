@@ -19,6 +19,22 @@ describe("regression-diff · parseFailures", () => {
     expect([...f].some((x) => x.includes("users-me"))).toBe(false);
   });
 
+  it("ANSI renk kodlu çıktıdan da fail çıkarır (execAsync/npm test gerçeği — KÖK NEDEN)", () => {
+    // MyCL execAsync ile koşunca vitest RENKLİ basar: ' ESC[31m×ESC[39m suite ESC[2m > ESC[22m test ESC[2m5msESC[22m'.
+    // ANSI soyulmazsa '^\s*[×]' eşleşmez → 0 fail → baseline=null → regresyon-farkı çöker (Ümit'in gördüğü hata).
+    const E = String.fromCharCode(27);
+    const out = [
+      ` ${E}[31m×${E}[39m backend/youtube-url-admin.integration.test.js${E}[2m > ${E}[22mYouTube URL Admin > AC4 invalid${E}[2m 5ms${E}[22m`,
+      ` ${E}[32m✓${E}[39m backend/users-me.integration.test.js > GET /api/users/me [AC1]`,
+      `${E}[31m FAIL ${E}[39m tests/integration/example.test.js`,
+    ].join("\n");
+    const f = parseFailures(out);
+    expect([...f].some((x) => x.includes("youtube-url-admin") && x.includes("AC4"))).toBe(true);
+    expect(f.has("tests/integration/example.test.js")).toBe(true);
+    expect([...f].some((x) => x.includes("users-me"))).toBe(false); // ✓ geçen yakalanmaz
+    expect([...f].every((x) => !x.includes(E))).toBe(true); // hiçbir kimlikte ESC kalmamalı
+  });
+
   it("pytest FAILED ve go --- FAIL desenleri", () => {
     const out = ["FAILED tests/test_x.py::test_y", "--- FAIL: TestFoo (0.00s)"].join("\n");
     const f = parseFailures(out);
