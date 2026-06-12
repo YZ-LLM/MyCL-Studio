@@ -45,6 +45,7 @@ export type OrchestratorEvent =
   | TranslationEvent
   | AskqEvent
   | AskqResolvedEvent
+  | IterationIntentEvent
   | TokenTotalsEvent
   | CostPhaseEvent
   | CostHistoryEvent
@@ -267,6 +268,12 @@ export interface AskqEvent {
 export interface AskqResolvedEvent {
   kind: "askq_resolved";
   data: { id: string };
+}
+
+/** Ümit 2026-06-12: İterasyonun Faz 1 hedefi (NİYET kutusu). text=null → temizle. Boot + Faz 1 onayında gelir. */
+export interface IterationIntentEvent {
+  kind: "iteration_intent";
+  data: { text: string | null };
 }
 
 /** v15.7 (2026-05-26): Session token totals — header badge için (madde 13). */

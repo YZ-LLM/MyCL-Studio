@@ -55,6 +55,7 @@ import {
   emitAskqResolved,
   emitChatMessage,
   emitError,
+  emitIterationIntent,
   emitPhaseChanged,
   emitPhaseRunning,
   emitPhaseIdle,
@@ -817,6 +818,9 @@ async function handleOpenProject(path: string): Promise<void> {
       log.warn("orchestrator", "SCHEMA.md copy failed", err),
     );
 
+    // Ümit 2026-06-12: NİYET kutusunu bu iterasyonun Faz 1 hedefiyle doldur (boot/resume sonrası "ilk user
+    // mesajı" heuristiği yanlış göstermesin — Faz 1 mesajı yüklü pencerede olmayabilir). Niyet yoksa null (temiz).
+    emitIterationIntent(runtime.state.intent_summary_raw ?? runtime.state.intent_summary ?? null);
     // v15.7 (2026-05-24): İş kuyruğunu frontend'e yolla
     void emitInitialTaskQueue(path);
     // Runtime HTTP server hedef proje bilgisini güncelle — UI'dan gelen
@@ -1177,6 +1181,8 @@ async function restartPhase1WithIntent(intentText: string): Promise<void> {
       intent_summary_raw: p1.approvedSummary ?? runtime.state.intent_summary_raw,
     };
     await saveState(runtime.state);
+    // NİYET kutusu bu iterasyonun hedefini göstersin (Faz 1 onaylandı).
+    emitIterationIntent(runtime.state.intent_summary_raw ?? runtime.state.intent_summary);
     await advanceToNextPhase(1);
   } else {
     await failPhase(1, p1);
@@ -2315,6 +2321,8 @@ async function executeDispatchedIntent(
       intent_summary: summary,
       intent_summary_raw: p1.approvedSummary ?? runtime.state.intent_summary_raw,
     };
+    // NİYET kutusu bu iterasyonun hedefini göstersin (Faz 1 onaylandı).
+    emitIterationIntent(runtime.state.intent_summary_raw ?? runtime.state.intent_summary);
     // Sonraki faz: P1 → P2 (ardışık akış).
     await advanceToNextPhase(1);
   } else {

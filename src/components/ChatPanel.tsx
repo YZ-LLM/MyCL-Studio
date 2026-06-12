@@ -142,6 +142,8 @@ export interface PendingAskq {
 
 interface Props {
   messages: ChatMessage[];
+  /** Ümit 2026-06-12: İterasyonun Faz 1 hedefi (NİYET kutusu). Varsa heuristiğe tercih edilir. */
+  iterationIntent?: string | null;
   pendingAskq: PendingAskq | null;
   runningBanner: { label: string; detail?: string; ts: number } | null;
   disabled: boolean;
@@ -185,6 +187,7 @@ interface Props {
 
 export function ChatPanel({
   messages,
+  iterationIntent,
   pendingAskq,
   runningBanner,
   disabled,
@@ -282,7 +285,9 @@ export function ChatPanel({
 
   // İlk Faz 1 prompt'u — sabit kutu (Ümit 2026-05-23). Kullanıcının ilk
   // yazdığı user mesajı; pipeline ilerledikçe ne istediğini hatırlatır.
-  const firstUserPrompt = messages.find((m) => m.role === "user")?.text;
+  // Ümit 2026-06-12: NİYET = iterasyonun Faz 1 hedefi (backend'den, sabit). Yoksa eski heuristik (ilk user
+  // mesajı) — ama o boot/trim sonrası yanlış olabilir (son askq cevabını gösterebilir), bu yüzden intent tercih.
+  const firstUserPrompt = iterationIntent ?? messages.find((m) => m.role === "user")?.text;
 
   // Ümit 2026-06-12: chat balonlarına + tüm sohbete kopyalama. clipboard yazımı + kısa "✓" geri bildirimi
   // (1.2sn). copiedId="__all__" → tüm-sohbet butonu; aksi mesaj id'si.

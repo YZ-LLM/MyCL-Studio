@@ -94,6 +94,9 @@ interface MainState {
   } | null;
   phase: PhaseId;
   phaseStatus: PhaseStatus;
+  /** Ümit 2026-06-12: İterasyonun Faz 1 hedefi (NİYET kutusu). Backend'den iteration_intent ile gelir;
+   *  null ise ChatPanel "ilk user mesajı" heuristiğine düşer (geri uyum). */
+  iterationIntent: string | null;
   /** Sticky loading banner — emitPhaseRunning / emitPhaseIdle ile yönetilir. */
   runningBanner: { label: string; detail?: string; ts: number } | null;
   /** Feature 3 history state. */
@@ -137,6 +140,7 @@ const INITIAL_STATE: MainState = {
   runningBanner: null,
   phase: 1,
   phaseStatus: "running",
+  iterationIntent: null,
   historyLoaded: false,
   oldestLoadedTs: 0,
   olderAvailable: true,
@@ -244,6 +248,10 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       },
       phaseStatus: "waiting",
     };
+  }
+  if (ev.kind === "iteration_intent") {
+    // Ümit 2026-06-12: NİYET kutusu = iterasyonun Faz 1 hedefi (sabit). null → heuristiğe düş.
+    return { ...state, iterationIntent: ev.data.text };
   }
   if (ev.kind === "token_totals") {
     return { ...state, tokenTotals: ev.data };
@@ -1255,6 +1263,7 @@ function App() {
         )}
         <ChatPanel
           messages={mainState.messages}
+          iterationIntent={mainState.iterationIntent}
           pendingAskq={mainState.pendingAskq}
           runningBanner={mainState.runningBanner}
           disabled={composerDisabled}
