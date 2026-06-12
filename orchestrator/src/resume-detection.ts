@@ -39,6 +39,13 @@ export function detectInterruptedPhase2To9Pure(
   const handled = audit.some(
     (e) => e.ts > scopeStartTs && (e.event === `phase-${cp}-complete` || e.event === `phase-${cp}-skipped`),
   );
-  if (handled) return null;
+  // Ümit 2026-06-12: ONAY fazları (2 hassasiyet, 3 brief, 4 spec, 7 DB) interaktiftir. Bir faz GERÇEKTEN
+  // tamamlanınca advanceToNextPhase current_phase'i ilerletir (index.ts: `current_phase = next`). Demek ki
+  // current_phase HÂLÂ bu onay fazındaysa, faz park etmiş/yeniden-açılmış demektir: verify-up bir önceki koşuyu
+  // tamamlayıp (BAYAT phase-N-complete bırakır) Faz N'e geri dönüp YENİ bir onay açmış olabilir. Bu durumda
+  // bayat complete'e rağmen RESUME et — onayı otomatik yeniden aç; orkestratör "soldan faza tıkla" DEMESİN
+  // ("nerede kaldıysak orayı aç"). Onaylanınca loop ilerler → döngü yok. Mekanik fazlarda (10-17) eski davranış.
+  const APPROVAL_PHASES = new Set<number>([2, 3, 4, 7]);
+  if (handled && !APPROVAL_PHASES.has(cp)) return null;
   return { phaseId: cp as PhaseId };
 }
