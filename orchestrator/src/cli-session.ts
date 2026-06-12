@@ -150,6 +150,10 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
     let resultErrorText = "";
     let stderrTail = "";
     let usage: TokenUsage | undefined;
+    // Ümit 2026-06-12 (#5 kör-nokta log): hang teşhisi için SON olayın türü + zamanı. Idle-timeout/close'ta
+    // loglanır → "ne yaparken/hangi olaydan sonra sustu" görünür (Faz 9 18dk hang'inde bu bilgi YOKTU).
+    let lastEventType = "none";
+    let lastEventTs = Date.now();
 
     const child = spawn(spawnCmd.cmd, spawnCmd.args, {
       cwd: opts.cwd,
@@ -173,7 +177,17 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
       clearTimeout(timer);
       if (timeoutMs <= 0) return; // sınırsız (Ümit): idle-kill kapalı
       timer = setTimeout(() => {
-        log.warn("cli-session", "idle timeout — killing claude", { timeoutMs, resume: opts.resume });
+        log.warn("cli-session", "idle timeout — killing claude (HANG teşhisi)", {
+          timeoutMs,
+          resume: opts.resume,
+          model: opts.modelId,
+          lastEventType, // son alınan stream olayı (assistant/result/rate_limit/none)
+          msSinceLastEvent: Date.now() - lastEventTs, // son olaydan beri geçen süre (≈ sessizlik)
+          turnsSoFar: turns,
+          textChunks: texts.length,
+          toolUsesSoFar: toolUses.length,
+          stderrTail: stderrTail.slice(-300),
+        });
         done({ ok: false, text: texts.join(""), toolUses, turns, usage, error: `cli idle timeout ${timeoutMs}ms` });
       }, timeoutMs);
     };
@@ -191,6 +205,8 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
         return; // NDJSON olmayan satır (banner) — atla
       }
       const type = ev.type;
+      lastEventType = typeof type === "string" ? type : "unknown"; // #5: hang teşhisi
+      lastEventTs = Date.now();
       if (type === "rate_limit_event") {
         // v15.12 Auto Mode: abonelik usage-limit + resetsAt sinyali.
         noteRateLimitEvent(ev.rate_limit_info as RateLimitInfo | undefined);
