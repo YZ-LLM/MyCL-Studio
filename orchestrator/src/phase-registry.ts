@@ -55,6 +55,13 @@ function securityRulePath(name: string): string {
   return join(ASSETS_ROOT, "security-rules", name);
 }
 
+/** assets/quality-rules/ altındaki kod-kalite (güvenlik-DIŞI) kural dosyası (Birim 1:
+ *  code-quality.yml). Güvenlikten AYRI klasör — semantik netlik (Faz 10 Lint extra_scan).
+ *  securityRulePath ile aynı mutlak-yol gereği. */
+function qualityRulePath(name: string): string {
+  return join(ASSETS_ROOT, "quality-rules", name);
+}
+
 export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
   0: {
     id: 0,
@@ -261,6 +268,21 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
       fix_cmd: { type: "profile_key", key: "lint_fix", scoped_key: "lint_fix_scoped" },
       max_rescans: 1,
       skip_unless: "always",
+      // Birim 1 (Ümit 2026-06-12): kod-kalite anti-pattern semgrep seti — güvenlik-DIŞI
+      // mühendislik kuralları (yutulan hata, debug artığı, ts-suppress kaçağı). Faz 10
+      // (Lint) semantik yuva. Bozuk kural/araç-crash (exit 2) → fail DEĞİL skip
+      // (tool_error_codes). scoped: changedScope doluysa yalnız değişen dosyalara koşar.
+      extra_scans: [
+        {
+          name: "code-quality",
+          cmd: `semgrep --config "${qualityRulePath("code-quality.yml")}" src/ --exclude='mycl-audit*' --error --quiet`,
+          scoped_cmd_template: `semgrep --config "${qualityRulePath("code-quality.yml")}" {files} --exclude='mycl-audit*' --error --quiet`,
+          // semgrep araç/kural sorunu → fail DEĞİL skip: 2=fatal/bozuk-kural(validate) +
+          // bozuk-tarama-root, 7=runtime invalid-rule (düşman-gözü K3-A: tarama modunda
+          // bozuk kural 2 değil 7 verir). Gerçek bulgu=1 → fail (skip değil).
+          tool_error_codes: [2, 7],
+        },
+      ],
     },
   },
   11: {

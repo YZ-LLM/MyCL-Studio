@@ -46,19 +46,24 @@ step "5/6 Eski-iddia taraması (aktif/tracked dosyalar)"
 stale=$(git grep -lE "20 Faz|20-phase|MIMARI YASAKLARI|126 test|v1[34] —" -- . "${EXCL[@]}" 2>/dev/null || true)
 if [ -z "$stale" ]; then ok "eski iddia yok"; else bad "eski iddia bulundu"; echo "$stale" | sed 's/^/      /'; fi
 
-# Güvenlik gate'inin custom semgrep kuralları (Faz 13) bozuksa runner tool_error_codes
-# ile SESSİZCE skip eder → güvenlik sessizce düşer. O yüzden YAML'ları validate et.
-# semgrep yoksa (CI'da kurulu olmayabilir) ATLA — eksik araç CI'yı KIRMASIN (bu bir
-# geliştirme-zamanı drift guard'ı; gerçek tarama runtime'da Faz 13'te).
-step "6/6 Güvenlik kuralları (semgrep --validate, varsa)"
+# Custom semgrep kuralları (güvenlik=Faz 13, kod-kalite=Faz 10) bozuksa runner
+# tool_error_codes ile SESSİZCE skip eder → gate sessizce düşer. O yüzden YAML'ları
+# validate et. semgrep yoksa (CI'da kurulu olmayabilir) ATLA — eksik araç CI'yı KIRMASIN
+# (bu bir geliştirme-zamanı drift guard'ı; gerçek tarama runtime'da Faz 10/13'te).
+step "6/6 Custom semgrep kuralları (güvenlik + kod-kalite; --validate, varsa)"
 if command -v semgrep >/dev/null 2>&1; then
   if semgrep --validate --config assets/security-rules/ >/dev/null 2>&1; then
-    ok "custom güvenlik kuralları geçerli"
+    ok "custom güvenlik kuralları geçerli (Faz 13)"
   else
     bad "assets/security-rules/ — geçersiz semgrep kuralı (Faz 13 güvenlik gate'i sessizce düşer)"
   fi
+  if semgrep --validate --config assets/quality-rules/ >/dev/null 2>&1; then
+    ok "custom kod-kalite kuralları geçerli (Faz 10)"
+  else
+    bad "assets/quality-rules/ — geçersiz semgrep kuralı (Faz 10 kod-kalite gate'i sessizce düşer)"
+  fi
 else
-  ok "semgrep yok — kural validate atlandı (runtime Faz 13'te taranır)"
+  ok "semgrep yok — kural validate atlandı (runtime Faz 10/13'te taranır)"
 fi
 
 printf '\n'

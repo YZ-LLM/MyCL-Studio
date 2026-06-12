@@ -1,0 +1,95 @@
+# code-quality — güvenlik-DIŞI, proje-agnostik mühendislik anti-pattern'leri (Birim 1).
+# Florian Buetow tezi: "asla hata yutma — her hata propagate edilmeli"; commit'e debug
+# artığı / tip-suppress kaçağı sızmasın. Faz 10 (Lint) extra_scan (semgrep). Bozuk kural /
+# araç-crash (exit 2 veya 7) → runner tool_error_codes ile skip (yanlış-blocking yapmaz).
+#
+# MUAFİYET (yanlış-pozitif tasarımı): bilerek yapılan istisna (best-effort cleanup, meşru
+# durum) için `// nosemgrep: <kural-id>` (Python'da `# nosemgrep: <id>`) + GEREKÇE ekle.
+# semgrep eşleşmenin BAŞLANGIÇ satırında bastırır → muafiyeti DOĞRU satıra koy:
+#   • JS/TS hata yutma: `} catch (e) {}` satırına (kural catch'te başlar).
+#   • Python hata yutma: `try:` satırına (Python except tek başına pattern olamaz → kural
+#     try/except bloğunu eşler, başlangıç `try:` satırıdır).
+#   • Tek-satır kurallar (debugger, @ts-ignore): kendi satırına.
+# Bu "sessiz yutma yasak ama AÇIKÇA gerekçelendirilen istisna serbest" (Florian) ilkesini zorlar.
+#
+# KAPSAM NOTU: console.log kasıtlı olarak DAHİL DEĞİL — JS/TS'de hem debug artığı hem meşru
+# I/O (Express/CLI startup log, logger soyutlaması) için kullanılan TEK API'dir; semantik
+# ayrım yapılamaz → blanket-blok yanlış-pozitif fabrikası + çözülemeyen döngü olur (düşman-gözü
+# K1 doğruladı). `debugger` ise tartışmasız debug artığı → dahil. Gerçek log için logger kullan.
+
+rules:
+  # ── Hata yutma: JS/TS (swallowed error) ───────────────────────────────────
+  - id: mycl-swallowed-error-js
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >
+      Boş catch — hata sessizce yutuluyor (Florian: "asla hata yutma, propagate et").
+      Hatayı işle, yeniden-fırlat (throw) veya en azından logla. Bilerek yutuyorsan
+      `} catch ... {}` SATIRINA `// nosemgrep: mycl-swallowed-error-js` + gerekçe ekle
+      (örn. best-effort cleanup).
+    patterns:
+      - pattern-either:
+          # try/catch: boş gövde (bare catch → eşleşme catch satırında başlar)
+          - pattern: "catch ($E) {}"
+          - pattern: "catch ($E) { ; }"
+          - pattern: "catch {}"
+          # promise: boş .catch() handler (en yaygın gerçek-dünya yutma biçimi)
+          - pattern: "$P.catch(() => {})"
+          - pattern: "$P.catch(($E) => {})"
+          - pattern: "$P.catch(function () {})"
+          - pattern: "$P.catch(function ($E) {})"
+
+  # ── Hata yutma: Python (swallowed error) ──────────────────────────────────
+  - id: mycl-swallowed-error-python
+    languages: [python]
+    severity: ERROR
+    message: >
+      İstisna sessizce yutuluyor (`except: pass`/`...`). Hatayı işle/logla/yeniden-fırlat.
+      Bilerek ise `try:` SATIRINA `# nosemgrep: mycl-swallowed-error-python` + gerekçe ekle
+      (Python except tek başına pattern olamaz → muafiyet try satırına).
+    patterns:
+      - pattern-either:
+          - pattern: |
+              try:
+                  ...
+              except:
+                  pass
+          - pattern: |
+              try:
+                  ...
+              except $EXC:
+                  pass
+          - pattern: |
+              try:
+                  ...
+              except:
+                  ...
+          - pattern: |
+              try:
+                  ...
+              except $EXC:
+                  ...
+
+  # ── Debug artığı: debugger ifadesi ────────────────────────────────────────
+  - id: mycl-leftover-debugger
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >
+      `debugger` ifadesi commit'e sızmış (debug artığı) — kaldır. Bilerek ise
+      `// nosemgrep: mycl-leftover-debugger` ekle.
+    pattern: debugger
+
+  # ── Tip-denetimi kaçağı: @ts-ignore / @ts-nocheck ─────────────────────────
+  - id: mycl-ts-suppression
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >
+      `@ts-ignore`/`@ts-nocheck` tip hatasını gizler (gerçek bug saklanır). Hatayı
+      düzelt; gerçekten gerekiyorsa hata mesajını DOĞRULAYAN `@ts-expect-error` kullan
+      veya `// nosemgrep: mycl-ts-suppression` + gerekçe ekle.
+    # Yalnız YORUM başlangıcını hedefle (// veya /* sonrası) → string/template-literal
+    # içindeki "@ts-ignore" metni yanlış-bloklanmaz (düşman-gözü K1b doğruladı).
+    patterns:
+      - pattern-either:
+          - pattern-regex: '//\s*@ts-(ignore|nocheck)'
+          - pattern-regex: '/\*\s*@ts-(ignore|nocheck)'
