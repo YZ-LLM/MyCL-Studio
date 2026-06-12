@@ -147,6 +147,14 @@ export function isTestCommand(cmd: string): boolean {
   return TEST_CMD_PATTERNS.some((re) => re.test(cmd));
 }
 
+// Ümit 2026-06-12 (#2): son regresyon imzası (escalation retry'leri arası — her retry yeni Phase8Controller).
+// Anahtar `proje::iterasyon`; aynı imza tekrarlarsa tırmanma kesilir. Yeni iterasyon farklı anahtar (bayat eşleşme
+// yok); başarıda temizlenir. clearRegressionSig() index.ts yeni-iterasyon/temizlikte çağırabilir.
+const _lastRegressionSig = new Map<string, string>();
+export function clearRegressionSig(projectRoot: string, iteration: number): void {
+  _lastRegressionSig.delete(`${projectRoot}::${iteration}`);
+}
+
 export class Phase8Controller {
   public statePatch: Partial<State> = {};
   private base: CodegenBackend | null = null;
@@ -176,6 +184,9 @@ export class Phase8Controller {
   // yalnız YENİ düşen testte fail eder; önceden-kırık/alakasız fix'in suçu sayılmaz. null = baseline kurulamadı
   // (test komutu yok / runner ayrıştırılamadı) → anchor mutlak davranışa düşer (güvenli).
   private baseline: { failures: Set<string>; green: boolean } | null = null;
+  // Ümit 2026-06-12 (#2): bu denemenin regresyonu bir öncekiyle AYNI mı (model gücü çözmüyor) → gate'te
+  // escalatable=false yapar (tırmanmayı keser). Anchor set eder, gate okur.
+  private regressionRepeated = false;
 
   private readonly state: State;
   private readonly config: MyclConfig;
@@ -644,6 +655,7 @@ export class Phase8Controller {
         log.warn("phase-8", "handoff write failed (non-blocking)", e);
       }
       disarmRollback(); // faz başarıyla bitti → iyi işi kilitle (geri-alınmasın)
+      clearRegressionSig(this.state.project_root, this.state.iteration_count ?? 1); // başarı → bayat imza kalmasın
       return "complete";
     }
     // Fail nedenini kullanıcıya görünür yap. Ümit 2026-06-12: mesajlar DÜRÜST — eski hali yanıltıcıydı
@@ -681,7 +693,9 @@ export class Phase8Controller {
     // acCoverageOk false ve geri kalan TEMİZ) model gücüyle çözülmez → escalatable=false → failPhase tırmanmaz.
     const codeQualityFail =
       greens < minGreens || lastEvent !== "tdd-green" || !finalSuiteRun || !debtOk || !reproOk;
-    this.lastFailEscalatable = codeQualityFail;
+    // Ümit 2026-06-12 (#2): kod-fail olsa bile AYNI regresyon tekrar ettiyse model gücü çözmüyor →
+    // escalatable=false → failPhase tırmanmaz (7-basamak boş yakma yerine durup yaklaşımı sorgulatır).
+    this.lastFailEscalatable = codeQualityFail && !this.regressionRepeated;
     await this.rollbackFixIfNeeded();
     // ③ Structured handoff (Missions): başarısız devir — durum + neden + keşfedilen (takip zemini).
     try {
@@ -834,6 +848,18 @@ export class Phase8Controller {
             `${reg.regressed.slice(0, 5).join(" | ").slice(0, 200)}` +
             `${reg.regressed.length > 5 ? ` (+${reg.regressed.length - 5} daha)` : ""}. ` +
             `(Önceden-var ${reg.preExistingCount} fail ayrı — onlar fix-dışı.)`;
+          // Ümit 2026-06-12 (#2): AYNI regresyon imzası bir önceki denemede de olduysa → daha güçlü model
+          // AYNI testleri kırıyor → model gücü sorunu DEĞİL → tırmanmayı KES (7-basamak Opus·xhigh'a kadar
+          // boş yakma). İmza = sıralı regressed test id'leri; anahtar proje+iterasyon (iterasyonlar arası bayat eşleşme yok).
+          const sig = [...reg.regressed].sort().join("\n");
+          const key = `${this.state.project_root}::${this.state.iteration_count ?? 1}`;
+          if (_lastRegressionSig.get(key) === sig) {
+            this.regressionRepeated = true;
+            verdictMsg +=
+              ` ⛔ AYNI regresyon bir önceki denemede de oldu — daha güçlü model çözmüyor → merdiven tırmanmayı KESİYORUM. ` +
+              `Bu fix yaklaşımı bu testleri kaçınılmaz kırıyor; yaklaşım veya test-sözleşmesi gözden geçirilmeli.`;
+          }
+          _lastRegressionSig.set(key, sig);
         }
       }
     }

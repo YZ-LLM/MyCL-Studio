@@ -2,13 +2,16 @@
 // darboğazda devam etsin" → otonom düzeltme GÜVENLİ olmalı). Git deposunda checkpoint (ucuz); git YOKSA kaynak
 // ağacını `.mycl/backups/<ts>/`'a kopyalar (node_modules vb. hariç). Yanlış oto-düzeltme geri alınabilir.
 
-import { cp, mkdir } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { basename, join, relative } from "node:path";
 import { createCheckpoint, restoreCheckpoint } from "./git.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { globalConfigDir } from "./paths.js";
 
+// Yedeklenmeyen + restore'da SİLİNMEYEN top-level dizinler. node_modules/.git/dist vb. ağır/türetilmiş;
+// .mycl (MyCL state) + error_folder (hata kataloğu) BİLEREK korunur — rollback "MyCL state ve hata kataloğu
+// korundu" sözünü tutar (Ümit 2026-06-12: error_folder eklendi — yoksa ayna-restore onu da geri alırdı).
 const EXCLUDE_TOP = new Set([
   "node_modules",
   ".git",
@@ -18,6 +21,7 @@ const EXCLUDE_TOP = new Set([
   "out",
   "coverage",
   ".mycl",
+  "error_folder",
   ".turbo",
   ".cache",
   ".vite",
@@ -76,8 +80,49 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
 }
 
 /**
+ * Ümit 2026-06-12 KRİTİK FİX: copy-restore artık GERÇEK AYNA. Eski hali yalnız `cp(backup→proje)` ile üzerine
+ * yazıyordu → fix'in EKLEDİĞİ dosyalar (yeni util/test dosyaları) SİLİNMİYORDU → her başarısız fix'in artığı
+ * birikiyor, fix-öncesi baseline kırık-sayısı tur tur şişiyordu (gözlemlendi: 20→21→24) + "geri aldım" YALAN
+ * oluyordu + regresyon baseline'ı zehirleniyordu. Ayna-restore: (1) backup'ı projeye yaz, (2) projede olup
+ * backup'ta OLMAYAN dosyaları SİL (hariç-tutulan top-level dizinler hariç). Sonuç: proje TAM olarak snapshot anı.
+ */
+async function mirrorRestore(backupDir: string, projectRoot: string): Promise<void> {
+  // 1. Backup içeriğini projeye yaz — değişen/silinen dosyalar geri gelir.
+  await cp(backupDir, projectRoot, { recursive: true, force: true });
+  // 2. Projede olup backup'ta OLMAYAN dosyaları sil = fix'in EKLEDİĞİ fazlalık. Hariç-tutulan top-level
+  //    dizinlere (node_modules/.git/.mycl/error_folder/dist...) DOKUNMA — bilerek yedeklenmedi/korunuyor.
+  await removeAddedFiles(projectRoot, backupDir, projectRoot);
+}
+
+/** projeRoot altını gez; backup'ta karşılığı OLMAYAN dosya/dizini sil. Top-level EXCLUDE_TOP atlanır (korunur). */
+async function removeAddedFiles(dir: string, backupRoot: string, projectRoot: string): Promise<void> {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return; // dizin yok/okunamadı → atla
+  }
+  for (const e of entries) {
+    const full = join(dir, e.name);
+    const rel = relative(projectRoot, full);
+    const top = rel.split(/[/\\]/)[0];
+    if (EXCLUDE_TOP.has(top)) continue; // yedeklenmemiş/korunan dizin → dokunma
+    const inBackup = join(backupRoot, rel);
+    const existsInBackup = await stat(inBackup).then(() => true).catch(() => false);
+    if (!existsInBackup) {
+      // backup'ta yok → fix ekledi → sil (dosya VEYA tüm alt-ağaç).
+      await rm(full, { recursive: true, force: true }).catch((err) =>
+        log.warn("fix-snapshot", "mirror: added-file silinemedi (non-fatal)", { full, err }),
+      );
+      continue;
+    }
+    if (e.isDirectory()) await removeAddedFiles(full, backupRoot, projectRoot);
+  }
+}
+
+/**
  * Bir snapshot'tan projeyi GERİ YÜKLE. git → restoreCheckpoint (checkout+clean, fix'in eklediği dosyalar da gider);
- * copy → yedek dizini proje üstüne kopyalanır (silinen/değişen dosyalar döner; fix'in eklediği fazlalık kalabilir).
+ * copy → AYNA-restore (mirrorRestore): proje tam olarak snapshot anına döner (fix'in eklediği dosyalar dahil temizlenir).
  */
 export async function restoreSnapshot(snap: FixSnapshot, projectRoot: string): Promise<boolean> {
   try {
@@ -86,7 +131,7 @@ export async function restoreSnapshot(snap: FixSnapshot, projectRoot: string): P
       return ok;
     }
     if (snap.method === "copy" && snap.dir) {
-      await cp(snap.dir, projectRoot, { recursive: true, force: true });
+      await mirrorRestore(snap.dir, projectRoot);
       return true;
     }
     return false;

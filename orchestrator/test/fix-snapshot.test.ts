@@ -48,6 +48,33 @@ describe("snapshotBeforeAutofix (git yoksa .mycl/backups kopya)", () => {
     expect(await readFile(join(dir, "keep.txt"), "utf8")).toBe("orig\n");
   });
 
+  // Ümit 2026-06-12 KRİTİK (#1): ayna-restore — fix'in EKLEDİĞİ dosyalar da silinmeli (baseline drift'in kökü);
+  // error_folder (hata kataloğu) ve .mycl KORUNMALI. Eski cp-over yalnız üzerine yazıp eklenenleri bırakıyordu.
+  it("ayna-restore eklenen dosyaları siler + error_folder/.mycl korur (baseline drift fix)", async () => {
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "app.js"), "orig\n");
+    await mkdir(join(dir, "error_folder"), { recursive: true });
+    await writeFile(join(dir, "error_folder", "errors.db"), "catalog\n");
+    const snap = await snapshotBeforeAutofix(dir, 1781000000010);
+    expect(snap.method).toBe("copy");
+    // Fix simülasyonu: YENİ dosya/dizin ekle + mevcut boz + error_folder'a hata ekle.
+    await writeFile(join(dir, "src", "added-by-fix.js"), "junk\n");
+    await mkdir(join(dir, "src", "utils"), { recursive: true });
+    await writeFile(join(dir, "src", "utils", "sanitize.js"), "added module\n");
+    await writeFile(join(dir, "src", "app.js"), "BROKEN\n");
+    await writeFile(join(dir, "error_folder", "errors.db"), "catalog+newerror\n");
+    // Ayna geri-yükleme
+    expect(await restoreSnapshot(snap, dir)).toBe(true);
+    // Mevcut dosya geri geldi
+    expect(await readFile(join(dir, "src", "app.js"), "utf8")).toBe("orig\n");
+    // Fix'in EKLEDİĞİ dosya/dizin SİLİNDİ (drift kaynağı kapandı)
+    expect(existsSync(join(dir, "src", "added-by-fix.js"))).toBe(false);
+    expect(existsSync(join(dir, "src", "utils"))).toBe(false);
+    // error_folder KORUNDU (rollback'te geri ALINMAZ — hata kataloğu sözü)
+    expect(existsSync(join(dir, "error_folder", "errors.db"))).toBe(true);
+    expect(await readFile(join(dir, "error_folder", "errors.db"), "utf8")).toBe("catalog+newerror\n");
+  });
+
   it("peekRollback armed snapshot'ı temizlemeden döner (Faz 8 çift-yedek almasın)", async () => {
     await writeFile(join(dir, "a.js"), "1\n");
     const snap = await snapshotBeforeAutofix(dir, 1781000000002); // arm eder
