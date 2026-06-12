@@ -38,6 +38,7 @@ import {
 import { computeVerdict, type HarnessVerdict } from "./harness-verdict.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import { detectInterruptedPhase2To9Pure } from "./resume-detection.js";
+import { SerialWorkQueue } from "./serial-queue.js";
 import { runDast } from "./dast-runner.js";
 import { setRecordContext } from "./record-context.js";
 import {
@@ -1491,11 +1492,22 @@ async function handleCommandDirect(
       log.warn("orchestrator", "command_direct history fail", err),
     );
   }
-  if (runtime.controller) {
-    emitChatMessage(
-      "system",
-      "Faz zaten çalışıyor — komut bekletildi.",
-    );
+  // Ümit 2026-06-12: busy iken DÜŞÜRME (eski "komut bekletildi" + return = kayıp). command_direct
+  // paralel-değil (shared pipeline'a dokunur) → kuyruğa al; faz/orkestratör boşa çıkınca sırayla işlenir.
+  // submit() boşsa hemen çalıştırır (gövdeyi await eder), meşgulse sıraya alıp görünür bilgilendirir.
+  await commandDirectQueue.submit({ text, intentKind });
+}
+
+/**
+ * command_direct'in ASIL gövdesi — kuyruk kilidi altında çalışır (tek seferde bir tane). history
+ * kaydı + meşguliyet kontrolü handleCommandDirect/kuyruktadır; burada yalnız precondition + komut.
+ */
+async function runCommandDirectBody(
+  text: string,
+  intentKind: "run" | "test" | "build" | "install" | "lint",
+): Promise<void> {
+  if (!runtime.state || !runtime.config) {
+    emitError("no active project", null);
     return;
   }
   // Phase 0 D2_WAITING'de yeni komut başlatma — askq cevabı bekleniyor;
@@ -1533,6 +1545,33 @@ let _handlingUserMessage = false;
 // fazı EZER → çalışanı durdur (abort), yeni isteği lock boşalınca işle. Reddetme YOK.
 let _pendingRedirect: string | null = null;
 let _userInitiatedAbort = false;
+
+// Ümit 2026-06-12: pipeline-derinlik sayacı. advanceToNextPhase fazlar arasında kısa süre controller=null
+// bırakır (await appendCost gibi) + failPhase içinden ÖZYİNELEMELİ çağrılır → basit boolean drain'i fazlar
+// arasına sızdırır. Sayaç: girişte ++, çıkışta (her return/break/throw) --; >0 ise pipeline koşuyor sayılır.
+let _pipelineDepth = 0;
+
+// Paralel-OLMAYAN işler (▶ Çalıştır/build/test/lint = command_direct) için FIFO kuyruk. Busy iken DÜŞÜRMEK
+// yerine sıraya alır; faz/orkestratör/pipeline boşa çıkınca sırayla işler. Paralel-güvenli işler (quality
+// audit, DAST, read-only sorgular) bu kuyruğa girmez — onlar zaten serbest koşar.
+const commandDirectQueue = new SerialWorkQueue<{
+  text: string;
+  intentKind: "run" | "test" | "build" | "install" | "lint";
+}>({
+  isExternallyBusy: () =>
+    runtime.controller !== null || _handlingUserMessage || _pipelineDepth > 0,
+  exec: ({ text, intentKind }) => runCommandDirectBody(text, intentKind),
+  onEnqueue: (_item, position) =>
+    emitChatMessage(
+      "system",
+      `🧾 İş kuyruğa alındı (sıra ${position}) — çalışan iş bitince işlenecek.`,
+    ),
+  onResume: (item, remaining) =>
+    emitChatMessage(
+      "system",
+      `▶️ Kuyruktan alındı, işleniyor: "${item.text.slice(0, 40)}"${remaining > 0 ? ` (kalan ${remaining})` : ""}.`,
+    ),
+});
 
 /** Çalışan fazı/işi kullanıcı yönlendirmesi nedeniyle durdurmak için (failPhase analizini atlatır). */
 function isUserInitiatedAbort(): boolean {
@@ -1576,6 +1615,10 @@ async function handleUserMessage(text: string): Promise<void> {
     _userInitiatedAbort = false;
     await handleUserMessage(next);
   }
+  // Bu tur pipeline tetiklemediyse (sohbet/karar) sistem şimdi boşta — bekleyen command_direct varsa işle.
+  // Pipeline tetiklediyse advanceToNextPhase senkron olarak _pipelineDepth'i artırmıştır → drain no-op,
+  // pipeline bitince kendi finally'sinde boşaltılır.
+  void commandDirectQueue.drain();
 }
 async function handleUserMessageInner(text: string): Promise<void> {
   log.info("orchestrator", "user_message", { text_len: text.length });
@@ -2319,6 +2362,20 @@ function isPhaseSkippedByScope(state: State, phaseId: number): boolean {
 }
 
 export async function advanceToNextPhase(from: PhaseId): Promise<void> {
+  // Ümit 2026-06-12: pipeline-derinliğini say (özyinelemeli failPhase→advance çağrıları + fazlar arası
+  // controller=null boşlukları için). En dış çıkışta (derinlik 0) sistem GERÇEKTEN boşa çıkar → bekleyen
+  // command_direct kuyruğunu boşalt. try/finally → her return/break/throw'da sayaç düzgün iner (kalıcı
+  // "pipeline koşuyor" yanlış-pozitifi yok).
+  _pipelineDepth++;
+  try {
+    await advanceToNextPhaseInner(from);
+  } finally {
+    _pipelineDepth--;
+    if (_pipelineDepth === 0) void commandDirectQueue.drain();
+  }
+}
+
+async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
   if (!runtime.state || !runtime.config) return;
   // Narrowing — döngü içinde runtime.state assignments TS'in null-check'ini bozar.
   let state: State = runtime.state;
@@ -4529,6 +4586,8 @@ ipcRouter.register("ping", (data: unknown) =>
 );
 ipcRouter.register("open_project", async (data: unknown) => {
   const d = data as { path?: string } | undefined;
+  // Proje değişiyor → önceki projeye ait bekleyen command_direct'ler bayat → at.
+  commandDirectQueue.clear();
   await handleOpenProject(String(d?.path ?? ""));
 });
 ipcRouter.register("user_message", async (data: unknown) => {
@@ -4610,6 +4669,22 @@ ipcRouter.register("start_quality_audit", async (data: unknown) => {
     emitError("no active project", null);
     return;
   }
+  // Ümit 2026-06-12 ("paralel-güvenli işi kaynak varsa başlat"): denetim ajanı faz çalışırken serbest koşar
+  // (paralel-güvenli) ama AYNI ağır ajanı ikinci kez başlatma — çift-tık re-entrancy guard (DAST'taki gibi).
+  if (_qualityAuditRunning) {
+    emitChatMessage("system", "🕵️ Bir kalite denetimi zaten sürüyor — bitmesini bekle.");
+    return;
+  }
+  _qualityAuditRunning = true;
+  try {
+    await runQualityAuditFlow(data);
+  } finally {
+    _qualityAuditRunning = false;
+  }
+});
+let _qualityAuditRunning = false;
+async function runQualityAuditFlow(data: unknown): Promise<void> {
+  if (!runtime.state || !runtime.config) return;
   const questions = String((data as { questions?: unknown })?.questions ?? "").trim() || DEFAULT_QUALITY_QUESTIONS;
   const res = await runQualityAudit(runtime.config, runtime.state, questions);
   if (!res) return;
@@ -4635,7 +4710,7 @@ ipcRouter.register("start_quality_audit", async (data: unknown) => {
       emitChatMessage("system", "✅ Denetim temiz — bu koşuda kayda değer bir kalite sorunu bulunmadı.");
     }
   }
-});
+}
 // v15.7 (2026-05-25): Feature flags IPC
 ipcRouter.register("save_features", async (data: unknown) => {
   await handleSaveFeatures(data as Partial<import("./config.js").FeatureFlags>);
