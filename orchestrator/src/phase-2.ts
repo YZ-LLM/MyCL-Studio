@@ -172,22 +172,14 @@ export class Phase2Controller {
     // Fail policy: relevance API fail → injector "(no relevant ... found)"
     // sentinel döner; faz çökmez. relevance-engine emitError + log.warn
     // yapar — hata GİZLENMEZ ama compliance pass context'siz devam eder.
-    const existingSpecDigest = await buildRelevantSpecDigest(
-      this.config,
-      this.state,
-      auditIntent,
-    );
-    const abandonedDigest = await buildRelevantAbandonedDigest(
-      this.config,
-      this.state,
-      auditIntent,
-    );
-    // v15.11: mevcut özellik dökümantasyonu — ajan gereksiz/kapsam-dışı soru sormasın.
-    const featuresDigest = await buildRelevantFeatureDigest(
-      this.config,
-      this.state,
-      auditIntent,
-    );
+    // Ümit 2026-06-12 (perf): 3 digest BAĞIMSIZ relevance-LLM çağrısı — ardışık beklemek yerine PARALEL (3× hız).
+    // Her biri kendi fail-policy'sini taşır (sentinel döner, faz çökmez) → Promise.all güvenli.
+    const [existingSpecDigest, abandonedDigest, featuresDigest] = await Promise.all([
+      buildRelevantSpecDigest(this.config, this.state, auditIntent),
+      buildRelevantAbandonedDigest(this.config, this.state, auditIntent),
+      // v15.11: mevcut özellik dökümantasyonu — ajan gereksiz/kapsam-dışı soru sormasın.
+      buildRelevantFeatureDigest(this.config, this.state, auditIntent),
+    ]);
 
     let systemPrompt: string;
     try {
