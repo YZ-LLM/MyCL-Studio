@@ -39,13 +39,16 @@ export function detectInterruptedPhase2To9Pure(
   const handled = audit.some(
     (e) => e.ts > scopeStartTs && (e.event === `phase-${cp}-complete` || e.event === `phase-${cp}-skipped`),
   );
-  // Ümit 2026-06-12: ONAY fazları (2 hassasiyet, 3 brief, 4 spec, 7 DB) interaktiftir. Bir faz GERÇEKTEN
-  // tamamlanınca advanceToNextPhase current_phase'i ilerletir (index.ts: `current_phase = next`). Demek ki
-  // current_phase HÂLÂ bu onay fazındaysa, faz park etmiş/yeniden-açılmış demektir: verify-up bir önceki koşuyu
-  // tamamlayıp (BAYAT phase-N-complete bırakır) Faz N'e geri dönüp YENİ bir onay açmış olabilir. Bu durumda
-  // bayat complete'e rağmen RESUME et — onayı otomatik yeniden aç; orkestratör "soldan faza tıkla" DEMESİN
-  // ("nerede kaldıysak orayı aç"). Onaylanınca loop ilerler → döngü yok. Mekanik fazlarda (10-17) eski davranış.
-  const APPROVAL_PHASES = new Set<number>([2, 3, 4, 7]);
-  if (handled && !APPROVAL_PHASES.has(cp)) return null;
+  // Ümit 2026-06-12: bir faz GERÇEKTEN tamamlanınca advanceToNextPhase current_phase'i İLERLETİR (index.ts:
+  // `current_phase = next`). Demek ki current_phase HÂLÂ N ise faz PARK ETMİŞ/yeniden-açılmış demektir — gerçekten
+  // bitseydi N'de durmazdık. Park nedenleri: onay fazı (2/3/4/7) verify-up geri-dönüşüyle yeni onay açtı; ya da
+  // codegen/risk fazı (5/8/9) güvenlik-fix/verify-up ile YENİDEN girildi ama bitmeden oturum koptu (BAYAT
+  // phase-N-complete önceki koşudan kalır). Her iki halde de bayat complete'e rağmen RESUME et — "soldan faza tıkla"
+  // DEMESİN ("nerede kaldıysak orayı aç"). Re-run bitince loop ilerler → döngü yok.
+  // HARİÇ: Faz 6 (deferred UI review — boot'ta pending_ui_tweak ile ayrı ele alınır) + mekanik gate'ler (10-17,
+  // tamamlanırsa truly-done, redo istemez). Boot-resume katmanı ayrıca pending_diagnostic/pending_ui_tweak'te
+  // resume yapmaz (kullanıcı seçimi bekleniyor) — bkz index.ts boot akışı.
+  const RESUMABLE_PARKED = new Set<number>([2, 3, 4, 5, 7, 8, 9]);
+  if (handled && !RESUMABLE_PARKED.has(cp)) return null;
   return { phaseId: cp as PhaseId };
 }

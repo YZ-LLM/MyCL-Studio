@@ -46,10 +46,28 @@ describe("resume-detection · detectInterruptedPhase2To9Pure", () => {
     expect(detectInterruptedPhase2To9Pure(s, audit)).toEqual({ phaseId: 4 });
   });
 
-  it("mekanik faz 6 + phase-6-complete VAR → null (onay-fazı istisnası 6'yı kapsamaz)", () => {
+  it("mekanik faz 6 + phase-6-complete VAR → null (deferred UI; istisna 6'yı kapsamaz)", () => {
     const s: S = { current_phase: 6, iteration_count: 1 };
     const audit = [ev(200, "phase-6-complete")];
     expect(detectInterruptedPhase2To9Pure(s, audit)).toBeNull();
+  });
+
+  // Ümit 2026-06-12: codegen/risk fazları (5/8/9) güvenlik-fix/verify-up ile YENİDEN girilebilir → park edebilir.
+  // Faz 8 bayat phase-8-complete'e rağmen current_phase=8'de park etmişse → resume (eskiden "soldan tıkla" diyordu).
+  it("codegen faz 8 (TDD) + bu iterasyonda phase-8-complete VAR ama park etmiş → resume {phaseId:8}", () => {
+    const s: S = { current_phase: 8, iteration_count: 1 };
+    const audit = [ev(100, "phase-8-complete"), ev(200, "phase-8-complete")];
+    expect(detectInterruptedPhase2To9Pure(s, audit)).toEqual({ phaseId: 8 });
+  });
+
+  it("risk faz 9 + phase-9-complete VAR ama park → resume {phaseId:9}", () => {
+    const s: S = { current_phase: 9, iteration_count: 1 };
+    expect(detectInterruptedPhase2To9Pure(s, [ev(100, "phase-9-complete")])).toEqual({ phaseId: 9 });
+  });
+
+  it("mekanik faz 13 + phase-13-complete VAR → null (mekanik gate; redo istemez)", () => {
+    const s: S = { current_phase: 13, iteration_count: 1 };
+    expect(detectInterruptedPhase2To9Pure(s, [ev(200, "phase-13-complete")])).toBeNull();
   });
 
   // ASIL BUG: uzun iter-2'de iteration-2-start audit tail'i dışında kalmış +

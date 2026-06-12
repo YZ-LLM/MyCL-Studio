@@ -919,7 +919,10 @@ async function handleOpenProject(path: string): Promise<void> {
     // Phase 5 tweak mode hariç (pending_ui_tweak akışı zaten kendi handler'ı
     // ile devam eder; çift tetik olmasın).
     const interrupted29 = await detectInterruptedPhase2To9(runtime.state);
-    if (interrupted29 && !runtime.state.pending_ui_tweak) {
+    // pending_ui_tweak → deferred UI akışı kendi handler'ında. pending_diagnostic → Faz 0 debug askq cevabı
+    // bekleniyor (Ümit 2026-06-12: Faz 8/9 resume genişledi → parked faz user-seçimi beklerken auto-resume
+    // ETME, seçimi baypas etmesin). İkisi de yoksa kaldığı yerden otomatik devam.
+    if (interrupted29 && !runtime.state.pending_ui_tweak && !runtime.state.pending_diagnostic) {
       const phaseId = interrupted29.phaseId;
       emitChatMessage(
         "system",
@@ -2262,6 +2265,7 @@ async function executeDispatchedIntent(
       pending_backend_fix: undefined,
       pending_migrations: undefined,
       pending_diagnostic: undefined,
+      pending_security_reverify: undefined, // #2 düşman-gözü: bayat güvenlik-reverify bayrağı sonraki iterasyona taşınmasın
       // v15.6: needed_phases scope iterasyon-spesifiktir — yeni iterasyonda
       // Faz 3 LLM tekrar önerir, kullanıcı tekrar onaylar.
       needed_phases: undefined,
@@ -3081,6 +3085,14 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         }
       }
 
+      // Ümit 2026-06-12 (#2): güvenlik fix sonrası Faz 13 forward re-run'ı TAM tara (scoped değil) — derin fix
+      // (Phase 0/8) yoluyla gelindiyse eksik/taşan güvenlik açığı yakalansın. Tek seferlik: tüketince temizle.
+      const securityReverifyFull = next === 13 && state.pending_security_reverify === true;
+      if (securityReverifyFull) {
+        state = { ...state, pending_security_reverify: undefined };
+        runtime.state = state;
+        await saveState(state);
+      }
       const runner = new MechanicalRunnerBase({
         tag: `phase-${next}`,
         displayLabel: phaseLabelTR(next, spec),
@@ -3089,8 +3101,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         mechanical: spec.mechanical_config,
         pass_event: passEvent,
         fail_event: failEvent,
-        // v15.9: scoped-touch modunda değişen dosyalara daralt (boş → tüm-proje).
-        changedScope: state.changed_scope?.files,
+        // v15.9: scoped-touch modunda değişen dosyalara daralt (boş → tüm-proje). #2: güvenlik re-verify → TAM.
+        changedScope: securityReverifyFull ? undefined : state.changed_scope?.files,
       });
       // Ümit: "çalışırken ne yaptığını söylesin." Mekanik faz (lint/test/build — yavaş olabilir)
       // çalıştığı sürece sticky banner. try/finally → takılı spinner yok.
@@ -3146,9 +3158,15 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           runtime.config
         ) {
           gateAutofixTried.add(13);
+          // Ümit 2026-06-12 (#2): güvenlik fix denendi → fix sonrası Faz 13 yeniden-tarama SCOPED değil TAM olsun
+          // (fix etkisi değişen-dosya dışına taşabilir + eksik fix yakalansın). In-phase re-verify zaten TAM
+          // (changedScope: undefined); flag derin fix → forward Faz 13 re-run için (aşağıda mekanik runner okur).
+          state = { ...state, pending_security_reverify: true };
+          runtime.state = state;
+          await saveState(state);
           emitChatMessage(
             "system",
-            "🔧 Faz 13 (Güvenlik) — bulguları fazın içinde düzeltiyorum + güvenliği yeniden doğruluyorum (Faz 8'e dönmeden).",
+            "🔧 Faz 13 (Güvenlik) — bulguları fazın içinde düzeltiyorum + güvenliği TAM yeniden doğruluyorum (scoped değil; Faz 8'e dönmeden).",
           );
           const fixRan = await runGateAutofix(state, cfg, 13, phaseLabelTR(13, spec), outcome.stderr);
           if (fixRan) {
@@ -3160,7 +3178,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               mechanical: spec.mechanical_config,
               pass_event: passEvent,
               fail_event: failEvent,
-              changedScope: state.changed_scope?.files,
+              changedScope: undefined, // #2: güvenlik re-verify TAM tara — scoped eksik fix'i kaçırmasın
             });
             emitPhaseRunning(phaseLabelTR(13, spec));
             let reOutcome;
@@ -3185,6 +3203,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
                 outcome = { kind: "fail", rescans: 0, stderr: "regression-guard: security fix broke tests" };
                 // continue ETME — aşağıdaki analiz/accept-continue regresyonu ele alsın.
               } else {
+                // #2: güvenlik TAM re-verify geçti → reverify flag'i tüketildi (forward'da tekrar full gerekmez).
+                state = { ...state, pending_security_reverify: undefined };
+                runtime.state = state;
                 cur = 13;
                 continue;
               }
@@ -3583,6 +3604,12 @@ export async function handleAskqAnswer(
     // yine PARTIAL = "tamamlandı ama güvenlik kabul edildi", asla çıplak PASS değil).
     if (sel === OPT_ACCEPT_CONTINUE && cached.acceptContinuePhase !== undefined) {
       const p = cached.acceptContinuePhase as PhaseId;
+      // Ümit 2026-06-12 (#2 düşman-gözü bulgusu): kullanıcı güvenlik bulgusunu KABUL ETTİ → fix yapılmayacak →
+      // pending_security_reverify bayat kalmasın (yoksa sonraki Faz 13 gereksiz TAM tarar). Temizle.
+      if (runtime.state.pending_security_reverify) {
+        runtime.state = { ...runtime.state, pending_security_reverify: undefined };
+        await saveState(runtime.state);
+      }
       await appendAuditModule(runtime.state.project_root, {
         ts: Date.now(),
         phase: p,
