@@ -64,8 +64,10 @@ export interface CliRunResult {
   usage?: TokenUsage;
 }
 
-// IDLE timeout: Ümit 2026-06-11 "idle timeout'u sınırsız yap" — 0 = idle-kill YOK (takılırsa Abort ile durdurulur).
-const DEFAULT_TIMEOUT_MS = 0;
+// IDLE timeout: Ümit 2026-06-12 — 0 (sınırsız) idi ama çıktı-üretmeyen hung claude SONSUZ takılıyordu (Faz 9
+// 18+ dk). İdle = ÇIKTI YOKLUĞU; 10 dk TAM SESSİZ = gerçek hang/deadlock → öldür. Aktif iş (thinking/tool çıktısı)
+// idle'ı sıfırlar → yavaş-ama-aktif iş ÖLMEZ. Uzun Bash tool'u (npm test/install) 10 dk'yı genelde aşmaz; aşan = stuck.
+const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öldür
 
 function buildArgs(opts: CliRunOpts): string[] {
   const args: string[] = [

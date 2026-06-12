@@ -64,9 +64,11 @@ export interface CliSessionResult {
   usage?: TokenUsage;
 }
 
-// IDLE timeout: Ümit 2026-06-11 "idle timeout'u sınırsız yap" — 0 = idle-kill YOK. Uzun codegen/thinking
-// öldürülmesin; takılırsa kullanıcı Abort ile durdurur. (Çıktı geldikçe zaten sıfırlanıyordu; artık hiç kesmez.)
-const DEFAULT_TIMEOUT_MS = 0;
+// IDLE timeout: Ümit 2026-06-11 "sınırsız yap" → 0 idi; AMA 2026-06-12 Faz 9 18+ dk SONSUZ takıldı (resume-claude
+// hung, hiç çıktı yok, 0 olduğu için asla ölmedi). İdle = ÇIKTI YOKLUĞU; `--include-partial-messages` her token
+// delta'sında sıfırlar → AKTİF iş (yavaş thinking dahil) ASLA tetiklemez, yalnız 10 dk TAM SESSİZ (gerçek hang/
+// deadlock) tetikler. Yani "yavaş işi öldürme" korunur, sonsuz takılma biter. Kill → fail → escalation/retry kurtarır.
+const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öldür (cömert; aktif iş token akıtır)
 
 function buildArgs(opts: CliSessionTurnOpts): string[] {
   // v15.12: her main-ajan user mesajına İngilizce-çıktı hatırlatması (ilk + resume

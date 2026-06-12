@@ -82,7 +82,7 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
       modelId: config.selected_models.main,
       cwd: state.project_root,
       allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-      timeoutMs: 0, // idle-timeout sınırsız (Ümit) — uzun test yazımı/koşumu kesilmesin
+      timeoutMs: 600_000, // Ümit 2026-06-12: 10 dk idle (çıktı yoksa) — hung'u kurtar; aktif test yazımı/koşumu çıktı akıtır, ölmez
     });
   } catch (e) {
     log.warn("adversarial-test", "çağrı başarısız", e);
