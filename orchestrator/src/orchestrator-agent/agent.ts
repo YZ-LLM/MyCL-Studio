@@ -26,6 +26,7 @@ import {
   type MyclConfig,
 } from "../config.js";
 import { emitAgentEvent } from "../ipc.js";
+import { VERIFY_BEFORE_CLAIM } from "../agent-language.js";
 import { log } from "../logger.js";
 import { safeEnv } from "../safe-env.js";
 import type { State } from "../types.js";
@@ -62,6 +63,9 @@ export async function buildOrchestratorSystemPrompt(
   const recurring = await detectRecurringTopic(config, state.project_root, userText);
   // Doğru-karar/recall: userText'i geçir → relevance-tabanlı "en ilgili geçmiş" recall.
   let systemPrompt = await buildAgentSystemPrompt(state, config, userText);
+  // Ümit 2026-06-12: orkestratör BEYİN de "önce sessizce kanıtla, sonra konuş" disiplinine uyar — kullanıcıya
+  // kanıtlamadığı kök-neden/iddia sunmaz (gözlemlenen yanlış-teşhisin — gerçek testleri okumadan E2BIG demek — önlemi).
+  systemPrompt += `\n\n---\n\n${VERIFY_BEFORE_CLAIM}`;
   if (recurring.recurring) {
     systemPrompt +=
       `\n\n---\n\n## BU KONU TEKRAR EDİYOR (v15.6 dedup)\n\n` +

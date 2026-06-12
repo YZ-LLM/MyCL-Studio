@@ -36,6 +36,9 @@ export const MAIN_AGENT_LANGUAGE_REMINDER =
  */
 export const VERIFY_BEFORE_CLAIM = [
   "VERIFY BEFORE YOU CLAIM (anti-false-positive discipline):",
+  // Ümit 2026-06-12: "önce sessizce kanıt bul, sonra konuş — her zaman kanıtlayabileceğini konuş." Listenin BAŞ
+  // kuralı: bir hata-analizi gerçek başarısız test listesini OKUMADAN E2BIG/boş-stub gibi sebepler UYDURMUŞTU.
+  "- FIND THE EVIDENCE SILENTLY FIRST, THEN SPEAK. Before saying anything, investigate QUIETLY — read the actual failing output/file/state, reproduce it, run the check. State ONLY conclusions you can prove from evidence you actually gathered. NEVER narrate a hypothesis, a guess, or a plausible-sounding cause as if it were a finding. If you have not gathered the evidence yet, gather it before claiming — or say nothing on that point. (Concrete failure to avoid: blaming 'E2BIG / empty test stubs' for failures WITHOUT having read the real failing-test list first.)",
   "- Separate a HYPOTHESIS ('I suspect X') from a CONFIRMED FACT ('I checked and X is true'). Never act on a guess as if it were fact.",
   "- Before treating a diagnosis / root-cause / finding as real, CONFIRM it against concrete evidence — read the actual file/state/output, reproduce it, run the check. If you cannot confirm, label it UNCONFIRMED and say so instead of asserting it.",
   "- A clipped / excerpted / missing piece of evidence is NOT proof of a defect — it may be the excerpt boundary, not the artifact. Judge only the substance you can actually see.",

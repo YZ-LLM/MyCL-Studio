@@ -19,6 +19,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { cliCurrentlyLimited, resolveAuto } from "./cli-rate-limit.js";
 import { globalConfigDir } from "./paths.js";
+import { modelForTier } from "./model-catalog.js";
 
 export interface ClaudeCodeFlags {
   /**
@@ -363,13 +364,14 @@ export function orchestratorApiKey(keys: ApiKeys): string {
 }
 
 /**
- * Orkestrator agent model id — opsiyonel orchestrator ayarlanmadıysa **main**
- * model fallback. User talebi (v15.5): "ana modelde ne seçili ise onu
- * kullansın" — default davranış main, ama Settings'te override edilebilir
- * (örn. agent için Opus, codegen için Sonnet).
+ * Orkestrator agent model id. Ümit 2026-06-12: orkestratör ajanı MERDİVEN DIŞI — beyin (karar/teşhis/routing)
+ * rolü; düşük modelde başlayınca yanlış kök-neden/routing üretiyor (gözlemlendi: bir hata-analizi gerçek testleri
+ * okumadan E2BIG/stub uydurdu). HER ZAMAN en yüksek KABUL EDİLEN model = `strong` tier (örn. Opus 4.8). Fable 5
+ * gibi kabul EDİLMEMİŞ model strong'a yalnız kullanıcı onayı (adoption) ile girer → otomatik gelmez. modelForTier
+ * config.model_tiers.strong'u (yoksa katalog default'u) çözer. Eski orchestrator/main override'ı artık kullanılmaz.
  */
 export function orchestratorModelId(models: SelectedModels): string {
-  return models.orchestrator ?? models.main;
+  return modelForTier("strong", models.model_tiers).id;
 }
 
 /** v15.13: Fan-out alt-ajan rolleri (Faz 5 tasarım paneli + Faz 0 kök-neden fan-out). */

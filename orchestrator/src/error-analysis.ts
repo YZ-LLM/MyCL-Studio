@@ -19,8 +19,7 @@ import { extractKindBlock } from "./cli-json.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
 import { makeAnthropicClient } from "./claude-api.js";
-import { backendForRole, type MyclConfig } from "./config.js";
-import { selectEffortForTask } from "./model-catalog.js";
+import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
 import { VERIFY_BEFORE_CLAIM } from "./agent-language.js";
@@ -267,7 +266,9 @@ export async function analyzeAndAskError(
     // Hata analizi ORKESTRATÖR rolüdür. Backend'e göre: cli → araştırmalı (Read/Grep/Bash);
     // api → tek-atış triage (Ümit 2026-06-10 "bunu çözmüştük" — API modunda da çalışmalı).
     // Tek-atışta derin araştırmayı SEÇİLEN FİX downstream (Faz 0 / SDK) yapar → triage hızlı + yeterli.
-    const analysisModel = config.selected_models.orchestrator ?? config.selected_models.main;
+    // Ümit 2026-06-12: hata-analizi orkestratör BEYİN rolü → merdiven-dışı strong tier (Opus 4.8). Düşük
+    // modelde gerçek testleri okumadan kök-neden uyduruyordu; strong + max ile sağlam akıl yürütme.
+    const analysisModel = orchestratorModelId(config.selected_models);
     const useCli = backendForRole(config, "orchestrator") === "cli";
     // Proje-gerçeklerini ajana ver (Ümit: "proje bilgisini cömertçe ver → daha iyi yanıt"; ajan JS/TS bilsin).
     const facts = await buildProjectFacts(state.project_root).catch(() => null);
@@ -283,7 +284,7 @@ export async function analyzeAndAskError(
         cwd: state.project_root,
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
         disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
-        effort: selectEffortForTask("verification", config.claude_code_flags.effort),
+        effort: "max", // orkestratör beyin → en yüksek efor (kabul edilen tavan: Opus 4.8 · max)
         onText: (t) => emitClaudeStream({ sub: "text", text: t }),
         observer: (tu) =>
           emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
