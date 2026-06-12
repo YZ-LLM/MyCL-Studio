@@ -195,10 +195,13 @@ export interface AgentBackends {
   translator: ConfiguredBackend;
   main: ConfiguredBackend;
 }
+// Ümit 2026-06-12: "her zaman auto olsun — sistem hangisine ulaşabilirse onu çalıştırır." Varsayılan hepsi
+// "auto" (eskiden "api"): CLI ile başla, abonelik limitliyse API'ye çöz (backendForRole/resolveAuto). Kullanıcı
+// yine de UI'dan API/CLI'ye sabitleyebilir (kullanıcı ayarı kral) — bu yalnız out-of-the-box varsayılan.
 const DEFAULT_BACKENDS: AgentBackends = {
-  orchestrator: "api",
-  translator: "api",
-  main: "api",
+  orchestrator: "auto",
+  translator: "auto",
+  main: "auto",
 };
 
 export interface MyclConfig {
@@ -430,7 +433,7 @@ function resolveSelectedModels(file: ConfigFile): SelectedModels {
 }
 
 /**
- * Rol başına backend'i çözer. Default hepsi "api". Migration: eski
+ * Rol başına backend'i çözer. Default hepsi "auto" (Ümit 2026-06-12). Migration: eski
  * `features.claude_code_cli_enabled:true` + main backend'i explicit set değilse
  * → main:"cli" (geriye uyum; eski kullanıcının main-CLI tercihi korunur).
  */
@@ -447,16 +450,16 @@ function resolveAgentBackends(file: ConfigFile): AgentBackends {
  * Bir rol için EFEKTİF backend ("api" | "cli"). "auto" → runtime'da çözülür:
  * abonelik limiti aktifse "api", değilse "cli" (cli-rate-limit.ts). loadConfig her
  * zaman agent_backends'i doldurur; partial/cast config'lere karşı savunmacı — eksikse
- * "api" (güvenli default). Tek çözüm-noktası: 9 dispatch yeri bunu çağırır.
+ * "auto" (Ümit 2026-06-12: varsayılan auto). Tek çözüm-noktası: 9 dispatch yeri bunu çağırır.
  */
 export function backendForRole(config: MyclConfig, role: AgentRole): AgentBackend {
-  const configured = config.agent_backends?.[role] ?? "api";
+  const configured = config.agent_backends?.[role] ?? "auto";
   return resolveAuto(configured, configured === "auto" ? cliCurrentlyLimited() : false);
 }
 
 /** Rol Auto Mode'da mı (factory'ler görünür CLI→API fallback'i yalnız auto'da uygular). */
 export function isAutoMode(config: MyclConfig, role: AgentRole): boolean {
-  return (config.agent_backends?.[role] ?? "api") === "auto";
+  return (config.agent_backends?.[role] ?? "auto") === "auto";
 }
 
 /**

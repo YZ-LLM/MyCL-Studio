@@ -128,6 +128,9 @@ describe("relevance/engine · audit_phase post-filter", () => {
     const fakeConfig = {
       api_keys: { translator: "t", main: "m" },
       selected_models: { translator: "tm", main: "mm" },
+      // Ümit 2026-06-12: varsayılan backend artık "auto" (→ limit yoksa cli). Bu test API yolunu (classifier.
+      // scoreChunks) stub'lar → backend'i AÇIKÇA "api" sabitle ki isSubscriptionMode false olsun, scoreChunksViaCli'ye sapmasın.
+      agent_backends: { orchestrator: "api", translator: "api", main: "api" },
     } as MyclConfig;
     const fakeState: State = {
       current_phase: 7,

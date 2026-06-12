@@ -303,11 +303,12 @@ export function Settings({
   );
   // v15.8 (2026-05-30): Main model efor seçimi (CLI backend için).
   const [effortSel, setEffortSel] = useState<string>(effort ?? "max");
-  // v15.8: rol başına backend (api/cli). Default hepsi "api" (bugünkü SDK).
+  // Ümit 2026-06-12: "her zaman auto olsun." Default hepsi "auto" (sistem ulaşabildiğini çalıştırır;
+  // CLI ile başlar, limit dolunca API'ye geçer). Kullanıcı yine de API/CLI'ye sabitleyebilir.
   const DEFAULT_BACKENDS: AgentBackends = {
-    orchestrator: "api",
-    translator: "api",
-    main: "api",
+    orchestrator: "auto",
+    translator: "auto",
+    main: "auto",
   };
   const [backends, setBackends] = useState<AgentBackends>(
     currentBackends ?? DEFAULT_BACKENDS,
