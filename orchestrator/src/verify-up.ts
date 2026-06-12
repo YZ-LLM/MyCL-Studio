@@ -82,9 +82,24 @@ export async function verifyWorkAtHigherRung(
   }
   if (phaseId === 4) {
     try {
+      const specMd = await readFile(join(state.project_root, ".mycl", "spec.md"), "utf-8");
+      // Ümit 2026-06-12: ÖNCEDEN ilk 4000 karakter okunuyordu → uzun spec kesilince kontrolcü "AC truncated" sanıp
+      // İYİ spec'i YETERSİZ işaretliyordu (false-negative). TAM dosyayı ver (cömert cap); kesilirse AÇIKÇA "inceleme
+      // limiti, ajan kesmedi" de. + İTERATİF-SPEC kuralı: korunan eski AC'ler (regression) NORMAL, kusur DEĞİL.
+      const MAXLEN = 24000;
+      const body =
+        specMd.length <= MAXLEN
+          ? specMd
+          : specMd.slice(0, MAXLEN) +
+            "\n…[inceleme alıntısı burada kesildi — SPEC DEVAM EDİYOR, ajan KESMEDİ; truncation SANMA]";
       evidence +=
-        "\n\nSPEC (head):\n" +
-        (await readFile(join(state.project_root, ".mycl", "spec.md"), "utf-8")).slice(0, 4000);
+        "\n\nFULL SPEC (agent'ın yazdığı tam spec.md):\n" +
+        body +
+        "\n\nİNCELEME KURALI (önemli): Bu İTERATİF bir proje. Spec, önceki iterasyonların kabul kriterlerini " +
+        "(regression) KASITLI olarak KORUR + bu iterasyonun yeni özelliği için yenilerini EKLER. Başlığın yalnız YENİ " +
+        "özelliği adlandırması, eski AC'lerin başka özellikleri kapsaması NORMAL ve DOĞRU — bunu 'scope/başlık " +
+        "uyuşmazlığı' veya 'yetersiz' SAYMA. Yalnız şunu değerlendir: bu iterasyonun YENİ AC'leri var mı, doğru/test " +
+        "edilebilir mi; ve dosya GERÇEKTEN eksik mi (yukarıdaki alıntı sınırından truncation ÇIKARMA).";
     } catch {
       // spec okunamadı — audit kanıtıyla devam
     }
