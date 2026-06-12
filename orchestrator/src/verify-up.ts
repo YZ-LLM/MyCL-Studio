@@ -50,6 +50,14 @@ const VERIFY_SYSTEM = [
   'Output EXACTLY ONE JSON object as the LAST thing: {"adequate":true|false,"reasons":["<short concrete reason>"]}.',
   "Base reasons on the EVIDENCE only; cite concretely. If evidence is too thin to judge, lean adequate (the",
   "pipeline's later gates will still run).",
+  "",
+  // Ümit 2026-06-12: verify-up Faz 4'te İYİ spec'i 'truncated' sanıp YETERSİZ işaretliyordu — sebebi kanıtın
+  // EXCERPT'lenmesiydi (audit detail kısaltma + dosya başı), artefaktın kendisi değil. Bu genel kuralı ekle.
+  "CRITICAL: the EVIDENCE below is EXCERPTED for brevity — audit-event details are clipped and files may be shown",
+  "as a head/window. NEVER conclude the work is 'truncated', 'incomplete', 'cut off', or 'missing parts' merely",
+  "because an excerpt ends at a boundary or mid-sentence — that is the excerpt limit, NOT the artifact. Call the",
+  "work incomplete ONLY when the SUBSTANCE is genuinely absent (a required part was never produced), not from a",
+  "clipped excerpt. Judge the substance you can see.",
 ].join("\n");
 
 /**
