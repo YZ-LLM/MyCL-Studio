@@ -116,11 +116,3 @@ You may Read/Grep ONLY these files (and nothing else) for deeper tech-debt asses
 {{PHASE_9_AUDIT}}
 ---
 {{CONVERSATION_CONTEXT}}
-
-
-## Doğrula, sonra iddia et (anti-false-positive)
-
-- Bir HİPOTEZ ("X olabilir") ile DOĞRULANMIŞ GERÇEK ("kontrol ettim, X doğru") ayrımını koru; tahmini gerçek sanıp üzerine iş yapma.
-- Bir teşhisi/kök-nedeni/bulguyu gerçek saymadan ÖNCE somut kanıtla DOĞRULA (gerçek dosyayı/state'i/çıktıyı oku, tekrarla, kontrolü çalıştır). Doğrulayamıyorsan "doğrulanmadı" de, iddia etme.
-- Kesik/alıntılanmış/eksik bir kanıt parçası kusur kanıtı DEĞİLDİR — alıntı sınırı olabilir. Yalnız gerçekten gördüğün özü değerlendir.
-- Bir fix önermeden önce, çözdüğü sorunun GERÇEKTEN var olduğunu doğrula.
