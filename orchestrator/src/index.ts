@@ -341,6 +341,9 @@ function gracefulShutdown(reason: string): never {
  */
 interface FailReasonHolder {
   lastFailReason?: string;
+  // Ümit 2026-06-12: fail model+efor tırmanmasıyla düzelebilir mi? false → tırmanma (climb) BOŞA (örn. saf
+  // AC-etiketleme/kapsama: kod doğru, model gücü çözmez). Tanımsız → eski davranış (tırmanabilir). Faz 8 set eder.
+  lastFailEscalatable?: boolean;
 }
 function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): string {
   const reason = controller?.lastFailReason;
@@ -626,7 +629,17 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   const failReason = ctrl?.lastFailReason ?? "";
   const projectError =
     !isEnvironmentError(failReason) && !isEnvironmentError(message) && !/\babort/i.test(failReason);
-  if (autoAnswerSuggested() && ESCALATION_PHASES.has(n) && projectError) {
+  // Ümit 2026-06-12 ("merdivenleri çok hızlı tırmanıyor"): eskalasyon YALNIZ model-gücüyle düzelebilecek fail'de
+  // anlamlı. Gate `lastFailEscalatable=false` derse (saf AC-kapsama/etiketleme — kod doğru) daha güçlü model çözmez
+  // → tırmanma boşa + pahalı. Tanımsız → eski davranış (tırmanabilir).
+  const escalatable = ctrl?.lastFailEscalatable !== false;
+  if (autoAnswerSuggested() && ESCALATION_PHASES.has(n) && projectError && !escalatable) {
+    emitChatMessage(
+      "system",
+      `ℹ️ Faz ${n}: bu fail model gücüyle çözülmez (kapsama/etiketleme türü) — merdiven TIRMANMIYORUM, aynı seviyede ele alıyorum.`,
+    );
+  }
+  if (autoAnswerSuggested() && ESCALATION_PHASES.has(n) && projectError && escalatable) {
     const domain = phaseDomain(n);
     await recordRungOutcome(n, false);
     const cur = rungForDomain(runtime.state, domain);

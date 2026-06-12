@@ -157,6 +157,9 @@ export class Phase8Controller {
   private testResultWrites: Promise<void>[] = [];
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
+  // Ümit 2026-06-12: gate-fail model+efor tırmanmasıyla düzelebilir mi? Saf AC-kapsama/etiketleme fail'i
+  // (kod doğru, testler AC-id'siz) model gücüyle çözülmez → false → failPhase tırmanmaz. Gerçek kod-fail'i → true.
+  public lastFailEscalatable?: boolean;
   /** v15.7 (2026-05-27): Faz 7'den gelen pending migration not — initialMessage'a eklenir. */
   private pendingMigrationNote = "";
   /** v15.7 (2026-05-27): Phase 0 D2 backend-only fix routing'ten gelen plan. */
@@ -542,7 +545,12 @@ export class Phase8Controller {
     } catch (e) {
       log.warn("phase-8", "AC coverage hesaplanamadı (non-blocking)", e);
     }
-    const acCoverageOk = !acCov.tagged || acCov.uncovered.length === 0;
+    // Ümit 2026-06-12 ("merdivenleri çok hızlı tırmanıyor, sorun yoktu"): FIX modunda tüm-spec AC kapsama
+    // ZORUNLU DEĞİL. Fix tek bir sorunu çözer (örn. 1 endpoint = AC1), koca 15-AC'lik spec'i yeniden KURMAZ →
+    // AC2..AC15'e test istemek küçük fix'i koca spec'le yargılamaktı (yanlış-fail → boş eskalasyon). Fix'in KENDİ
+    // davranışını repro-first (reproRequired) test eder; regresyonu final anchor (npm test) yakalar. Greenfield
+    // (fix-dışı) codegen'de tam AC izlenebilirliği aynen zorunlu kalır.
+    const acCoverageOk = this.isFixMode || !acCov.tagged || acCov.uncovered.length === 0;
 
     // Final full-suite: son 10 event içinde en az 1 tdd-green olmalı
     // (Bash test komutu + Claude'un final run'ı). Daha sıkı versiyon
@@ -612,17 +620,26 @@ export class Phase8Controller {
       disarmRollback(); // faz başarıyla bitti → iyi işi kilitle (geri-alınmasın)
       return "complete";
     }
-    // Fail nedenini kullanıcıya görünür yap
+    // Fail nedenini kullanıcıya görünür yap. Ümit 2026-06-12: mesajlar DÜRÜST — eski hali yanıltıcıydı
+    // ("3/3 green" gösterip "yetersiz" diyordu; "çalıştırılmadı" derken aslında KOŞUP kırmızıya dönmüştü).
     const reasons: string[] = [];
-    if (!tddOk)
-      reasons.push(`AC coverage yetersiz: ${greens}/${minGreens} green`);
+    // Yeşil sayısı GERÇEKTEN azsa kapsam-yetersiz; aksi halde sorun yeşil sayısı değil.
+    if (greens < minGreens) reasons.push(`AC coverage yetersiz: ${greens}/${minGreens} green`);
+    // Final tam-suite: koştu ama yeşil değil = KIRMIZI ("çalıştırılmadı" değil). Hiç yeşil yoksa + kırmızı da
+    // yoksa gerçekten doğrulanamadı. tddOk son olayın yeşil olmasını da ister → ikisini tek dürüst mesaja topla.
+    if (lastEvent !== "tdd-green" || !finalSuiteRun) {
+      reasons.push(
+        lastEvent === "tdd-red" || reds > 0
+          ? "final tam-suite KIRMIZI — son doğrulama (npm test) geçmedi"
+          : "final tam-suite doğrulaması yapılamadı (yeşil sonuç yok)",
+      );
+    }
     if (!debtOk)
       reasons.push(
         `${techDebtCount} dosyada tech debt: ${techDebtPaths.slice(0, 3).join(", ")}${
           techDebtPaths.length > 3 ? "..." : ""
         }`,
       );
-    if (!finalSuiteRun) reasons.push("final test suite çalıştırılmadı");
     if (!reproOk) reasons.push("repro-first ihlali: bug'ı yeniden üreten failing test (kırmızı→yeşil) yok");
     if (!acCoverageOk)
       reasons.push(
@@ -633,6 +650,12 @@ export class Phase8Controller {
       `❌ Faz 8 gate fail: ${reasons.join("; ")}. MyCL_Pseudocode.md:203 — "ASLA TEKNİK BORÇ BIRAKMA".`,
     );
     this.lastFailReason = `gate fail: ${reasons.join("; ")}`;
+    // Eskalasyon kararı: model+efor tırmanması YALNIZ model-gücüyle düzelebilecek kod-fail'inde anlamlı
+    // (kırmızı suite / tech debt / repro yok / yetersiz yeşil). SAF AC-etiketleme/kapsama fail'i (kod doğru,
+    // acCoverageOk false ve geri kalan TEMİZ) model gücüyle çözülmez → escalatable=false → failPhase tırmanmaz.
+    const codeQualityFail =
+      greens < minGreens || lastEvent !== "tdd-green" || !finalSuiteRun || !debtOk || !reproOk;
+    this.lastFailEscalatable = codeQualityFail;
     await this.rollbackFixIfNeeded();
     // ③ Structured handoff (Missions): başarısız devir — durum + neden + keşfedilen (takip zemini).
     try {
