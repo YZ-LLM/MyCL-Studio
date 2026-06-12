@@ -269,7 +269,13 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     // v15.7 (2026-05-26): Backend askq cevap işledi (kapı bekçisi answer_askq
     // veya askq UI click). pendingAskq eşleşirse clear et — askq kartı UI'dan kalkar.
     if (state.pendingAskq && state.pendingAskq.id === ev.data.id) {
-      return { ...state, pendingAskq: null };
+      // Ümit 2026-06-12: askq cevaplandı → "yanıt bekleniyor" durumu kalksın (bayat kalmasın). Faz devam eder
+      // (running); bittiyse sonraki phase_changed düzeltir. Yalnız "waiting" iken sıfırla, diğer durumlara dokunma.
+      return {
+        ...state,
+        pendingAskq: null,
+        phaseStatus: state.phaseStatus === "waiting" ? "running" : state.phaseStatus,
+      };
     }
     return state;
   }
@@ -1209,7 +1215,9 @@ function App() {
       <AppHeader
         projectPath={projectPath}
         phase={mainState.phase}
-        status={mainState.phaseStatus}
+        // Ümit 2026-06-12: model GERÇEKTEN çalışırken (runningBanner aktif) header "çalışıyor" göstersin —
+        // bayat "yanıt bekleniyor" (askq cevaplandıktan sonra kalan) yanıltmasın. runningBanner canlı gerçek.
+        status={mainState.runningBanner ? "running" : mainState.phaseStatus}
         onSettingsClick={() => setSettingsOpen(true)}
         onExecuteClick={sendRunCommand}
         executeDisabled={buttonsDisabled}
