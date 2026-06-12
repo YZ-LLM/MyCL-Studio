@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import { appendAudit, appendHandoff, readAuditLogTail } from "./audit.js";
 import { isMissingCommand, resolveMechanicalCmd } from "./base/mechanical-runner.js";
 import { probeTestValidity } from "./test-validity.js";
+import { runAdversarialTester } from "./adversarial-test.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
@@ -796,23 +797,24 @@ export class Phase8Controller {
       candidateFiles: changed,
       runCmd: (c) => this.runCmdResult(c),
     });
-    if (!r.checked) return; // prob koşamadı (aday yok/mutasyon üretilemedi) — sessiz, sahte-alarm verme
-    if (r.caught) {
+    if (r.checked && !r.caught) {
+      await appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 8,
+        event: "tdd-tests-weak",
+        caller: "mycl-orchestrator",
+        detail: `mutation NOT caught in ${r.file} — tests may be shallow/false-green`,
+      });
+      emitChatMessage(
+        "system",
+        `⚠️ Test-geçerliliği UYARISI: \`${r.file}\` küçük bir davranış-bozumunda testler HÂLÂ geçti — testler o davranışı ` +
+          "gerçekten sınamıyor olabilir (sahte-yeşil riski). Faz 9 risk incelemesi bunu ele alır.",
+      );
+    } else if (r.checked && r.caught) {
       emitChatMessage("system", `✅ Test-geçerliliği: testler bozulan davranışı yakaladı (${r.file}) — koruma gerçek.`);
-      return;
     }
-    await appendAudit(this.state.project_root, {
-      ts: Date.now(),
-      phase: 8,
-      event: "tdd-tests-weak",
-      caller: "mycl-orchestrator",
-      detail: `mutation NOT caught in ${r.file} — tests may be shallow/false-green`,
-    });
-    emitChatMessage(
-      "system",
-      `⚠️ Test-geçerliliği UYARISI: \`${r.file}\` küçük bir davranış-bozumunda testler HÂLÂ geçti — testler o davranışı ` +
-        "gerçekten sınamıyor olabilir (sahte-yeşil riski). Faz 9 risk incelemesi bunu ele alır.",
-    );
+    // Bağımsız düşman-test yazarı (Özellik #2): kodu yazandan AYRI ajan kodu kırmaya çalışır (taraflı-test riski).
+    await runAdversarialTester(this.state, this.config).catch((e: unknown) => log.warn("phase-8", "adversarial tester failed", e));
   }
 
   /**
