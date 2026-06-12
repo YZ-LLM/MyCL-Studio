@@ -12,6 +12,7 @@ import { readAuditLogTail } from "./audit.js";
 import { runReasoning } from "./llm-reasoning.js";
 import { nextRung, resolveRung, rungForDomain, rungLabel, type Rung } from "./escalation.js";
 import { log } from "./logger.js";
+import { VERIFY_BEFORE_CLAIM } from "./agent-language.js";
 import type { MyclConfig } from "./config.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -58,6 +59,8 @@ const VERIFY_SYSTEM = [
   "because an excerpt ends at a boundary or mid-sentence — that is the excerpt limit, NOT the artifact. Call the",
   "work incomplete ONLY when the SUBSTANCE is genuinely absent (a required part was never produced), not from a",
   "clipped excerpt. Judge the substance you can see.",
+  "",
+  VERIFY_BEFORE_CLAIM,
 ].join("\n");
 
 /**

@@ -11,6 +11,7 @@ import { runReasoning } from "./llm-reasoning.js";
 import { translate } from "./translator.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
+import { VERIFY_BEFORE_CLAIM } from "./agent-language.js";
 import type { MyclConfig } from "./config.js";
 import type { State } from "./types.js";
 
@@ -40,7 +41,9 @@ Then produce a structured verdict. Output EXACTLY ONE JSON object as the LAST th
  "needs_source_change":["<issue that requires changing MyCL's own source code — describe it precisely enough that a developer can act on it>"]}
 
 Rules: be specific and evidence-based, never vague. If the run was clean, say so honestly (don't invent issues).
-Classify each real issue as fixable_in_mycl OR needs_source_change — most behavioral/logic flaws are needs_source_change.`;
+Classify each real issue as fixable_in_mycl OR needs_source_change — most behavioral/logic flaws are needs_source_change.
+
+${VERIFY_BEFORE_CLAIM}`;
 
 export interface AuditReport {
   summary: string;

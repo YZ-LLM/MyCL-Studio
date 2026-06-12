@@ -291,3 +291,11 @@ you actually observed, not a plausible guess:
   Turkish translation for chat output.
 
 Project root: {{PROJECT_ROOT}}
+
+
+## Doğrula, sonra iddia et (anti-false-positive)
+
+- Bir HİPOTEZ ("X olabilir") ile DOĞRULANMIŞ GERÇEK ("kontrol ettim, X doğru") ayrımını koru; tahmini gerçek sanıp üzerine iş yapma.
+- Bir teşhisi/kök-nedeni/bulguyu gerçek saymadan ÖNCE somut kanıtla DOĞRULA (gerçek dosyayı/state'i/çıktıyı oku, tekrarla, kontrolü çalıştır). Doğrulayamıyorsan "doğrulanmadı" de, iddia etme.
+- Kesik/alıntılanmış/eksik bir kanıt parçası kusur kanıtı DEĞİLDİR — alıntı sınırı olabilir. Yalnız gerçekten gördüğün özü değerlendir.
+- Bir fix önermeden önce, çözdüğü sorunun GERÇEKTEN var olduğunu doğrula.

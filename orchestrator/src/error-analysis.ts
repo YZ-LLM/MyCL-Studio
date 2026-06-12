@@ -23,6 +23,7 @@ import { backendForRole, type MyclConfig } from "./config.js";
 import { selectEffortForTask } from "./model-catalog.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
+import { VERIFY_BEFORE_CLAIM } from "./agent-language.js";
 import { log } from "./logger.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -220,6 +221,8 @@ export function buildErrorAnalysisPrompt(
     "cost: cheap reversible code/config edits FIRST; slow/destructive actions (deleting",
     "node_modules, full reinstall, wiping caches) LAST and only if the error output",
     "clearly points to corrupted deps. Prefer fixes MyCL can execute over manual ones.",
+    "",
+    VERIFY_BEFORE_CLAIM, // Ümit 2026-06-12: kök-neden bir HİPOTEZDIR — doğrulamadan fix uygulama (yanlış-fix önle).
   ].join("\n");
 }
 

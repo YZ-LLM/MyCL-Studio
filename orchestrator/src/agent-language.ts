@@ -28,3 +28,16 @@ nothing in Turkish.)
 // yeniden gönderilmediği için tek garanti budur (cli-session/codegen buildArgs).
 export const MAIN_AGENT_LANGUAGE_REMINDER =
   "(Reminder: respond ONLY in English — never Turkish. A separate translator handles Turkish display.)";
+
+/**
+ * VERIFY-BEFORE-YOU-CLAIM — anti-false-positive disiplini (Ümit 2026-06-12). Teşhis/karar/bulgu üreten ajanlara
+ * (orkestratör, debug/hata-analizi, verify-up, denetim, risk) enjekte edilir. Amaç: bir hipotezi GERÇEK sanıp
+ * üzerine iş yapmasın (yanlış kök-neden → yanlış fix; iyi işi 'yetersiz' sanma; uydurma risk). İngilizce (ana ajanlar).
+ */
+export const VERIFY_BEFORE_CLAIM = [
+  "VERIFY BEFORE YOU CLAIM (anti-false-positive discipline):",
+  "- Separate a HYPOTHESIS ('I suspect X') from a CONFIRMED FACT ('I checked and X is true'). Never act on a guess as if it were fact.",
+  "- Before treating a diagnosis / root-cause / finding as real, CONFIRM it against concrete evidence — read the actual file/state/output, reproduce it, run the check. If you cannot confirm, label it UNCONFIRMED and say so instead of asserting it.",
+  "- A clipped / excerpted / missing piece of evidence is NOT proof of a defect — it may be the excerpt boundary, not the artifact. Judge only the substance you can actually see.",
+  "- Before proposing a fix, confirm the problem it fixes ACTUALLY exists. Prefer 'I checked X and found Y' over 'X is probably the cause'.",
+].join("\n");
