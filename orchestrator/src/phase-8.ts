@@ -18,12 +18,12 @@ import { runAdversarialTester } from "./adversarial-test.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
-import { createCheckpoint, getChangedFiles, restoreCheckpoint } from "./git.js";
+import { getChangedFiles } from "./git.js";
 import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
-import { snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
+import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, type FixSnapshot } from "./fix-snapshot.js";
 import { escalatedModelEffort } from "./escalation.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
@@ -165,6 +165,9 @@ export class Phase8Controller {
   private isFixMode = false;
   /** Fix öncesi git checkpoint ref'i (rollback hedefi). null → rollback yok. */
   private checkpointRef: string | null = null;
+  // Ümit 2026-06-12 ("kullanıcı hiç bir şeyi elle yapmayacak"): rollback artık git-only DEĞİL. FixSnapshot
+  // git temizse checkpoint, git yoksa ~/.mycl/backups kaynak-kopyası kullanır → her durumda OTOMATİK geri alma.
+  private fixSnapshot: FixSnapshot | null = null;
 
   private readonly state: State;
   private readonly config: MyclConfig;
@@ -402,26 +405,20 @@ export class Phase8Controller {
     // kirliyse görünür uyarı + rollback devre dışı (kullanıcı WIP'i riske girmez).
     if (this.isFixMode) {
       if (this.state.fix_checkpoint_ref) {
-        // v15.10: D2 routing'de (ilk kod değişiminden ÖNCE) alındı — onu kullan.
+        // v15.10: D2 routing'de (ilk kod değişiminden ÖNCE) git checkpoint alındı — onu kullan.
         // ui fix'lerde ilk değişim Faz 5'te olduğu için checkpoint orada erken
         // alınmış olmalı; burada yeniden almak fix sonrası state'i yakalardı.
+        this.fixSnapshot = { method: "git", ref: this.state.fix_checkpoint_ref };
         this.checkpointRef = this.state.fix_checkpoint_ref;
       } else {
-        // Fallback (eski state / doğrudan Faz 8 fix): burada al.
-        const cp = await createCheckpoint(this.state.project_root);
-        if (cp.ok && cp.ref) {
-          this.checkpointRef = cp.ref;
-          emitChatMessage(
-            "system",
-            "📌 Fix öncesi checkpoint alındı — regresyon olursa değişiklikler otomatik geri alınacak.",
-          );
-        } else {
-          this.checkpointRef = null;
-          emitChatMessage(
-            "system",
-            `⚠️ Otomatik geri alma kapalı: ${cp.reason}. Regresyon yine raporlanır, ama geri almayı elle yaparsın.`,
-          );
-        }
+        // Ümit 2026-06-12: git-only checkpoint YERİNE snapshot — git temizse checkpoint, git YOKSA
+        // ~/.mycl/backups kaynak-kopyası → non-git projede de OTOMATİK geri alma ("elle yap" YOK).
+        // index.ts fix-routing (3895) bu turda zaten bir snapshot armed etmiş olabilir (non-git) → GÖZ AT +
+        // yeniden kullan (çift yedek + çift mesaj olmasın); yoksa (doğrudan Faz 8 fix) yeni al.
+        const snap = peekRollback() ?? (await snapshotBeforeAutofix(this.state.project_root, Date.now()));
+        this.fixSnapshot = snap;
+        // checkpointRef yalnız git'te set (getChangedFiles + scoped-scope köprüsü git-ref ister); copy'de null.
+        this.checkpointRef = snap.method === "git" ? (snap.ref ?? null) : null;
       }
     }
 
@@ -662,20 +659,22 @@ export class Phase8Controller {
    * korunur. Tek seferlik (ref temizlenir). Fix dışı / checkpoint yok → no-op.
    */
   private async rollbackFixIfNeeded(): Promise<void> {
-    if (!this.isFixMode || !this.checkpointRef) return;
-    const ref = this.checkpointRef;
-    this.checkpointRef = null; // tek seferlik
+    if (!this.isFixMode || !this.fixSnapshot || this.fixSnapshot.method === "none") return;
+    const snap = this.fixSnapshot;
+    this.fixSnapshot = null; // tek seferlik
+    this.checkpointRef = null;
+    const via = snap.method === "git" ? "checkpoint (git)" : "yedek (`~/.mycl/backups`)";
     try {
-      const ok = await restoreCheckpoint(this.state.project_root, ref);
+      const ok = await restoreSnapshot(snap, this.state.project_root);
       emitChatMessage(
         "system",
         ok
-          ? "↩️ Başarısız/regresyonlu fix — değişiklikler checkpoint'e geri alındı (MyCL state ve hata kataloğu korundu)."
-          : "⚠️ Otomatik geri alma kısmen başarısız — değişiklikleri elle gözden geçir.",
+          ? `↩️ Başarısız/regresyonlu fix — değişiklikler ${via} üzerinden OTOMATİK geri alındı (MyCL state ve hata kataloğu korundu).`
+          : "⚠️ Otomatik geri alma kısmen başarısız (yedek bozulmuş olabilir) — sonraki koşuda yeniden denenecek.",
       );
     } catch (err) {
       log.warn("phase-8", "rollback failed", err);
-      emitChatMessage("system", "⚠️ Otomatik geri alma başarısız — değişiklikleri elle gözden geçir.");
+      emitChatMessage("system", "⚠️ Otomatik geri alma başarısız — yedek erişilemedi.");
     }
   }
 

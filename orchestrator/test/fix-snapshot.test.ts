@@ -3,12 +3,17 @@ import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { snapshotBeforeAutofix } from "../src/fix-snapshot.js";
+import {
+  snapshotBeforeAutofix,
+  restoreSnapshot,
+  peekRollback,
+  disarmRollback,
+} from "../src/fix-snapshot.js";
 
 describe("snapshotBeforeAutofix (git yoksa .mycl/backups kopya)", () => {
   let dir: string;
   beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mycl-snap-")); });
-  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+  afterEach(async () => { disarmRollback(); await rm(dir, { recursive: true, force: true }); });
 
   it("git olmayan projede kaynağı yedekler, node_modules'ı HARİÇ tutar", async () => {
     await mkdir(join(dir, "src"), { recursive: true });
@@ -23,5 +28,33 @@ describe("snapshotBeforeAutofix (git yoksa .mycl/backups kopya)", () => {
     expect(copied).toContain("export const x = 1");
     // node_modules KOPYALANMADI (ağır dizin hariç)
     expect(existsSync(join(snap.dir!, "node_modules"))).toBe(false);
+  });
+
+  // Ümit 2026-06-12 "kullanıcı hiç bir şeyi elle yapmayacak": non-git projede de OTOMATİK geri alma.
+  // Round-trip: snapshot → kötü fix (dosyayı boz/sil) → restoreSnapshot → orijinal geri gelmeli.
+  it("git olmayan projede restoreSnapshot bozulan/silinen dosyayı geri yükler (elle iş YOK)", async () => {
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "app.js"), "export const x = 1;\n");
+    await writeFile(join(dir, "keep.txt"), "orig\n");
+    const snap = await snapshotBeforeAutofix(dir, 1781000000001);
+    expect(snap.method).toBe("copy");
+    // Kötü fix simülasyonu: bir dosyayı boz, birini "sil" (içeriğini değiştir).
+    await writeFile(join(dir, "src", "app.js"), "BROKEN garbage\n");
+    await writeFile(join(dir, "keep.txt"), "corrupted\n");
+    // Otomatik geri alma
+    const ok = await restoreSnapshot(snap, dir);
+    expect(ok).toBe(true);
+    expect(await readFile(join(dir, "src", "app.js"), "utf8")).toContain("export const x = 1");
+    expect(await readFile(join(dir, "keep.txt"), "utf8")).toBe("orig\n");
+  });
+
+  it("peekRollback armed snapshot'ı temizlemeden döner (Faz 8 çift-yedek almasın)", async () => {
+    await writeFile(join(dir, "a.js"), "1\n");
+    const snap = await snapshotBeforeAutofix(dir, 1781000000002); // arm eder
+    const peeked = peekRollback();
+    expect(peeked).not.toBeNull();
+    expect(peeked!.dir).toBe(snap.dir); // aynı snapshot
+    // peek temizlemedi → ikinci peek de aynısını döner
+    expect(peekRollback()?.dir).toBe(snap.dir);
   });
 });

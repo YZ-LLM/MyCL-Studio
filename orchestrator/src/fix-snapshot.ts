@@ -113,6 +113,11 @@ export function takeRollback(): FixSnapshot | null {
   _rollback = null;
   return r;
 }
+/** Rollback noktasını GÖZ AT (temizlemeden) — aynı turda armed bir snapshot başka mekanizmaca (Faz 8 fix
+ * rollback'i) ÇİFT yedek almadan yeniden kullanılsın. Yeni kullanıcı turu zaten disarm eder → bayat dönmez. */
+export function peekRollback(): FixSnapshot | null {
+  return _rollback;
+}
 /** Dizi çözüldü/yeni tur → rollback noktasını at (bayat restore olmasın). */
 export function disarmRollback(): void {
   _rollback = null;
