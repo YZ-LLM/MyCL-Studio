@@ -77,6 +77,7 @@ import { computeTiersFromModels, modelForTier } from "./model-catalog.js";
 import { buildStrengthReportTR, recordStrength } from "./model-strength-report.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
 import { verifyWorkAtHigherRung } from "./verify-up.js";
+import { runRegressionGuard } from "./regression-guard.js";
 import { isApiAccountError, isEnvironmentError, environmentErrorAdvice } from "./claude-api.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
@@ -3097,10 +3098,18 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
                 detail: "gate_autofix_resolved",
               });
               emitChatMessage("system", "✅ Faz 13 kendi içinde düzeltildi — güvenlik geçti (Faz 8'e dönülmedi).");
-              cur = 13;
-              continue;
+              // Güvenlik düzeltmesi kodu değiştirdi → testleri bozmuş olabilir; regresyon guard (Ümit 2026-06-12).
+              const rg13 = await runRegressionGuard(state, cfg, 13);
+              if (rg13.ran && rg13.pass === false) {
+                outcome = { kind: "fail", rescans: 0, stderr: "regression-guard: security fix broke tests" };
+                // continue ETME — aşağıdaki analiz/accept-continue regresyonu ele alsın.
+              } else {
+                cur = 13;
+                continue;
+              }
+            } else {
+              outcome = reOutcome; // hâlâ fail → güncel çıktıyla aşağıdaki analiz/accept-continue'a düş
             }
-            outcome = reOutcome; // hâlâ fail → güncel çıktıyla aşağıdaki analiz/accept-continue'a düş
           }
         }
         let pending: PendingErrorAnalysis | null = null;
@@ -3201,11 +3210,25 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
               detail: "gate_autofix_resolved",
             });
             emitChatMessage("system", `✅ Faz ${next} kendi içinde düzeltildi — geçti.`);
-            cur = next;
-            continue;
+            // Ümit 2026-06-12: Faz 8 SONRASI (≥9) bir gate düzeltmesi kodu değiştirdi → testleri bozmuş olabilir.
+            // Regresyon guard: tüm testleri yeniden koş; kırmızıysa bu faz fail'e döner (sessiz bozulma engellenir).
+            if (next >= 9) {
+              const rg = await runRegressionGuard(state, cfg, next);
+              if (rg.ran && rg.pass === false) {
+                outcome = { kind: "fail", rescans: 0, stderr: "regression-guard: fix broke tests" };
+                // continue ETME — aşağıdaki investigate+solve bu regresyonu ele alsın.
+              } else {
+                cur = next;
+                continue;
+              }
+            } else {
+              cur = next;
+              continue;
+            }
+          } else {
+            // Hâlâ fail → güncel çıktıyla aşağıdaki investigate+solve'a düş.
+            outcome = reOutcome;
           }
-          // Hâlâ fail → güncel çıktıyla aşağıdaki investigate+solve'a düş.
-          outcome = reOutcome;
         }
       }
       // Gerçek mekanik fail → güvenlik (Faz 13) gibi investigate+solve akışına gider: failPhase → gerçek stderr ile
