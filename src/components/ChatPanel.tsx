@@ -284,9 +284,37 @@ export function ChatPanel({
   // yazdığı user mesajı; pipeline ilerledikçe ne istediğini hatırlatır.
   const firstUserPrompt = messages.find((m) => m.role === "user")?.text;
 
+  // Ümit 2026-06-12: chat balonlarına + tüm sohbete kopyalama. clipboard yazımı + kısa "✓" geri bildirimi
+  // (1.2sn). copiedId="__all__" → tüm-sohbet butonu; aksi mesaj id'si.
+  const [copiedId, setCopiedId] = useState<string | number | null>(null);
+  const copyText = (text: string, id: string | number): void => {
+    void navigator.clipboard
+      ?.writeText(text)
+      .then(() => {
+        setCopiedId(id);
+        setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1200);
+      })
+      .catch(() => undefined);
+  };
+  const copyAll = (): void => {
+    copyText(messages.map((m) => `[${m.role}] ${m.text}`).join("\n\n"), "__all__");
+  };
+
   return (
     <section className="panel">
-      <div className="panel-label">MyCL</div>
+      <div className="panel-label">
+        <span>MyCL</span>
+        {messages.length > 0 && (
+          <button
+            type="button"
+            className="chat-copy-all"
+            title="Tüm sohbeti kopyala"
+            onClick={copyAll}
+          >
+            {copiedId === "__all__" ? "✓ Kopyalandı" : "⧉ Tümünü kopyala"}
+          </button>
+        )}
+      </div>
       {firstUserPrompt && (
         <div className="first-prompt-box" title={firstUserPrompt}>
           <span className="first-prompt-label">Niyet</span>
@@ -301,6 +329,19 @@ export function ChatPanel({
           const renderMsg = (m: ChatMessage) => {
             const highlighted = selectedTs === m.ts ? " highlighted" : "";
             const tsLabel = fmtTs(m.ts);
+            const copyBtn = (
+              <button
+                type="button"
+                className="msg-copy"
+                title="Bu mesajı kopyala"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  copyText(m.text, m.id);
+                }}
+              >
+                {copiedId === m.id ? "✓" : "⧉"}
+              </button>
+            );
             if (m.role === "error") {
               return (
                 <div
@@ -310,6 +351,7 @@ export function ChatPanel({
                 >
                   {tsLabel && <span className="msg-ts">{tsLabel}</span>}
                   <ErrorMessage msg={m} />
+                  {copyBtn}
                 </div>
               );
             }
@@ -321,6 +363,7 @@ export function ChatPanel({
               >
                 {tsLabel && <span className="msg-ts">{tsLabel}</span>}
                 {linkifyText(m.text)}
+                {copyBtn}
               </div>
             );
           };

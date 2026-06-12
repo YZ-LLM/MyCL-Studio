@@ -852,6 +852,27 @@ select:focus {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Tüm sohbeti kopyala (panel başlığı sağı) — küçük, sade. */
+.chat-copy-all {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.chat-copy-all:hover {
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 /* İlk Faz 1 prompt'u — MyCL panel'in üstünde sabit, scroll dışı kutu
@@ -927,6 +948,37 @@ select:focus {
   line-height: 1.5;
   word-wrap: break-word;
   white-space: pre-wrap;
+  position: relative;
+}
+
+/* Balon-başına kopyala (Ümit 2026-06-12) — sağ üstte, hover'da belirir; tıkı balon seçimini tetiklemez. */
+.msg-copy,
+.msg-wrap .msg-copy {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.msg:hover .msg-copy,
+.msg-wrap:hover .msg-copy {
+  opacity: 0.85;
+}
+.msg-copy:hover {
+  opacity: 1;
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.msg-wrap {
+  position: relative;
 }
 
 .msg.user {
