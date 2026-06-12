@@ -12,7 +12,11 @@ Your job:
    - **Scope**: 1-2 paragraphs — what's included AND what's explicitly excluded.
    - **Acceptance criteria (AC)**: 3-7 testable conditions. Each must be:
      - Independently verifiable
-     - Phrased as "Given X, when Y, then Z" OR a clear binary check.
+     - PREFERRED: behavioral shape — fill the `given` (precondition), `when`
+       (action/event) and `then` (the OBSERVABLE outcome to assert) fields.
+       This makes WHAT the test must check explicit (BDD-as-spec; later the TDD
+       test asserts the "then"). Use a plain `statement` alone only for a trivial
+       binary check where Given/When/Then would be noise.
      - Numbered for reference in later phases.
    - **Out of scope**: 1-5 bullets — features, integrations, polish DEFERRED.
    - **Technical risks**: 1-4 bullets — known unknowns, integration friction,

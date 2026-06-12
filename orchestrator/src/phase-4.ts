@@ -41,13 +41,20 @@ const TOOL_WRITE_SPEC: ToolDef = {
       },
       acceptance_criteria: {
         type: "array",
-        description: "3-7 testable conditions, AC1..ACn ids.",
+        description:
+          "3-7 testable conditions, AC1..ACn ids. PREFER behavioral (Given/When/Then) " +
+          "shape for each: fill given/when/then with the precondition, the action/event, and the " +
+          "OBSERVABLE outcome to assert. This makes WHAT to test explicit (BDD-as-spec; the test " +
+          "asserts the 'then'). For a trivial binary check, statement alone is fine (given/when/then optional).",
         items: {
           type: "object",
           required: ["id", "statement"],
           properties: {
             id: { type: "string", description: "AC1, AC2, ..." },
-            statement: { type: "string" },
+            statement: { type: "string", description: "One-line human-readable summary of the criterion." },
+            given: { type: "string", description: "Optional (BDD): the precondition / starting state." },
+            when: { type: "string", description: "Optional (BDD): the action or event that occurs." },
+            then: { type: "string", description: "Optional (BDD): the OBSERVABLE outcome the test must assert." },
           },
         },
       },
@@ -101,7 +108,14 @@ const TOOL_REQUEST_APPROVAL: ToolDef = {
 interface SpecData {
   title: string;
   scope: string;
-  acceptance_criteria: Array<{ id: string; statement: string }>;
+  acceptance_criteria: Array<{
+    id: string;
+    statement: string;
+    /** Birim 3 (BDD-as-spec): opsiyonel davranış şekli. Boşsa düz statement (geri-uyumlu). */
+    given?: string;
+    when?: string;
+    then?: string;
+  }>;
   out_of_scope: string[];
   risks: Array<{ title: string; detail: string }>;
   /** #1 (varsayım görünürlüğü): kullanıcının açıkça demediği ama spec'in dayandığı varsayımlar. Opsiyonel. */
@@ -109,8 +123,31 @@ interface SpecData {
 }
 
 export function specToMarkdown(spec: SpecData): string {
+  // Birim 3 (BDD-as-spec): given/when/then VARSA girintili alt-bullet olarak render edilir
+  // (davranışı + assert edilecek "then"i görünür kılar). Alt-bullet'lar `**ACn**:` desenine
+  // UYMAZ → parseAcIds/parseAcTexts/countAcceptanceCriteria onları AC saymaz (geri-uyumlu).
+  // GWT değerini tek-satıra indir + placeholder/boş ele. KRİTİK (düşman-gözü K3-c): newline
+  // bırakırsak 2.+ satırlar sütun-0'a düşer → kozmetik bozulma + metin `- **ACn**:` içerirse
+  // parseAcIds FANTOM AC üretir (countAC şişer → yanlış-fail). K1: cli-skeleton "..."
+  // placeholder'ını da ele (zayıf CLI ajanı literal kopyalarsa gürültü sızmasın).
+  const cleanGwt = (s?: string): string | null => {
+    if (!s) return null;
+    const t = s.trim().replace(/\s*\n\s*/g, " ");
+    return t === "" || t === "..." ? null : t;
+  };
   const ac = spec.acceptance_criteria
-    .map((a) => `- **${a.id}**: ${a.statement}`)
+    .map((a) => {
+      let line = `- **${a.id}**: ${a.statement}`;
+      const gwt: string[] = [];
+      const g = cleanGwt(a.given);
+      const w = cleanGwt(a.when);
+      const th = cleanGwt(a.then);
+      if (g) gwt.push(`  - _Given:_ ${g}`);
+      if (w) gwt.push(`  - _When:_ ${w}`);
+      if (th) gwt.push(`  - _Then:_ ${th}`);
+      if (gwt.length > 0) line += "\n" + gwt.join("\n");
+      return line;
+    })
     .join("\n");
   const oos = spec.out_of_scope.map((s) => `- ${s}`).join("\n");
   const risks = spec.risks

@@ -59,10 +59,14 @@ fixture/setup'ı paylaşır.
 
 1. **AC'leri kullanıcı senaryolarına grupla**. Genelde 5-15 AC tek bir
    integration test'le kapsanır (örn. "auth flow", "survey CRUD", "results
-   view"). Her grup = 1 integration test.
+   view"). Her grup = 1 integration test. **AC'lerde Given/When/Then varsa
+   AYNI _Given_'ı paylaşanları tek senaryo-grubunda topla** (ortak precondition
+   = tek setup).
 2. **Her grup için 1 integration/E2E-stili test yaz** (uçtan uca senaryo —
    API çağrı zinciri, HTTP request → response → DB state, vb.). Bu test
-   birden fazla AC'yi aynı anda doğrular.
+   birden fazla AC'yi aynı anda doğrular. **AC'nin _Then_'i = testin assert'i**:
+   her davranışsal AC için testin o _Then_ (gözlemlenebilir sonuç) çıktısını
+   AÇIKÇA doğruladığından emin ol — "test koştu" değil "then gerçekleşti".
 3. **Production kodu yaz**, integration test'i koş.
 4. **Hata çıkarsa**: hatanın hangi katmandan geldiğini belirle (DB? handler?
    validation? auth?). SADECE o noktayı izole eden bir unit test yaz, fix,
