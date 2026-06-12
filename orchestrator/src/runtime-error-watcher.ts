@@ -19,6 +19,7 @@
 // kendi reference'larını tutar.
 
 import { createHash } from "node:crypto";
+import { stripAnsi } from "./strip-ansi.js";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import type { MyclConfig } from "./config.js";
@@ -244,7 +245,7 @@ export function attachRuntimeErrorWatcher(opts: AttachOpts): RuntimeErrorWatcher
 
   const handleLine = (line: string): void => {
     if (detached) return;
-    const trimmed = line.replace(/\[[0-9;]*m/g, ""); // ANSI escape strip
+    const trimmed = stripAnsi(line); // ANSI escape strip
 
     // White-list filter
     for (const wp of WHITELIST_PATTERNS) {

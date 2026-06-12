@@ -51,7 +51,10 @@ interface SpawnResult {
  */
 function runGit(projectRoot: string, args: string[]): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, {
+    // Ümit 2026-06-12 (ANSI-sınıfı sağlamlaştırma — regression-diff kökünün aynısı): `color.ui=always`
+    // yapılandırması git çıktısına ANSI enjekte edip --stat/--name-only PARSE'ını (^-çapalı regex) sessizce
+    // bozabilir. Non-TTY'de git zaten kapatır ama config'i ezerek GARANTİYE al ("ize/varsayıma güvenme").
+    const child = spawn("git", ["-c", "color.ui=false", ...args], {
       cwd: projectRoot,
       env: { ...safeEnv(), LC_ALL: "C" },
       stdio: ["ignore", "pipe", "pipe"],

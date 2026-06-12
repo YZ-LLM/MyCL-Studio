@@ -8,15 +8,7 @@
 // (vitest/jest/pytest/cargo/go) için yaygın fail-satır desenleri; runner anlaşılamazsa (kırmızı ama 0 fail
 // ayrıştırıldı) ÇAĞIRAN mutlak davranışa düşer (sahte-yeşil önleme).
 
-// ANSI escape (renk/CSI) kodlarını soy. KÖK NEDEN (Ümit 2026-06-12, reprodüksiyonla doğrulandı): MyCL test
-// komutunu execAsync ile koşar; bu bağlamda `npm test → vitest` çıktısı RENKLİ gelir (ESC[31m × ESC[39m
-// backend/...), terminal-redirect'te ise renksiz. Renkli olunca `^\s*[×✕✗✖]` eşleşmez (× öncesi escape var) →
-// 0 fail ayrıştırılır → baseline=null → regresyon-farkı devre dışı kalıyordu. Önce SOY, sonra eşleştir.
-// new RegExp + fromCharCode(27): ESC karakterini regex-literal kaçışı olmadan güvenle yaz.
-const ANSI_RE = new RegExp(String.fromCharCode(27) + "\\[[0-9;?]*[ -/]*[@-~]", "g");
-function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, "");
-}
+import { stripAnsi } from "./strip-ansi.js";
 
 /** Yaygın test-runner fail-satır desenleri. Yakalanan grup = testin (koşular arası sabit) kimliği. */
 const FAIL_PATTERNS: RegExp[] = [
