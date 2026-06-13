@@ -916,6 +916,21 @@ async function handleOpenProject(path: string): Promise<void> {
       });
       return; // boot check skip — Phase 1 zaten başladı
     }
+    // Ümit 2026-06-13 "headless çalışmasın": bekleyen UI-tweak headless'i hedefliyorsa (önceki
+    // deep-debug'ın enjekte ettiği sapma) ATLA — headless:false SABİT kuraldır (playwright-setup.ts:
+    // "kullanıcı testi gözlemek istiyor"). Kuralı ihlal eden tweak'i uygulama; discard et ki boot kaldığı
+    // yerden devam etsin ("engel yoksa ilerle"). substring yeter (regex değil).
+    if (runtime.state.pending_ui_tweak && /headless/i.test(runtime.state.pending_ui_tweak)) {
+      log.info("orchestrator", "boot: headless ui-tweak discarded (headless:false hard rule)", {
+        tweak: runtime.state.pending_ui_tweak.slice(0, 80),
+      });
+      runtime.state = { ...runtime.state, pending_ui_tweak: undefined, updated_at: Date.now() };
+      await saveState(runtime.state);
+      emitChatMessage(
+        "system",
+        "🖥️ Bekleyen \"Playwright headless\" tweak'i uygulanmadı — headless:false sabit kuralın (browser görünür kalır, testi gözleyebilirsin). Kaldığım yerden devam ediyorum.",
+      );
+    }
     // v15.7 (2026-05-26): Phase 2-9 boot-resume (production readiness madde 08).
     // Faz 1 dışı yarım kalmış faz varsa advanceToNextPhase(N-1) ile restart.
     // Phase 5 tweak mode hariç (pending_ui_tweak akışı zaten kendi handler'ı
@@ -1084,8 +1099,9 @@ async function runBootStatusCheck(
         "yerden devam eder; kullanıcının bir şey yapmasına gerek YOK. Kullanıcıya " +
         "ASLA 'faza tıkla / Sadece Çalıştır seç / devam etmek için ...' DEME — " +
         "bekletme/yönlendirme YASAK (Ümit 2026-06-13). reason='boot clean' (sessiz geç).\n" +
-        "- pending_ui_tweak set → 'UI değişikliği bekliyor — soldan Faz 5'e " +
-        "tıkla.'\n" +
+        "- pending_ui_tweak set → bu otomatik ele alınır; kullanıcıya 'tıkla / " +
+        "yazman yeterli / devam etmek için ...' DEME (Ümit 2026-06-13: bekletme/" +
+        "yönlendirme yok). reason='boot clean' (sessiz geç).\n" +
         "- pending_diagnostic set → 'Debug çözüm seçimi bekliyor — chat'te " +
         "askq açılacak.'\n" +
         "- current_phase=1 + intent_summary boş → 'Niyet bekleniyor — ne " +
