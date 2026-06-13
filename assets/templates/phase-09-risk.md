@@ -37,8 +37,9 @@ If you cannot point to the concrete guard or test that makes something safe, it 
    resource leaks, dependency surfaces, technical debt, etc.), call
    **ask_risk_decision** with a concrete question and the three options above.
 
-   **VERIFY FIRST — never ask the user what the code does.** You have Read/Grep/Bash and
-   the actual code. Before raising a risk, INSPECT the relevant file yourself (e.g. grep the
+   **VERIFY FIRST — never ask the user what the code does.** You have Read/Grep/Glob and
+   the actual code (READ-ONLY: you cannot and must not write/run anything — applying a fix is
+   Phase 8's job). Before raising a risk, INSPECT the relevant file yourself (e.g. grep the
    validation in `routes/admin.js`) and CONFIRM the behavior. `ask_risk_decision` is for the
    `fix`/`rule`/`skip` DECISION on a risk you have ALREADY verified — it is NOT a way to ask
    the developer to confirm a code-fact you could check in seconds. A question like "does the

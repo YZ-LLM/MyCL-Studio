@@ -387,15 +387,24 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
           );
           return { kind: "approved", approvalInput: input };
         }
-        // v15.13 (saha 3/5): Oto-cevap ON + (clarifying + öneri var) → kullanıcıya sormadan
-        // öneriyle yanıtla (görünür not). Onaylar (isApproval) + önerisi olmayanlar → normal akış.
+        // v15.13 (saha 3/5): Oto-cevap ON + clarifying → kullanıcıya sormadan yanıtla.
+        // Ümit 2026-06-13: öneri YOKSA bile ASKIDA KALMA — ilk seçeneği (prompt'ta conservative/
+        // güvenli-seçenek-önce kuralı) seç. Eskiden öneri yoksa kullanıcıya düşüyordu → ajan öneri
+        // vermeyince 22+ dk "yanıtını bekliyorum"da asılı kalıyordu. Onaylar (isApproval) hariç.
         let selected_tr: string;
-        if (!isApproval && suggested_option_tr !== undefined && autoAnswerSuggested()) {
+        if (
+          !isApproval &&
+          autoAnswerSuggested() &&
+          (suggested_option_tr !== undefined || options_tr.length > 0)
+        ) {
+          const pick = suggested_option_tr ?? options_tr[0];
           emitChatMessage(
             "system",
-            `🤖 Oto-cevap (öneri): "${question_tr}" → "${suggested_option_tr}"`,
+            suggested_option_tr !== undefined
+              ? `🤖 Oto-cevap (öneri): "${question_tr}" → "${pick}"`
+              : `🤖 Oto-cevap (öneri yok → güvenli/ilk seçenek): "${question_tr}" → "${pick}"`,
           );
-          selected_tr = suggested_option_tr;
+          selected_tr = pick;
         } else {
           emitAskq({
             id: askqId,

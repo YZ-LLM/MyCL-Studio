@@ -97,7 +97,8 @@ ${lines.join("\n")}
 ### EXACT shape — copy this structure (note nested arrays of objects; do NOT write them as prose):
 ${examples.join("\n")}
 
-DO NOT write to disk (only investigate with Read/Grep/Glob/Bash). When you ask a question you will
+DO NOT write to disk or run commands — investigate ONLY with Read/Grep/Glob (read-only review;
+applying any "fix" is a later phase's job, not yours). When you ask a question you will
 receive the user's answer in the next message; continue accordingly (then another {"kind":"askq"} or {"kind":"approval"}).`;
 }
 
@@ -180,8 +181,13 @@ export class CliQaAskqBackend implements QaAskqBackend {
         systemPrompt: resume ? undefined : systemPrompt,
         modelId: opts.modelId,
         cwd: opts.state.project_root,
-        allowedTools: ["Read", "Grep", "Glob", "Bash"],
-        disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+        // Ümit 2026-06-13: Bash KALDIRILDI — qa-askq fazları (Faz 1/2/9 niyet/hassasiyet/risk-inceleme)
+        // SALT-OKUNUR analizdir. Write/Edit yasaktı ama Bash AÇIK olduğundan ajan `cat > admin.js << EOF`
+        // ile dosyayı EZDİ (Write yasağını baypas). Read/Grep/Glob okumaya yeter; komut çalıştırmaya
+        // gerek yok. Bash explicit deny'de de (belt-and-suspenders). Risk-incelemesi kod YAZMAZ — "fix"
+        // kararı Faz 8'in işidir.
+        allowedTools: ["Read", "Grep", "Glob"],
+        disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"],
         effort,
         onText: (text) => emitClaudeStream({ sub: "text", text }),
         // tool_use'ları yüzeye çıkar: review-yoğun fazlar (Faz 9) onlarca
