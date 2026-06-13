@@ -18,7 +18,11 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const ARTIFACTS = path.join(__dirname, "artifacts");
-const PROJECT = process.argv[2] || "/Users/umitduman/adminpanel";
+const PROJECT = process.argv[2] || process.env.MYCL_TEST_PROJECT || "";
+if (!PROJECT) {
+  console.error("Kullanım: node e2e/drive.mjs <proje-yolu>  (veya MYCL_TEST_PROJECT env)");
+  process.exit(1);
+}
 const BRIDGE_PORT = 1799;
 const APP_URL = "http://localhost:1420";
 
