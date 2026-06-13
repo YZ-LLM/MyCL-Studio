@@ -13,6 +13,7 @@ import {
   killProcessTree,
   stopActiveDevServer,
   tryDevServerChain,
+  waitForDevServer,
 } from "../src/dev-server-launcher.js";
 
 describe("dev-server-launcher · isProcessAlive", () => {
@@ -223,6 +224,30 @@ describe("dev-server-launcher · isPortFree + findFreePort", () => {
     expect(next).not.toBeNull();
     expect(next).not.toBe(p); // dolu olanı atladı
   });
+});
+
+// Ümit 2026-06-13 (trace kökü): Vite default `localhost`'a bind eder; macOS'ta localhost→::1
+// (IPv6) → eski IPv4-only probe ECONNREFUSED alıp "port_timeout" derdi (Faz 5 false-fail →
+// tüm cascade). Çift-stack probe (127.0.0.1 + ::1) bind tercihinden bağımsız tespit eder.
+describe("dev-server-launcher · waitForDevServer çift-stack (IPv6 localhost) probe", () => {
+  let srv: Server | null = null;
+  afterEach(async () => {
+    if (srv) await new Promise<void>((r) => srv!.close(() => r()));
+    srv = null;
+  });
+
+  it("`localhost`-bind sunucu (Vite default; macOS'ta ::1) tespit edilir — IPv4-only probe kaçırırdı", async () => {
+    const port = (await findFreePort(49500))!;
+    srv = createServer((_q, s) => s.end("ok"));
+    // "localhost" → macOS ::1 / Linux 127.0.0.1; çift-stack probe hangisi olursa bulur.
+    await new Promise<void>((r) => srv!.listen(port, "localhost", () => r()));
+    expect(await waitForDevServer(port, 4000)).toBe(true);
+  }, 8000);
+
+  it("sunucu yok → false (gerçek timeout korunur, false-positive yok)", async () => {
+    const free = (await findFreePort(49600))!;
+    expect(await waitForDevServer(free, 1500)).toBe(false);
+  }, 5000);
 });
 
 describe("dev-server-launcher · tryDevServerChain FALSE-MATCH fix", () => {

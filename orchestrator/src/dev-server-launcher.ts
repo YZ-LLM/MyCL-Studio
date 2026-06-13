@@ -137,27 +137,28 @@ export async function waitForDevServer(
       log.warn("dev-server-launcher", "spawned process exited before ready", { port });
       return false;
     }
-    const ready = await new Promise<boolean>((resolve) => {
-      const req = httpGet(
-        // 127.0.0.1 (localhost DEĞİL): Node 18+ ::1'i önce deneyip vite'ın
-        // 127.0.0.1 listener'ını kaçırabilir → false-negative. IPv4'e sabitle.
-        { host: "127.0.0.1", port, path: "/", timeout: 1000 },
-        (res) => {
-          // Default: her HTTP yanıtı "server dinliyor" sayılır. Phase 6 smoke
-          // test okOnly2xx=true geçer → SADECE 2xx/3xx response başarı; 4xx/5xx
-          // → çöküntü/middleware crash; probe fail döner, Claude'a feedback.
+    // ÇİFT-STACK probe (Ümit 2026-06-13, trace kökü): Vite default `localhost`'a bind eder;
+    // macOS'ta localhost → ::1 (IPv6) çözülür → yalnız 127.0.0.1 probe'u ECONNREFUSED alır =
+    // FALSE-NEGATIVE ("port_timeout" → Faz 5 fail → tüm cascade; ampirik doğrulandı). Eski kod
+    // ters yönü (server 127.0.0.1'de, probe ::1'i önler) için IPv4'e sabitlemişti; bu yönü açtı.
+    // Çözüm: HER İKİ stack'i dene, BİRİ yanıt verirse hazır → bind tercihinden bağımsız (risk-free).
+    const probeHost = (host: string): Promise<boolean> =>
+      new Promise<boolean>((resolve) => {
+        const req = httpGet({ host, port, path: "/", timeout: 1000 }, (res) => {
+          // Default: her HTTP yanıtı "server dinliyor" sayılır. Phase 6 smoke okOnly2xx=true →
+          // SADECE 2xx/3xx başarı; 4xx/5xx → çöküntü/middleware crash → fail, Claude'a feedback.
           res.resume();
           const status = res.statusCode ?? 0;
-          const ok = okOnly2xx ? status >= 200 && status < 400 : true;
-          resolve(ok);
-        },
-      );
-      req.on("error", () => resolve(false));
-      req.on("timeout", () => {
-        req.destroy();
-        resolve(false);
+          resolve(okOnly2xx ? status >= 200 && status < 400 : true);
+        });
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => {
+          req.destroy();
+          resolve(false);
+        });
       });
-    });
+    const results = await Promise.all([probeHost("127.0.0.1"), probeHost("::1")]);
+    const ready = results.some(Boolean);
     if (ready) {
       log.info("dev-server-launcher", "ready detected", {
         port,
