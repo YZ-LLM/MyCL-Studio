@@ -155,6 +155,7 @@ import { isProcessAlive } from "./process-utils.js";
 import { stopActiveDevServer } from "./dev-server-launcher.js";
 import { loadI18n, t } from "./i18n.js";
 import { log } from "./logger.js";
+import { translate } from "./translator.js";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join as pathJoin } from "node:path";
 import type { CostRecord, PhaseId, PhaseSpec, State } from "./types.js";
@@ -821,7 +822,7 @@ async function handleOpenProject(path: string): Promise<void> {
 
     // Ümit 2026-06-12: NİYET kutusunu bu iterasyonun Faz 1 hedefiyle doldur (boot/resume sonrası "ilk user
     // mesajı" heuristiği yanlış göstermesin — Faz 1 mesajı yüklü pencerede olmayabilir). Niyet yoksa null (temiz).
-    emitIterationIntent(runtime.state.intent_summary_raw ?? runtime.state.intent_summary ?? null);
+    emitIterationIntentTr(runtime.state.intent_summary_raw ?? runtime.state.intent_summary ?? null);
     // v15.7 (2026-05-24): İş kuyruğunu frontend'e yolla
     void emitInitialTaskQueue(path);
     // Runtime HTTP server hedef proje bilgisini güncelle — UI'dan gelen
@@ -1028,6 +1029,27 @@ async function handleOpenProject(path: string): Promise<void> {
  * askq sorma, hafıza önerme YOK. Background fire-and-forget (await çağrı
  * yeri void).
  */
+/**
+ * NİYET kutusunu TÜRKÇE göster (Ümit 2026-06-13: chat panelinde teknik şeyler hariç her şey
+ * Türkçe; teknik terimlerin Türkçesi parantez içinde). intent_summary_raw main-ajanın İngilizce
+ * çıktısı → emit'ten önce EN→TR çevir (translator teknik token'ları/özel adları korur). Non-blocking;
+ * çeviri başarısızsa ham metni göster (boş bırakma). Tek emit → İngilizce-flash yok.
+ */
+function emitIterationIntentTr(raw: string | null | undefined): void {
+  if (!raw) {
+    emitIterationIntent(null);
+    return;
+  }
+  const cfg = runtime.config;
+  if (!cfg) {
+    emitIterationIntent(raw);
+    return;
+  }
+  void translate(cfg, raw, "en-to-tr")
+    .then((r) => emitIterationIntent(r.text?.trim() || raw))
+    .catch(() => emitIterationIntent(raw));
+}
+
 async function runBootStatusCheck(
   cfg: MyclConfig,
   st: State,
@@ -1058,9 +1080,10 @@ async function runBootStatusCheck(
         "- `phase-17-complete` = pipeline tamamlandı.\n" +
         "- `tdd-red`, `phase-N-fail` = test failure → yarıda kalmış iş VAR.\n\n" +
         "## Karar matrisi (söylem örnekleri)\n" +
-        "- current_phase ∈ [5..16] (mid-pipeline) → 'X fazı yarıda. Devam " +
-        "etmek için soldaki Fazlar listesinden o faza tıkla ve \"Sadece " +
-        "Çalıştır\"ı seç.' (faz adı kullan, numara değil)\n" +
+        "- current_phase ∈ [2..16] (mid-pipeline, yarıda) → bu faz OTOMATİK kaldığı " +
+        "yerden devam eder; kullanıcının bir şey yapmasına gerek YOK. Kullanıcıya " +
+        "ASLA 'faza tıkla / Sadece Çalıştır seç / devam etmek için ...' DEME — " +
+        "bekletme/yönlendirme YASAK (Ümit 2026-06-13). reason='boot clean' (sessiz geç).\n" +
         "- pending_ui_tweak set → 'UI değişikliği bekliyor — soldan Faz 5'e " +
         "tıkla.'\n" +
         "- pending_diagnostic set → 'Debug çözüm seçimi bekliyor — chat'te " +
@@ -1193,7 +1216,7 @@ async function restartPhase1WithIntent(intentText: string): Promise<void> {
     };
     await saveState(runtime.state);
     // NİYET kutusu bu iterasyonun hedefini göstersin (Faz 1 onaylandı).
-    emitIterationIntent(runtime.state.intent_summary_raw ?? runtime.state.intent_summary);
+    emitIterationIntentTr(runtime.state.intent_summary_raw ?? runtime.state.intent_summary);
     await advanceToNextPhase(1);
   } else {
     await failPhase(1, p1);
@@ -2333,7 +2356,7 @@ async function executeDispatchedIntent(
       intent_summary_raw: p1.approvedSummary ?? runtime.state.intent_summary_raw,
     };
     // NİYET kutusu bu iterasyonun hedefini göstersin (Faz 1 onaylandı).
-    emitIterationIntent(runtime.state.intent_summary_raw ?? runtime.state.intent_summary);
+    emitIterationIntentTr(runtime.state.intent_summary_raw ?? runtime.state.intent_summary);
     // Sonraki faz: P1 → P2 (ardışık akış).
     await advanceToNextPhase(1);
   } else {
