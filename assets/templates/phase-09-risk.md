@@ -36,7 +36,19 @@ If you cannot point to the concrete guard or test that makes something safe, it 
 2. For each risk surface (input validation, error paths, race conditions,
    resource leaks, dependency surfaces, technical debt, etc.), call
    **ask_risk_decision** with a concrete question and the three options above.
-3. After all risks classified, call **complete_risk_review** with a structured
+
+   **VERIFY FIRST — never ask the user what the code does.** You have Read/Grep/Bash and
+   the actual code. Before raising a risk, INSPECT the relevant file yourself (e.g. grep the
+   validation in `routes/admin.js`) and CONFIRM the behavior. `ask_risk_decision` is for the
+   `fix`/`rule`/`skip` DECISION on a risk you have ALREADY verified — it is NOT a way to ask
+   the developer to confirm a code-fact you could check in seconds. A question like "does the
+   validation reject old formats?" is a YOU-read-the-code task, not a user question. If you
+   cannot determine it even after reading, ASSUME the riskier case (`fix`/`rule`) — do not punt.
+3. **Always provide your recommended option** as the suggestion in `ask_risk_decision` (you are
+   the reviewer — you have an opinion). Put the conservative/secure option first. This lets the
+   developer (or auto-answer) proceed without re-doing your analysis. Genuine open *business*
+   decisions are the only thing you defer to the user — never code behavior.
+4. After all risks classified, call **complete_risk_review** with a structured
    summary { risk_count, decisions[] }.
 
 ## Review across six axes (code-review-and-quality discipline)
