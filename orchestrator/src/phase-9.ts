@@ -34,7 +34,10 @@ const TOOL_ASK_RISK: ToolDef = {
   description: "Ask the user how to handle a specific risk: skip / fix / rule.",
   input_schema: {
     type: "object",
-    required: ["question", "options"],
+    // Ümit 2026-06-13 ("orkestratör cevap vermedi"): suggested_answer ZORUNLU — sen incelemecisin,
+    // her zaman bir öneri ver. Bu olmadan auto-answer (Oto-cevap) ASLA ateşlenmiyordu (composeQuestion
+    // suggested_en=null) → her risk-kararı kullanıcıya düşüyordu. Bununla, Oto-cevap açıkken MyCL kendi yanıtlar.
+    required: ["question", "options", "suggested_answer"],
     properties: {
       question: { type: "string" },
       options: {
@@ -42,6 +45,13 @@ const TOOL_ASK_RISK: ToolDef = {
         items: { type: "string" },
         minItems: 2,
         maxItems: 4,
+      },
+      suggested_answer: {
+        type: "string",
+        description:
+          "Your RECOMMENDED option — copy ONE of the `options` strings VERBATIM (must exactly match). " +
+          "You are the reviewer; ALWAYS recommend. Prefer the conservative/secure choice (fix/rule); " +
+          "NEVER recommend skipping an unverified risk. Auto-answer uses this so the user isn't asked.",
       },
     },
   },

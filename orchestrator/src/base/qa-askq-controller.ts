@@ -482,7 +482,11 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
     const rawSugg = typeof input.suggested_answer === "string"
       ? input.suggested_answer.trim()
       : null;
-    const suggested_en = rawSugg && opts.includes(rawSugg) ? rawSugg : null;
+    // Ümit 2026-06-13: önce exact, sonra TRIM-normalize eşleştir → LLM önerisi boşluk/format farkı
+    // taşısa bile eşleşsin (auto-answer kaçmasın). EŞLEŞEN ORİJİNAL option döner (caller indexOf exact ister).
+    const suggested_en = rawSugg
+      ? (opts.find((o) => o === rawSugg) ?? opts.find((o) => o.trim() === rawSugg) ?? null)
+      : null;
     return { question_en: question, options_en: opts, suggested_en };
   }
 
