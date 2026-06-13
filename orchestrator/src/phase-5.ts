@@ -47,6 +47,8 @@ export class Phase5Controller {
   private base: CodegenBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
+  /** false → escalation merdivenini TIRMANMA (model gücü çözmez); index.ts okur. */
+  public lastFailEscalatable?: boolean;
 
   private readonly state: State;
   private readonly config: MyclConfig;
@@ -377,6 +379,12 @@ export class Phase5Controller {
       if (tweakWrites.length === 0) {
         emitError("phase-5 tweak: no ui-tweak-applied events — Claude yazmadı", null);
         this.lastFailReason = "tweak mode: no ui-tweak-applied events";
+        // Ümit 2026-06-13 (trace kökü): "hiç event yok" = ya tweak ZATEN uygulanmış (no-op) ya da
+        // ajan yazamadı. İKİSİNDE de model-gücü çözmez — daha güçlü model de aynı dosyaları okuyup
+        // "yapacak şey yok" der (trace: haiku→opus-max 11 rung, her biri 30-130dk, HEPSİ aynı sonuç).
+        // escalatable=false → merdiveni TIRMANMA, doğrudan error-analysis'e (akıllı deep-debug zaten
+        // "zaten uygulanmış"ı bulup pending_ui_tweak'i temizliyor — ama saatler tırmanmadan).
+        this.lastFailEscalatable = false;
         return "fail";
       }
       await appendAudit(this.state.project_root, {
