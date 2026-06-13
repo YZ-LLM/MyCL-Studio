@@ -250,6 +250,9 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
       approval_summary_field: "summary",
       approval_suffix_key: "generic",
       max_questions: 20,
+      // Ümit 2026-06-13: risk-kararları (ask_risk_decision) zaten yanıtlandı → sonuç-onayı redundant.
+      // Oto-sonuçlandır (ayrı "Onaylıyor musunuz?" açma; toggle'dan bağımsız).
+      auto_conclude: true,
     },
   },
   10: {

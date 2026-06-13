@@ -125,6 +125,14 @@ export interface AskqConfig {
   max_questions: number;
   /** İsteğe bağlı boyut listesi (örn. P2'nin 7 hassasiyet boyutu). */
   dimensions?: string[];
+  /**
+   * Ümit 2026-06-13: approval tool çağrılınca AYRI onay askq'ı AÇMA — otomatik onayla
+   * (toggle'dan bağımsız). Faz 9 risk-review için: her risk-kararı (ask_risk_decision) zaten
+   * yanıtlandı → sonuç-onayı ("Onaylıyor musunuz?") REDUNDANT. "Cevap zaten verilmiş, arkasından
+   * gereksiz onay isteme." Yalnız sonuç-onayı bir-sonraki-adım-özeti olan fazlarda set edilir
+   * (spec/intent onayı gibi GERÇEK incelemelerde KAPALI kalır).
+   */
+  auto_conclude?: boolean;
 }
 
 /** production-schema fazlarının çıktı artifact ayarı. */

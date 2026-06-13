@@ -375,6 +375,18 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
           }
         }
 
+        // Ümit 2026-06-13: auto_conclude (Faz 9) → sonuç-onayını AÇMA, otomatik onayla.
+        // Risk-kararları zaten yanıtlandı (clarifying askq'lar) → ayrı "Onaylıyor musunuz?"
+        // REDUNDANT. Toggle'dan BAĞIMSIZ ("oto-cevap açık olsa da olmasa da"). Yalnız approval'da.
+        if (isApproval && askq.auto_conclude) {
+          this.pendingAskq = null;
+          this.currentAskqId = null;
+          emitChatMessage(
+            "system",
+            `✅ ${question_tr} → kararlar zaten verildi, otomatik sonuçlandırdım (ayrı onay gerekmiyor).`,
+          );
+          return { kind: "approved", approvalInput: input };
+        }
         // v15.13 (saha 3/5): Oto-cevap ON + (clarifying + öneri var) → kullanıcıya sormadan
         // öneriyle yanıtla (görünür not). Onaylar (isApproval) + önerisi olmayanlar → normal akış.
         let selected_tr: string;
