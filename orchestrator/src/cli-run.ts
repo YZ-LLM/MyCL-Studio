@@ -34,7 +34,11 @@ export interface CliRunOpts {
   /** "ultracode" → --settings; diğerleri → --effort. */
   effort?: string;
   maxBudgetUsd?: number;
+  /** IDLE-timeout: bu süre HİÇ çıktı gelmezse öldür (her olayda sıfırlanır). */
   timeoutMs?: number;
+  /** WALL-CLOCK cap: tek çağrı toplam-süre tavanı (olaylarla SIFIRLANMAZ); runaway keser.
+   *  Verilmezse WALL_CLOCK_MAX_MS. <=0 → kapalı. */
+  wallClockMs?: number;
   /** Assistant metin parçaları geldikçe (UI stream köprüsü). */
   onText?: (text: string) => void;
   /** Her tool_use için (review-yoğun fazların aktivitesini yüzeye çıkarır). */
@@ -68,6 +72,9 @@ export interface CliRunResult {
 // 18+ dk). İdle = ÇIKTI YOKLUĞU; 10 dk TAM SESSİZ = gerçek hang/deadlock → öldür. Aktif iş (thinking/tool çıktısı)
 // idle'ı sıfırlar → yavaş-ama-aktif iş ÖLMEZ. Uzun Bash tool'u (npm test/install) 10 dk'yı genelde aşmaz; aşan = stuck.
 const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öldür
+// WALL-CLOCK tavanı (Ümit 2026-06-13): tek claude çağrısı en fazla bu kadar; olaylarla sıfırlanmaz.
+// idle-timer "sürekli akıtan ama bitmeyen" runaway'i kaçırıyordu (Faz 5 rung'ları 133 dk). 30 dk tavan.
+const WALL_CLOCK_MAX_MS = 1_800_000; // 30 dk
 
 function buildArgs(opts: CliRunOpts): string[] {
   const args: string[] = [
@@ -153,10 +160,12 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     });
 
     let timer: ReturnType<typeof setTimeout>;
+    let wallTimer: ReturnType<typeof setTimeout> | undefined;
     const done = (r: CliRunResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (wallTimer) clearTimeout(wallTimer);
       try { child.kill("SIGTERM"); } catch { /* zaten bitti */ }
       resolve(r);
     };
@@ -171,6 +180,21 @@ export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       }, timeoutMs);
     };
     resetTimer();
+
+    // WALL-CLOCK cap (Ümit 2026-06-13): idle-timer çıktı geldikçe sıfırlanır → sürekli
+    // thinking/tool akıtan ama ASLA bitmeyen çağrı (Faz 5 rung'ları 133 dk) idle-out olmaz.
+    // Bu sabit tavan spawn'da bir kez kurulur, sıfırlanmaz → runaway'i keser.
+    const wallClockMs = opts.wallClockMs ?? WALL_CLOCK_MAX_MS;
+    if (wallClockMs > 0) {
+      wallTimer = setTimeout(() => {
+        log.warn("cli-run", "WALL-CLOCK cap — killing claude (runaway/sonsuz-döngü)", {
+          wallClockMs,
+          model: opts.modelId,
+          toolUsesSoFar: toolUses.length,
+        });
+        done({ ok: false, text: texts.join(""), toolUses, turns, usage, error: `cli wall-clock cap ${wallClockMs}ms aşıldı (olası sonsuz-döngü)` });
+      }, wallClockMs);
+    }
 
     const rl = createInterface({ input: child.stdout! });
     rl.on("line", (line) => {

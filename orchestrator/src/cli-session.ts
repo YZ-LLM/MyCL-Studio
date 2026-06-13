@@ -40,7 +40,11 @@ export interface CliSessionTurnOpts {
   disallowedTools?: string[];
   effort?: string;
   maxBudgetUsd?: number;
+  /** IDLE-timeout: bu süre boyunca HİÇ çıktı gelmezse öldür (her olayda sıfırlanır). */
   timeoutMs?: number;
+  /** WALL-CLOCK cap: tek çağrı için sabit toplam-süre tavanı (olaylarla SIFIRLANMAZ);
+   *  runaway/sonsuz-düşünme'yi keser. Verilmezse WALL_CLOCK_MAX_MS. <=0 → kapalı. */
+  wallClockMs?: number;
   /** Assistant metin parçaları geldikçe (UI stream köprüsü). */
   onText?: (text: string) => void;
   /** Her tool_use için (Faz 8 observer köprüsü). */
@@ -69,6 +73,10 @@ export interface CliSessionResult {
 // delta'sında sıfırlar → AKTİF iş (yavaş thinking dahil) ASLA tetiklemez, yalnız 10 dk TAM SESSİZ (gerçek hang/
 // deadlock) tetikler. Yani "yavaş işi öldürme" korunur, sonsuz takılma biter. Kill → fail → escalation/retry kurtarır.
 const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öldür (cömert; aktif iş token akıtır)
+// WALL-CLOCK tavanı (Ümit 2026-06-13): tek claude çağrısı en fazla bu kadar SÜREBİLİR — olaylarla
+// sıfırlanmaz. idle-timer "sürekli düşünen" modeli kaçırıyordu (Faz 9 79 dk asılı); bu mutlak tavan keser.
+// 30 dk: meşru uzun codegen'e (Faz 8) cömert, ama 79/133-dk pataolojiyi bounded yapar.
+const WALL_CLOCK_MAX_MS = 1_800_000; // 30 dk
 
 function buildArgs(opts: CliSessionTurnOpts): string[] {
   // v15.12: her main-ajan user mesajına İngilizce-çıktı hatırlatması (ilk + resume
@@ -162,10 +170,12 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
     });
 
     let timer: ReturnType<typeof setTimeout>;
+    let wallTimer: ReturnType<typeof setTimeout> | undefined;
     const done = (r: CliSessionResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (wallTimer) clearTimeout(wallTimer);
       try { child.kill("SIGTERM"); } catch { /* zaten bitti */ }
       resolve(r);
     };
@@ -192,6 +202,31 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
       }, timeoutMs);
     };
     resetTimer();
+
+    // WALL-CLOCK cap (Ümit 2026-06-13, Faz 9 79dk asılı kökü): idle-timer her stream
+    // olayında (thinking-token dahil) SIFIRLANIR → sürekli "düşünen"/döngüye giren model
+    // ASLA idle-out olmaz, saatlerce koşar. Bu timer spawn'da BİR kez kurulur, olaylarla
+    // SIFIRLANMAZ → tek bir claude çağrısı wallClockMs'i aşamaz (runaway/sonsuz-düşünme tavanı).
+    const wallClockMs = opts.wallClockMs ?? WALL_CLOCK_MAX_MS;
+    if (wallClockMs > 0) {
+      wallTimer = setTimeout(() => {
+        log.warn("cli-session", "WALL-CLOCK cap — killing claude (runaway/sonsuz-düşünme)", {
+          wallClockMs,
+          model: opts.modelId,
+          lastEventType,
+          turnsSoFar: turns,
+          toolUsesSoFar: toolUses.length,
+        });
+        done({
+          ok: false,
+          text: texts.join(""),
+          toolUses,
+          turns,
+          usage,
+          error: `cli wall-clock cap ${wallClockMs}ms aşıldı (olası sonsuz-düşünme/döngü)`,
+        });
+      }, wallClockMs);
+    }
 
     const rl = createInterface({ input: child.stdout! });
     rl.on("line", (line) => {
