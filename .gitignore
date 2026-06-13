@@ -25,6 +25,7 @@ dist-ssr
 
 # Coverage / test output
 coverage
+e2e/artifacts/
 
 # Secrets & local runtime state (NEVER commit) — keys live in ~/.mycl, not here
 .env

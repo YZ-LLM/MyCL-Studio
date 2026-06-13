@@ -81,7 +81,7 @@ export function AppHeader({
       ? VERDICT_CHIP[pipelineVerdict]
       : null;
   return (
-    <header className="app-header" data-tauri-drag-region>
+    <header className="app-header" data-testid="app-header" data-tauri-drag-region>
       <span className="app-title" data-tauri-drag-region>MyCL Studio</span>
       <span
         className="app-version"
@@ -98,6 +98,7 @@ export function AppHeader({
       {onPhaseIndicatorClick ? (
         <button
           type="button"
+          data-testid="phase-indicator"
           className={`app-phase-indicator ${status} clickable`}
           style={{ marginLeft: "auto" }}
           onClick={onPhaseIndicatorClick}
@@ -112,6 +113,7 @@ export function AppHeader({
         </button>
       ) : (
         <span
+          data-testid="phase-indicator"
           className={`app-phase-indicator ${status}`}
           style={{ marginLeft: "auto" }}
           data-tauri-drag-region
@@ -145,6 +147,7 @@ export function AppHeader({
           onClick={onExecuteClick}
           disabled={executeDisabled}
           className="header-execute-btn"
+          data-testid="execute-btn"
           title="Projeyi çalıştır (chat'e otomatik 'projeyi çalıştır' mesajı gönderir)"
           aria-label="Projeyi çalıştır"
         >
@@ -201,6 +204,7 @@ export function AppHeader({
       {/* v15.2.2: Yeni pencere — multi-instance için kullanıcı tetikli */}
       <button
         type="button"
+        data-testid="new-window-btn"
         onClick={async () => {
           try {
             await invoke("open_new_window");
@@ -243,6 +247,7 @@ export function AppHeader({
         <button
           type="button"
           onClick={onSettingsClick}
+          data-testid="settings-btn"
           aria-label="Ayarlar"
           style={{
             fontSize: 12,

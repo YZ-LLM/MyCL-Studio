@@ -306,7 +306,7 @@ export function ChatPanel({
   };
 
   return (
-    <section className="panel">
+    <section className="panel" data-testid="chat-panel">
       <div className="panel-label">
         <span>MyCL</span>
         {messages.length > 0 && (
@@ -400,6 +400,7 @@ export function ChatPanel({
       {runningBanner && (
         <div
           className="running-banner"
+          data-testid="running-banner"
           title={
             onOrchestratorClick
               ? "Düşünceleri görmek için tıkla"
@@ -427,6 +428,7 @@ export function ChatPanel({
       >
         <textarea
           className="composer-input"
+          data-testid="composer-input"
           placeholder={
             composerPlaceholder ??
             "MyCL'e yaz... (Enter gönderir, Shift+Enter alt satır)"
@@ -458,6 +460,7 @@ export function ChatPanel({
           <button
             type="button"
             className="intent-pill"
+            data-testid="intent-orchestrator"
             onClick={onOrchestratorClick}
             title={
               agentBusy
@@ -515,6 +518,7 @@ export function ChatPanel({
           >
             <input
               type="checkbox"
+              data-testid="auto-answer-toggle"
               checked={!!autoAnswer}
               onChange={(e) => onAutoAnswerToggle(e.target.checked)}
               style={{ margin: 0 }}
@@ -527,6 +531,7 @@ export function ChatPanel({
           <button
             type="button"
             className="intent-pill"
+            data-testid="intent-guide"
             onClick={onGuideClick}
             title={
               guideAvailable
@@ -545,6 +550,7 @@ export function ChatPanel({
           <button
             type="button"
             className="intent-pill"
+            data-testid="intent-model-report"
             onClick={onModelReportClick}
             title="Hangi model hangi işte iyi — escalation gözlemleri raporu"
           >
@@ -557,6 +563,7 @@ export function ChatPanel({
           <button
             type="button"
             className="intent-pill"
+            data-testid="intent-quality-audit"
             onClick={onQualityAuditClick}
             title="Denetim ajanı: orkestratörün son koşusunu kalite sorularına göre denetler"
           >
@@ -570,6 +577,7 @@ export function ChatPanel({
           <button
             type="button"
             className="intent-pill"
+            data-testid="intent-add-task"
             onClick={() => {
               const txt = draft.trim();
               if (!txt) return;
@@ -589,6 +597,7 @@ export function ChatPanel({
           <button
             type="button"
             className="intent-pill"
+            data-testid="intent-dast"
             onClick={onDastClick}
             disabled={dastRunning}
             title={

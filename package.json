@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:browser": "node browser-bridge/start.mjs",
+    "bridge": "node browser-bridge/server.mjs",
+    "e2e:smoke": "node e2e/smoke.mjs",
     "build": "tsc && vite build",
     "build:all": "npm --prefix orchestrator run build && npm run build",
     "check": "bash scripts/check.sh",

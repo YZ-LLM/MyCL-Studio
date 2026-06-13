@@ -45,7 +45,7 @@ export function AskqCard({
       });
     };
     return (
-      <div className="askq-card msg">
+      <div className="askq-card msg" data-testid="askq-card">
         <div className="askq-question">{question}</div>
         <div className="askq-options askq-multi">
           {options.map((o) => {
@@ -68,6 +68,7 @@ export function AskqCard({
           <button
             type="button"
             className="askq-option askq-apply"
+            data-testid="askq-apply"
             disabled={picked.size === 0}
             onClick={() => onAnswer(Array.from(picked))}
           >
@@ -86,7 +87,7 @@ export function AskqCard({
   }
 
   return (
-    <div className="askq-card msg">
+    <div className="askq-card msg" data-testid="askq-card">
       <div className="askq-question">{question}</div>
       {suggestedOption && (
         <div className="askq-suggestion" title="Orkestra ajanının önerisi">
@@ -103,6 +104,7 @@ export function AskqCard({
             <button
               key={value}
               type="button"
+              data-testid="askq-option"
               className={`askq-option${isSuggested ? " askq-option-suggested" : ""}`}
               onClick={() => onAnswer(value)}
             >
@@ -129,6 +131,7 @@ export function AskqCard({
             <input
               type="text"
               className="askq-other-input"
+              data-testid="askq-other-input"
               autoFocus
               placeholder="Cevabınızı yazın…"
               value={otherText}

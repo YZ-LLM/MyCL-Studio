@@ -1,3 +1,20 @@
+## 2026-06-13
+
+- **feat(tarayıcı köprüsü: MyCL Studio'yu düz Chromium'da Playwright ile uçtan-uca test) [Ümit: "Tauri yüzünden
+  erişemediğin yerleri tarayıcıda aç, benim yerime her şeyi test et"]:** Tauri WebView (WKWebView/WebKitGTK)
+  Playwright/CDP'ye bağlanamadığı için uygulamayı düz tarayıcıda açan köprü eklendi. Asıl beyin zaten Node
+  orchestrator; köprü Rust IPC katmanını BİREBİR taklit eder. (1) `browser-bridge/server.mjs` — Node yerleşik
+  `http` ile SSE (olaylar) + HTTP POST (13 invoke komutu), SIFIR yeni bağımlılık; `orchestrator/dist/index.js`'i
+  Rust gibi spawn eder, stdout NDJSON → `orchestrator-event`, stdin ← `OrchestratorCommand`. (2)
+  `src/browser-bridge/shim/*` — `@tauri-apps/api/{core,event,window}` + `plugin-{dialog,notification,opener}`
+  tarayıcı karşılıkları; `vite.config.ts` YALNIZ `MYCL_BROWSER=1` iken alias'lar → bileşen kodu DEĞİŞMEZ, Tauri
+  build'i ETKİLENMEZ. (3) `e2e/smoke.mjs` — Playwright (orchestrator/node_modules'taki, zaten kurulu Chromium)
+  harness'i: boot→Splash→fixture proje aç→Ana UI (header+faz sidebar+composer) tam DOM erişimi; HİÇBİR faz/LLM
+  tetiklenmez (harcama yok); sayfa-içi uncaught hata = kırmızı. (4) Bileşenlere additive `data-testid` kancaları
+  (Splash/PhaseSidebar/ChatPanel/AppHeader/AskqCard) — dile/stile bağımsız sağlam seçiciler. Komutlar:
+  `npm run dev:browser` / `npm run e2e:smoke` / `npm run bridge`. Sınırlar (bilinçli): çoklu pencere + güncelleme
+  tarayıcıda no-op; faz çalıştırınca gerçek orchestrator (API keys varsa maliyet). Detay: `browser-bridge/README.md`.
+
 ## 2026-06-11
 
 - **feat(6'lı paket: kalite + merdiven iyileştirmeleri) [Ümit log incelemesi]:**

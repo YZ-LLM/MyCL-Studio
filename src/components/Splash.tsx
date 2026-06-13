@@ -67,7 +67,7 @@ export function Splash({ onProjectSelected }: Props) {
   }, [onProjectSelected]);
 
   return (
-    <main className="splash">
+    <main className="splash" data-testid="splash">
       <div className="splash-box">
         <h1 className="splash-title">Proje Klasörü Seç</h1>
         <p className="splash-desc">
@@ -78,6 +78,7 @@ export function Splash({ onProjectSelected }: Props) {
         <button
           type="button"
           className="primary splash-btn"
+          data-testid="splash-pick-folder"
           onClick={pickFolder}
           disabled={busy}
         >
@@ -92,6 +93,7 @@ export function Splash({ onProjectSelected }: Props) {
                 return (
                   <li
                     key={p}
+                    data-testid="splash-recent-item"
                     className={`splash-recent-item${isOpen ? " splash-recent-item-disabled" : ""}`}
                     title={
                       isOpen

@@ -51,7 +51,7 @@ export function PhaseSidebar({
   const byId = new Map(phases.map((p) => [p.id, p]));
   const failedSet = new Set(gateFailures ?? []);
   return (
-    <aside className="phase-sidebar">
+    <aside className="phase-sidebar" data-testid="phase-sidebar">
       <div className="phase-sidebar-header">Fazlar</div>
       <div className="phase-sidebar-list">
         {/* Faz 0 — Hata Ayıklama (Debug Triage). Pipeline DIŞI/standalone; en üstte,
@@ -64,6 +64,7 @@ export function PhaseSidebar({
           return (
             <button
               type="button"
+              data-testid="phase-item-0"
               className={`phase-item standalone${isCurrent0 ? " current" : ""}`}
               disabled={disabled}
               onClick={() => onPhaseClick(0 as PhaseId)}
@@ -91,6 +92,7 @@ export function PhaseSidebar({
             <button
               key={id}
               type="button"
+              data-testid={`phase-item-${id}`}
               className={`phase-item${isCurrent ? " current" : ""}${isRequired ? " required" : ""}${gateFailed ? " gate-failed" : ""}`}
               disabled={disabled}
               onClick={() => onPhaseClick(id)}
