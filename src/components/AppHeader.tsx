@@ -14,6 +14,9 @@ interface Props {
   /** Tek tıkla "projeyi çalıştır" intent'i gönderir; LLM classifier'ı bypass etmez ama otomatik tetikler. */
   onExecuteClick?: () => void;
   executeDisabled?: boolean;
+  /** Duraklat/Devam (token tasarrufu): paused=true → "▶ Devam" gösterir. */
+  onPauseToggle?: () => void;
+  paused?: boolean;
   /** Sağ panel (Translator + Claude Code) görünürlük toggle'ı. */
   onTogglePanelsClick?: () => void;
   rightPanelsOpen?: boolean;
@@ -63,6 +66,8 @@ export function AppHeader({
   onSettingsClick,
   onExecuteClick,
   executeDisabled,
+  onPauseToggle,
+  paused,
   onTogglePanelsClick,
   rightPanelsOpen,
   onToggleLeftClick,
@@ -152,6 +157,29 @@ export function AppHeader({
           aria-label="Projeyi çalıştır"
         >
           ▶ Çalıştır
+        </button>
+      )}
+      {onPauseToggle && (
+        <button
+          type="button"
+          onClick={onPauseToggle}
+          className="header-pause-btn"
+          data-testid="pause-btn"
+          title={
+            paused
+              ? "Devam et — kaldığı yerden sürer"
+              : "Duraklat — yeni LLM çağrısı başlatmaz (mevcut tur bitince durur), token yakmaz"
+          }
+          aria-label={paused ? "Devam et" : "Duraklat"}
+          style={{
+            fontSize: 12,
+            background: paused ? "var(--accent-strong)" : "transparent",
+            color: paused ? "white" : "inherit",
+            border: "1px solid var(--border)",
+            padding: "4px 10px",
+          }}
+        >
+          {paused ? "▶ Devam" : "⏸ Duraklat"}
         </button>
       )}
       {onTogglePanelsClick && (

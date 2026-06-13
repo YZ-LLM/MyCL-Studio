@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
+import { waitIfPaused } from "./pause.js";
 import {
   noteRateLimitEvent,
   noteCliRateLimitError,
@@ -119,7 +120,8 @@ function buildArgs(opts: CliRunOpts): string[] {
  * `claude` CLI'ı tek-atışta çalıştırır, tüm assistant metnini + tool_use'ları toplar.
  * Hata/timeout durumunda `{ ok:false, error }` döner — caller SDK'ya düşebilir.
  */
-export function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
+export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
+  await waitIfPaused(); // Duraklat denetimi: yeni LLM çağrısı SINIRI (in-flight beklemez).
   // v15.11 GÜVENLİK: spawn-öncesi sandbox kapısı (enforce + sandbox yok → çalıştırma).
   if (!guardSandboxOrWarn()) {
     return Promise.resolve({

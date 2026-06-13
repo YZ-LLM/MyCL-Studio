@@ -956,6 +956,15 @@ function App() {
    * `command_direct` IPC → orchestrator handleCommandIntent direkt çağrılır.
    * Chat'e user balon optimistic eklenir (sendUserMessage paraleli).
    */
+  // Duraklat/Devam (Ümit 2026-06-13): MyCL'i geçici askıya al — yeni LLM çağrısı
+  // başlatmaz (mevcut tur biter), token yakmaz; tekrar tıkla → kaldığı yerden devam.
+  const [paused, setPausedState] = useState(false);
+  const handlePauseToggle = (): void => {
+    const next = !paused;
+    setPausedState(next);
+    void orch.send({ kind: "set_paused", data: { paused: next } });
+  };
+
   const sendRunCommand = () => {
     const text = "projeyi çalıştır";
     setMainState((s) => ({
@@ -1229,6 +1238,8 @@ function App() {
         onSettingsClick={() => setSettingsOpen(true)}
         onExecuteClick={sendRunCommand}
         executeDisabled={buttonsDisabled}
+        onPauseToggle={handlePauseToggle}
+        paused={paused}
         onTogglePanelsClick={() => setRightPanelsOpen((p) => !p)}
         rightPanelsOpen={rightPanelsOpen}
         onToggleLeftClick={() => setLeftPanelsOpen((p) => !p)}

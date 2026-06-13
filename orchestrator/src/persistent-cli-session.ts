@@ -22,6 +22,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import { emitChatMessage, recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
+import { waitIfPaused } from "./pause.js";
 import { globalConfigFile } from "./paths.js";
 
 // Oturum transcript'i (Ümit 2026-06-11: "arka plan oturumları kör noktada kalmasın, herşey loglansın, orkestratör
@@ -298,6 +299,7 @@ export class PersistentClaudeSession {
     const run = (): Promise<SessionTurnResult> =>
       new Promise<SessionTurnResult>((resolve) => {
         void (async () => {
+        await waitIfPaused(); // Duraklat denetimi: yeni kalıcı-oturum turu SINIRI.
         if (!this.alive && !this.start()) {
           resolve({ ok: false, text: "", error: "session start failed" });
           return;

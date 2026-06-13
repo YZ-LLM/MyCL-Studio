@@ -151,6 +151,7 @@ import {
   decisionIsConsequential,
 } from "./pre-commit-lens-gate.js";
 import { runBlindspotLens, formatLensFindings, type LensResult } from "./pre-commit-lens.js";
+import { setPaused } from "./pause.js";
 import { loadProfile } from "./profile-loader.js";
 import { isProcessAlive } from "./process-utils.js";
 import { stopActiveDevServer } from "./dev-server-launcher.js";
@@ -5020,6 +5021,11 @@ ipcRouter.register("task_queue_remove", async (data: unknown) => {
 // v15.13 (saha 3/5): Oto-cevap toggle (Orkestrator yanındaki checkbox).
 ipcRouter.register("set_auto_answer", (data: unknown) => {
   setAutoAnswerSuggested((data as { enabled?: boolean } | undefined)?.enabled === true);
+});
+// Duraklat/Devam (Ümit 2026-06-13): paused=true → yeni LLM çağrıları bir sonraki
+// sınırda bekler (in-flight tur tamamlanır); paused=false → kaldığı yerden devam.
+ipcRouter.register("set_paused", (data: unknown) => {
+  setPaused((data as { paused?: boolean } | undefined)?.paused === true);
 });
 
 async function dispatch(msg: IncomingCommand): Promise<void> {

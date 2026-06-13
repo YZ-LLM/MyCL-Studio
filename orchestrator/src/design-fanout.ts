@@ -12,6 +12,7 @@
 // veya sentez başarısız → ok:false + görünür reason → caller (phase-5) tek-ajana DÜŞER (sessiz değil).
 
 import Anthropic from "@anthropic-ai/sdk";
+import { waitIfPaused } from "./pause.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -74,6 +75,7 @@ export async function runReasoningTurn(
   maxTokens: number,
   projectRoot: string,
 ): Promise<string> {
+  await waitIfPaused(); // Duraklat denetimi: yeni akıl-yürütme turu SINIRI.
   const model = subagentModelId(config.selected_models, role);
   const backend = backendForRole(config, "main");
   if (backend === "cli") {

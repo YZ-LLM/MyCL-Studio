@@ -1,5 +1,13 @@
 ## 2026-06-13
 
+- **feat(Duraklat/Devam düğmesi: token tasarrufu) [Ümit: "sen çalışırken MyCL gereksiz token yakmasın"]:** Header'da
+  ⏸ Duraklat / ▶ Devam düğmesi (data-testid="pause-btn"). Semantik: Duraklat → bir sonraki LLM-çağrı SINIRINDA durur
+  (yeni çağrı başlatılmaz), IN-FLIGHT tur İPTAL EDİLMEZ (mevcut LLM cevabı alınır); Devam → kaldığı yerden sürer.
+  Çekirdek `orchestrator/src/pause.ts` (`waitIfPaused`/`setPaused`, runtime-only); gate'ler ağır LLM giriş
+  noktalarında: `runClaudeCli` (codegen/debug/orchestrator-cli/relevance-cli), `runReasoningTurn` (lens/hipotez/
+  error-analysis API), `PersistentClaudeSession.send` (çevirmen/relevance/persistent). IPC: `set_paused` komutu →
+  `setPaused`. Frontend durumu optimistic (echo olay yok). Operatör (ben/Ümit) Playwright'tan da tıklar.
+
 - **fix(orchestrator→debug handoff: bulunan çözüm kaybolmuyor) [Ümit gerçek-koşu: "çözümü buldu ama debug
   moduna geçip tekrar araştırıyor"]:** Bir faz gate-fail olunca derin-çözüm akışı somut çözümü buluyor
   (`error-analysis.ts` → `solutions_tr`), ama debug_triage'a devirde bu yapılandırılmış çözüm düz-metne çevrilip
