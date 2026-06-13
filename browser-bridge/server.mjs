@@ -37,6 +37,14 @@ export function startBridge(port = Number(process.env.MYCL_BRIDGE_PORT) || 1799)
   /** @type {import('node:child_process').ChildProcess | null} */
   let orch = null;
   let orchStarting = false;
+  // StrictMode/remount churn emici: kill_orchestrator'ı geciktir; bu arada
+  // spawn gelirse iptal et → çift-mount orchestrator'ı HİÇ öldürmez (tek
+  // kararlı süreç; resume yarıda kalmaz, deadlock olmaz).
+  let killTimer = null;
+  // Bir-kerelik durum olayları (ready/config_status) cache'i. Geç bağlanan
+  // istemciye (sayfa, Node logger'dan SONRA bağlanır) replay edilir — yoksa
+  // `ready`'yi kaçırır, orch.ready=false kalır, open_project hiç gönderilmez.
+  const stateCache = new Map();
 
   function broadcast(obj) {
     const line = `data: ${JSON.stringify(obj)}\n\n`;
@@ -52,6 +60,11 @@ export function startBridge(port = Number(process.env.MYCL_BRIDGE_PORT) || 1799)
   // Rust spawn_orchestrator'ın karşılığı — idempotent. SSE bağlanınca veya
   // spawn_orchestrator invoke gelince çağrılır; tek global orchestrator.
   function ensureOrchestrator() {
+    // Spawn = remount → bekleyen gecikmeli kill'i iptal et (orchestrator yaşasın).
+    if (killTimer) {
+      clearTimeout(killTimer);
+      killTimer = null;
+    }
     if (orch || orchStarting) return;
     if (!fs.existsSync(ORCH_ENTRY)) {
       // Görünür hata — sessiz düşme yok. Frontend lastError'a düşer.
@@ -88,6 +101,10 @@ export function startBridge(port = Number(process.env.MYCL_BRIDGE_PORT) || 1799)
         process.stderr.write(`[bridge] orchestrator bad json: ${trimmed}\n`);
         return;
       }
+      // Bir-kerelik durum olaylarını cache'le → geç bağlanan sayfaya replay.
+      if (payload && (payload.kind === "ready" || payload.kind === "config_status")) {
+        stateCache.set(payload.kind, payload);
+      }
       broadcast({ name: "orchestrator-event", payload });
     });
 
@@ -96,6 +113,7 @@ export function startBridge(port = Number(process.env.MYCL_BRIDGE_PORT) || 1799)
     child.on("exit", (code, sig) => {
       process.stderr.write(`[bridge] orchestrator çıktı code=${code} sig=${sig}\n`);
       if (orch === child) orch = null;
+      stateCache.clear(); // bayat ready replay etme
       broadcast({ name: "orchestrator-exit", payload: null });
     });
     child.on("error", (e) => {
@@ -115,6 +133,16 @@ export function startBridge(port = Number(process.env.MYCL_BRIDGE_PORT) || 1799)
       throw new Error("orchestrator not running");
     }
     orch.stdin.write(JSON.stringify(message) + "\n");
+  }
+
+  // kill_orchestrator INVOKE'u doğrudan öldürmez — geciktirir (StrictMode emici).
+  // 2.5s içinde spawn gelmezse gerçekten durdurur.
+  function scheduleStop() {
+    if (killTimer) return;
+    killTimer = setTimeout(() => {
+      killTimer = null;
+      stopOrchestrator();
+    }, 2500);
   }
 
   // Rust stop_session: stdin kapat → 1sn bekle → SIGKILL.
@@ -174,7 +202,7 @@ export function startBridge(port = Number(process.env.MYCL_BRIDGE_PORT) || 1799)
         return null;
       case "kill_orchestrator":
       case "kill_window":
-        stopOrchestrator();
+        scheduleStop();
         return null;
       case "get_recent_projects":
         return readRecent();
@@ -228,6 +256,11 @@ export function startBridge(port = Number(process.env.MYCL_BRIDGE_PORT) || 1799)
       res.write(": connected\n\n");
       clients.add(res);
       ensureOrchestrator();
+      // Geç bağlanan istemciye son durum olaylarını (ready/config_status) replay et
+      // → sayfa boot'tan önce kaçırdığı `ready`'yi alır, orch.ready=true olur.
+      for (const p of stateCache.values()) {
+        res.write(`data: ${JSON.stringify({ name: "orchestrator-event", payload: p })}\n\n`);
+      }
       const ping = setInterval(() => {
         try {
           res.write(": ping\n\n");

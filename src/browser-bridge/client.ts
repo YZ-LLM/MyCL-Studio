@@ -15,6 +15,9 @@ const BRIDGE_URL: string =
 type EventHandler = (payload: unknown) => void;
 
 const listeners = new Map<string, Set<EventHandler>>();
+// Bir-kerelik durum olayları (orchestrator-event/ready,config_status) istemci
+// cache'i. StrictMode remount'ta YENİ handler bunları kaçırmasın → replay.
+const stateCache = new Map<string, unknown>();
 let es: EventSource | null = null;
 
 function ensureEventSource(): void {
@@ -26,6 +29,12 @@ function ensureEventSource(): void {
       msg = JSON.parse(ev.data);
     } catch {
       return;
+    }
+    if (msg.name === "orchestrator-event") {
+      const p = msg.payload as { kind?: string } | null;
+      if (p && (p.kind === "ready" || p.kind === "config_status")) {
+        stateCache.set(p.kind, msg.payload);
+      }
     }
     const set = listeners.get(msg.name);
     if (!set) return;
@@ -70,6 +79,20 @@ export function bridgeListen(name: string, handler: EventHandler): () => void {
     listeners.set(name, set);
   }
   set.add(handler);
+  // Geç abone (StrictMode remount / boot sonrası mount) kaçırdığı ready/
+  // config_status'u alsın — cache'i bu yeni handler'a replay et.
+  if (name === "orchestrator-event" && stateCache.size > 0) {
+    const cached = [...stateCache.values()];
+    queueMicrotask(() => {
+      for (const p of cached) {
+        try {
+          handler(p);
+        } catch (e) {
+          console.error("[bridge] replay error", e);
+        }
+      }
+    });
+  }
   return () => {
     set?.delete(handler);
   };
