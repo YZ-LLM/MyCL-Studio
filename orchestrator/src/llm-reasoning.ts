@@ -6,6 +6,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
+import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { getPersistentSession, shortHash } from "./persistent-cli-session.js";
 import { makeAnthropicClient, modelSupportsAdaptive } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
@@ -46,7 +47,7 @@ export async function runReasoning(
         systemPrompt: opts.systemPrompt,
         effort: opts.effort,
         cwd: opts.projectRoot,
-        disallowedTools: ["Write", "Edit", "Bash"],
+        disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf reasoning: yazma + Bash + alt-ajan yasak
       });
       const r = await session.send(opts.userMessage, { model: opts.modelId, effort: opts.effort, timeoutMs: 180_000 });
       if (r.ok && r.text.trim()) return { ok: true, text: r.text };
@@ -61,7 +62,7 @@ export async function runReasoning(
       cwd: opts.projectRoot,
       effort: opts.effort,
       allowedTools: [], // saf reasoning
-      disallowedTools: ["Write", "Edit", "Bash"],
+      disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf reasoning: yazma + Bash + alt-ajan yasak (cold-start = kalıcı yolla parite)
     });
     return { ok: res.ok, text: res.text, error: res.error };
   }

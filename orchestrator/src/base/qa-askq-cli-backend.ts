@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
+import { PURE_REASONING_DISALLOWED_TOOLS } from "../tool-policy.js";
 import { autoAnswerSuggested } from "../auto-answer.js";
 import { selectEffortForTask } from "../model-catalog.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
@@ -181,13 +182,13 @@ export class CliQaAskqBackend implements QaAskqBackend {
         systemPrompt: resume ? undefined : systemPrompt,
         modelId: opts.modelId,
         cwd: opts.state.project_root,
-        // Ümit 2026-06-13: Bash KALDIRILDI — qa-askq fazları (Faz 1/2/9 niyet/hassasiyet/risk-inceleme)
-        // SALT-OKUNUR analizdir. Write/Edit yasaktı ama Bash AÇIK olduğundan ajan `cat > admin.js << EOF`
-        // ile dosyayı EZDİ (Write yasağını baypas). Read/Grep/Glob okumaya yeter; komut çalıştırmaya
-        // gerek yok. Bash explicit deny'de de (belt-and-suspenders). Risk-incelemesi kod YAZMAZ — "fix"
-        // kararı Faz 8'in işidir.
+        // Ümit 2026-06-13: qa-askq fazları (Faz 1/2/9 niyet/hassasiyet/risk-inceleme) SALT-OKUNUR analizdir →
+        // yazma + Bash + alt-ajan (Agent/Task) hepsi yasak. İki kanıtlı kaçış: (1) Bash AÇIKKEN ajan
+        // `cat > admin.js << EOF` ile production kodunu EZDİ; (2) Agent çağrılınca alt-ajan üst-kısıta tabi
+        // olmadan koştu + 200+ sn donma. Read/Grep/Glob okumaya yeter. Risk-incelemesi kod YAZMAZ — "fix"
+        // kararı Faz 8'in işidir. Tek doğruluk kaynağı: tool-policy.ts.
         allowedTools: ["Read", "Grep", "Glob"],
-        disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"],
+        disallowedTools: PURE_REASONING_DISALLOWED_TOOLS,
         effort,
         onText: (text) => emitClaudeStream({ sub: "text", text }),
         // tool_use'ları yüzeye çıkar: review-yoğun fazlar (Faz 9) onlarca

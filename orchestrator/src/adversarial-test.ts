@@ -7,6 +7,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runClaudeCli } from "./cli-run.js";
+import { SUBAGENT_SPAWN_TOOLS } from "./tool-policy.js";
 import { backendForRole } from "./config.js";
 import { VERIFY_BEFORE_CLAIM } from "./agent-language.js";
 import { appendAudit } from "./audit.js";
@@ -82,6 +83,7 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
       modelId: config.selected_models.main,
       cwd: state.project_root,
       allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+      disallowedTools: [...SUBAGENT_SPAWN_TOOLS], // test'i KENDİ yazar/koşar; alt-ajan doğurmasın (kaçış + 200+sn donma)
       timeoutMs: 600_000, // Ümit 2026-06-12: 10 dk idle (çıktı yoksa) — hung'u kurtar; aktif test yazımı/koşumu çıktı akıtır, ölmez
     });
   } catch (e) {

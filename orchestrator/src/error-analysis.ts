@@ -18,6 +18,7 @@ import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
+import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { makeAnthropicClient } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
@@ -283,7 +284,7 @@ export async function analyzeAndAskError(
         modelId: analysisModel,
         cwd: state.project_root,
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
-        disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+        disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur hata analizi: yazma + alt-ajan yasak, Bash açık
         effort: "max", // orkestratör beyin → en yüksek efor (kabul edilen tavan: Opus 4.8 · max)
         onText: (t) => emitClaudeStream({ sub: "text", text: t }),
         observer: (tu) =>

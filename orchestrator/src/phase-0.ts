@@ -17,6 +17,7 @@ import { isAbsolute, join } from "node:path";
 import { appendAudit, appendWtf, formatDecisions, readDecisions } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
+import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
@@ -759,7 +760,7 @@ Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
       modelId,
       cwd: this.state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
-      disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+      disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // D1 salt-okunur araştırma: yazma + alt-ajan yasak, Bash açık
       effort: this.config.claude_code_flags.effort,
       onText: (text) => emitClaudeStream({ sub: "text", text }),
       // tool_use aktivitesini yüzeye çıkar (D1 araştırması Read/Grep/Bash yoğun).

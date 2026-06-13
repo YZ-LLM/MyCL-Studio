@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
+import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { makeAnthropicClient } from "./claude-api.js";
 import { extractKindBlock } from "./cli-json.js";
 import { backendForRole, type MyclConfig } from "./config.js";
@@ -133,6 +134,7 @@ export async function verifyModelCallable(
         modelId: model,
         cwd: projectRoot,
         timeoutMs: 30_000,
+        disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // ping→"ok": araç gerekmez; yazma/Bash/alt-ajan yasak
       });
       return res.ok;
     }
@@ -160,6 +162,7 @@ async function discoverViaCli(modelId: string, projectRoot: string): Promise<str
     modelId,
     cwd: projectRoot,
     allowedTools: ["WebSearch", "WebFetch"],
+    disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // WebSearch/WebFetch açık; yazma/Bash/alt-ajan yasak
     // Ümit 2026-06-11: folder-guard AÇIK — WebSearch/WebFetch'te Bash YOK → nesting yok; sandbox-exec claude'un
     // startup Desktop/klasör taramasını + tccd'yi keser → "Masaüstü'ne erişmek istiyor" TCC penceresi çıkmaz.
     // (Profil default-allow + yalnız korunan-klasör/tccd deny → ağ/web-arama serbest çalışır.)

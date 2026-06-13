@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
+import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { emitChatMessage, emitClaudeStream, emitUserGuide } from "./ipc.js";
 import { log } from "./logger.js";
@@ -143,7 +144,7 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
       modelId: docsModel,
       cwd: state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
-      disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+      disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur: JSON döner, MyCL yazar; alt-ajan yasak
       effort: selectEffortForTask("verification", config.claude_code_flags.effort), // oto-efor: doküman güncelleme hafif iş
       onText: (t) => emitClaudeStream({ sub: "text", text: t }),
       observer: (tu) =>

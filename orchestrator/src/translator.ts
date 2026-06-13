@@ -16,6 +16,7 @@ import type { MyclConfig } from "./config.js";
 import { backendForRole, isAutoMode } from "./config.js";
 import { API_LABEL, CLI_LABEL } from "./cli-rate-limit.js";
 import { runClaudeCli } from "./cli-run.js";
+import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { getPersistentSession } from "./persistent-cli-session.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { emitChatMessage, emitError, emitTranslation } from "./ipc.js";
@@ -187,7 +188,7 @@ async function callCli(
       modelId: model,
       systemPrompt: buildSystemPrompt(dir),
       cwd: process.cwd(),
-      disallowedTools: ["Write", "Edit", "Bash"], // saf çeviri — araç yok
+      disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf çeviri — araç + alt-ajan yok
     });
     const r = await session.send(userMessage, { timeoutMs: to });
     if (r.ok && r.text.trim()) return stripTranslateTags(r.text);
@@ -201,6 +202,7 @@ async function callCli(
     modelId: model,
     cwd: process.cwd(),
     timeoutMs: to,
+    disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // cold-start = kalıcı yolla parite (saf çeviri, alt-ajan yok)
   });
   if (!res.ok) {
     throw new Error(res.error ?? "claude CLI translate failed");

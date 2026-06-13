@@ -21,6 +21,7 @@ import {
   type SubagentRole,
 } from "./config.js";
 import { runClaudeCli } from "./cli-run.js";
+import { SUBAGENT_SPAWN_TOOLS } from "./tool-policy.js";
 import { extractKindBlock } from "./cli-json.js";
 import { templatePath } from "./phase-registry.js";
 import { log } from "./logger.js";
@@ -82,7 +83,7 @@ export async function runReasoningTurn(
       modelId: model,
       cwd: projectRoot, // sandbox projeye hapsolur; read-only akıl yürütme
       // Saf akıl yürütme — spec userMessage'da verilir. Yazma KESİN engellenir.
-      disallowedTools: ["Write", "Edit", "Bash(rm *)", "Bash(git push *)"],
+      disallowedTools: [...SUBAGENT_SPAWN_TOOLS, "Write", "Edit", "Bash(rm *)", "Bash(git push *)"], // salt-okunur akıl-yürütme: alt-ajan + yazma + yıkıcı Bash yasak
       timeoutMs: PERSPECTIVE_TIMEOUT_MS,
     });
     if (!res.ok) throw new Error(res.error ?? "cli reasoning failed");
@@ -282,7 +283,7 @@ export async function negotiateConflicts(
       userMessage: userMsg,
       modelId: synthModel,
       cwd: projectRoot,
-      disallowedTools: ["Write", "Edit", "Bash(rm *)", "Bash(git push *)"],
+      disallowedTools: [...SUBAGENT_SPAWN_TOOLS, "Write", "Edit", "Bash(rm *)", "Bash(git push *)"], // salt-okunur akıl-yürütme: alt-ajan + yazma + yıkıcı Bash yasak
       extraEnv: { CLAUDE_CODE_WORKFLOWS: "1", CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1" },
       timeoutMs: NEGOTIATE_TIMEOUT_MS,
     });

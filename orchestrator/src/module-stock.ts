@@ -18,6 +18,7 @@ import { basename, join, sep } from "node:path";
 import { appendAudit, readAuditLog } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
+import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { computeVerdict } from "./harness-verdict.js";
 import { emitChatMessage } from "./ipc.js";
@@ -252,7 +253,7 @@ export async function extractStockedModules(state: State, config: MyclConfig): P
       modelId: model,
       cwd: state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
-      disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+      disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur: yazma + alt-ajan yasak, Bash inceleme için açık
       effort: config.claude_code_flags.effort,
       timeoutMs: 300_000,
     });

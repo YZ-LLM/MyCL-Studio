@@ -32,12 +32,14 @@ describe("runHypothesisInvestigations", () => {
     expect(cliMock).toHaveBeenCalledTimes(3);
   });
 
-  it("Read/Grep/Glob/Bash izinli + Write yasak + cwd=projectRoot + balanced tier", async () => {
+  it("Read/Grep/Glob/Bash izinli + yazma & alt-ajan (Agent/Task) yasak + cwd=projectRoot + balanced tier", async () => {
     cliMock.mockResolvedValue({ ok: true, text: `{"kind":"hypothesis","text":"x"}`, toolUses: [], turns: 1 });
     await runHypothesisInvestigations(cfg, "/tmp/proj", "bug", "ev");
     const opts = cliMock.mock.calls[0][0];
     expect(opts.allowedTools).toEqual(["Read", "Grep", "Glob", "Bash"]);
-    expect(opts.disallowedTools).toEqual(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+    // READ_ONLY_DISALLOWED_TOOLS: yazma araçları + alt-ajan doğuranlar (Agent/Task). acceptEdits altında
+    // deny-list TEK gerçek engel olduğundan Agent/Task burada OLMALI (salt-okunur fazda kaçış+donma vektörü).
+    expect(opts.disallowedTools).toEqual(["Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"]);
     expect(opts.cwd).toBe("/tmp/proj");
     // hypothesis rolü → balanced tier → model_tiers.balanced
     expect(opts.modelId).toBe("claude-bal");

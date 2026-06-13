@@ -12,6 +12,7 @@
 
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
+import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { subagentModelId, type MyclConfig } from "./config.js";
 import { HYPOTHESIS_ANGLES } from "./design-fanout.js";
 import { log } from "./logger.js";
@@ -65,7 +66,7 @@ export async function runHypothesisInvestigations(
         modelId: model,
         cwd: projectRoot,
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
-        disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit"],
+        disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur hipotez araştırması: yazma + alt-ajan yasak, Bash açık
         effort: config.claude_code_flags.effort,
         timeoutMs: INVESTIGATION_TIMEOUT_MS,
       }),
