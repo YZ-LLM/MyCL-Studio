@@ -50,7 +50,14 @@ If you cannot point to the concrete guard or test that makes something safe, it 
    developer (or auto-answer) proceed without re-doing your analysis. Genuine open *business*
    decisions are the only thing you defer to the user — never code behavior.
 4. After all risks classified, call **complete_risk_review** with a structured
-   summary { risk_count, decisions[] }.
+   summary { risk_count, decisions[] }. For every decision you mark **`fix`**, you MUST also set
+   `fix_phase` so the orchestrator can auto-apply it in the right phase:
+   - **`ui`** → the fix is a UI component / page / styling change (Phase 5).
+   - **`db`** → the fix is a database schema / migration / index change (Phase 7).
+   - **`code`** → the fix is backend / logic / validation / anything else — this is the general case (Phase 8).
+   - **`none`** → for `skip` and `rule` decisions (no auto-fix).
+   When unsure between code and ui/db, choose **`code`**. Every `fix` is auto-applied — so be precise:
+   `fix` means "this WILL be changed automatically", not "someone should look at this later".
 
 ## Review across six axes (code-review-and-quality discipline)
 

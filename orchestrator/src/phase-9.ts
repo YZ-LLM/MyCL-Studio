@@ -77,6 +77,15 @@ const TOOL_COMPLETE: ToolDef = {
               description: "skip | fix | rule",
             },
             detail: { type: "string" },
+            // Ümit 2026-06-13: "fix" kararları otomatik düzeltme fazına yönlendirilir. Domain'i SEN belirle:
+            // 'ui' (Faz 5 — bileşen/sayfa/stil), 'db' (Faz 7 — şema/migration/index), 'code' (Faz 8 — backend/
+            // mantık/validasyon/her şey). skip/rule için 'none'. Belirsizse 'code' (en genel codegen).
+            fix_phase: {
+              type: "string",
+              description:
+                "For 'fix' decisions, which phase applies it: 'ui' (Faz 5 UI), 'db' (Faz 7 schema/migration), " +
+                "'code' (Faz 8 backend/logic — the general case). Use 'none' for skip/rule. When unsure, use 'code'.",
+            },
           },
         },
       },
@@ -88,6 +97,8 @@ interface RiskDecision {
   risk: string;
   decision: string;
   detail?: string;
+  /** "fix" kararının hangi fazda uygulanacağı (Ümit 2026-06-13 risk-fix dispatch): ui|db|code|none. */
+  fix_phase?: "ui" | "db" | "code" | "none";
 }
 
 export class Phase9Controller {
@@ -95,6 +106,12 @@ export class Phase9Controller {
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
   public statePatch: Partial<State> = {};
+  /**
+   * Ümit 2026-06-13: complete_risk_review'daki tüm risk kararları (yüzeye çıkarıldı). Orkestratör
+   * (index.ts dispatchRiskFixes) "fix" kararlarını okuyup ilgili faza yönlendirir. Eskiden bu liste
+   * yalnız audit'e yazılıp ATILIYORDU → risk bulunuyor ama düzeltilmiyordu (Ümit'in gözlemi).
+   */
+  public riskDecisions: RiskDecision[] = [];
 
   private readonly state: State;
   private readonly config: MyclConfig;
@@ -218,6 +235,8 @@ export class Phase9Controller {
       caller: "user",
       detail: String(outcome.approvalInput.summary ?? "").slice(0, 200),
     });
+    // Orkestratör risk-fix dispatch'i bu listeyi okur (fix kararlarını ilgili faza yönlendirir).
+    this.riskDecisions = decisions;
     log.info("phase-9", "complete", { decisions: decisions.length });
     return "complete";
   }

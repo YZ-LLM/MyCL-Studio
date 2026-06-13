@@ -103,6 +103,7 @@ import { Phase1Controller } from "./phase-1.js";
 import { Phase2Controller } from "./phase-2.js";
 import { Phase3Controller } from "./phase-3.js";
 import { Phase4Controller } from "./phase-4.js";
+import { resolveRiskFixTarget } from "./risk-fix-routing.js";
 import { Phase5Controller } from "./phase-5.js";
 import { Phase6Controller } from "./phase-6.js";
 import { Phase7Controller } from "./phase-7.js";
@@ -2449,6 +2450,123 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
   }
 }
 
+/**
+ * Faz 9 risk-fix dispatch (Ümit 2026-06-13). Risk incelemesi bir riski "fix" diye işaretleyince,
+ * eskiden yalnız audit'e yazılıp ATILIYORDU (bulunan risk düzeltilmiyordu). Artık her "fix" kararını
+ * ALANINA göre hedefli-düzeltme fazına yönlendirir: ui→Faz 5, db→Faz 7, code→Faz 8 (belirsiz→8).
+ *
+ * Akış: senkron mini-döngü — fazları DOĞRUDAN `new + runController` ile çalıştırır, lineer faz-haritasını
+ * (PHASE_TRANSITIONS) HİÇ ilerletmez → current_phase 9'da KALIR → araya Faz 6 (UI inceleme) vb. GİRMEZ.
+ * Tam olarak istenen "düzelt → Faz 9'a dön → sonraki risk" döngüsü. Singleton-controller kısıtı korunur
+ * (her seferinde tek faz, seri). Her zaman çalışır (Oto-cevaptan bağımsız — Ümit 2026-06-13 kararı).
+ *
+ * Doğrulama: EKSTRA tur YOK — her düzeltme fazı kendi içinde doğrular (Faz 8 = TDD, kendi testini yazıp
+ * geçirir) + Faz 9 sonrası Faz 10-17 kapıları değişen dosyaları zaten tarar (kullanıcı kararı 2026-06-13).
+ * Fail-soft: bir fix patlarsa GÖRÜNÜR not + risk açık bırakılır + sonraki riske geçilir (pipeline kırılmaz).
+ */
+async function dispatchRiskFixes(
+  stateIn: State,
+  cfg: MyclConfig,
+  decisions: { risk: string; decision: string; detail?: string; fix_phase?: string }[],
+): Promise<State> {
+  let state = stateIn;
+  const fixes = (decisions ?? []).filter(
+    (d) => String(d.decision).trim().toLowerCase() === "fix",
+  );
+  if (fixes.length === 0) return state;
+  emitChatMessage(
+    "system",
+    `🔧 Faz 9 — ${fixes.length} risk "düzelt" işaretlendi; her birini ilgili fazda otomatik düzeltiyorum (UI→Faz 5, DB→Faz 7, kod→Faz 8).`,
+  );
+
+  for (let i = 0; i < fixes.length; i++) {
+    const f = fixes[i];
+    const detail = (f.detail?.trim() || f.risk).slice(0, 2000);
+    // Saf yönlendirme + kapsam koruması (test edilebilir helper'da).
+    const route = resolveRiskFixTarget(f.fix_phase, {
+      skipUi: !!state.skip_ui_phases,
+      noDb: state.has_database === false,
+    });
+    if (route.assumedCode) {
+      log.warn("orchestrator", "risk-fix: fix_phase yok/bilinmiyor → Faz 8 (code) varsayıldı", {
+        fix_phase: f.fix_phase,
+        risk: f.risk.slice(0, 80),
+      });
+    }
+    if (route.target === null) {
+      emitChatMessage(
+        "system",
+        route.skipReason === "no-ui"
+          ? `⏭ Risk ${i + 1}/${fixes.length} atlandı — UI riski ama proje UI içermiyor: ${detail.slice(0, 120)}`
+          : `⏭ Risk ${i + 1}/${fixes.length} atlandı — DB riski ama proje veritabanı kullanmıyor: ${detail.slice(0, 120)}`,
+      );
+      continue;
+    }
+    const target = route.target;
+
+    const fixSpec = getSpec(target);
+    if (!fixSpec) {
+      log.warn("orchestrator", "risk-fix: spec bulunamadı", { target });
+      continue;
+    }
+    const phaseName = target === 5 ? "Faz 5 (UI)" : target === 7 ? "Faz 7 (DB)" : "Faz 8 (kod)";
+    emitChatMessage(
+      "system",
+      `🔧 Risk ${i + 1}/${fixes.length} → ${phaseName} ile düzeltiliyor: ${detail.slice(0, 160)}`,
+    );
+    await appendAuditModule(state.project_root, {
+      ts: Date.now(),
+      phase: 9,
+      event: "risk-fix-dispatch",
+      caller: "mycl-orchestrator",
+      detail: `${phaseName} <= ${detail.slice(0, 120)}`,
+    }).catch(() => {});
+
+    // Hedefli-fix alanını set et — faz controller'ı bunu okuyup tüm-yeniden-yazma yerine tek fix yapar.
+    if (target === 5) state = { ...state, pending_ui_tweak: detail };
+    else if (target === 7) state = { ...state, pending_db_fix: detail };
+    else state = { ...state, pending_backend_fix: detail };
+    runtime.state = state;
+
+    try {
+      const ctrl =
+        target === 5
+          ? new Phase5Controller({ state, config: cfg, spec: fixSpec })
+          : target === 7
+            ? new Phase7Controller({ state, config: cfg, spec: fixSpec })
+            : new Phase8Controller({ state, config: cfg, spec: fixSpec });
+      const r = await runController(ctrl, () => ctrl.run(), `Risk düzeltiliyor — ${phaseName}`);
+      if (r === "complete") {
+        state = { ...state, ...ctrl.statePatch };
+        emitChatMessage("system", `✅ Risk ${i + 1}/${fixes.length} düzeltildi (${phaseName}).`);
+      } else {
+        emitChatMessage(
+          "system",
+          `⚠️ Risk ${i + 1}/${fixes.length} düzeltilemedi (${phaseName}) — açık bırakıldı, sonraki riske geçiyorum.`,
+        );
+      }
+    } catch (err) {
+      log.error("orchestrator", "risk-fix dispatch hata", err);
+      emitChatMessage(
+        "system",
+        `⚠️ Risk ${i + 1}/${fixes.length} düzeltme hata verdi — açık bırakıldı: ${String(err).slice(0, 120)}`,
+      );
+    } finally {
+      // Tek-seferlik tüketim: set ettiğim alanı her halükarda temizle (controller atlasa/patlasa bile sızmasın).
+      if (target === 5) state = { ...state, pending_ui_tweak: undefined };
+      else if (target === 7) state = { ...state, pending_db_fix: undefined };
+      else state = { ...state, pending_backend_fix: undefined };
+      runtime.state = state;
+      await saveState(state).catch((e) => log.warn("orchestrator", "risk-fix saveState fail", e));
+    }
+  }
+  emitChatMessage(
+    "system",
+    `🔧 Faz 9 risk düzeltmeleri tamamlandı (${fixes.length} risk işlendi). Kalite kapıları (Faz 10+) değişiklikleri doğrulayacak.`,
+  );
+  return state;
+}
+
 async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
   if (!runtime.state || !runtime.config) return;
   // Narrowing — döngü içinde runtime.state assignments TS'in null-check'ini bozar.
@@ -2955,6 +3073,11 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       const r = await runController(p9, () => p9.run(), "Risk inceleniyor");
       log.info("orchestrator", "phase 9 end", { result: r });
       if (r === "complete") {
+        // Ümit 2026-06-13: Faz 9 "fix" kararlarını ilgili faza (5/7/8) yönlendirip otomatik düzelt,
+        // sonra Faz 9'a dön (mini-döngü; current_phase 9'da kalır, Faz 6 araya girmez). Düzeltmeler
+        // state'i değiştirebilir (codegen sonuçları, dev-server pid) → dönen state'i kullan.
+        state = await dispatchRiskFixes(state, cfg, p9.riskDecisions);
+        runtime.state = state;
         if ((await completePhaseWithVerify(9)) === "rerun") { cur = 8 as PhaseId; continue; }
         emitChatMessage("system", "Faz 9 tamamlandı — risk incelemesi onaylandı.");
         cur = 9;

@@ -385,6 +385,13 @@ export interface State {
    */
   pending_backend_fix?: string;
   /**
+   * Ümit 2026-06-13: Faz 9 risk-fix dispatch'i DB-alanı bir riski Faz 7'ye yönlendirince set eder.
+   * Phase 7 başlangıcında okunur → tüm şemayı yeniden tasarlamak yerine YALNIZ bu hedefli düzeltmeyi
+   * uygular; statePatch ile temizlenir (tek-seferlik). Faz 5'in pending_ui_tweak + Faz 8'in
+   * pending_backend_fix deseninin DB karşılığı.
+   */
+  pending_db_fix?: string;
+  /**
    * v15.9: Scoped mekanik gate'ler için "değişen kapsam" — fix/development
    * sonrası computeChangedScope (git diff ∪ blast-radius) ile set edilir.
    * Faz 10/13/14 bunu okuyup lint/güvenlik/birim-test'i bu dosyalara daraltır;

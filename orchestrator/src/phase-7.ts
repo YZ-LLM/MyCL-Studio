@@ -218,7 +218,11 @@ export class Phase7Controller {
       modelId: escMe.modelId,
       effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
-      initialUserMessage: "Begin Phase 7: design the database schema and migration plan.",
+      // Ümit 2026-06-13: Faz 9 risk-fix dispatch'i pending_db_fix set ederse HEDEFLİ-fix modu —
+      // tüm şemayı yeniden tasarlama, yalnız bu riski düzelt (Faz 5 tweak / Faz 8 fix deseni).
+      initialUserMessage: this.state.pending_db_fix
+        ? `Targeted DB fix — apply ONLY this change. Do NOT redesign the whole schema; preserve everything else. Risk to fix:\n${this.state.pending_db_fix}`
+        : "Begin Phase 7: design the database schema and migration plan.",
       tools: [TOOL_WRITE_DB, TOOL_APPROVAL],
       production: this.spec.production_config,
       betas: this.config.claude_code_flags.betas,
