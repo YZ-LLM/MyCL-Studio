@@ -1,5 +1,16 @@
 ## 2026-06-13
 
+- **fix(orchestrator→debug handoff: bulunan çözüm kaybolmuyor) [Ümit gerçek-koşu: "çözümü buldu ama debug
+  moduna geçip tekrar araştırıyor"]:** Bir faz gate-fail olunca derin-çözüm akışı somut çözümü buluyor
+  (`error-analysis.ts` → `solutions_tr`), ama debug_triage'a devirde bu yapılandırılmış çözüm düz-metne çevrilip
+  KAYBOLUYORDU → Faz 0 D1 sıfırdan yeniden araştırıp (~5dk, hipotez fan-out) aynı kök nedeni yeniden türetiyordu.
+  Fix: `Phase0Controller`'a opsiyonel `priorAnalysis` (`executeDispatchedIntent` → `index.ts:3836` handoff'tan
+  taşınır); set'liyse D1, çözümü YÜKSEK-ÖNCELİKLİ kanıt + "DOĞRULA, yeniden türetme" yönlendirmesiyle alır →
+  yapılandırılmış `fix_options`/`plan_kind`'i 1-2 turda üretir (auto-apply routing/güvenlik KORUNUR), hipotez
+  fan-out'u atlanır. Doğrudan kullanıcı debug'ında (priorAnalysis yok) normal D1 değişmez. (Sentez investigator'ların
+  "D1'i atla, direkt uygula" hatasını yakaladı: `solutions_tr` prose-only, planKind yok → direkt uygulama ya
+  fix'i hiç koşmaz ya "full-stack" restart yapardı.)
+
 - **fix(orchestrator hız + döngü) [Ümit gerçek-koşu gözlemi: "sorunlar için çok uzun zaman harcıyor"]:** adminpanel'i
   tarayıcı köprüsünde sürerken çıkan 4 verimlilik/doğruluk kusuru. **(1) verify-up yanlış-negatif döngüsü:**
   `phase-7-complete`/`phase-8-complete` audit olaylarında `detail` boştu → üst-kontrol "tamamlama açıklaması yok"

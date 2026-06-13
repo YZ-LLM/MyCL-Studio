@@ -2141,6 +2141,9 @@ async function executeConfirmedAgentDecision(
 async function executeDispatchedIntent(
   text: string,
   outcome: DispatchOutcome,
+  // Orkestratör derin-çözüm akışı zaten somut çözüm bulduysa debug_triage'a taşı →
+  // Faz 0 sıfırdan araştırmaz, doğrular (handoff'ta çözüm kaybını önler).
+  priorAnalysis?: { solutions_tr: string[] },
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
     emitError("no active project", null);
@@ -2267,6 +2270,7 @@ async function executeDispatchedIntent(
       config: runtime.config,
       spec,
       bugReport: text,
+      priorAnalysis,
     });
     runtime.controller = phase0 as unknown as AnyPhaseController;
     let result: "complete" | "fail" = "fail";
@@ -3833,7 +3837,11 @@ export async function handleAskqAnswer(
         reasoning: "(error-analysis) kullanıcı çözüm seçti",
       },
     };
-    await executeDispatchedIntent(bugReport, fakeOutcome);
+    // Orkestratörün ZATEN bulduğu çözümleri yapılandırılmış olarak taşı → Faz 0 D1
+    // bunları sıfırdan yeniden türetmez, DOĞRULAR (handoff çözüm-kaybı fix'i).
+    await executeDispatchedIntent(bugReport, fakeOutcome, {
+      solutions_tr: cached.solutions_tr,
+    });
     return;
   }
 

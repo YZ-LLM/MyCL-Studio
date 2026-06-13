@@ -160,11 +160,16 @@ export class Phase0Controller {
   private readonly config: MyclConfig;
   private readonly spec: PhaseSpec;
   private readonly bugReport: string;
-  constructor(deps: PhaseDeps & { bugReport: string }) {
+  /** Orkestratör derin-çözüm akışının ZATEN bulduğu somut çözüm yönleri (varsa).
+   *  Set'liyse D1 sıfırdan araştırmaz; bunları DOĞRULAYIP yapılandırılmış fix_options'a
+   *  çevirir (1-2 tur). Yoksa (doğrudan kullanıcı debug'ı) normal D1 araştırması. */
+  private readonly priorAnalysis?: { solutions_tr: string[] };
+  constructor(deps: PhaseDeps & { bugReport: string; priorAnalysis?: { solutions_tr: string[] } }) {
     this.state = deps.state;
     this.config = deps.config;
     this.spec = deps.spec;
     this.bugReport = deps.bugReport;
+    this.priorAnalysis = deps.priorAnalysis;
   }
 
   abort(): void {
@@ -314,7 +319,22 @@ export class Phase0Controller {
     // API → saf-akıl-yürütme fan-out (parite; Bash'li forced-tool asimetrisinden kaçınır). Her ikisi de
     // aynı contextWithHypotheses'e enjekte; D1 yine NORMAL koşar (başarısız/azsa sessizce atla = regresyon yok).
     let contextWithHypotheses = contextSuffix;
-    if (this.config.claude_code_flags.agent_teams_optin) {
+    // Orkestratör derin-çözüm akışı ZATEN somut çözüm bulduysa (priorAnalysis): onu D1'e
+    // YÜKSEK-ÖNCELİKLİ KANIT olarak ver + "DOĞRULA, yeniden türetme" diye yönlendir → D1
+    // 1-2 turda yapılandırılmış fix_options üretir (auto-apply routing/güvenlik KORUNUR),
+    // 10-18 tur sıfırdan-araştırma + hipotez fan-out'u YAPMAZ (~5dk israf önlenir).
+    const hasPrior = (this.priorAnalysis?.solutions_tr.length ?? 0) > 0;
+    if (hasPrior) {
+      const priorBlock =
+        "## PRIOR ANALYSIS (already diagnosed by orchestrator — CONFIRM, do not re-derive)\n" +
+        "A first-pass analysis already produced concrete solution directions for this failure. " +
+        "Verify them against the code with at most 1-2 targeted Read/Grep calls, then call " +
+        "report_root_cause mapping them into structured fix_options with plan_kind. Do NOT start a " +
+        "fresh open-ended investigation.\n" +
+        this.priorAnalysis!.solutions_tr.map((s, i) => `${i + 1}. ${s}`).join("\n");
+      contextWithHypotheses = contextSuffix ? `${contextSuffix}\n\n${priorBlock}` : priorBlock;
+    }
+    if (!hasPrior && this.config.claude_code_flags.agent_teams_optin) {
       try {
         const useInvestigation = backendForRole(this.config, "main") === "cli";
         const hyps = useInvestigation
