@@ -14,6 +14,7 @@ import {
   persistAgentBackends,
   persistFeatures,
   persistSelectedModels,
+  persistDeclinedModelUpgrade,
   readAgentBackends,
   readClaudeCodeFlags,
   readFeatures,
@@ -85,7 +86,7 @@ import { runRegressionGuard } from "./regression-guard.js";
 import { isApiAccountError, isEnvironmentError, environmentErrorAdvice } from "./claude-api.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { nextRung, resolveRung, rungLabel, rungForDomain } from "./escalation.js";
-import { discoverModelsViaWeb } from "./model-discovery.js";
+import { discoverModelsViaWeb, verifyModelCallable } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
 import { Phase0Controller } from "./phase-0.js";
@@ -971,7 +972,14 @@ async function handleOpenProject(path: string): Promise<void> {
           const t = computeTiersFromModels(models);
           log.info("orchestrator", "model auto-keşif (web)", t);
           const currentStrong = cfg.selected_models.model_tiers?.strong ?? cfg.selected_models.main;
-          if (t.strong && t.strong !== currentStrong && !_declinedModelUpgrades.has(t.strong)) {
+          // Ümit 2026-06-13: oturum-içi (bellek) VE kalıcı (config) ret listesi → bir kez sor, "hayır"ı hatırla.
+          const declinedPersisted = !!t.strong && (cfg.declined_model_upgrades?.includes(t.strong) ?? false);
+          if (
+            t.strong &&
+            t.strong !== currentStrong &&
+            !_declinedModelUpgrades.has(t.strong) &&
+            !declinedPersisted
+          ) {
             const askqId = randomUUID();
             _pendingModelUpgrade = { askqId, model: t.strong };
             emitChatMessage(
@@ -3431,7 +3439,21 @@ export async function handleAskqAnswer(
     _pendingModelUpgrade = null;
     const yes = /evet|geç|yes/i.test(selectedText);
     if (yes && runtime.config) {
-      const sel = runtime.config.selected_models;
+      // Fix 2 (Ümit 2026-06-13): persist'ten ÖNCE modelin GERÇEKTEN çağrılabilir olduğunu doğrula —
+      // keşif uydurma/var-olmayan id (örn. "claude-mythos-5") önerebilir; doğrulamadan ana model
+      // yapmak tüm codegen'i kırardı. Doğrulanamazsa GEÇME (kullanıcı Ayarlar'dan elle seçebilir).
+      const cfg = runtime.config;
+      const root = runtime.state?.project_root ?? process.cwd();
+      emitChatMessage("system", `⏳ **${model}** doğrulanıyor (gerçekten çağrılabilir mi)…`);
+      const callable = await verifyModelCallable(cfg, model, root);
+      if (!callable) {
+        emitChatMessage(
+          "system",
+          `⚠️ **${model}** doğrulanamadı (çağrı başarısız / model bulunamadı) — güvenlik için GEÇMEDİM, mevcut modelin korunuyor. Gerçekten geçmek istersen Ayarlar → Modeller'den elle seçebilirsin.`,
+        );
+        return;
+      }
+      const sel = cfg.selected_models;
       await persistSelectedModels({
         ...sel,
         main: model,
@@ -3441,8 +3463,12 @@ export async function handleAskqAnswer(
       await emitConfigStatus(); // reload + applyConfigDerivedSettings (restart'sız aktif)
       emitChatMessage("system", `✅ Main ajan + strong görevler artık **${model}** kullanıyor — ayarların güncellendi.`);
     } else {
+      // Fix 1 (Ümit 2026-06-13): bellek-içi (oturum) + KALICI (config) → bir daha asla sorma.
       _declinedModelUpgrades.add(model);
-      emitChatMessage("system", `👍 Tamam, ${model}'e geçmedim; mevcut modelin korunuyor. (Bu oturumda tekrar sormam.)`);
+      await persistDeclinedModelUpgrade(model).catch((e) =>
+        log.warn("orchestrator", "declined model upgrade persist fail (non-fatal)", e),
+      );
+      emitChatMessage("system", `👍 Tamam, ${model}'e geçmedim; mevcut modelin korunuyor. (Bir daha sormam.)`);
     }
     return;
   }

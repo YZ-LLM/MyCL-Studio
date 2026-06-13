@@ -111,6 +111,44 @@ export async function discoverModelsViaWeb(
   }
 }
 
+/**
+ * Önerilen modeli persist etmeden ÖNCE GERÇEKTEN çağrılabilir mi doğrula (Ümit 2026-06-13).
+ * Keşif web-aramayla model ADI bulur ama uydurma/yanlış-okunmuş id (örn. var-olmayan
+ * "claude-mythos-5") yalnız `claude-*` regex'ini geçip ANA MODEL olarak yazılabilirdi →
+ * sonra TÜM codegen kırılır. Minimal ping (tek-token) ile dener; başarısız/timeout → false
+ * (güvenli taraf: doğrulanamayan modele GEÇME — kullanıcı Ayarlar'dan elle seçebilir).
+ * Backend-aware (cli → claude CLI; api → SDK). API key gerektiren yol API; cli yolu abonelik.
+ */
+export async function verifyModelCallable(
+  config: MyclConfig,
+  model: string,
+  projectRoot: string,
+): Promise<boolean> {
+  if (!/^claude-[a-z0-9.-]+$/i.test(model)) return false; // biçim bile bozuksa deneme
+  try {
+    if (backendForRole(config, "main") === "cli") {
+      const res = await runClaudeCli({
+        systemPrompt: "Reply with exactly: ok",
+        userMessage: "ping",
+        modelId: model,
+        cwd: projectRoot,
+        timeoutMs: 30_000,
+      });
+      return res.ok;
+    }
+    const client = makeAnthropicClient(config.api_keys.main, { timeoutMs: 30_000 });
+    await client.messages.create({
+      model,
+      max_tokens: 8,
+      messages: [{ role: "user", content: "ping" }],
+    });
+    return true;
+  } catch (e) {
+    log.warn("model-discovery", "model doğrulanamadı (geçilmeyecek)", { model, err: String(e) });
+    return false;
+  }
+}
+
 const DISCOVERY_USER =
   "Find the current official Claude model lineup from Anthropic's official documentation. Exact ids only.";
 

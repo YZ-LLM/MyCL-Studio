@@ -219,6 +219,8 @@ export interface MyclConfig {
     claude_subprocess_spawn: number;
     claude_first_event: number;
   };
+  /** Ümit 2026-06-13: kullanıcının kalıcı reddettiği model-upgrade id'leri (bir kez sor, "hayır"ı hatırla). */
+  declined_model_upgrades: string[];
 }
 
 const DEFAULT_FLAGS: ClaudeCodeFlags = {
@@ -281,6 +283,9 @@ interface ConfigFile {
   agent_backends?: Partial<AgentBackends>;
   features?: Partial<FeatureFlags>;
   timeouts_ms?: Partial<MyclConfig["timeouts_ms"]>;
+  /** Ümit 2026-06-13: kullanıcının "Hayır, kalsın" dediği model-upgrade id'leri — KALICI
+   *  (eskiden bellek-içiydi → her oturum tekrar soruyordu = "kafasına göre seçiyor" hissi). */
+  declined_model_upgrades?: string[];
 }
 
 interface SecretsFile {
@@ -482,7 +487,28 @@ export async function loadConfig(): Promise<MyclConfig> {
     agent_backends: resolveAgentBackends(fileConfig),
     features: { ...DEFAULT_FEATURES, ...(fileConfig.features ?? {}) },
     timeouts_ms: { ...DEFAULT_TIMEOUTS, ...(fileConfig.timeouts_ms ?? {}) },
+    declined_model_upgrades: Array.isArray(fileConfig.declined_model_upgrades)
+      ? fileConfig.declined_model_upgrades.filter((m): m is string => typeof m === "string")
+      : [],
   };
+}
+
+/**
+ * Ümit 2026-06-13: kullanıcının "Hayır, kalsın" dediği model-upgrade id'sini KALICI kaydeder
+ * (config.json declined_model_upgrades). Böylece keşif o modeli bir daha ASLA sormaz —
+ * bellek-içi Set yalnız oturum süresince tutuyordu (her oturum yeniden dürtüyordu).
+ */
+export async function persistDeclinedModelUpgrade(model: string): Promise<void> {
+  if (!model || typeof model !== "string") return;
+  await fs.mkdir(configDir(), { recursive: true, mode: 0o700 });
+  const existing = await loadConfigFile();
+  const prev = Array.isArray(existing.declined_model_upgrades)
+    ? existing.declined_model_upgrades.filter((m) => typeof m === "string")
+    : [];
+  if (prev.includes(model)) return; // zaten var → no-op
+  const next: ConfigFile = { ...existing, declined_model_upgrades: [...prev, model] };
+  const raw = JSON.stringify(next, null, 2) + "\n";
+  await fs.writeFile(configPath(), raw, { encoding: "utf-8", mode: 0o600 });
 }
 
 /**
