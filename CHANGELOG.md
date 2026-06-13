@@ -1,5 +1,24 @@
 ## 2026-06-13
 
+- **fix(orchestrator hız + döngü) [Ümit gerçek-koşu gözlemi: "sorunlar için çok uzun zaman harcıyor"]:** adminpanel'i
+  tarayıcı köprüsünde sürerken çıkan 4 verimlilik/doğruluk kusuru. **(1) verify-up yanlış-negatif döngüsü:**
+  `phase-7-complete`/`phase-8-complete` audit olaylarında `detail` boştu → üst-kontrol "tamamlama açıklaması yok"
+  deyip fazı tekrar-tekrar koşuyordu (~10dk + maliyet); `detail` eklendi (sha256 + test metrikleri), döngü kapandı.
+  **(2) per-mesaj relevance-classifier yükü:** aday havuzu istenen chunk sayısı kadar/altındaysa LLM skorlamasını
+  (~40s) ATLA (havuz-boyutuna göre, mesaj-içeriğine göre DEĞİL → no-regex kuralı korunur; simetrik API+CLI). **(3)
+  ucuz-başlangıç KALDIRILDI:** escalation artık `firstRung` ile cheap·low'a değil config.main tier'ından başlar
+  (config kral, ucuz-zorlama yok; merdiven yalnız başarısızlıkta tırmanır) — Ümit 2026-06-11 "en ucuzdan başla"
+  direktifi bugünkü "kaldır" ile geçersiz; 2 doğrudan `index.ts` çağrısı + verify-up etiketi de güncellendi.
+  **(4 ERTELENDİ):** gate-fail'de yalnız başarısız taramaları tekrar-koşma — güvenlik gate'i, false-green riski →
+  ayrı tura. Ayrıca araştırmada bulunan latent koruma: blindspot-lens awaiti 60s sert-timeout + persistent-CLI
+  IIFE `.catch` (timer-öncesi throw'da resolve garantisi) — kritik yollarda timeout'suz-await deadlock sınıfını kapatır.
+- **fix(tarayıcı köprüsü sağlamlık) [canlı sürüş regresyonları]:** (a) StrictMode çift-mount churn emici —
+  `kill_orchestrator` 2.5s geciktirilir, arada spawn gelirse iptal → orchestrator HİÇ öldürülmez (resume yarıda
+  kalmaz). (b) ready-replay — köprü + istemci son `ready`/`config_status`'u cache'leyip geç bağlanan sayfaya replay
+  eder (Node-logger orchestrator'ı erken doğurunca sayfa `ready`'yi kaçırıp open_project'i hiç göndermiyordu). (c)
+  canlı sürücü harness'i: `e2e/live.mjs` (görünür headed Chromium host, CDP), `e2e/step.mjs` (tek-aksiyon sürücü),
+  `e2e/drive.mjs` (otonom). Komut: `node e2e/live.mjs` + `node e2e/step.mjs <komut>`.
+
 - **feat(tarayıcı köprüsü: MyCL Studio'yu düz Chromium'da Playwright ile uçtan-uca test) [Ümit: "Tauri yüzünden
   erişemediğin yerleri tarayıcıda aç, benim yerime her şeyi test et"]:** Tauri WebView (WKWebView/WebKitGTK)
   Playwright/CDP'ye bağlanamadığı için uygulamayı düz tarayıcıda açan köprü eklendi. Asıl beyin zaten Node

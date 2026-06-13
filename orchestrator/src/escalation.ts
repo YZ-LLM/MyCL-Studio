@@ -1,5 +1,6 @@
-// escalation — adaptif model+efor MERDİVENİ (Ümit 2026-06-11: "bütün ajanlar en düşük model+efordan başlasın;
-// sorun çıktıkça adım adım yükselt; efor bitince model yükselt + o modelin low'undan başla").
+// escalation — adaptif model+efor MERDİVENİ. (Ümit 2026-06-11: "sorun çıktıkça adım adım yükselt; efor bitince
+// model yükselt + o modelin low'undan başla".) Ümit 2026-06-13 ("3 kaldır"): BAŞLANGIÇ artık en-ucuz DEĞİL —
+// config'teki ANA model tier'ından başlar (ucuz-zorlama kaldırıldı, config kral); merdiven yalnız BAŞARISIZLIKTA tırmanır.
 //
 // Amaç: HIZ + maliyet — kolay iş ucuz/hızlı modelde biter; zor iş gerektiği kadar tırmanır (gerektiğinde opus'a
 // ulaşır → kalite garanti). "Config kral": merdiven TIER'ları (cheap→balanced→strong) tırmanır; her tier'ın gerçek
@@ -7,7 +8,7 @@
 //
 // Saf + deterministik (test edilebilir). Tier→model çözümü + tırmanma kararı dışarıda (escalation-state, wiring).
 
-import { modelForTier, type ModelTier } from "./model-catalog.js";
+import { modelForTier, findModel, type ModelTier } from "./model-catalog.js";
 import type { State } from "./types.js";
 import type { MyclConfig } from "./config.js";
 
@@ -41,9 +42,13 @@ export function buildLadder(): Rung[] {
   return rungs;
 }
 
-/** İlk (en düşük) basamak — her iş buradan başlar. */
-export function firstRung(): Rung {
-  return { tier: "cheap", effort: "low" };
+/** Başlangıç basamağı. Ümit 2026-06-13 ("3 kaldır"): cheap·low'a SABİT değil — config'teki ANA model
+ *  tier'ından (config.selected_models.main) başlar; ucuz-zorlama yok, escalation yalnız başarısızlıkta
+ *  tırmanır. config yoksa (test/legacy) cheap·low (geriye uyum). */
+export function firstRung(config?: MyclConfig): Rung {
+  if (!config) return { tier: "cheap", effort: "low" };
+  const tier: ModelTier = findModel(config.selected_models.main)?.tier ?? "balanced";
+  return { tier, effort: "low" };
 }
 
 const sameRung = (a: Rung, b: Rung): boolean => a.tier === b.tier && a.effort === b.effort;
@@ -76,9 +81,9 @@ export function resolveRung(
   return { modelId: m.id, modelLabel: m.label, effort: rung.effort, tier: rung.tier };
 }
 
-/** Bir domain'in o anki basamağı (per-domain harita; yoksa firstRung=cheap·low). Monotonik — yalnız climb yükseltir. */
-export function rungForDomain(state: State, domain: string): Rung {
-  return state.escalation_rungs?.[domain] ?? firstRung();
+/** Bir domain'in o anki basamağı (per-domain harita; yoksa başlangıç=config.main tier). Monotonik — yalnız climb yükseltir. */
+export function rungForDomain(state: State, domain: string, config?: MyclConfig): Rung {
+  return state.escalation_rungs?.[domain] ?? firstRung(config);
 }
 
 /**
@@ -91,7 +96,7 @@ export function escalatedModelEffort(
   config: MyclConfig,
   domain: string,
 ): { modelId: string; modelLabel: string; effort: string } {
-  const r = resolveRung(rungForDomain(state, domain), config.selected_models.model_tiers);
+  const r = resolveRung(rungForDomain(state, domain, config), config.selected_models.model_tiers);
   return { modelId: r.modelId, modelLabel: r.modelLabel, effort: r.effort };
 }
 

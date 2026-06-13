@@ -150,7 +150,7 @@ import {
   blindspotLensDecision,
   decisionIsConsequential,
 } from "./pre-commit-lens-gate.js";
-import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
+import { runBlindspotLens, formatLensFindings, type LensResult } from "./pre-commit-lens.js";
 import { loadProfile } from "./profile-loader.js";
 import { isProcessAlive } from "./process-utils.js";
 import { stopActiveDevServer } from "./dev-server-launcher.js";
@@ -502,7 +502,7 @@ async function emitVerificationSummary(state: State): Promise<void> {
 async function recordRungOutcome(n: PhaseId, success: boolean): Promise<void> {
   if (!runtime.state || !runtime.config) return;
   const domain = phaseDomain(n);
-  const rung = rungForDomain(runtime.state, domain);
+  const rung = rungForDomain(runtime.state, domain, runtime.config);
   const model = resolveRung(rung, runtime.config.selected_models.model_tiers).modelId;
   await recordStrength({ domain, rung: rungLabel(rung), model, success }, Date.now());
 }
@@ -649,7 +649,7 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   if (autoAnswerSuggested() && ESCALATION_PHASES.has(n) && projectError && escalatable) {
     const domain = phaseDomain(n);
     await recordRungOutcome(n, false);
-    const cur = rungForDomain(runtime.state, domain);
+    const cur = rungForDomain(runtime.state, domain, runtime.config);
     const up = nextRung(cur);
     if (up) {
       const model = resolveRung(up, runtime.config.selected_models.model_tiers).modelId;
@@ -1806,14 +1806,33 @@ async function executeAgentDecision(
       isReversible: false,
     }) === "run"
   ) {
-    const lens = await runBlindspotLens(
-      runtime.config,
-      runtime.state.project_root,
-      "decision",
-      `Action: ${decision.action}${
-        decision.target_phase !== undefined ? ` (phase ${decision.target_phase})` : ""
-      }\nReason: ${decision.reason}`,
-    );
+    // Mercek fail-safe (kararı bloklamaz) → ama altta runReasoningTurn'ün hiç
+    // settle ETMEME ihtimaline karşı SERT timeout: 60s'de bitmezse görünür not +
+    // karar bloklanmadan sürer. (runBlindspotLens'in try/catch'i yalnız reject'i
+    // yakalar; never-settling promise'i değil → _handlingUserMessage deadlock'u.)
+    const LENS_HARD_TIMEOUT_MS = 60_000;
+    const lens = await Promise.race<LensResult>([
+      runBlindspotLens(
+        runtime.config,
+        runtime.state.project_root,
+        "decision",
+        `Action: ${decision.action}${
+          decision.target_phase !== undefined ? ` (phase ${decision.target_phase})` : ""
+        }\nReason: ${decision.reason}`,
+      ),
+      new Promise<LensResult>((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              ran: true,
+              clean: false,
+              blindspots: [],
+              error: "mercek zaman aşımı (60s) — karar bloklanmadan sürdü",
+            }),
+          LENS_HARD_TIMEOUT_MS,
+        ),
+      ),
+    ]);
     if (!lens.clean) {
       const m = formatLensFindings(lens);
       if (m) emitChatMessage("system", m);

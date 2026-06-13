@@ -73,7 +73,7 @@ export async function verifyWorkAtHigherRung(
   domain: string,
   phaseLabel: string,
 ): Promise<VerifyUpResult> {
-  const cur = rungForDomain(state, domain);
+  const cur = rungForDomain(state, domain, config);
   const up = nextRung(cur);
   if (!up) return { verdict: "skipped", reasons: ["en üst basamak — daha üst kontrolcü yok"] };
 

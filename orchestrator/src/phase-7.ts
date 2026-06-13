@@ -281,8 +281,11 @@ export class Phase7Controller {
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 7,
+      // detail ZORUNLU: verify-up kanıtı audit detail'inden okur; boş bırakılırsa
+      // "tamamlama açıklaması yok" yanlış-negatifi → faz tekrar-tekrar koşar (döngü).
       event: "phase-7-complete",
       caller: "mycl-orchestrator",
+      detail: `DB şeması yazıldı + onaylandı; sha256=${outcome.artifact_hash}`,
     });
     // ADR: şema/migration kararı (otomatik, non-blocking).
     try {

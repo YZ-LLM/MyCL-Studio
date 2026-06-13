@@ -156,6 +156,24 @@ export async function getRelevantChunks(
 
   const candidates = keywordPreFilter(options.intent, allChunks, topK);
 
+  // Ücuz gate (Ümit 2026-06-13 "2 düzelt" — Option B, simetrik API+CLI): aday havuzu
+  // zaten istenen chunk sayısı kadar/altındaysa, LLM skorlamasının (en pahalı adım,
+  // ~40s) sıralayıp eleyecek anlamlı işi YOK → keyword-sıralı adayları DOĞRUDAN dön,
+  // LLM çağrısını ATLA. Mesaj-İÇERİĞİNE göre değil, havuz-BOYUTUNA göre karar (no-regex
+  // fast-path kuralını bozmaz; ajan kararını yine LLM verir, yalnız bağlam-getirme ucuzlar).
+  if (candidates.length <= maxChunks) {
+    log.info("relevance/engine", "LLM skorlama atlandı (küçük aday havuzu)", {
+      gathered: allChunks.length,
+      candidates: candidates.length,
+      max_chunks: maxChunks,
+    });
+    return candidates.map((c) => ({
+      ...c,
+      score: minScore,
+      reason: "keyword pre-filter (LLM skor atlandı — küçük havuz)",
+    }));
+  }
+
   let scored: ScoredChunk[];
   try {
     // Backend: saf-abonelik → text-JSON CLI (forced-tool yok); aksi → SDK forced-tool.

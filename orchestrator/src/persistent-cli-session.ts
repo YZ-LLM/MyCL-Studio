@@ -337,7 +337,11 @@ export class PersistentClaudeSession {
         } catch (e) {
           finish({ ok: false, text: "", error: `stdin write failed: ${String(e)}` });
         }
-        })();
+        })().catch((e) => {
+          // Timer-öncesi throw (start()/ensureModelEffort()) Promise'i ASILI
+          // bırakmasın → her durumda resolve (timeout'suz deadlock sınıfını kapatır).
+          resolve({ ok: false, text: "", error: `session send threw: ${String(e)}` });
+        });
       });
     // Seri kuyruk: bir tur bitmeden sonraki başlamasın (tek konuşma). Her sonuçtan sonra sağlık değerlendir.
     const next = this.queue.then(run, run).then((r) => {

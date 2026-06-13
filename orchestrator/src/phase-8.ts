@@ -627,8 +627,11 @@ export class Phase8Controller {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 8,
+        // detail ZORUNLU: verify-up kanıtı audit detail'inden okur; boş → "tamamlama
+        // açıklaması yok" yanlış-negatifi → faz tekrar-tekrar koşar (döngü).
         event: "phase-8-complete",
         caller: "mycl-orchestrator",
+        detail: `green=${greens}/${minGreens} debt=${techDebtCount} tdd=${tddOk} suite=${finalSuiteRun} repro=${reproOk} ac=${acCoverageOk}`,
       });
       // Score: AC coverage × 100 − tech debt penalty (5 puan/bulgu). Min 0.
       const acCovRatio = greens / Math.max(1, minGreens);
