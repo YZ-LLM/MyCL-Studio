@@ -44,7 +44,14 @@ export function buildSeatbeltProfile(home: string): string {
     "(version 1)",
     "(allow default)",
     `(deny file-read* ${denies})`,
+    // tccd: TCC izin-broker'ı — reddet → framework'ler izin SORMAK için ona ulaşamaz (pencere açılamaz).
     '(deny mach-lookup (global-name-regex #"^com\\.apple\\.tccd"))',
+    // Ümit 2026-06-13: "MyCL Studio Apple Music'e/ortam arşivine erişmek istiyor" penceresi sürüyordu —
+    // Media Library / Apple Music / Photos framework'leri tccd dışında KENDİ broker daemon'larına da
+    // ulaşıp prompt tetikleyebiliyor. claude coding için bunların HİÇBİRİNE ihtiyacı yok (allow-default
+    // altında reddetmek güvenli) → medya/foto daemon mach-lookup'larını da kapat ki bu framework-tabanlı
+    // pencereler kaynağında ölsün. (medialibraryd/Apple-Music-amp*/mediaremoted/itunescloudd/foto-daemonlar.)
+    '(deny mach-lookup (global-name-regex #"^com\\.apple\\.(medialibraryd|amp([d.]|/)|amsengagementd|mediaremoted|itunescloudd|photoanalysisd|cloudphotod|photolibraryd|mediaanalysisd)"))',
   ].join("\n");
 }
 

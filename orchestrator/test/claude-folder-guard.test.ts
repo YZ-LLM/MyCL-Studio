@@ -39,6 +39,13 @@ describe("buildSeatbeltProfile", () => {
     expect(p).toContain("deny mach-lookup");
     expect(p).toContain("tccd");
   });
+
+  it("medya/foto broker daemon'larını da reddeder (Apple Music/Media Library penceresi)", () => {
+    const p = buildSeatbeltProfile("/Users/x");
+    // tccd dışındaki broker'lar üzerinden de prompt tetiklenmesin
+    expect(p).toContain("medialibraryd");
+    expect(p).toContain("photoanalysisd");
+  });
 });
 
 describe("wrapReadOnlyClaude", () => {

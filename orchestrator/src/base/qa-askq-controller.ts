@@ -324,6 +324,23 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
           suffixKey,
         );
 
+        // Ümit 2026-06-13: BOŞ soru koruması — clarifying askq'da question boşsa bu BOZUK bir tool
+        // çağrısıdır (ajan question alanını doldurmamış). Boş soruyu kullanıcıya GÖSTERME; ajana hata
+        // dön → gerçek soruyla yeniden çağırsın. (Eski davranış: boş metin çevirmene gidiyor, Haiku
+        // "Çevrilecek metin boş. Lütfen ... yazınız." kılavuz-cevabını askq sorusu yapıyordu — gerçek
+        // trace, Faz 9. Çevirmen artık boşta model çağırmaz; bu da boş kartın hiç açılmamasını sağlar.)
+        if (!isApproval && question_en.trim() === "") {
+          log.warn(tag, "boş clarifying soru — ajana hata dönülüyor (yeniden sorsun)", { tool: tu.name });
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content:
+              "The 'question' field was empty. You MUST provide a concrete, non-empty question that states the risk and the decision to make. Call the tool again with a real question.",
+            is_error: true,
+          });
+          continue;
+        }
+
         let question_tr: string;
         let options_tr: string[];
         try {

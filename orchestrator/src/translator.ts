@@ -236,6 +236,13 @@ export async function translate(
   dir: TranslationDir,
 ): Promise<TranslateResult> {
   const startTs = Date.now();
+  // Ümit 2026-06-13: BOŞ girdi koruması — boş/whitespace metni modele GÖNDERME. Aksi halde Haiku
+  // `<text_to_translate></text_to_translate>` görünce çeviri yerine "Çevrilecek metin boş. Lütfen ... yazınız."
+  // kılavuz-cevabı üretir → bu metin askq sorusu olarak kullanıcıya GÖRÜNÜR (gerçek trace, Faz 9 boş soru).
+  // Çevrilecek şey yoksa olduğu gibi dön — model çağrısı yok, token yok, yanlış-cevap yok.
+  if (text.trim() === "") {
+    return { text, model: TRANSLATOR_MODEL, attempts: 0, elapsed_ms: 0 };
+  }
   // SABİT hızlı model (Ümit 2026-06-11): config.selected_models.translator YOK SAYILIR — translator hep hızlı/ucuz
   // tier'da, kullanıcı değiştiremez. Çeviri mekanik; hız önemli; teknik token'lar verbatim geçer (system prompt).
   const model = TRANSLATOR_MODEL;
