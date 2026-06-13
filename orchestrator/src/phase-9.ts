@@ -18,8 +18,9 @@ import {
   renderTechDebtFindings,
 } from "./phase-9-tech-debt.js";
 import type { ToolDef } from "./claude-api.js";
-import type { MyclConfig } from "./config.js";
-import { emitError } from "./ipc.js";
+import { backendForRole, type MyclConfig } from "./config.js";
+import { runDebateReview } from "./phase-9-debate-review.js";
+import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import {
@@ -169,6 +170,69 @@ export class Phase9Controller {
       detail: `scanned=${techDebt.scannedCount} findings=${techDebt.totalFindings}${techDebt.truncated ? " (truncated)" : ""}`,
     });
 
+    const escMe = escalatedModelEffort(this.state, this.config, "risk-review");
+
+    // Ümit 2026-06-13: CLI/abonelik → çok-ajanlı "bulan + çürüten" debate review (Anthropic /ultrareview
+    // deseni). N uzman bulucu paralel tarar → bağımsız çürütücüler yanlış-pozitifi eler → ETKİLEŞİMSİZ
+    // (onay yok) → doğrulanan bulgular decisions[] olarak risk-fix dispatch'ine akar. API modunda eski
+    // tek-ajan qa-askq'ya düşer (review fan-out CLI-only açık-maddesi; görünür not).
+    if (backendForRole(this.config, "main") === "cli") {
+      emitChatMessage(
+        "system",
+        "🔬 Risk incelemesi çok-ajanlı modda — 6 uzman bulucu paralel tarıyor, sonra her bulgu bağımsız çürütücüyle doğrulanıyor (yanlış-pozitif elenir).",
+      );
+      const review = await runDebateReview(this.state.project_root, escMe.modelId, escMe.effort, {
+        specRisks,
+        phase9Audit,
+        techDebtFindings: renderTechDebtFindings(techDebt),
+        changedFiles: renderChangedFilesList(techDebt),
+      });
+      if (!review.ok) {
+        this.lastFailReason = review.reason ?? "debate review başarısız";
+        emitError("phase-9 debate review failed", review.reason ?? null);
+        return "fail";
+      }
+      const decisions: RiskDecision[] = review.findings.map((f) => ({
+        risk: f.risk,
+        decision: f.decision,
+        detail: f.detail,
+        fix_phase: f.fix_phase,
+      }));
+      const fixN = decisions.filter((d) => d.decision === "fix").length;
+      const ruleN = decisions.filter((d) => d.decision === "rule").length;
+      for (const d of decisions) {
+        await appendAudit(this.state.project_root, {
+          ts: Date.now(),
+          phase: 9,
+          event: "risk-decision",
+          caller: "mycl-orchestrator",
+          detail: `${d.decision}[${d.fix_phase ?? "?"}]=${d.risk.slice(0, 80)}`,
+        });
+      }
+      await appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 9,
+        event: "phase-9-complete",
+        caller: "mycl-orchestrator",
+        detail: `debate: ${review.confirmedCount}/${review.rawCount} doğrulandı (${fixN} fix, ${ruleN} rule); ${review.axisOk}/${review.axisCount} eksen`,
+      });
+      this.riskDecisions = decisions;
+      emitChatMessage(
+        "system",
+        `🔬 Risk incelemesi tamamlandı — ${review.axisOk}/${review.axisCount} eksen, ${review.rawCount} aday → **${review.confirmedCount} doğrulandı** (yanlış-pozitifler elendi). ${fixN} düzeltilecek, ${ruleN} kural.`,
+      );
+      log.info("phase-9", "debate complete", {
+        confirmed: review.confirmedCount,
+        raw: review.rawCount,
+        axisOk: review.axisOk,
+      });
+      return "complete";
+    }
+    emitChatMessage(
+      "system",
+      "ℹ️ Çok-ajanlı risk incelemesi yalnız abonelik/CLI modunda; API modunda tek-ajan inceleme yapılıyor.",
+    );
+
     let systemPrompt: string;
     try {
       const tmpl = await readFile(this.spec.prompt_template_path!, "utf-8");
@@ -188,7 +252,7 @@ export class Phase9Controller {
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
-    const escMe = escalatedModelEffort(this.state, this.config, "risk-review");
+    // escMe yukarıda (debate branch öncesi) hesaplandı — API yolu da onu kullanır.
     this.base = createQaAskqBackend({
       tag: "phase-9",
       state: this.state,
