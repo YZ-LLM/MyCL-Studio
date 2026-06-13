@@ -41,6 +41,7 @@
       "../orchestrator/dist/**/*",
       "../orchestrator/package.json",
       "../orchestrator/node_modules/**/*",
+      "../orchestrator/*.mjs",
       "../assets/templates/**/*",
       "../assets/i18n/**/*",
       "../assets/scripts/**/*",
@@ -48,6 +49,8 @@
       "../assets/profiles/**/*",
       "../assets/gates/**/*",
       "../assets/schemas/**/*",
+      "../assets/security-rules/**/*",
+      "../assets/quality-rules/**/*",
       "../assets/mycl-schema.md"
     ]
   }
