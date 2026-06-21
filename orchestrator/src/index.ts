@@ -3928,11 +3928,61 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           runtime.config
         ) {
           gateAutofixTried.add(13);
+          // ⚖️ MAHKEME (YZLLM 2026-06-22, "mahkeme EVRENSEL — küçükte olsa etkileri büyük"): Faz 13 güvenlik
+          // = EN yüksek-risk alan; oto-düzeltmeden ÖNCE müfettiş BAĞLAYICI inceler (genel gate yolundaki kanıtlı
+          // desen, Faz 13 terminaline uyarlandı). inspectGateFinding "Güvenlik" etiketinden highStakes=true türetir
+          // → mahkemeRuling güvenlikte ASLA suppress etmez (sessiz-gömme=beter).
+          //   proceed  = bulgu gerçek → oto-fix (müfettiş gerekçesi B5 ile fix'i besler).
+          //   escalate = iki bilim insanı kuşkulu/false-positive → çalışan kodu "düzeltmeyle" BOZMA; oto-fix YOK,
+          //              LOUD accept-continue (bulgu rapora yazılır, pipeline devam — frozen-goal: oto-modda insan
+          //              BLOKLANMAZ). Flag KAPALI veya mahkeme hata → proceed (davranış aynen korunur, sıfır risk).
+          let secMahkemeAction: MahkemeAction = "proceed";
+          let secMahkemeGuidance: string | undefined;
+          if (cfg.features.inspector_enabled) {
+            try {
+              const insp = await inspectGateFinding(cfg, {
+                projectRoot: state.project_root,
+                gateLabel: phaseLabelTR(13, spec),
+                errors: outcome.stderr,
+              });
+              const ruling = mahkemeRuling(insp);
+              if (ruling.convened) {
+                // Güvenlik: suppress ASLA (savunmacı — highStakes regex'i kaçırsa bile) → escalate'e çevir.
+                secMahkemeAction = ruling.action === "suppress" ? "escalate" : ruling.action;
+                if (secMahkemeAction === "proceed") secMahkemeGuidance = ruling.summary;
+                emitChatMessage("system", `⚖️ Mahkeme (Faz 13 güvenlik — ${secMahkemeAction}): ${ruling.summary}`);
+              }
+            } catch (e) {
+              log.warn("orchestrator", "mahkeme Faz 13 incelemesi hata (yutuldu → proceed)", { error: String(e) });
+            }
+          }
+          if (secMahkemeAction === "escalate") {
+            // Müfettiş bulguyu kuşkulu/false-positive ilan etti → oto-fix YOK (çalışan kodu koru). LOUD accept-continue:
+            // pipeline devam, bulgu rapora yazılır, insan bloklanmaz (Faz 13 oto-modda asla bloklamaz kuralı korunur).
+            emitChatMessage(
+              "system",
+              "⚖️ Mahkeme: Faz 13 güvenlik bulgusu olası false-positive/kuşkulu — otomatik düzeltme YAPILMADI " +
+                "(çalışan kod korundu), bulgu YUTULMADI rapora yazıldı; pipeline 'kabul et + devam' ile ilerliyor (incelemen raporda).",
+            );
+            const accId = `error_analysis_${randomUUID()}`;
+            runtime.pendingErrorAnalysis = {
+              id: accId,
+              phase: 13,
+              blocking: true,
+              options: [OPT_ACCEPT_CONTINUE],
+              solutions_tr: [],
+              acceptContinuePhase: 13,
+            };
+            await handleAskqAnswer(accId, OPT_ACCEPT_CONTINUE).catch((e: unknown) =>
+              log.error("orchestrator", "faz-13 mahkeme-escalate accept-continue failed", e),
+            );
+            return;
+          }
           emitChatMessage(
             "system",
             "🔧 Faz 13 (Güvenlik) — bulguları fazın içinde düzeltiyorum + güvenliği yeniden doğruluyorum (Faz 8'e dönmeden).",
           );
-          const fixRan = await runGateAutofix(state, cfg, 13, phaseLabelTR(13, spec), outcome.stderr);
+          const fixRan = await runGateAutofix(state, cfg, 13, phaseLabelTR(13, spec), outcome.stderr, secMahkemeGuidance);
           if (fixRan) {
             const reRunner = new MechanicalRunnerBase({
               tag: "phase-13",

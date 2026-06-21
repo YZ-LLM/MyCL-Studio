@@ -1,3 +1,8 @@
+## 2026-06-22
+
+- **feat(mahkeme): Faz 13 güvenlik gate'i bağlayıcı mahkemeden geçer (evrensel-yetki boşluğu kapandı):**
+  Mahkeme şimdiye dek gate-autofix yolundaydı ama Faz 13 güvenlik KENDİ dalında raw `runGateAutofix` ile mahkemesiz koşuyordu — "yetki fix-kararları üzerinde evrensel" ilkesindeki boşluk (EN yüksek-risk alan denetimsizdi). [index.ts](orchestrator/src/index.ts) Faz 13 oto-fix'ten ÖNCE genel yolun kanıtlı mahkeme desenini uygular: `inspectGateFinding` "Güvenlik" etiketinden `highStakes=true` türetir → `mahkemeRuling` güvenlikte ASLA suppress etmez. **proceed** → oto-fix (müfettiş gerekçesi B5 ile fix'i besler); **escalate** → oto-fix YOK (çalışan kod korunur) + LOUD accept-continue (oto-modda insan BLOKLANMAZ — frozen-goal; bulgu YUTULMAZ rapora yazılır); **suppress** savunmacı→escalate'e çevrilir. Flag-gated (`inspector_enabled`) + fail-safe (kapalı/hata→proceed, davranış aynen korunur). check yeşil (1370 test); `mahkemeRuling` yüksek-risk→escalate kuralı zaten [inspector.test.ts](orchestrator/test/inspector.test.ts)'de test'li.
+
 ## 2026-06-21
 
 - **feat(KENDİ-YETERLİLİK MEKANİZMASI: "iki bilim insanı" müfettiş + müdahale-seçimi + tecrübe katmanı — TEMELLER):**
