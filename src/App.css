@@ -1018,6 +1018,11 @@ select:focus {
 /* ===== Chat panel ===== */
 .chat-messages {
   flex: 1;
+  /* KRİTİK: flex column'da flex:1 öğe, min-height:auto (default) yüzünden içeriğinin
+     altına SHRINK ETMEZ → mesajlar çoğalınca composer + intent-row .panel'den taşıp
+     overflow:hidden ile kırpılırdı ("alt kısımlar gelmiyor"). min-height:0 → kendi
+     içinde scroll'lar, composer + araç çubuğu HER ZAMAN tam görünür (yeni scroll yok). */
+  min-height: 0;
   overflow-y: auto;
   padding: 14px;
   display: flex;
