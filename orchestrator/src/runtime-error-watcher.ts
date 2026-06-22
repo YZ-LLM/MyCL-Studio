@@ -107,6 +107,15 @@ export interface RuntimeErrorWatcher {
 // spawn'da eski detach edilir, yeni attach.
 let activeWatcher: RuntimeErrorWatcher | null = null;
 
+// Pentest (Faz 17 / 🛡️ buton) sırasında watcher SUSTURULUR: katana/nuclei kasıtlı saldırı yükleri
+// (SQLi/JSP/servlet exploit) atar → app 404/500 döner → bunlar GERÇEK runtime bug DEĞİL, beklenen saldırı
+// trafiği. Aksi halde her probe translate+toast'a gider → ÇEVİRMEN BOĞULUR + chat flood (CANLI kanıt
+// Arcelik_BO 2026-06-22: Faz 17'de 54 çeviri, run sürünüyor + makine ısındı). dast çağrısı try/finally ile sarar.
+let pentestActive = false;
+export function setPentestActive(v: boolean): void {
+  pentestActive = v;
+}
+
 /** Singleton helper — eski watcher varsa detach, yeni attach. Spawn site'leri kullanır. */
 export function replaceActiveWatcher(opts: AttachOpts): void {
   if (activeWatcher) {
@@ -171,6 +180,9 @@ export function attachRuntimeErrorWatcher(opts: AttachOpts): RuntimeErrorWatcher
   };
 
   const record = async (e: PendingEntry): Promise<void> => {
+    // Pentest sırasında saldırı trafiği = hata DEĞİL → translate/toast/DB hepsini atla (flood + çevirmen-boğulma
+    // + makine-ısınma önle). dast bitince setPentestActive(false) ile geri açılır.
+    if (pentestActive) return;
     const category = e.category;
     const location = category.extractLocation(e.match).slice(0, 200);
     const hash = createHash("sha1")

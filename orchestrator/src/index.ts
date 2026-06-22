@@ -114,7 +114,7 @@ import {
   startRuntimeHttpServer,
   stopRuntimeHttpServer,
 } from "./runtime-http-server.js";
-import { detachActiveWatcher } from "./runtime-error-watcher.js";
+import { detachActiveWatcher, setPentestActive } from "./runtime-error-watcher.js";
 import { Phase1Controller } from "./phase-1.js";
 import { Phase2Controller } from "./phase-2.js";
 import { Phase3Controller } from "./phase-3.js";
@@ -4405,7 +4405,9 @@ async function runPhase17Pentest(
         `🔪 Faz 17 yalnız değişen işe scope'landı: ${scopeRoutes.join(", ")} (tüm proje için 🛡️ Güvenlik Taraması).`,
       );
     }
-    const res = await runDast(state, { scopeRoutes });
+    // Pentest sırasında runtime-error-watcher'ı sustur (saldırı trafiği=hata değil; flood+çevirmen-boğulma+ısınma önle).
+    setPentestActive(true);
+    const res = await runDast(state, { scopeRoutes }).finally(() => setPentestActive(false));
     emitChatMessage("system", res.summary_tr);
     if (res.ok) {
       if (_iterationIsSecurityFix) {
@@ -4613,15 +4615,17 @@ export async function handleAskqAnswer(
       // 🛡️ Full Security (YZLLM "huzur butonu"): STACK-BAĞIMSIZ bağımlılık-audit (profil 'security')
       // + SAST (semgrep güvenlik/OWASP/secret) + aktif DAST pentest (tüm yüzey + GÜNCEL CVE)
       // ÜÇÜ PARALEL → tek birleşik hüküm. Hepsi temizse yeşil; biri bile değilse kırmızı.
+      setPentestActive(true); // pentest trafiği watcher'a hata sayılmasın (flood+ısınma önle)
       const [dep, sast, res] = await Promise.all([
         runDependencyAudit(st),
         runSemgrepScans(st),
         runDast(st, { updateTemplates: true }), // ANA: autologin AÇIK → korumalı route'lar taranır
-      ]);
+      ]).finally(() => setPentestActive(false));
       // LOGIN modülünü autologin BYPASS'lamadan test et (YZLLM): ikinci pass anonim (mycl_no_autologin)
       // → gerçek login/auth akışı bir saldırgan gözüyle taranır. Ana taramadan SONRA (dev server'ı
       // aynı anda iki crawl ile boğma).
-      const loginRes = await runDast(st, { noAutologin: true });
+      setPentestActive(true);
+      const loginRes = await runDast(st, { noAutologin: true }).finally(() => setPentestActive(false));
       const loginFindings = loginRes.findings_count ?? 0;
       const loginLine = !loginRes.ok
         ? `• Login (autologin'siz): ${loginRes.summary_tr.split("\n")[0]}`
