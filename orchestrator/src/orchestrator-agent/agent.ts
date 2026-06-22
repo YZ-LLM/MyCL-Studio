@@ -174,6 +174,8 @@ export class OrchestratorAgent {
         {
           messages,
           system: systemPrompt,
+          role: "orchestrator", // ⑤ Sağlayıcı=Z.AI seçiliyse orkestratör turu GLM'e yönlenir
+
           model: modelId,
           tools: AGENT_TOOLS,
           tool_choice: { type: "any" },

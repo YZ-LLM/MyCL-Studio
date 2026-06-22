@@ -114,6 +114,8 @@ async function scoreBatch(
       {
         messages: [{ role: "user", content: userMessage }],
         system: SYSTEM_PROMPT,
+        role: "main", // ⑤ relevance main-pipeline alt-işidir → main sağlayıcısını izler
+
         model: modelId,
         tools: [TOOL_SCORE],
         // Force-tool: intent-router/classifier.ts ile aynı consistency —

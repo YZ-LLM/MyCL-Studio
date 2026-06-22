@@ -11,9 +11,26 @@
 // kendi tool set'i, system prompt'u, gate logic'iyle bu wrapper'ı çağırır.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { ZAI_BASE_URL, ZAI_MODEL, type MyclConfig } from "./config.js";
+import {
+  ZAI_BASE_URL,
+  resolveProvider,
+  zaiKeyForRole,
+  type AgentRole,
+  type MyclConfig,
+} from "./config.js";
+import { findModel, glmModelForTier } from "./model-catalog.js";
 import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
+
+/**
+ * Claude (veya keyfi) model id'sini provider=z.ai turu için doğru GLM modeline çevirir (z.ai Aşama 2 ⑤).
+ * Zaten `glm-*` ise dokunma (kullanıcı dropdown'dan GLM seçti); değilse claude tier'ından eş GLM'i bul
+ * (strong→glm-5.2, balanced→glm-4.6, cheap→glm-4-flash). Tanınmayan model → balanced (güvenli orta).
+ */
+function glmModelFor(model: string): string {
+  if (model.startsWith("glm-")) return model;
+  return glmModelForTier(findModel(model)?.tier ?? "balanced");
+}
 
 /**
  * Anthropic API error'ını kullanıcıya gösterilecek **Türkçe + anlamlı** mesaja
@@ -230,6 +247,12 @@ export interface RunTurnOptions {
   baseURL?: string;
   /** Bu tur z.ai/GLM mi (provider=zai). true → betas strip (GLM Anthropic-beta'yı bilmez). */
   isZai?: boolean;
+  /**
+   * Ajan rolü (z.ai Aşama 2 ⑤): verilirse runTurn merkezi `resolveProvider` ile sağlayıcıyı çözer —
+   * o rolün Sağlayıcı=Z.AI seçimi varsa çağrı GLM'e yönlenir (key+endpoint+model otomatik). Verilmezse
+   * davranış aynen (geçen apiKey+model claude'a gider). claude→z.ai fallback'ı da rolün z.ai key'ini kullanır.
+   */
+  role?: AgentRole;
 }
 
 export interface TurnUsage {
@@ -585,20 +608,42 @@ export async function runTurn(
   opts: RunTurnOptions,
   onEvent: StreamHandler,
 ): Promise<TurnResult> {
+  // ⑤ PROVIDER ROUTING (z.ai Aşama 2): rol verilmişse merkezi resolveProvider çözer.
+  // Rolün Sağlayıcı=Z.AI seçimi varsa BİRİNCİL çağrı doğrudan GLM'e gider (key+endpoint+model swap).
+  // Sağlayıcı claude ise geçen apiKey + opts AYNEN korunur (sıfır davranış değişikliği — kritik path güvenliği).
+  let primaryKey = apiKey;
+  let primaryOpts = opts;
+  if (opts.role) {
+    const prov = resolveProvider(config, opts.role);
+    if (prov.isZai) {
+      primaryKey = prov.apiKey;
+      primaryOpts = {
+        ...opts,
+        baseURL: prov.baseURL,
+        isZai: true,
+        model: glmModelFor(opts.model),
+        betas: undefined,
+      };
+    }
+  }
   try {
-    return await runTurnOnce(config, apiKey, opts, onEvent);
+    return await runTurnOnce(config, primaryKey, primaryOpts, onEvent);
   } catch (err) {
-    const zaiKey = config.api_keys.zai;
-    if (zaiKey && err instanceof ClaudeApiError && isApiAccountError(err.message)) {
+    // FALLBACK (ladder 3. halka): birincil claude idiyse + HESAP/erişim hatası (kredi/limit/auth) →
+    // AYNI turu z.ai (GLM) ile tekrarla. Rol varsa rolün z.ai key'i (per-rol ?? default), yoksa default zai.
+    // Birincil ZATEN z.ai idiyse fallback YOK (z.ai son halka; hatasını dürüstçe fırlat — sessiz yutma yok).
+    const zaiKey = opts.role ? zaiKeyForRole(config.api_keys, opts.role) : config.api_keys.zai;
+    if (!primaryOpts.isZai && zaiKey && err instanceof ClaudeApiError && isApiAccountError(err.message)) {
+      const fallbackModel = glmModelFor(opts.model);
       emitChatMessage(
         "system",
-        `⚠️ Claude API erişilemedi (kredi/limit) → z.ai (GLM \`${ZAI_MODEL}\`) fallback deneniyor.`,
+        `⚠️ Claude API erişilemedi (kredi/limit) → z.ai (GLM \`${fallbackModel}\`) fallback deneniyor.`,
       );
-      log.warn("claude-api", "claude API account-error → z.ai fallback", { model: ZAI_MODEL });
+      log.warn("claude-api", "claude API account-error → z.ai fallback", { model: fallbackModel });
       return await runTurnOnce(
         config,
         zaiKey,
-        { ...opts, model: ZAI_MODEL, baseURL: ZAI_BASE_URL, isZai: true, betas: undefined },
+        { ...opts, model: fallbackModel, baseURL: ZAI_BASE_URL, isZai: true, betas: undefined },
         onEvent,
       );
     }

@@ -208,6 +208,7 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
             messages,
             system: systemPrompt,
             model: opts.modelId,
+            role: "main", // ⑤ main-pipeline → Sağlayıcı=Z.AI seçiliyse GLM'e yönlenir
             tools: opts.tools,
             max_tokens: 4096,
             betas: opts.betas,
