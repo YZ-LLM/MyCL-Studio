@@ -12,6 +12,7 @@
 
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join, extname, relative } from "node:path";
+import { log } from "./logger.js";
 
 /** unsafe-* İÇERMEYEN katı baseline CSP. Faz 5 kodu zaten buna uyacak şekilde üretilir. */
 export const STRICT_CSP =
@@ -75,8 +76,16 @@ export function violationsInLine(line: string): string[] {
 }
 
 async function walk(dir: string, root: string, out: CspViolation[]): Promise<void> {
-  // okunamayan dizin → boş liste (fail-soft)
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  // errno-AYRIMI (sessiz-fallback denetimi): ENOENT/ENOTDIR = gerçekten yok (meşru). AMA dizin VAR ama
+  // okunamıyorsa (EACCES/EIO) bu alt-ağaç TARANMADI → boş-liste "temiz" sanmak FALSE-CLEAN güvenlik taraması.
+  // "scan-incomplete" sentinel'i push et → çağıran non-empty görüp fail-closed davranır (eksik tarama ≠ temiz).
+  const entries = await readdir(dir, { withFileTypes: true }).catch((e: { code?: string }) => {
+    if (e.code !== "ENOENT" && e.code !== "ENOTDIR") {
+      log.error("csp", "CSP taraması: dizin okunamadı — alt-ağaç taranmadı (fail-closed)", { dir, code: e.code });
+      out.push({ file: relative(root, dir), line: 0, kind: "scan-incomplete", snippet: `[dizin okunamadı: ${e.code}] CSP taraması EKSİK` });
+    }
+    return [];
+  });
   for (const e of entries) {
     const name = String(e.name);
     if (e.isDirectory()) {
@@ -87,7 +96,13 @@ async function walk(dir: string, root: string, out: CspViolation[]): Promise<voi
       let content: string;
       try {
         content = await readFile(p, "utf-8");
-      } catch {
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code !== "ENOENT") {
+          // Taranabilir dosya VAR ama okunamadı → ihlali kaçırırız → "temiz" sanma. Sentinel + görünür.
+          log.error("csp", "CSP taraması: kaynak dosya okunamadı — taranmadı (fail-closed)", { file: relative(root, p), code });
+          out.push({ file: relative(root, p), line: 0, kind: "scan-incomplete", snippet: `[dosya okunamadı: ${code}] CSP taraması EKSİK` });
+        }
         continue;
       }
       // Config dosyaları (vite.config/next.config): yalnız CSP unsafe-token al — build-zamanı
@@ -122,7 +137,12 @@ export async function ensureCspMeta(projectRoot: string): Promise<CspMetaResult>
     let html: string;
     try {
       html = await readFile(p, "utf-8");
-    } catch {
+    } catch (e) {
+      // ENOENT = bu aday yok (meşru, sonrakine bak). Diğer hata (EACCES) = var ama okunamadı → görünür kıl.
+      const code = (e as { code?: string }).code;
+      if (code !== "ENOENT") {
+        log.error("csp", "ensureCspMeta: HTML adayı VAR ama okunamadı", { file: rel, code });
+      }
       continue;
     }
     if (/Content-Security-Policy/i.test(html)) return { action: "present", file: rel };
