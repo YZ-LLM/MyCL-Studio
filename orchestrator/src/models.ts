@@ -10,7 +10,10 @@
 
 import { createHash } from "node:crypto";
 import { makeAnthropicClient } from "./claude-api.js";
+import { GLM_CATALOG } from "./model-catalog.js";
 import { log } from "./logger.js";
+
+const ZAI_MODELS_URL = process.env.MYCL_ZAI_MODELS_URL ?? "https://api.z.ai/api/paas/v4/models";
 
 export interface ModelEntry {
   id: string;            // örn. "claude-sonnet-4-6"
@@ -34,6 +37,42 @@ function cacheKey(apiKey: string): string {
 
 export class ModelsError extends Error {
   override readonly name = "ModelsError";
+}
+
+/**
+ * z.ai (GLM) CANLI model keşfi (②b, YZLLM 2026-06-22): OpenAI-uyumlu /v4/models endpoint'inden glm-*
+ * modellerini çeker (Bearer auth) → z.ai yeni model eklerse otomatik yakalanır. Hata/boş/key-yok →
+ * statik GLM_CATALOG fallback (CANLI doğrulandı: 8 model statik listeyle birebir). ASLA throw etmez.
+ * NOT: UI dropdown'ı statik GLM optgroup kullanır (doğrulanmış-doğru); bu capability gelecekte katalog-
+ * tazeleme / model-resolution için + statik liste bayatlarsa canlı doğrulama sağlar.
+ */
+export async function discoverZaiModels(apiKey: string): Promise<ModelEntry[]> {
+  const fallback = (): ModelEntry[] =>
+    GLM_CATALOG.map((m) => ({ id: m.id, display_name: m.label, created_at: new Date(0).toISOString() }));
+  if (!apiKey || apiKey.trim().length === 0) return fallback();
+  try {
+    const r = await fetch(ZAI_MODELS_URL, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = (await r.json()) as { data?: Array<{ id?: string; created?: number }> };
+    const out: ModelEntry[] = [];
+    for (const m of j.data ?? []) {
+      if (typeof m.id === "string" && m.id.startsWith("glm-")) {
+        out.push({
+          id: m.id,
+          display_name: m.id,
+          created_at:
+            typeof m.created === "number" ? new Date(m.created * 1000).toISOString() : new Date(0).toISOString(),
+        });
+      }
+    }
+    return out.length > 0 ? out : fallback();
+  } catch (err) {
+    log.warn("models", "z.ai /v4/models keşfi başarısız → statik GLM fallback", err);
+    return fallback();
+  }
 }
 
 /**
