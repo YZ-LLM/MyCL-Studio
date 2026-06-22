@@ -459,7 +459,7 @@ export type OrchestratorCommand =
       kind: "askq_answer";
       data: { id: string; selected: string | string[] };
     }
-  | { kind: "save_api_keys"; data: { translator: string; main: string; orchestrator?: string } }
+  | { kind: "save_api_keys"; data: { translator: string; main: string; orchestrator?: string; zai?: string } }
   | { kind: "list_models"; data: { which: "translator" | "main"; force?: boolean } }
   | {
       kind: "save_settings";

@@ -792,13 +792,17 @@ function App() {
     translator: string,
     main: string,
     orchestrator?: string,
+    zai?: string,
   ) => {
     setSavingKeys(true);
     void orch.send({
       kind: "save_api_keys",
-      data: orchestrator
-        ? { translator, main, orchestrator }
-        : { translator, main },
+      data: {
+        translator,
+        main,
+        ...(orchestrator ? { orchestrator } : {}),
+        ...(zai ? { zai } : {}),
+      },
     });
   };
 

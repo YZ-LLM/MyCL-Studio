@@ -65,7 +65,7 @@ interface Props {
   ) => void;
   /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
   currentBackends?: AgentBackends;
-  onSaveApiKeys: (translator: string, main: string, orchestrator?: string) => void;
+  onSaveApiKeys: (translator: string, main: string, orchestrator?: string, zai?: string) => void;
   onClose: () => void;
   savingModels: boolean;
   savingKeys: boolean;
@@ -225,6 +225,8 @@ export function Settings({
   // v15.5 Orkestrator agent API key — opsiyonel; explicit set edilirse agent
   // aktif olur, boş bırakılırsa klasik Haiku classifier kullanılır.
   const [apiKeyOrchestrator, setApiKeyOrchestrator] = useState("");
+  // z.ai (GLM) fallback key — opsiyonel; fallback ladder'ın 3. halkası.
+  const [apiKeyZai, setApiKeyZai] = useState("");
   const [showSecret, setShowSecret] = useState(false);
 
   // Modeller tabı ilk açılıştaysa auto-fetch.
@@ -611,6 +613,26 @@ export function Settings({
                   approve. Latency +3-6sn her mesaj için.
                 </span>
               </label>
+              {/* z.ai (GLM) fallback key — opsiyonel; claude (CLI+API) erişilemezse 3. halka. */}
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "var(--fg-dim)", textTransform: "uppercase" }}>
+                  z.ai (GLM) API Key (opsiyonel — fallback)
+                </span>
+                <input
+                  type={showSecret ? "text" : "password"}
+                  placeholder="z.ai key (boş → fallback kapalı, davranış aynen claude)"
+                  value={apiKeyZai}
+                  onChange={(e) => setApiKeyZai(e.target.value)}
+                  style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                />
+                <span style={{ fontSize: 10, color: "var(--fg-dim)" }}>
+                  Fallback ladder'ın 3. halkası: claude aboneliği → claude API → z.ai
+                  (GLM). Claude kredi/limit dolunca otomatik z.ai'ye düşer (görünür
+                  mesajla). Anthropic-uyumlu endpoint, model glm-4.6 (env ile
+                  değiştirilebilir). Key:{" "}
+                  <a href="https://z.ai" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>z.ai</a>.
+                </span>
+              </label>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--fg-dim)" }}>
                 <input
                   type="checkbox"
@@ -628,6 +650,7 @@ export function Settings({
                     apiKeyTranslator.trim(),
                     apiKeyMain.trim(),
                     apiKeyOrchestrator.trim() || undefined,
+                    apiKeyZai.trim() || undefined,
                   )
                 }
               >
