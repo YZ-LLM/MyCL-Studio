@@ -16,6 +16,7 @@ import {
   GLM_CATALOG,
   MODEL_CATALOG,
 } from "../src/model-catalog.js";
+import { resolveLlmClient } from "../src/claude-api.js";
 
 function cfg(backend: string, keys: Partial<ApiKeys>): MyclConfig {
   return {
@@ -102,5 +103,32 @@ describe("GLM katalog (provider-aware model — ②)", () => {
     for (const tier of ["cheap", "balanced", "strong"] as const) {
       expect(GLM_CATALOG.some((m) => m.tier === tier)).toBe(true);
     }
+  });
+});
+
+describe("glmModelFor doğrulaması (canlı-bug 2026-06-22: config'te eski/sahte glm- id'si)", () => {
+  // resolveLlmClient zai yolunda glmModelFor uygular → dönen model HER ZAMAN gerçek GLM olmalı (z.ai 404 yok).
+  const zaiCfg = cfg("zai", { zai_main: "zm" });
+  const realGlm = (id: string) => GLM_CATALOG.some((m) => m.id === id);
+
+  it("SAHTE glm-4-plus (silinen model) → körü körüne geçmez, gerçek GLM'e düşer", () => {
+    const r = resolveLlmClient(zaiCfg, "main", "ckm", "glm-4-plus");
+    expect(r.isZai).toBe(true);
+    expect(realGlm(r.model)).toBe(true);
+    expect(r.model).not.toBe("glm-4-plus");
+  });
+
+  it("GERÇEK GLM (glm-5.2) → kendisi korunur (kullanıcı seçimi)", () => {
+    expect(resolveLlmClient(zaiCfg, "main", "ckm", "glm-5.2").model).toBe("glm-5.2");
+  });
+
+  it("claude modeli → tier-eş gerçek GLM'e çevrilir", () => {
+    const r = resolveLlmClient(zaiCfg, "main", "ckm", "claude-opus-4-8");
+    expect(realGlm(r.model)).toBe(true);
+    expect(r.model.startsWith("glm-")).toBe(true);
+  });
+
+  it("bilinmeyen/boş model → gerçek GLM (güvenli balanced)", () => {
+    expect(realGlm(resolveLlmClient(zaiCfg, "main", "ckm", "yok-böyle").model)).toBe(true);
   });
 });

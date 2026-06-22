@@ -23,13 +23,17 @@ import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 
 /**
- * Claude (veya keyfi) model id'sini provider=z.ai turu için doğru GLM modeline çevirir (z.ai Aşama 2 ⑤).
- * Zaten `glm-*` ise dokunma (kullanıcı dropdown'dan GLM seçti); değilse claude tier'ından eş GLM'i bul
- * (strong→glm-5.2, balanced→glm-4.6, cheap→glm-4-flash). Tanınmayan model → balanced (güvenli orta).
+ * Claude (veya keyfi) model id'sini provider=z.ai turu için GEÇERLİ bir GLM modeline çevirir (z.ai Aşama 2 ⑤).
+ * findModel ile DOĞRULAR (canlı-bug 2026-06-22): config'te eski/SAHTE bir `glm-` id'si kalmış olabilir
+ * (örn. katalogdan silinen glm-4-plus) → körü körüne geçirmek z.ai 404'üne yol açar. Kurallar:
+ *  - katalogdaki GERÇEK GLM modeli → kendisi (kullanıcı dropdown'dan seçti)
+ *  - tanınan claude modeli → tier-eş GLM (strong→glm-5.2, balanced→glm-4.6, cheap→glm-4.5-air)
+ *  - tanınmayan (boş/sahte-glm/bilinmeyen) → tier'dan güvenli GLM (balanced) — 404 önlenir
  */
 function glmModelFor(model: string | undefined): string {
-  if (model?.startsWith("glm-")) return model;
-  return glmModelForTier(findModel(model ?? "")?.tier ?? "balanced");
+  const known = model ? findModel(model) : undefined;
+  if (known?.id.startsWith("glm-")) return known.id;
+  return glmModelForTier(known?.tier ?? "balanced");
 }
 
 /**
