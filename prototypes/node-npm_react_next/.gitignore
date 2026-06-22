@@ -1,0 +1,28 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/dist
+
+# test / coverage
+/coverage
+/playwright-report
+/test-results
+
+# MyCL error catalog — per-instance, never committed (AC12)
+/error_folder/
+
+# Local application database (per-instance app data store)
+/data/
+
+# misc
+.DS_Store
+*.pem
+.env
+.env*.local
+npm-debug.log*

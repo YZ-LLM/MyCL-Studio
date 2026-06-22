@@ -34,6 +34,9 @@ const MAX_AGE_DAYS = 30;
 export const DENY_SEGMENTS = new Set([
   "node_modules", "dist", "build", ".git", ".mycl", "coverage", ".next",
   "target", "__pycache__", ".venv", "venv", ".cache", "out", "tmp", ".turbo",
+  // Runtime/per-instance çöpü (YZLLM 2026-06-22): prototip baseline'ı temiz KAYNAK olmalı — bunlar
+  // yeni projeye kopyalanırsa kirletir (eski projenin test-çıktısı/hata-db'si/OS-noise'u taşınır).
+  "error_folder", "test-results", "playwright-report", ".DS_Store",
 ]);
 
 /** Baseline kök-config dosyaları (TAM ad; feature değil iskelet/araç yapılandırması). */
@@ -86,6 +89,15 @@ export function matchesBaseline(relPath: string): boolean {
 }
 
 /** Prototip meta (bayatlama tespiti için). */
+/** Prototipteki yeniden-kullanılabilir bir modül (sayfa/route/API) — yeni projede HIZLI arama için. */
+export interface PrototypeModule {
+  /** İnsan-okur ad, örn. "login sayfası", "urunler sayfası", "auth/login API", "ana sayfa". */
+  name: string;
+  /** Prototip-içi göreli yol, örn. "app/login/page.js". */
+  path: string;
+  kind: "page" | "api";
+}
+
 export interface PrototypeMeta {
   stack: string;
   createdAt: number;
@@ -93,6 +105,58 @@ export interface PrototypeMeta {
   fileCount: number;
   /** YEŞİL koşuda kaydedilen TAM çalışan proje mi (true) yoksa config-iskelet baseline mi (false/undefined). */
   full?: boolean;
+  /** Prototipteki sayfa/route/API modülleri (YZLLM 2026-06-22): yeni proje açarken "login sayfası var mı?"
+   *  gibi HIZLI arama buradan yapılır — tüm prototip dosyalarını taramaya gerek kalmaz. */
+  modules?: PrototypeModule[];
+}
+
+/**
+ * Prototip dosya yollarından yeniden-kullanılabilir modülleri (sayfa/route/API) çıkarır — SAF, test edilebilir.
+ * Next.js app + pages router (src/ önekli de) sayfa/API'lerini tanır; route-group ("(grup)") segmentleri atlanır.
+ * Başka stack'lerde eşleşme yoksa boş döner (best-effort manifest). Yeni-proje modül-aramasını besler.
+ */
+export function deriveModules(files: string[]): PrototypeModule[] {
+  const out: PrototypeModule[] = [];
+  const seen = new Set<string>();
+  const push = (name: string, path: string, kind: PrototypeModule["kind"]): void => {
+    const key = `${kind}:${name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ name, path, kind });
+  };
+  const routeFromApp = (dir: string): string =>
+    dir
+      .split("/")
+      .filter((s) => s && !(s.startsWith("(") && s.endsWith(")"))) // route-group segmentlerini at
+      .join("/");
+  const pageName = (route: string): string => {
+    const r = route.replace(/\/+$/, "");
+    return r === "" ? "ana sayfa" : `${r} sayfası`;
+  };
+  for (const f of files) {
+    const u = f.replace(/\\/g, "/");
+    let m = u.match(/^(?:src\/)?app\/(.*\/)?page\.(?:jsx?|tsx?)$/); // app router sayfa
+    if (m) {
+      push(pageName(routeFromApp(m[1] ?? "")), f, "page");
+      continue;
+    }
+    m = u.match(/^(?:src\/)?app\/api\/(.+)\/route\.(?:jsx?|tsx?)$/); // app router API
+    if (m) {
+      push(`${m[1]} API`, f, "api");
+      continue;
+    }
+    m = u.match(/^(?:src\/)?pages\/api\/(.+)\.(?:jsx?|tsx?)$/); // pages router API
+    if (m) {
+      push(`${m[1]} API`, f, "api");
+      continue;
+    }
+    m = u.match(/^(?:src\/)?pages\/(?!api\/|_)(.+)\.(?:jsx?|tsx?)$/); // pages router sayfa (_app/_document hariç)
+    if (m) {
+      push(pageName(m[1]), f, "page");
+      continue;
+    }
+  }
+  return out;
 }
 
 /** SAF: meta MAX_AGE_DAYS'ten eski mi (bayat). now ms epoch. */
@@ -269,12 +333,14 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
       await fs.mkdir(join(dest, ".."), { recursive: true });
       await fs.copyFile(src, dest);
     }
+    const modules = deriveModules(files); // sayfa/route/API manifest'i → yeni-proje hızlı modül-araması
     const meta: PrototypeMeta = {
       stack,
       createdAt: Date.now(),
       nodeVersion: process.version,
       fileCount: files.length,
       full: green, // YEŞİL → tam çalışan proje; değilse config-iskelet (baseline)
+      modules,
     };
     await fs.mkdir(prototypesBaseDir(), { recursive: true });
     await fs.writeFile(prototypeMetaPath(stack), JSON.stringify(meta, null, 2), "utf-8");
@@ -286,10 +352,11 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
       caller: "mycl-orchestrator",
       detail: `stack=${stack} files=${files.length}`,
     }).catch(() => {});
+    const modNote = modules.length > 0 ? ` · ${modules.length} modül (${modules.slice(0, 4).map((m) => m.name).join(", ")}${modules.length > 4 ? "…" : ""})` : "";
     emitChatMessage(
       "system",
       green
-        ? `📦 Golden prototip kaydedildi (${stack}, ${files.length} dosya — TAM YEŞİL proje) — bu stack'teki sonraki proje buradan başlar.`
+        ? `📦 Golden prototip kaydedildi (${stack}, ${files.length} dosya — TAM YEŞİL proje)${modNote} — bu stack'teki sonraki proje buradan başlar; modüller meta'dan hızlı aranır.`
         : `📦 Prototip iskeleti güncellendi (${stack}, ${files.length} baseline dosyası) — koşu tamamen yeşil olunca TAM proje kaydedilir.`,
     );
   } catch (err) {
