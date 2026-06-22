@@ -160,6 +160,9 @@ export async function runDebateReview(
   modelId: string,
   effort: string | undefined,
   ctx: DebateReviewContext,
+  // ⑥ z.ai: Sağlayıcı=Z.AI ise caller resolveCliProvider'dan env'i (ANTHROPIC_BASE_URL+token) geçer →
+  // tüm bulucu/çürütücü claude CLI'ları z.ai endpoint'ine gider (çok-ajanlı z.ai). undefined → claude.
+  extraEnv?: Record<string, string>,
 ): Promise<DebateReviewResult> {
   const ctxText = contextBlock(ctx);
   const userMsg =
@@ -172,6 +175,7 @@ export async function runDebateReview(
         systemPrompt: finderSystemPrompt(a),
         userMessage: userMsg,
         modelId,
+        extraEnv, // ⑥ z.ai ise z.ai endpoint'i
         cwd: projectRoot,
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
         disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
@@ -225,6 +229,7 @@ export async function runDebateReview(
         userMessage:
           "Re-check the claimed risk against the actual code, then emit the verdict JSON block.",
         modelId,
+        extraEnv, // ⑥ z.ai ise z.ai endpoint'i
         cwd: projectRoot,
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
         disallowedTools: READ_ONLY_DISALLOWED_TOOLS,

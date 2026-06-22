@@ -18,8 +18,8 @@ import {
   renderChangedFilesList,
   renderTechDebtFindings,
 } from "./phase-9-tech-debt.js";
-import type { ToolDef } from "./claude-api.js";
-import { backendForRole, type MyclConfig } from "./config.js";
+import { resolveCliProvider, type ToolDef } from "./claude-api.js";
+import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
 import { runDebateReview, DEBATE_AXES } from "./phase-9-debate-review.js";
 import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
@@ -177,17 +177,27 @@ export class Phase9Controller {
     // deseni). N uzman bulucu paralel tarar → bağımsız çürütücüler yanlış-pozitifi eler → ETKİLEŞİMSİZ
     // (onay yok) → doğrulanan bulgular decisions[] olarak risk-fix dispatch'ine akar. API modunda eski
     // tek-ajan qa-askq'ya düşer (review fan-out CLI-only açık-maddesi; görünür not).
-    if (backendForRole(this.config, "main") === "cli") {
+    // ⑥ CLI/abonelik VEYA Sağlayıcı=Z.AI (main) → çok-ajanlı debate; z.ai'de tüm bulucu/çürütücü
+    // claude CLI'ları z.ai endpoint'ine gider (çok-ajanlı z.ai — kullanıcı isteği). Aksi API → tek-ajan qa-askq.
+    const mainProvP9 = resolveProvider(this.config, "main");
+    if (backendForRole(this.config, "main") === "cli" || mainProvP9.isZai) {
       emitChatMessage(
         "system",
         `🔬 Risk incelemesi çok-ajanlı modda — ${DEBATE_AXES.length} uzman bulucu (STRIDE tehdit-modeli dahil) paralel tarıyor, sonra her bulgu bağımsız çürütücüyle doğrulanıyor (yanlış-pozitif elenir).`,
       );
-      const review = await runDebateReview(this.state.project_root, escMe.modelId, escMe.effort, {
-        specRisks,
-        phase9Audit,
-        techDebtFindings: renderTechDebtFindings(techDebt),
-        changedFiles: renderChangedFilesList(techDebt),
-      });
+      const cliP9 = resolveCliProvider(this.config, "main", escMe.modelId);
+      const review = await runDebateReview(
+        this.state.project_root,
+        cliP9.model,
+        escMe.effort,
+        {
+          specRisks,
+          phase9Audit,
+          techDebtFindings: renderTechDebtFindings(techDebt),
+          changedFiles: renderChangedFilesList(techDebt),
+        },
+        cliP9.extraEnv,
+      );
       if (!review.ok) {
         this.lastFailReason = review.reason ?? "debate review başarısız";
         emitError("phase-9 debate review failed", review.reason ?? null);

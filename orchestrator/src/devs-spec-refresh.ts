@@ -20,7 +20,8 @@ import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { backendForRole, type MyclConfig } from "./config.js";
+import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
+import { resolveCliProvider } from "./claude-api.js";
 import {
   emitChatMessage,
   emitClaudeStream,
@@ -107,14 +108,17 @@ export async function refreshDevsSpecs(
 ): Promise<void> {
   try {
     // Spec'leri ORKESTRATÖR rolü yazar (living-docs deseni) — ana ajana GİTMEZ. API modu sonraki tur.
-    if (backendForRole(config, "orchestrator") !== "cli") {
+    // ⑥ CLI/abonelik VEYA Sağlayıcı=Z.AI (orkestratör) → çalışır; z.ai'de claude CLI z.ai endpoint'ine yönlenir.
+    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
       emitChatMessage(
         "system",
-        "ℹ️ Proje/sayfa spec tazeleme şu an yalnız CLI/abonelik modunda yapılır (orkestratör rolü).",
+        "ℹ️ Proje/sayfa spec tazeleme şu an CLI/abonelik VEYA z.ai modunda yapılır (orkestratör rolü).",
       );
       return;
     }
-    const specModel = config.selected_models.orchestrator ?? config.selected_models.main;
+    const baseSpecModel = config.selected_models.orchestrator ?? config.selected_models.main;
+    const specCli = resolveCliProvider(config, "orchestrator", baseSpecModel);
+    const specModel = specCli.model;
 
     // Bu iterasyonun iter-spec'i + dokunulan birimlerin mevcut page-spec'leri.
     const iterSpec = await fs.readFile(outcome.iterSpecPath, "utf-8").catch(() => "");
@@ -147,6 +151,7 @@ export async function refreshDevsSpecs(
       systemPrompt: prompt,
       userMessage: "Read the artifacts and emit the updated specs JSON block now.",
       modelId: specModel,
+      extraEnv: specCli.extraEnv, // ⑥ z.ai ise claude CLI'yi z.ai endpoint'ine yönlendir
       cwd: state.project_root,
       allowedTools: ["Read", "Grep", "Glob"], // salt-okunur: devs/ + .mycl incele
       disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // alt-ajan/yazma yasak; JSON döner, MyCL yazar

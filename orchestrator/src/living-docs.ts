@@ -15,7 +15,8 @@ import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { backendForRole, type MyclConfig } from "./config.js";
+import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
+import { resolveCliProvider } from "./claude-api.js";
 import { emitChatMessage, emitClaudeStream, emitUserGuide, emitTechDoc, emitPhaseRunning, emitPhaseIdle } from "./ipc.js";
 import { log } from "./logger.js";
 import { templatePath } from "./phase-registry.js";
@@ -208,7 +209,8 @@ export async function bootstrapLivingDocs(state: State, config: MyclConfig): Pro
     const { isExistingProject } = await import("./phase-1-codebase-probe.js");
     if (!(await isExistingProject(state.project_root))) return; // boş proje → pipeline üretir
     // v15.13: docs'u ORKESTRATÖR rolü yazar (ana ajan değil — kullanıcı kuralı).
-    if (backendForRole(config, "orchestrator") !== "cli") return; // API modu: updateLivingDocs not basar
+    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai)
+      return; // API modu (claude): updateLivingDocs not basar; z.ai → çalışır
     emitChatMessage(
       "system",
       "📚 İlk açılış: mevcut koddan proje dökümantasyonu + kullanma kılavuzu üretiliyor…",
@@ -228,16 +230,19 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
     // v15.13: Yaşayan dökümantasyonu ORKESTRATÖR rolü yazar — ana ajana (codegen) GİTMEZ
     // (kullanıcı kuralı). Orkestratör "her şeyi bilen" hafif rol → docs için doğru yer.
     // Abonelik/CLI modu birincil hedef. API modu sonraki tur — görünür not (sessiz değil).
-    if (backendForRole(config, "orchestrator") !== "cli") {
+    // ⑥ CLI/abonelik VEYA Sağlayıcı=Z.AI (orkestratör) → çalışır; z.ai'de claude CLI z.ai endpoint'ine yönlenir.
+    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
       emitChatMessage(
         "system",
-        "ℹ️ Yaşayan dökümantasyon şu an yalnız CLI/abonelik modunda güncellenir (orkestratör rolü).",
+        "ℹ️ Yaşayan dökümantasyon şu an CLI/abonelik VEYA z.ai modunda güncellenir (orkestratör rolü).",
       );
       return;
     }
     const includeUserGuide = !(state.skip_ui_phases ?? false);
     // Orkestratör modeli (yoksa main'e fallback — SelectedModels.orchestrator opsiyonel).
-    const docsModel = config.selected_models.orchestrator ?? config.selected_models.main;
+    const baseDocsModel = config.selected_models.orchestrator ?? config.selected_models.main;
+    const docsCli = resolveCliProvider(config, "orchestrator", baseDocsModel);
+    const docsModel = docsCli.model;
 
     const tmpl = await fs.readFile(templatePath("living-docs.md"), "utf-8");
     const prompt = buildLivingDocsPrompt({
@@ -265,6 +270,7 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
       systemPrompt: prompt,
       userMessage: "Inspect the codebase and emit the updated documentation JSON block now.",
       modelId: docsModel,
+      extraEnv: docsCli.extraEnv, // ⑥ z.ai ise claude CLI'yi z.ai endpoint'ine yönlendir
       cwd: state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
       disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur: JSON döner, MyCL yazar; alt-ajan yasak

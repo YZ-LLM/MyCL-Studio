@@ -198,6 +198,35 @@ export function resolveLlmClient(
   return { client, model: isZai ? glmModelFor(model) : model, isZai };
 }
 
+/**
+ * Forced-CLI siteleri için sağlayıcı-aware CLI parametreleri (z.ai Aşama 2 ⑥). `runClaudeCli`'yi (claude
+ * subprocess) doğrudan kullanan + backendForRole(zai)→"api" yüzünden SDK yoluna düşmeyen yollar için
+ * (visual-design/debate/module-stock/living-docs/devs-spec-refresh/parallel-codegen). Rolün Sağlayıcı=Z.AI
+ * seçimi varsa: claude CLI'yi z.ai endpoint'ine yönlendiren extraEnv (ANTHROPIC_BASE_URL+AUTH_TOKEN+API_KEY)
+ * + GLM model döner; claude ise extraEnv=undefined + model değişmez (sıfır regresyon). CANLI DOĞRULANDI
+ * (2026-06-22): `claude -p` + bu env → z.ai GLM yanıt verdi. NOT: müfettiş (inspector) BİLEREK çapraz-aile
+ * (claude) kalır — bu helper'ı oraya UYGULAMA (z.ai-main'de bile bağımsız aile gerek).
+ */
+export function resolveCliProvider(
+  config: MyclConfig,
+  role: AgentRole,
+  model: string,
+): { extraEnv?: Record<string, string>; model: string } {
+  const prov = resolveProvider(config, role);
+  if (prov.isZai && prov.apiKey) {
+    const base = prov.baseURL ?? ZAI_BASE_URL;
+    return {
+      extraEnv: {
+        ANTHROPIC_BASE_URL: base,
+        ANTHROPIC_AUTH_TOKEN: prov.apiKey,
+        ANTHROPIC_API_KEY: prov.apiKey,
+      },
+      model: glmModelFor(model),
+    };
+  }
+  return { model };
+}
+
 
 // Anthropic API "Overloaded" (529) yoğun günlerde sık görülüyor. Phase 6 fix
 // turn'leri uzun + paralel kullanım yüksek → daha sabırlı retry kullanıcı için
