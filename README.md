@@ -111,7 +111,11 @@ entegre eder.
   yüksek-risk / güvenlik insana yükseltilir; gerçek bulgu düzeltmeye gider —
   müfettişin bağımsız analizi düzeltmeyi besler.
   Yetki fix-kararları üzerinde evrenseldir (küçük değişiklik de incelenir), ama
-  orkestratörün çalışan akışı asla zorla kesilmez. Varsayılan **açık** (Ayarlar →
+  orkestratörün çalışan akışı asla zorla kesilmez. Ayrıca **döngü sınıfı**: aynı hata
+  arka arkaya otomatik düzeltmeye rağmen geçmiyorsa (orkestratörün kendi göremediği
+  yapısal kör-nokta), müfettiş döngüyü bağımsız inceler — fantom (false-positive) bir
+  döngü kanıtlanırsa çalışan koda dönülüp devam edilir, aksi halde müfettişin bağımsız
+  okuması eklenerek karar insana taşınır. Varsayılan **açık** (Ayarlar →
   müfettiş'ten kapatılabilir).
 - **Sızma testi / DAST** — `katana` (gezinme) + `nuclei` ile çalışan uygulama
   aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı

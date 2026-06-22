@@ -643,6 +643,7 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // YZLLM 2026-06-10: "oto-cevap açıksa ve geri almaktan başka çare yoksa MyCL kendi geri alsın."
   // Tükenme = aynı hata MAX denemeye rağmen sürüyor → denemeler işe yaramadı, üstelik junk biriktirmiş olabilir.
   // Oto-cevap açıkken: dizinin EN TEMİZ snapshot'ına (ilk fix öncesi) otomatik GERİ DÖN, sonra seçenekleri sor.
+  let mahkemeLoopSummary: string | null = null;
   if (exhausted) {
     const rb = takeRollback();
     if (rb) {
@@ -650,12 +651,57 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
       emitChatMessage(
         "system",
         ok
-          ? `↩️ Otomatik düzeltmeler bu hatayı çözmedi — başarısız değişiklikleri **geri aldım** (${rb.method === "git" ? "git checkpoint" : "yedek"}; ilk denemeden önceki temiz hale). Şimdi seçenekleri sana soruyorum.`
-          : `⚠️ Geri alma denedim ama tam başarılı olamadı (${rb.method}). Değişiklikleri elle kontrol etmen gerekebilir; seçenekleri sana soruyorum.`,
+          ? `↩️ Otomatik düzeltmeler bu hatayı çözmedi — başarısız değişiklikleri **geri aldım** (${rb.method === "git" ? "git checkpoint" : "yedek"}; ilk denemeden önceki temiz hale).`
+          : `⚠️ Geri alma denedim ama tam başarılı olamadı (${rb.method}). Değişiklikleri elle kontrol etmen gerekebilir.`,
       );
     } else {
-      emitChatMessage("system", "Seçenekleri sana soruyorum (geri alınacak snapshot yok).");
+      emitChatMessage("system", "Geri alınacak snapshot yok.");
     }
+    // ⚖️ MAHKEME — DÖNGÜ SINIFI (frozen-goal kanonik örneği). Tükenme = aynı hata AUTO_SOLVE_MAX kez
+    // düzelmedi → bu, orkestratörün YAPISAL kör-noktası: "yanlış yeri mi düzeltiyorum / olmayan sorunu mu
+    // kovalıyorum"u kendi soramaz (Faz N↔0 döngüsünü göremedi). BAĞIMSIZ müfettiş (Sonnet, çapraz-aile)
+    // döngüyü inceler (loop sinyali → tam tartışma). suppress (iki bilim insanı KANITLA hemfikir + düşük-risk)
+    // → fantom döngü KIRILIR, kabul-devam (çalışan koda dönüldü + dokümante). proceed/escalate → kullanıcıya
+    // sorulur AMA müfettişin bağımsız okuması ekli (zengin escalation; kör-nokta görünür). Flag kapalı → davranış değişmez.
+    if (runtime.config.features.inspector_enabled) {
+      try {
+        const insp = await inspectGateFinding(runtime.config, {
+          projectRoot: runtime.state.project_root,
+          gateLabel: `Faz ${n}`,
+          errors: ctrl?.lastFailReason ?? message,
+          loop: { attempts: priorCount },
+        });
+        const ruling = mahkemeRuling(insp);
+        if (ruling.convened) {
+          await appendAuditModule(runtime.state.project_root, {
+            ts: Date.now(),
+            phase: n,
+            event: `mahkeme-döngü-${ruling.action}`,
+            caller: "mycl-orchestrator",
+            detail: ruling.summary.slice(0, 400),
+          }).catch(() => {});
+          if (ruling.action === "suppress") {
+            emitChatMessage(
+              "system",
+              `⚖️ Mahkeme (döngü → suppress): Faz ${n} hatası ${priorCount} denemeye rağmen sürüyordu çünkü ` +
+                `GERÇEK bir kod sorunu DEĞİL (false-positive — iki bağımsız değerlendirme kanıtla hemfikir, ` +
+                `düşük-risk). Çalışan koda geri dönüldü, bulgu rapora yazıldı, devam ediliyor.\n${ruling.summary}`,
+            );
+            await advanceToNextPhase(n);
+            return;
+          }
+          mahkemeLoopSummary = ruling.summary;
+        }
+      } catch (e) {
+        log.warn("orchestrator", "mahkeme döngü-incelemesi hata (yutuldu → normal akış)", { error: String(e) });
+      }
+    }
+  }
+  if (mahkemeLoopSummary) {
+    emitChatMessage(
+      "system",
+      `🕵️ Müfettişin bağımsız döngü-okuması (kararına yardımcı; orkestratörün göremediği açı):\n${mahkemeLoopSummary}`,
+    );
   }
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
     autoResolve,

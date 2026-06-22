@@ -330,23 +330,45 @@ export async function runInspectorCheckpoint(
  */
 export async function inspectGateFinding(
   config: MyclConfig,
-  opts: { projectRoot: string; gateLabel: string; errors: string; intent?: string },
+  opts: {
+    projectRoot: string;
+    gateLabel: string;
+    errors: string;
+    intent?: string;
+    /** DÖNGÜ-SINIFI (frozen-goal kanonik örneği): aynı hata `attempts` odaklı oto-düzeltmeye RAĞMEN
+     *  sürüyor. Bu, orkestratörün YAPISAL kör-noktası — kendi döngüsünü göremez ("döngüde miyim yoksa
+     *  kendimi mi kandırıyorum"). Set edilince isLoop=true → mekanik taban → TAM tartışma (bağımsız
+     *  "gerçek sorun nerede / bulgu gerçek mi" araştırması), gate-fix tek-geçişi değil. */
+    loop?: { attempts: number },
+  },
 ): Promise<CheckpointResult> {
   const highStakes = /güvenlik|security|secret|credential|csp|injection|auth/i.test(
     `${opts.gateLabel} ${opts.errors}`,
   );
+  const loop = opts.loop;
   const ctx: InspectorContext = {
     intent: opts.intent ?? "Kod-kalite/gate incelemesi — amaç çalışan, kaliteli, sıfır-gerçek-borç kod.",
-    trajectory: `"${opts.gateLabel}" gate'i başarısız; MyCL bildirilen bulguları "düzeltmek" üzere.`,
+    trajectory: loop
+      ? `"${opts.gateLabel}" hatası ${loop.attempts} odaklı oto-düzeltme denemesine RAĞMEN sürüyor (döngü). ` +
+        `Orkestratör muhtemelen YANLIŞ yeri düzeltiyor / olmayan bir sorunu kovalıyor / yanlış sorunu çözüyor — ` +
+        `bu, orkestratörün yapısal kör-noktası (kendi döngüsünü göremez).`
+      : `"${opts.gateLabel}" gate'i başarısız; MyCL bildirilen bulguları "düzeltmek" üzere.`,
     outcomes: opts.errors.slice(0, 4000),
-    decision: `MyCL şu "${opts.gateLabel}" gate bulgularını düzeltecek. Bunlar GERÇEK kod sorunu mu, yoksa false-positive mi (framework-convention export'u, i18n metin-etiketi, sezgisel-tarayıcı yanlışı)? Bizzat dosyaları okuyup DOĞRULA, sonra sınıfla.`,
+    decision: loop
+      ? `MyCL "${opts.gateLabel}" hatasını ${loop.attempts} kez düzeltmeyi denedi, geçmedi. BAĞIMSIZ araştır: ` +
+        `GERÇEK sorun NEREDE (düzenlenen yerde mi, yoksa başka yerde mi)? Bulgu GERÇEK kod sorunu mu, yoksa ` +
+        `false-positive mi (framework-convention, i18n-etiketi, sezgisel-tarayıcı yanlışı, ortam farkı)? ` +
+        `Bizzat repro-et + dosyaları oku, sonra sınıfla.`
+      : `MyCL şu "${opts.gateLabel}" gate bulgularını düzeltecek. Bunlar GERÇEK kod sorunu mu, yoksa false-positive mi (framework-convention export'u, i18n metin-etiketi, sezgisel-tarayıcı yanlışı)? Bizzat dosyaları okuyup DOĞRULA, sonra sınıfla.`,
     highStakes,
     projectRoot: opts.projectRoot,
   };
   const signals: InterventionSignals = {
     isStuck: false,
-    isLoop: false,
-    noProgress: false,
+    // Döngü mekanik tabandır (yargı yok) → tam tartışma. Gate-fix tek-geçişi değil; çünkü 6 deneme
+    // başarısız = "düzeltilebilir bulgu" varsayımı çürüdü, derin bağımsız araştırma gerek.
+    isLoop: !!loop,
+    noProgress: !!loop,
     highStakesAction: false,
     isGateFix: true, // yumuşak sinyal: bir bulgu "düzeltilmek" üzere → false-positive riski
     severity: highStakes ? "high" : "medium",
