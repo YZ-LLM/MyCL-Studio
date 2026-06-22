@@ -103,7 +103,7 @@ export function isEnvironmentError(text: string): boolean {
   // — bunlar PROJE kodu hatası DEĞİL (kod kurcalayarak çözülmez) ve mechanical-runner.isSpawnEnvFailure bunları
   // zaten tanıyordu ama merkezi text-sınıflandırıcı KAÇIRIYORDU → faz-hatası proje-fix döngüsüne sızıyordu.
   // Yanlış-pozitif riski düşük (errno'lar test-iddiası metninde nadir) + sonuç SESLİ escalate (sessiz stall değil).
-  return /E2BIG|argument list too long|EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)|spawn \w+ ENOENT|command not found|: not found|EACCES|\bEPERM\b|ECONNREFUSED|ENOTFOUND|\bENOMEM\b|\bENOSPC\b|\bEMFILE\b|\bENFILE\b|\bEAGAIN\b|\bELOOP\b|out of memory|no space left|too many open files/i.test(
+  return /E2BIG|argument list too long|EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)|spawn \w+ ENOENT|command not found|: not found|EACCES|\bEPERM\b|ECONNREFUSED|ENOTFOUND|\bENOMEM\b|\bENOSPC\b|\bEMFILE\b|\bENFILE\b|\bEAGAIN\b|\bELOOP\b|out of memory|no space left|too many open files|\[ENV\] (command timed out|spawn failed)/i.test(
     text,
   );
 }
@@ -136,6 +136,12 @@ export function environmentErrorAdvice(text: string): string {
   }
   if (/\bELOOP\b/i.test(text)) {
     return "Sembolik bağlantı döngüsü (ELOOP) — proje hatası DEĞİL. Bozuk symlink'i düzeltin, sonra 'Çalıştır' ile devam edin.";
+  }
+  if (/\[ENV\] command timed out|command timed out \/ process killed/i.test(text)) {
+    return "Gate komutu zaman aşımına uğradı / süreç asıldı (çıkış kodu yok). Bu genelde ORTAM sorunudur (yavaş makine / ağır yük / asılan araç) — ama asılan bir test PROJE kaynaklı sonsuz döngü de olabilir. Kör otomatik düzeltme YAPMADIM (asılmayı çözmez, sahte-yeşile kaydırabilir). Yükü azaltıp tekrar deneyin; sürerse asılan komutu elle inceleyin.";
+  }
+  if (/\[ENV\] spawn failed/i.test(text)) {
+    return "Komut başlatılamadı (spawn faultu — bellek/işlem kaynağı). Proje hatası DEĞİL. Ağır süreçleri kapatıp 'Çalıştır' ile devam edin.";
   }
   return "Bu bir ORTAM sorunu (proje/kod hatası DEĞİL) — kod kurcalayarak çözülmez. Ortamı düzeltip 'Çalıştır' ile devam edin. Otomatik tırmanma/düzeltme YAPMADIM (boşuna olurdu).";
 }

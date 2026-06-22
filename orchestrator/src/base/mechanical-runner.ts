@@ -165,7 +165,10 @@ export function isSpawnEnvFailure(result: {
     /posix_spawn/i.test(s) ||
     /argument list too long/i.test(s) ||
     /\bENOMEM\b/.test(s) ||
-    /spawn \S+ EAGAIN/.test(s)
+    /spawn \S+ EAGAIN/.test(s) ||
+    // execCmd'in spawn-fault/timeout işareti (YZLLM 2026-06-23 sessiz-fallback denetimi): timeout-kill
+    // (SIGTERM/SIGKILL, code=null) errno metni TAŞIMAZ → işaret olmazsa "normal fail" sanılıp fix-döngüsüne girer.
+    /\[ENV\] (command timed out|spawn failed)/i.test(s)
   );
 }
 
@@ -308,7 +311,27 @@ export class MechanicalRunnerBase {
     if (extra.require_file) {
       try {
         await access(join(opts.state.project_root, extra.require_file));
-      } catch {
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        // errno-AYRIMI (sessiz-fallback denetimi): yalnız ENOENT "gerçekten yok → meşru skip". Dosya VAR ama
+        // okunamıyorsa (EACCES/ELOOP/EIO) bunu "yok" sanmak, güvenlik/perf gate'ini (snyk/k6) sessiz no-op
+        // yapar ve tekrarlayan izin/bozulma sorununu maskeler → fail-closed + GÖRÜNÜR.
+        if (code && code !== "ENOENT") {
+          log.error(opts.tag, `${extra.name} require_file access error (not ENOENT)`, { code, file: extra.require_file });
+          await appendAudit(opts.state.project_root, {
+            ts: Date.now(),
+            phase: opts.phaseId,
+            event: `${extra.name}-access-error`,
+            caller: "mycl-orchestrator",
+            detail: `code=${code} file="${extra.require_file}"`,
+          });
+          emitChatMessage(
+            "system",
+            `❌ ${extra.name}: gerekli dosya (${extra.require_file}) VAR ama erişilemiyor (${code}) — ortam sorunu, ` +
+              `gate ATLANMADI (sessiz no-op değil). Erişimi düzeltip tekrar koş.`,
+          );
+          return "fail";
+        }
         await appendAudit(opts.state.project_root, {
           ts: Date.now(),
           phase: opts.phaseId,
@@ -609,6 +632,26 @@ export class MechanicalRunnerBase {
         );
         return { kind: "skipped", reason: "ts_tool_not_applicable" };
       }
+      // Ortam/spawn faultu VEYA timeout (süreç bile başlatılamadı / asıldı) → testler KOŞMADI. Bunu "fail"
+      // (kod hatası) sanıp fix_cmd retry + orkestratör codegen döngüsüne sokmak YANLIŞ (adminpanel 21-iter kökü).
+      // GÖRÜNÜR fail + [ENV]-imzalı stderr döndür (retry YOK) → failPhase'in isEnvironmentError gate'i durdurur.
+      if (isSpawnEnvFailure(scanResult)) {
+        const why = scanResult.stderr.trim() || scanResult.stdout.trim();
+        log.error(opts.tag, "spawn/timeout env-fault — halting (NOT a project failure)", { cmd: scanCmd, why: why.slice(0, 200) });
+        await appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.phaseId,
+          event: opts.fail_event ?? `phase-${opts.phaseId}-fail`,
+          caller: "mycl-orchestrator",
+          detail: `spawn_env_fault cmd="${scanCmd}" ${why.slice(0, 160)}`,
+        });
+        emitChatMessage(
+          "system",
+          `🔴 ${this.label} — komut çalıştırılamadı/asıldı (ortam: bellek/işlem/timeout). Bu PROJE hatası DEĞİL; ` +
+            `kod kurcalamıyorum. Ortamı düzeltip tekrar koş. (${why.slice(0, 120)})`,
+        );
+        return { kind: "fail", rescans, stderr: why };
+      }
       if (scanResult.code === 0) {
         await appendAudit(opts.state.project_root, {
           ts: Date.now(),
@@ -628,15 +671,16 @@ export class MechanicalRunnerBase {
         // audit + chat snippet'i boş kalmasın.
         const tail = scanResult.stderr.trim() || scanResult.stdout.trim();
         const snippet = tail.slice(0, 200);
-        if (opts.fail_event) {
-          await appendAudit(opts.state.project_root, {
-            ts: Date.now(),
-            phase: opts.phaseId,
-            event: opts.fail_event,
-            caller: "mycl-orchestrator",
-            detail: snippet,
-          });
-        }
+        // Fail audit'i fail_event opsiyoneline bağlama (sessiz-fallback denetimi): fail_event tanımsız bir
+        // faz başarısız olursa müfettiş trajectory'si audit.jsonl'den HİÇ fail kaydı görmez (gözle görünür
+        // ❌ var ama makine-izi yok → boşluk). Her zaman bir fail event yaz (yoksa jenerik phase-N-fail).
+        await appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.phaseId,
+          event: opts.fail_event ?? `phase-${opts.phaseId}-fail`,
+          caller: "mycl-orchestrator",
+          detail: snippet,
+        });
         emitChatMessage(
           "system",
           `❌ ${this.label} — başarısız.` +
@@ -668,15 +712,30 @@ export class MechanicalRunnerBase {
       });
       return { code: 0, stdout: String(stdout), stderr: String(stderr) };
     } catch (err) {
-      const e = err as NodeJS.ErrnoException & {
-        code?: number;
+      const e = err as {
+        code?: number | string;
         stdout?: string;
         stderr?: string;
+        message?: string;
+        killed?: boolean;
+        signal?: string | null;
       };
+      const numericCode = typeof e.code === "number";
+      // Timeout-kill (execp timeout → SIGTERM/SIGKILL, code=null) ve spawn-fault (code=string errno:
+      // ENOMEM/EAGAIN/E2BIG) GERÇEK exit DEĞİL. code:1'e (normal lint/test fail) yıkamak, asılan aracı/
+      // ortam-faultunu sessiz "proje-fail"e çevirir → boşuna fix_cmd retry + orkestratör codegen-rollback
+      // döngüsü (adminpanel 21-iter Faz 8 KÖKÜ, 2026-06-23 denetimi). stderr'i [ENV] işaretle ki
+      // isSpawnEnvFailure (scan loop) + isEnvironmentError (failPhase) yakalayıp döngüyü retry'sız durdursun
+      // (timeout'ta errno METNİ yoktur → işaret olmazsa gizli kalır).
+      const timedOut = e.killed === true || e.signal === "SIGTERM" || e.signal === "SIGKILL";
+      const spawnErrno = !numericCode && typeof e.code === "string" ? e.code : "";
+      let stderr = String(e.stderr ?? e.message ?? "");
+      if (timedOut) stderr = `[ENV] command timed out / process killed after ${timeout_ms}ms (no exit code) — ${stderr}`;
+      else if (spawnErrno) stderr = `[ENV] spawn failed (${spawnErrno}) — ${stderr}`;
       return {
-        code: typeof e.code === "number" ? e.code : 1,
+        code: numericCode ? (e.code as number) : 1,
         stdout: String(e.stdout ?? ""),
-        stderr: String(e.stderr ?? e.message ?? ""),
+        stderr,
       };
     }
   }

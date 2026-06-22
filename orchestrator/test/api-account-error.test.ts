@@ -33,9 +33,31 @@ describe("isEnvironmentError (YZLLM: escalation yalnız PROJE hatasında)", () =
     expect(isEnvironmentError("EPERM: operation not permitted, open '/x'")).toBe(true); // izin/TCC
     expect(isEnvironmentError("ELOOP: too many symbolic links")).toBe(true); // symlink döngüsü
   });
+  it("execCmd [ENV] timeout/spawn işareti → true (code:1'e yıkanan ortam-faultu yakalanır; döngü-kökü)", () => {
+    expect(isEnvironmentError("[ENV] command timed out / process killed after 60000ms (no exit code) — Command failed")).toBe(true);
+    expect(isEnvironmentError("[ENV] spawn failed (EAGAIN) — Command failed: vitest")).toBe(true);
+  });
   it("proje/kod hatası → false (tırmanma ÇALIŞIR)", () => {
     expect(isEnvironmentError("TypeError: x is not a function")).toBe(false);
     expect(isEnvironmentError("Test failed: expected 3 got 5")).toBe(false);
     expect(isEnvironmentError("lint: 'foo' is assigned but never used")).toBe(false);
+  });
+});
+
+import { isSpawnEnvFailure } from "../src/base/mechanical-runner.js";
+describe("isSpawnEnvFailure (testler KOŞMADI = tdd-unverified; fix-döngüsü tetiklenmez)", () => {
+  const r = (stderr: string) => ({ code: 1, stdout: "", stderr });
+  it("E2BIG/ENOMEM/EAGAIN/posix_spawn → true", () => {
+    expect(isSpawnEnvFailure(r("spawn vitest E2BIG"))).toBe(true);
+    expect(isSpawnEnvFailure(r("Cannot allocate memory ENOMEM"))).toBe(true);
+    expect(isSpawnEnvFailure(r("spawn node EAGAIN"))).toBe(true);
+  });
+  it("execCmd [ENV] timeout/spawn işareti → true (errno metni olmayan timeout yakalanır)", () => {
+    expect(isSpawnEnvFailure(r("[ENV] command timed out / process killed after 60000ms (no exit code)"))).toBe(true);
+    expect(isSpawnEnvFailure(r("[ENV] spawn failed (ENOMEM) — x"))).toBe(true);
+  });
+  it("gerçek proje fail (lint/test) → false (fix-döngüsü ÇALIŞMALI)", () => {
+    expect(isSpawnEnvFailure(r("2 problems (2 errors, 0 warnings)"))).toBe(false);
+    expect(isSpawnEnvFailure(r("AssertionError: expected 3 to equal 5"))).toBe(false);
   });
 });
