@@ -27,9 +27,9 @@ import { log } from "./logger.js";
  * Zaten `glm-*` ise dokunma (kullanıcı dropdown'dan GLM seçti); değilse claude tier'ından eş GLM'i bul
  * (strong→glm-5.2, balanced→glm-4.6, cheap→glm-4-flash). Tanınmayan model → balanced (güvenli orta).
  */
-function glmModelFor(model: string): string {
-  if (model.startsWith("glm-")) return model;
-  return glmModelForTier(findModel(model)?.tier ?? "balanced");
+function glmModelFor(model: string | undefined): string {
+  if (model?.startsWith("glm-")) return model;
+  return glmModelForTier(findModel(model ?? "")?.tier ?? "balanced");
 }
 
 /**
@@ -170,6 +170,32 @@ export function makeAnthropicClient(
         ? { "anthropic-beta": opts.betas.join(",") }
         : undefined,
   });
+}
+
+/**
+ * Sağlayıcı-aware SDK client (z.ai Aşama 2 ⑤b) — runTurn DIŞINDA `makeAnthropicClient`'ı doğrudan
+ * kullanan raw-SDK siteleri için (translator/llm-reasoning/error-analysis/intake/...). resolveProvider
+ * ile rolü çözer: Sağlayıcı=Z.AI ise z.ai key+endpoint+GLM model döner (betas strip); claude ise GEÇEN
+ * `apiKey` AYNEN korunur + model değişmez → sıfır regresyon (kritik-path güvenliği). Dönen `model`'i
+ * `messages.create({ model })`'a geçir. NOT: bu yol claude→z.ai auto-fallback YAPMAZ (yalnız runTurn yapar);
+ * birincil sağlayıcı seçimini uygular.
+ */
+export function resolveLlmClient(
+  config: MyclConfig,
+  role: AgentRole,
+  apiKey: string,
+  model: string,
+  opts?: { timeoutMs?: number; maxRetries?: number; betas?: readonly string[] },
+): { client: Anthropic; model: string; isZai: boolean } {
+  const prov = resolveProvider(config, role);
+  const isZai = prov.isZai;
+  const client = makeAnthropicClient(isZai ? prov.apiKey : apiKey, {
+    timeoutMs: opts?.timeoutMs,
+    maxRetries: opts?.maxRetries,
+    betas: isZai ? undefined : opts?.betas,
+    baseURL: prov.baseURL, // claude → undefined (Anthropic default)
+  });
+  return { client, model: isZai ? glmModelFor(model) : model, isZai };
 }
 
 

@@ -8,7 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { getPersistentSession, shortHash } from "./persistent-cli-session.js";
-import { makeAnthropicClient, modelSupportsAdaptive } from "./claude-api.js";
+import { resolveLlmClient, modelSupportsAdaptive } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { log } from "./logger.js";
 
@@ -68,14 +68,17 @@ export async function runReasoning(
   }
   // API (api / auto-limited→api)
   try {
-    const client = makeAnthropicClient(config.api_keys.main, { timeoutMs: 60_000 });
+    // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise reasoning turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
+    const { client, model } = resolveLlmClient(config, "main", config.api_keys.main, opts.modelId, {
+      timeoutMs: 60_000,
+    });
     const response = await client.messages.create({
-      model: opts.modelId,
+      model,
       max_tokens: opts.maxTokens ?? 4096,
       system: opts.systemPrompt,
       messages: [{ role: "user", content: opts.userMessage }],
-      // Efor yalnız destekleyen modelde (aksi 400) — haiku'da atlanır, model seviyesi asıl kaldıraç.
-      ...(opts.effort && modelSupportsAdaptive(opts.modelId)
+      // Efor yalnız destekleyen modelde (aksi 400) — efektif modele bak (GLM adaptive desteklemez → atlanır).
+      ...(opts.effort && modelSupportsAdaptive(model)
         ? { output_config: { effort: opts.effort as "low" | "medium" | "high" | "xhigh" | "max" } }
         : {}),
     });

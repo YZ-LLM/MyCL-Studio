@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
-import { makeAnthropicClient } from "./claude-api.js";
+import { resolveLlmClient } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { isSubscriptionMode } from "./subscription-mode.js";
 import { runClaudeCli } from "./cli-run.js";
@@ -73,8 +73,14 @@ async function generateSummary(
 ): Promise<string> {
   // Tek factory (kod-analiz): SDK 0.102 timeout regresyonu burada da açıktı; özet hang ederse
   // handleUserMessage/boot yanıtı gecikiyordu. 60sn timeout + SDK retry.
-  const client = makeAnthropicClient(config.api_keys.translator, { timeoutMs: 60_000 });
-  const model = config.selected_models.translator;
+  // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise özet turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
+  const { client, model } = resolveLlmClient(
+    config,
+    "translator",
+    config.api_keys.translator,
+    config.selected_models.translator,
+    { timeoutMs: 60_000 },
+  );
   const response = await client.messages.create({
     model,
     max_tokens: SUMMARY_MAX_TOKENS,

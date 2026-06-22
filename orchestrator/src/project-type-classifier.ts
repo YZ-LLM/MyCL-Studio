@@ -9,6 +9,7 @@
 // pipeline durmaz. v15.1 confirm askq ile kullanıcı override edebilir.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { resolveLlmClient } from "./claude-api.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import type { MyclConfig } from "./config.js";
@@ -185,8 +186,13 @@ export async function classifyProjectType(
     return await classifyViaCli(config, summary);
   }
 
-  const client = new Anthropic({ apiKey: config.api_keys.main });
-  const model = config.selected_models.translator;
+  // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise proje-tipi sınıflandırma turu GLM'e gider; claude'da AYNEN korunur.
+  const { client, model } = resolveLlmClient(
+    config,
+    "main",
+    config.api_keys.main,
+    config.selected_models.translator,
+  );
   const startTs = Date.now();
 
   log.info("project-type-classifier", "request", {

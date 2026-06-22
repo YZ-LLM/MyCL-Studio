@@ -19,7 +19,7 @@ import { extractKindBlock } from "./cli-json.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { makeAnthropicClient } from "./claude-api.js";
+import { resolveLlmClient } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
@@ -306,12 +306,16 @@ export async function analyzeAndAskError(
     } else {
       // API yolu — Anthropic SDK tek-atış (tool yok; hata mesajı + detail'den triage).
       try {
-        const client = makeAnthropicClient(
+        // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise hata-analizi turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
+        const { client, model } = resolveLlmClient(
+          config,
+          "orchestrator",
           config.api_keys.orchestrator ?? config.api_keys.main,
+          analysisModel,
           { timeoutMs: 120_000 },
         );
         const response = await client.messages.create({
-          model: analysisModel,
+          model,
           max_tokens: 2048,
           system: buildErrorAnalysisPrompt(errCtx, false, factsSummary),
           messages: [

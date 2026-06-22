@@ -10,7 +10,7 @@
 // - Timeout: 30s per attempt, chunked >2000 token
 
 import Anthropic from "@anthropic-ai/sdk";
-import { makeAnthropicClient } from "./claude-api.js";
+import { resolveLlmClient } from "./claude-api.js";
 import { TRANSLATOR_MODEL } from "./model-catalog.js";
 import type { MyclConfig } from "./config.js";
 import { backendForRole, isAutoMode } from "./config.js";
@@ -248,16 +248,20 @@ export async function translate(
   }
   // SABİT hızlı model (YZLLM 2026-06-11): config.selected_models.translator YOK SAYILIR — translator hep hızlı/ucuz
   // tier'da, kullanıcı değiştiremez. Çeviri mekanik; hız önemli; teknik token'lar verbatim geçer (system prompt).
-  const model = TRANSLATOR_MODEL;
+  // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise translator turu cheap GLM'e (glm-4-flash) z.ai key+endpoint ile gider.
+  // claude'da AYNEN korunur (api.model = TRANSLATOR_MODEL, api.client = translator key). Provider=zai → API yolu
+  // (isAutoMode false, backendForRole "api") → CLI z.ai'yi kullanmaz, model her zaman doğru efektif değer.
+  const api = resolveLlmClient(config, "translator", config.api_keys.translator, TRANSLATOR_MODEL, {
+    timeoutMs: 60_000,
+  });
+  const model = api.model;
   const chunks = splitForChunking(text);
 
   // Bir backend ile TÜM chunk'ları çevir (closure: startTs/model/chunks/dir).
   // Auto Mode bunu birincil, gerekirse ikincil backend'le çağırır.
   const attempt = async (useCli: boolean): Promise<TranslateResult> => {
     // SDK client yalnızca API yolunda gerekir (CLI'da API key kullanılmaz).
-    const client = useCli
-      ? null
-      : makeAnthropicClient(config.api_keys.translator, { timeoutMs: 60_000 });
+    const client = useCli ? null : api.client;
     log.info("translator", "request", {
       dir,
       model,

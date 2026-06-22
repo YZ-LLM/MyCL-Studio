@@ -10,7 +10,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
-import { makeAnthropicClient } from "../claude-api.js";
+import { resolveLlmClient } from "../claude-api.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCli } from "../cli-run.js";
 import { backendForRole, orchestratorModelId, type MyclConfig } from "../config.js";
@@ -112,12 +112,16 @@ async function splitTasks(
     if (!res.ok) return null;
     text = res.text;
   } else {
-    const client = makeAnthropicClient(
+    // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise iş-bölme turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
+    const { client, model: apiModel } = resolveLlmClient(
+      config,
+      "orchestrator",
       config.api_keys.orchestrator ?? config.api_keys.main,
+      model,
       { timeoutMs: 60_000 },
     );
     const response = await client.messages.create({
-      model,
+      model: apiModel,
       max_tokens: 2048,
       system: SPLIT_PROMPT,
       messages: [{ role: "user", content: SPLIT_USER(rawText, pendingTexts) }],

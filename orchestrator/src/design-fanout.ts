@@ -12,6 +12,7 @@
 // veya sentez başarısız → ok:false + görünür reason → caller (phase-5) tek-ajana DÜŞER (sessiz değil).
 
 import Anthropic from "@anthropic-ai/sdk";
+import { resolveLlmClient } from "./claude-api.js";
 import { waitIfPaused } from "./pause.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -97,9 +98,10 @@ export async function runReasoningTurn(
     return res.text.trim();
   }
   // API (backend "api"; "auto" da limitliyken backendForRole bunu "api"ye çözer)
-  const client = new Anthropic({ apiKey: config.api_keys.main });
+  // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise fan-out perspektif turu GLM'e gider; claude'da AYNEN korunur.
+  const { client, model: apiModel } = resolveLlmClient(config, "main", config.api_keys.main, model);
   const response = await client.messages.create({
-    model,
+    model: apiModel,
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
@@ -306,9 +308,10 @@ export async function negotiateConflicts(
   } else {
     // API (gerçek Agent Teams YOK): MyCL-simüle cross-critique — synthesizer çelişkileri tek-tur
     // muhakemeyle (her iki tarafı steel-man) çözer. Aynı template; "teams yoksa kendin akıl yürüt" der.
-    const client = new Anthropic({ apiKey: config.api_keys.main });
+    // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise sentez/müzakere turu GLM'e gider; claude'da AYNEN korunur.
+    const { client, model: apiSynthModel } = resolveLlmClient(config, "main", config.api_keys.main, synthModel);
     const response = await client.messages.create({
-      model: synthModel,
+      model: apiSynthModel,
       max_tokens: SYNTH_MAX_TOKENS,
       system: template,
       messages: [{ role: "user", content: userMsg }],
