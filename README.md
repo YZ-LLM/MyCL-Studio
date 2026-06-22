@@ -4,8 +4,9 @@
 
 Yapay zeka destekli yazılım geliştirme için masaüstü uygulaması. Kullanıcının
 Türkçe niyetini alır, çok fazlı bir pipeline üzerinden çalıştırır ve Claude
-modellerini Anthropic API üzerinden — opsiyonel olarak Claude Code CLI ile —
-kullanarak kod üretir, test eder ve kalite kapılarından geçirir. Arayüz
+modellerini Anthropic API üzerinden — opsiyonel olarak Claude Code CLI ile — ya da
+**z.ai (GLM)** modellerini Anthropic-uyumlu endpoint üzerinden kullanarak kod üretir,
+test eder ve kalite kapılarından geçirir. Sağlayıcı rol başına seçilir. Arayüz
 Türkçedir; modellere giden tüm istekler İngilizceye çevrilir.
 
 ## Bileşenler
@@ -22,8 +23,15 @@ Türkçedir; modellere giden tüm istekler İngilizceye çevrilir.
 
 Her rolün modeli **Ayarlar ekranından dinamik olarak seçilir** — hesabın
 erişebildiği modeller listelenir, kod içinde sabit model ismi yoktur. Ayarlardan
-ayrıca rol başına backend (Anthropic API / Claude Code CLI / Auto), efor seviyesi
-ve özellik bayrakları yapılandırılır.
+ayrıca rol başına **Sağlayıcı** (Otomatik / Claude API / Claude Abonelik / **Z.AI**),
+efor seviyesi ve özellik bayrakları yapılandırılır.
+
+Sağlayıcı olarak **Z.AI (GLM)** seçilebilir: o rolün tüm çağrıları Anthropic-uyumlu
+endpoint üzerinden bir GLM modeline (glm-5.2 … glm-4.5-air) gider. Her rol için ayrı
+z.ai API anahtarı (translator / main / orchestrator) girilir; SDK ve CLI yolları,
+forced tool-call, prompt-caching ve Deep Think dahil canlı doğrulanmıştır. Claude
+seçili rollerde davranış birebir aynıdır (sıfır regresyon). Claude kredi/limit
+dolduğunda o rol otomatik olarak z.ai'ye düşebilir (görünür mesajla).
 
 - **Orchestrator** — Türkçe çalışır; kullanıcıyla konuşur, hangi fazın
   çalışacağına ve faz geçişlerine karar verir.
@@ -76,6 +84,11 @@ Her ajan rolünün backend'i Ayarlar'dan rol başına seçilir:
   `~/.mycl/agent-skills` dizini varsa CLI'a `--plugin-dir` ile bağlanır.
 - **Auto** — CLI ile başlar, abonelik kullanım limiti dolunca API'ye geçer, limit
   açılınca CLI'a döner.
+- **Z.AI (GLM)** — o rolün çağrıları, rolün z.ai anahtarıyla Anthropic-uyumlu
+  endpoint üzerinden GLM modeline gider (aynı SDK, baseURL override; geniş adapter
+  yok). Hem SDK hem CLI yolları desteklenir; forced-CLI çok-ajanlı yollar (görsel
+  tasarım, risk debate'i, paralel codegen) da z.ai'ye yönlenir. İstisna: bağımsız
+  **müfettiş** ajanı çapraz-aile çeşitlilik için bilerek Claude'da kalır.
 
 Karmaşık işlerde Faz 5 birden çok bağımsız tasarım üreten **çok-ajanlı tasarım
 fan-out**'u kullanabilir; birbirinden bağımsız ≥2 modül varsa **Çoklu Ajan
