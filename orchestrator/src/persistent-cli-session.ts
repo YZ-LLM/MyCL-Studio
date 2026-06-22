@@ -88,6 +88,20 @@ export interface SessionTurnResult {
 }
 
 /**
+ * Başarısız tur GEÇİCİ DIŞ kesinti mi (API erişilemez/timeout/limit) yoksa YAPISAL bozulma mı (oturum bozuk)?
+ * YZLLM 2026-06-22 (canlı transcript teşhisi): translator-en-to-tr "kararsız" uyarılarının asıl sebebi çöp girdi
+ * DEĞİL (repro: çöp log satırı bile başarıyla çevriliyor) — "Request timed out" / "Unable to connect (ConnectionRefused)"
+ * gibi DIŞ API kesintileri. Bunlar oturum kusuru sayılmaz: cold-start aynı backend'i kullanır, fayda etmez.
+ * Hem error hem (CLI'nin assistant-text olarak bastığı) çıktı metni taranır.
+ */
+export function isTransientOutage(r: SessionTurnResult): boolean {
+  const s = `${r.error ?? ""} ${r.text ?? ""}`;
+  return /timed out|time ?out|unable to connect|connection ?refused|econnrefused|econnreset|etimedout|enotfound|eai_again|socket hang up|fetch failed|network|overloaded|rate.?limit|too many requests|\b429\b|\b503\b|\b502\b|\b504\b|service unavailable/i.test(
+    s,
+  );
+}
+
+/**
  * Tek kalıcı claude süreci + seri tur kuyruğu. Lazy spawn (ilk send'de). Süreç ölürse sonraki send yeniden açar
  * (tur-içi ölüm → o tur {ok:false}, caller fallback). dispose() ile kapatılır.
  */
@@ -111,6 +125,10 @@ export class PersistentClaudeSession {
   private fails = 0;
   /** Oturum kalıcı olarak kararsız mı (çok yenilendi) — caller buna bakıp cold-start/API'ye düşebilir. */
   unhealthy = false;
+  // Bu kararsızlık-epizodu için kullanıcı bilgilendirildi mi (60sn'de bir aynı mesajı spam'leme; recovery'de sıfırlanır).
+  private episodeNoticed = false;
+  // stderr son ~2KB (YZLLM 2026-06-22: stderr eskiden tamamen yutuluyordu → yapısal hatada kör teşhis. Artık tail saklanır).
+  private lastStderr = "";
 
   constructor(private opts: PersistentSessionOpts) {
     this.curModel = opts.modelId;
@@ -172,7 +190,10 @@ export class PersistentClaudeSession {
     const rl = createInterface({ input: child.stdout });
     this.rl = rl;
     rl.on("line", (line) => this.onLine(line));
-    child.stderr.on("data", () => {}); // stderr'i tüket (backpressure'ı önle)
+    child.stderr.on("data", (d) => {
+      // stderr'i tüket (backpressure) + son ~2KB sakla → yapısal hatada gerçek sebep görünür (kör teşhis yok).
+      this.lastStderr = (this.lastStderr + String(d)).slice(-2048);
+    });
     child.on("exit", (code) => {
       this.alive = false;
       log.info("persistent-cli", `${this.opts.id}: exited`, { code });
@@ -372,20 +393,46 @@ export class PersistentClaudeSession {
    */
   private applyHealth(r: SessionTurnResult): void {
     if (r.ok) {
+      // Toparladı: kararsızlık epizodundan çıktıysak kullanıcıya görünür "düzeldi" de (sessiz toparlama yok).
+      if (this.unhealthy) {
+        emitChatMessage("system", `✓ "${this.opts.id}" kalıcı oturumu toparladı — normal yola dönüldü.`);
+      }
       this.fails = 0;
       this.unhealthy = false;
+      this.episodeNoticed = false;
       return;
     }
     this.fails++;
-    if (this.alive) this.kill(); // bozuk olabilir → kapat, sonraki çağrı taze oturum açar
-    if (this.fails >= 3) {
-      this.unhealthy = true;
+    // YZLLM 2026-06-22 (canlı teşhis): hatayı sınıflandır. GEÇİCİ dış kesinti (API timeout/bağlantı/limit)
+    // "oturum kararsız" DEĞİLDİR — cold-start aynı backend'i kullanır, fayda etmez; ayrıca sıcak oturumu
+    // boş yere öldürüp 60sn'de bir respawn etmek israf. Yalnız YAPISAL bozulmada öldür + "kararsız" de.
+    const transient = isTransientOutage(r);
+    if (this.alive && !transient) this.kill(); // yapısal bozulma → kapat (sonraki çağrı taze açar); dış kesinti → sıcak tut
+    if (this.fails < 3) {
+      log.warn("persistent-cli", `${this.opts.id}: hata → oturum yenilenecek (taze açılacak)`, {
+        fails: this.fails,
+        transient,
+        error: r.error,
+      });
+      return;
+    }
+    this.unhealthy = true;
+    if (this.episodeNoticed) return; // epizot başına TEK görünür mesaj (60sn-spam'i önle); recovery'de sıfırlanır
+    this.episodeNoticed = true;
+    if (transient) {
+      // Dış API kesintisi: oturum kusuru değil — dürüst + doğru teşhis (yanlış "oturum bozuk" damgası yok).
       emitChatMessage(
         "system",
-        `⚠️ "${this.opts.id}" kalıcı oturumu ${this.fails} kez üst üste hata verdi — kararsız sayıldı; geçici olarak cold-start/eski yola düşülüyor.`,
+        `⚠️ "${this.opts.id}": API'ye ${this.fails} kez üst üste ulaşılamadı (timeout/bağlantı) — geçici dış kesinti, oturum sorunu değil. API toparlayınca otomatik düzelir; bu sırada yavaş cold-start yolundan denenir.`,
       );
     } else {
-      log.warn("persistent-cli", `${this.opts.id}: hata → oturum yenilenecek (taze açılacak)`, { fails: this.fails });
+      // Yapısal bozulma: gerçek hatayı (stderr tail) yüzeye çıkar — kör teşhis yok.
+      const tail = this.lastStderr.trim().slice(-300);
+      const detail = tail ? ` — son hata: ${tail}` : r.error ? ` — ${r.error}` : "";
+      emitChatMessage(
+        "system",
+        `⚠️ "${this.opts.id}" kalıcı oturumu ${this.fails} kez üst üste hata verdi — kararsız sayıldı; geçici olarak cold-start/eski yola düşülüyor${detail}.`,
+      );
     }
   }
 
