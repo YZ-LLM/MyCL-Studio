@@ -46,7 +46,17 @@ async function readTextSafe(path: string): Promise<string> {
   return fs
     .readFile(path, "utf-8")
     .then((c) => c.trim() || SENTINEL_EMPTY)
-    .catch(() => SENTINEL_EMPTY);
+    .catch((e) => {
+      // errno-AYRIMI (sessiz-fallback denetimi): ENOENT = gerçekten yok (SENTINEL_EMPTY meşru). BAŞKA hata
+      // (EACCES/EIO) = spec VAR ama okunamadı → "boş" sanıp üstüne inceltilmiş spec yazmak içerik-kaybı. Görünür.
+      if ((e as { code?: string }).code !== "ENOENT") {
+        log.error("devs-spec-refresh", "spec okunamadı (var ama erişilemez) — SENTINEL_EMPTY döndü, üstüne yazma içerik-kaybı riski", {
+          path,
+          code: (e as { code?: string }).code,
+        });
+      }
+      return SENTINEL_EMPTY;
+    });
 }
 
 /** Birim → page-spec.md mutlak yolu. devs/<type>/<key>/<ts>/ dizininin EBEVEYNİ (page-spec birim kökünde). */

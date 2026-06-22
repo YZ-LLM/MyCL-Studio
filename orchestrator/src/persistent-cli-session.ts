@@ -48,7 +48,9 @@ function recordSessionTurn(rec: {
       input: rec.input.slice(0, 800), // önizleme (bloat değil, ama "ne düşündü" görünür)
       output: rec.output.slice(0, 2000),
     }) + "\n";
-  appendFile(SESSION_TRANSCRIPT, line, "utf-8").catch(() => {});
+  appendFile(SESSION_TRANSCRIPT, line, "utf-8").catch((e) =>
+    log.warn("persistent-cli", "transcript satırı yazılamadı (best-effort gözlem)", { error: String(e) }),
+  );
 }
 
 /** Orkestratör için: son N kalıcı-oturum turunu oku (kör nokta yok — ne düşündüklerini bul). Best-effort. */
@@ -59,7 +61,14 @@ export async function readSessionTranscript(
     const raw = await readFile(SESSION_TRANSCRIPT, "utf-8");
     const lines = raw.trim().split("\n").filter(Boolean).slice(-limit);
     return lines.map((l) => JSON.parse(l)).filter(Boolean);
-  } catch {
+  } catch (e) {
+    // errno-AYRIMI (sessiz-fallback denetimi): ENOENT = transcript hiç yok (ilk açılış, normal). BAŞKA hata
+    // (EACCES/bozuk JSON) = var ama okunamadı → orkestratörün kör-nokta bağlamı eksik kaldı, görünür kıl.
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.error("persistent-cli", "transcript okunamadı (var ama bozuk/erişilemez) — kör-nokta bağlamı eksik", {
+        code: (e as { code?: string }).code,
+      });
+    }
     return [];
   }
 }
@@ -299,7 +308,8 @@ export class PersistentClaudeSession {
       this.pendingControls.set(rid, finish);
       try {
         child.stdin.write(JSON.stringify({ type: "control_request", request_id: rid, request }) + "\n");
-      } catch {
+      } catch (e) {
+        log.error("persistent-cli", "control_request stdin'e yazılamadı", { error: String(e) });
         finish(false);
       }
     });
@@ -309,9 +319,19 @@ export class PersistentClaudeSession {
   private async ensureModelEffort(model?: string, effort?: string): Promise<void> {
     if (model && model !== this.curModel) {
       if (await this.sendControl({ subtype: "set_model", model })) this.curModel = model;
+      else {
+        // YÜK-TAŞIYAN sapma (sessiz-fallback denetimi): model değişimi başarısızsa oturum YANLIŞ modelde
+        // devam eder (ör. müfettiş Sonnet yerine eski modelde → çapraz-aile çeşitliliği kaybolur). GÖRÜNÜR kıl.
+        log.error("persistent-cli", "set_model BAŞARISIZ — oturum yanlış modelde devam ediyor", { wanted: model, current: this.curModel });
+        emitChatMessage(
+          "system",
+          `⚠️ Model değişimi (${model}) başarısız — oturum mevcut modelde (${this.curModel}) devam ediyor; sonuç beklenenden farklı olabilir.`,
+        );
+      }
     }
     if (effort && effort !== this.curEffort && effort !== "ultracode") {
       if (await this.sendControl({ subtype: "apply_flag_settings", settings: { effort } })) this.curEffort = effort;
+      else log.error("persistent-cli", "apply_flag_settings(effort) BAŞARISIZ — eski efor sürüyor", { wanted: effort, current: this.curEffort });
     }
   }
 

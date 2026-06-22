@@ -416,9 +416,17 @@ export async function analyzeAndAskError(
       acceptContinuePhase: errCtx.acceptContinuePhase,
     };
   } catch (err) {
-    // Hiçbir koşulda ana akışı bozma — görünür hata + log (sessiz değil).
-    log.warn("error-analysis", "analyzeAndAskError failed (non-fatal)", err);
-    emitChatMessage("error", "⚠️ Hata analizi beklenmedik bir nedenle yapılamadı.");
+    // Hiçbir koşulda ana akışı bozma — ama GÖRÜNÜR + tanılanabilir (sessiz-fallback denetimi: iç fail()
+    // ile aynı seviye). log.warn→log.error + hata detayını mesaja kat + audit'e yaz (müfettiş trajectory'si görsün).
+    log.error("error-analysis", "analyzeAndAskError beklenmedik hata (non-fatal)", err);
+    emitChatMessage("error", `⚠️ Hata analizi beklenmedik bir nedenle yapılamadı: ${String(err).slice(0, 200)}`);
+    await appendAudit(state.project_root, {
+      ts: Date.now(),
+      phase: errCtx.phase,
+      event: "error-analysis-failed",
+      caller: "mycl-orchestrator",
+      detail: String(err).slice(0, 200),
+    }).catch(() => {});
     return null;
   }
 }

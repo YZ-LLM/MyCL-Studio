@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { readAuditLog } from "./audit.js";
 import { log } from "./logger.js";
+import { emitChatMessage } from "./ipc.js";
 import { ensurePlaywrightInstalled } from "./playwright-setup.js";
 import { isProcessAlive } from "./process-utils.js";
 
@@ -80,7 +81,9 @@ async function findAliveDevServer(
     }
     return null;
   } catch (err) {
-    log.warn("phase-0-ui-probe", "audit read failed", err);
+    // Audit okuma hatası (sessiz-fallback denetimi): null = dev-server keşfi İPTAL → UI probe atlanır.
+    // Sessiz null "sunucu yok" ile karışır → görünür kıl (gerçek hata, "yok" değil).
+    log.error("phase-0-ui-probe", "audit okuma hatası — dev-server keşfi iptal edildi", err);
     return null;
   }
 }
@@ -156,10 +159,15 @@ export async function runPreD1UiProbe(
     log.info("phase-0-ui-probe", "playwright missing — attempting install");
     const ensure = await ensurePlaywrightInstalled(projectRoot, stack);
     if (!ensure.ok) {
-      log.info("phase-0-ui-probe", "skip: playwright install failed", {
+      // Load-bearing skip (sessiz-fallback denetimi): UI probe atlanıyor → kullanıcı NEDEN bilmeli (sessiz null değil).
+      log.warn("phase-0-ui-probe", "playwright install failed — UI probe skipped", {
         action: ensure.action,
         error: ensure.error?.slice(0, 200),
       });
+      emitChatMessage(
+        "system",
+        `ℹ️ UI ön-incelemesi atlandı — Playwright kurulamadı (${ensure.action ?? "hata"}). Debug yine de devam ediyor.`,
+      );
       return null;
     }
     log.info("phase-0-ui-probe", "playwright installed", { action: ensure.action });

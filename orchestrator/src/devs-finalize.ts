@@ -11,6 +11,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { State } from "./types.js";
 import { log } from "./logger.js";
+import { emitChatMessage } from "./ipc.js";
 import { deriveDevsPaths, pendingSpecPath } from "./devs-paths.js";
 import { resolveUnits, type ResolvedUnit, type UnitType } from "./fix/route-resolver.js";
 import { computeChangedScope } from "./fix/scope.js";
@@ -63,14 +64,26 @@ export async function finalizeDevsArtifacts(state: State): Promise<FinalizeOutco
   let iterSpec: string;
   try {
     iterSpec = await fs.readFile(pendingSpecPath(state.project_root, ts), "utf-8");
-  } catch {
-    return null; // spec yok → sessiz no-op
+  } catch (e) {
+    // errno-AYRIMI (sessiz-fallback denetimi): ENOENT = Faz 4 atlandı/yazılmadı (meşru no-op). BAŞKA hata
+    // (EACCES/EIO) = spec VAR ama okunamadı → finalize sessizce atlanırsa iterasyon-spec'i kaybolur. Görünür.
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.error("devs-finalize", "iter-spec okunamadı (var ama erişilemedi) — finalize atlandı, spec kaybolabilir", {
+        code: (e as { code?: string }).code,
+      });
+    }
+    return null; // spec yok → no-op
   }
 
   // değişen dosyalar → birimler (deterministik resolver). Boşsa tek "shared" birim.
   const changed = await computeChangedScope(state.project_root, undefined, ts)
     .then((s) => s.files)
-    .catch(() => [] as string[]);
+    .catch((e) => {
+      // Beklenmedik throw'u sessiz []'e düşürmek (sessiz-fallback denetimi): değişen-dosya kümesi kaybolur →
+      // birim çözümü yanlış 'shared'a düşebilir. Görünür kıl (boş-liste ≠ crash).
+      log.error("devs-finalize", "computeChangedScope hata — değişen-dosya kümesi boş türetildi (birim çözümü 'shared'a düşebilir)", { error: String(e) });
+      return [] as string[];
+    });
   let units: ResolvedUnit[] = [];
   if (changed.length > 0) {
     units = await resolveUnits(state.project_root, changed).catch((e) => {
@@ -150,7 +163,13 @@ export async function finalizeDevsArtifacts(state: State): Promise<FinalizeOutco
     });
     return outcome;
   } catch (e) {
-    log.warn("devs-finalize", "finalize başarısız (non-fatal, pipeline kırılmaz)", e);
+    // finalize artefaktları (iter-spec/units/_shared) yazılamadı (sessiz-fallback denetimi): sessiz log.warn →
+    // bu iterasyonun spec'i KAYDEDİLMEDİ (yaşayan-dökümantasyon/handoff eksik). GÖRÜNÜR kıl (pipeline kırılmaz).
+    log.error("devs-finalize", "finalize başarısız — iterasyon spec/artefaktları kaydedilmedi (non-fatal)", e);
+    emitChatMessage(
+      "system",
+      `⚠️ İterasyon artefaktları (spec/birimler) kaydedilemedi — yaşayan-dökümantasyon bu tur eksik kalabilir. (${String(e).slice(0, 100)})`,
+    );
     return null;
   }
 }

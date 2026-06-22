@@ -473,8 +473,13 @@ export async function applyPrototype(state: State): Promise<boolean> {
         // Yeni-proje modül-araması: ajan + kullanıcı hangi sayfa/API'lerin HAZIR geldiğini görür → sıfırdan yazmaz.
         moduleNote = `\n🔎 Hazır modüller (sıfırdan yazma; varsa yeniden kullan/genişlet): ${meta.modules.map((m) => m.name).join(", ")}.`;
       }
-    } catch {
-      /* meta yoksa yaş/modül bilinmez — yine de kopyala (uyarısız) */
+    } catch (e) {
+      // errno/parse-AYRIMI (sessiz-fallback denetimi): ENOENT = meta yok (meşru, sessiz kopyala). Parse-hatası
+      // veya EACCES = meta VAR ama bozuk/okunamaz → yaş/modül DOĞRULANAMADI; "temiz" sanma, GÖRÜNÜR kıl.
+      if ((e as { code?: string }).code !== "ENOENT") {
+        log.error("prototype-cache", "prototip meta okunamadı/parse edilemedi (bozuk?) — yaş/modül doğrulanamadı", { error: String(e) });
+        staleNote = " ⚠️ Prototip meta bozuk/okunamadı — bayatlık ve modül listesi DOĞRULANAMADI (yine de kopyalanıyor).";
+      }
     }
 
     // Cache config-iskelet VEYA (yeşil koşuda kaydedilmişse) TAM çalışan proje içerir → tümünü kopyala,
