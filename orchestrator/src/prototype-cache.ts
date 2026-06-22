@@ -91,6 +91,8 @@ export interface PrototypeMeta {
   createdAt: number;
   nodeVersion: string;
   fileCount: number;
+  /** YEŞİL koşuda kaydedilen TAM çalışan proje mi (true) yoksa config-iskelet baseline mi (false/undefined). */
+  full?: boolean;
 }
 
 /** SAF: meta MAX_AGE_DAYS'ten eski mi (bayat). now ms epoch. */
@@ -200,6 +202,31 @@ async function collectBaselineFiles(root: string, rel = ""): Promise<string[]> {
 }
 
 /**
+ * TÜM proje dosyalarını topla (DENY dizinlerine — node_modules/.next/dist/.git/.mycl — girmeden recursive).
+ * GREEN-prototip için (YZLLM 2026-06-22 "TÜM dosyalarını"): yeşil koşuda config-iskelet değil, GERÇEK
+ * çalışan projenin tamamı (app/components/lib/backend dahil) prototip olarak kaydedilir.
+ */
+async function collectAllFiles(root: string, rel = ""): Promise<string[]> {
+  const out: string[] = [];
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await fs.readdir(join(root, rel), { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    if (DENY_SEGMENTS.has(e.name)) continue;
+    const childRel = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) {
+      out.push(...(await collectAllFiles(root, childRel)));
+    } else if (e.isFile()) {
+      out.push(childRel);
+    }
+  }
+  return out;
+}
+
+/**
  * IMPURE: pipeline-end'de çağrılır. Koşu YEŞİL (gate-fail yok) + stack biliniyorsa,
  * baseline dosyalarını ~/.mycl/prototypes/<stack>/ altına kaydeder (overwrite=tazele) +
  * meta yazar. NON-BLOCKING — asla throw etmez (yan-yarar). Yeşil değilse / stack yoksa no-op.
@@ -215,14 +242,21 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
     // hızlı + düşük-token başlar). Eski "yeşil-zorunlu" kapı prototipi hiç doldurmuyordu (gate-fail'li
     // koşular da boşta kaldı). KÖK FIX (eventsSince) korunur: yalnız BU iterasyona bak. force → manuel
     // snapshot (verdict'i tamamen baypas — pipeline-end dışından force-snapshot için).
+    // YZLLM 2026-06-22 ("Faz 17 yeşil → TÜM dosyalar"): YEŞİL (tüm gate'ler PASS, Faz 17 dahil) → GERÇEK
+    // çalışan projenin TAMAMI prototip olur. PARTIAL/yeşil-değil ama tamamlanmış → mevcut baseline (config-
+    // iskelet, hızlı scaffold fallback). force → tam-snapshot (manuel). Yarım koşu (completed değil) → no-op.
+    let green = !!opts?.force;
     if (!opts?.force) {
       const events = await readAuditLog(state.project_root);
       const verdict = computeVerdict(eventsSince(events, state.iteration_started_at ?? 0));
       if (!verdict.completed) return; // en azından iterasyon SONUNA ulaşmış olmalı (yarım koşu prototip olmaz)
+      green = verdict.verdict === "PASS";
     }
 
-    const files = await collectBaselineFiles(state.project_root);
-    if (files.length === 0) return; // kaydedilecek baseline yok
+    const files = green
+      ? await collectAllFiles(state.project_root)
+      : await collectBaselineFiles(state.project_root);
+    if (files.length === 0) return; // kaydedilecek dosya yok
 
     // Zengin parmak izi (base + spec'ten dil/framework) — klasör adı tam stack'i taşır.
     const stack = await stackFingerprint(state);
@@ -240,6 +274,7 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
       createdAt: Date.now(),
       nodeVersion: process.version,
       fileCount: files.length,
+      full: green, // YEŞİL → tam çalışan proje; değilse config-iskelet (baseline)
     };
     await fs.mkdir(prototypesBaseDir(), { recursive: true });
     await fs.writeFile(prototypeMetaPath(stack), JSON.stringify(meta, null, 2), "utf-8");
@@ -253,7 +288,9 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
     }).catch(() => {});
     emitChatMessage(
       "system",
-      `📦 Golden prototip güncellendi (${stack}, ${files.length} baseline dosyası) — bu stack'te sonraki proje buradan hızlı başlar.`,
+      green
+        ? `📦 Golden prototip kaydedildi (${stack}, ${files.length} dosya — TAM YEŞİL proje) — bu stack'teki sonraki proje buradan başlar.`
+        : `📦 Prototip iskeleti güncellendi (${stack}, ${files.length} baseline dosyası) — koşu tamamen yeşil olunca TAM proje kaydedilir.`,
     );
   } catch (err) {
     // Yan-yarar; ana akışı ASLA bozma. Görünür uyarı (sessiz değil) ama non-fatal.
@@ -291,7 +328,8 @@ export async function applyPrototype(state: State): Promise<boolean> {
       /* meta yoksa yaş bilinmez — yine de kopyala (uyarısız) */
     }
 
-    // Cache yalnız baseline içerir (snapshot filtreledi) → tümünü kopyala, mevcut dosyaları EZME.
+    // Cache config-iskelet VEYA (yeşil koşuda kaydedilmişse) TAM çalışan proje içerir → tümünü kopyala,
+    // mevcut dosyaları EZME (force:false) → ana ajan üstüne genişletir/yeni gereksinime göre değiştirir.
     await fs.cp(srcDir, state.project_root, { recursive: true, force: false, errorOnExist: false });
     await appendAudit(state.project_root, {
       ts: Date.now(),
@@ -302,7 +340,7 @@ export async function applyPrototype(state: State): Promise<boolean> {
     }).catch(() => {});
     emitChatMessage(
       "system",
-      `📦 ${stack} golden prototipi uygulandı — ana ajan sıfırdan değil, doğrulanmış baseline üzerine geliştirecek.${staleNote}`,
+      `📦 ${stack} golden prototipi uygulandı — ana ajan sıfırdan değil, doğrulanmış prototip üzerine geliştirecek.${staleNote}`,
     );
     return true;
   } catch (err) {
