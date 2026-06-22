@@ -97,14 +97,17 @@ interface Props {
   currentCacheTtl?: "5m" | "1h";
 }
 
-// z.ai (GLM) statik model listesi — Sağlayıcı=Z.AI seçili rollerde + tier seçimlerinde sunulur.
-// Orkestratör GLM_CATALOG'una paralel (model-catalog.ts); ②b canlı /v4/models ile tazelenecek.
+// z.ai (GLM) model listesi — CANLI /v4/models ile DOĞRULANDI (2026-06-22). Orkestratör GLM_CATALOG'una
+// paralel (model-catalog.ts). Önceki glm-4-plus/glm-4-flash SAHTE'ydi (kaldırıldı).
 const GLM_MODELS: { id: string; label: string }[] = [
-  { id: "glm-5.2", label: "GLM-5.2 (güçlü · 1M)" },
+  { id: "glm-5.2", label: "GLM-5.2 (güçlü · flagship)" },
+  { id: "glm-5.1", label: "GLM-5.1 (güçlü)" },
+  { id: "glm-5", label: "GLM-5 (güçlü)" },
   { id: "glm-4.7", label: "GLM-4.7 (güçlü)" },
-  { id: "glm-4-plus", label: "GLM-4-Plus (dengeli)" },
-  { id: "glm-4.6", label: "GLM-4.6 (dengeli · 200K)" },
-  { id: "glm-4-flash", label: "GLM-4-Flash (hızlı/ucuz)" },
+  { id: "glm-4.6", label: "GLM-4.6 (dengeli · kod)" },
+  { id: "glm-4.5", label: "GLM-4.5 (dengeli)" },
+  { id: "glm-4.5-air", label: "GLM-4.5-Air (hızlı/ucuz)" },
+  { id: "glm-5-turbo", label: "GLM-5-Turbo (hızlı)" },
 ];
 
 function ModelDropdown({

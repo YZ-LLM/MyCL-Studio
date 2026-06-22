@@ -83,7 +83,7 @@ describe("zaiKeyForRole (per-rol > default)", () => {
 describe("GLM katalog (provider-aware model — ②)", () => {
   it("findModel GLM id'lerini tanır (sessiz claude-default landmine yok); claude'u da bulur", () => {
     expect(findModel("glm-5.2")?.tier).toBe("strong");
-    expect(findModel("glm-4-flash")?.tier).toBe("cheap");
+    expect(findModel("glm-4.5-air")?.tier).toBe("cheap");
     expect(findModel("claude-opus-4-8")?.tier).toBe("strong");
     expect(findModel("yok-böyle-model")).toBeUndefined();
   });

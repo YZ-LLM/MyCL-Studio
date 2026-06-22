@@ -65,16 +65,22 @@ export const MODEL_CATALOG: ModelInfo[] = [
 ];
 
 /**
- * Bilinen z.ai/GLM modelleri (curated, 2026-06; canlı keşif Settings'te z.ai /v4/models ile
- * genişler). Provider "zai" seçili rol/tier'da bu katalogdan model çözülür — claude id'si GLM
- * endpoint'ine GİTMEZ. Tier eşlemesi: glm-5.2/4.7=strong, glm-4.6/4-plus=balanced, flash=cheap.
+ * z.ai/GLM modelleri — CANLI /v4/models ile DOĞRULANDI (2026-06-22): 8 model. Önceki glm-4-plus/
+ * glm-4-flash SAHTE'ydi (yoktu → o tier seçilince çağrı patlardı). Provider "zai" seçili rol/tier'da
+ * bu katalogdan model çözülür — claude id'si GLM endpoint'ine GİTMEZ. Tier-default = her tier'ın İLK'i
+ * (strong→glm-5.2, balanced→glm-4.6, cheap→glm-4.5-air). contextTokens: API context vermiyor →
+ * muhafazakâr tahmin (taşma 400'ünü önler). Hepsi canlı chat + forced tool_choice + cache_control +
+ * Deep Think ile doğrulandı.
  */
 export const GLM_CATALOG: ModelInfo[] = [
-  { id: "glm-5.2", label: "GLM-5.2", tier: "strong", contextTokens: 1_000_000, isOpus: false, blurb: "z.ai flagship — codegen/spec/tasarım/inceleme; Deep Think" },
-  { id: "glm-4.7", label: "GLM-4.7", tier: "strong", contextTokens: 128_000, isOpus: false, blurb: "z.ai güçlü (önceki nesil)" },
-  { id: "glm-4-plus", label: "GLM-4-Plus", tier: "balanced", contextTokens: 128_000, isOpus: false, blurb: "z.ai dengeli" },
+  { id: "glm-5.2", label: "GLM-5.2", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai flagship — codegen/spec/tasarım/inceleme; Deep Think" },
+  { id: "glm-5.1", label: "GLM-5.1", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai güçlü (5 serisi)" },
+  { id: "glm-5", label: "GLM-5", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai güçlü (5 serisi)" },
+  { id: "glm-4.7", label: "GLM-4.7", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai güçlü (4.x)" },
   { id: "glm-4.6", label: "GLM-4.6", tier: "balanced", contextTokens: 200_000, isOpus: false, blurb: "z.ai dengeli kod modeli" },
-  { id: "glm-4-flash", label: "GLM-4-Flash", tier: "cheap", contextTokens: 128_000, isOpus: false, blurb: "z.ai en hızlı/ucuz — sınıflandırma/çeviri" },
+  { id: "glm-4.5", label: "GLM-4.5", tier: "balanced", contextTokens: 128_000, isOpus: false, blurb: "z.ai dengeli" },
+  { id: "glm-4.5-air", label: "GLM-4.5-Air", tier: "cheap", contextTokens: 128_000, isOpus: false, blurb: "z.ai hafif/hızlı — sınıflandırma/çeviri" },
+  { id: "glm-5-turbo", label: "GLM-5-Turbo", tier: "cheap", contextTokens: 200_000, isOpus: false, blurb: "z.ai hızlı (5 serisi turbo)" },
 ];
 
 /** Provider'a göre katalog (Settings model dropdown'ları + tier-default'ları). */
