@@ -12,6 +12,7 @@ import { isApiAccountError, isEnvironmentError } from "./claude-api.js";
 import { safeEnv } from "./safe-env.js";
 import { appendAudit } from "./audit.js";
 import { emitChatMessage } from "./ipc.js";
+import { log } from "./logger.js";
 import type { MyclConfig } from "./config.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -33,7 +34,19 @@ export async function runRegressionGuard(
   afterPhase: PhaseId,
 ): Promise<RegressionResult> {
   void config;
-  const cmd = await resolveMechanicalCmd({ type: "profile_key", key: "test" }, state).catch(() => null);
+  // resolveMechanicalCmd null = "test komutu tanımlı değil" (meşru). AMA throw = profil/çözümleme
+  // SORUNU — bunu "komut yok" sanıp sessiz atlamak, regresyonu doğrulanmadığı halde "güvenli" gösterir.
+  let cmd: string | null;
+  try {
+    cmd = await resolveMechanicalCmd({ type: "profile_key", key: "test" }, state);
+  } catch (e) {
+    log.error("regression-guard", "test komutu çözümlenemedi (profil sorunu olabilir)", { error: String(e) });
+    emitChatMessage(
+      "system",
+      `⚠️ Regresyon guard (Faz ${afterPhase}): test komutu ÇÖZÜMLENEMEDİ → fix regresyon açısından DOĞRULANAMADI (ne onaylandı ne reddedildi). Profil/ortamı kontrol et.`,
+    );
+    return { ran: false, note: "test komutu çözümlenemedi — regresyon doğrulanamadı (görünür)" };
+  }
   if (!cmd) return { ran: false, note: "test komutu yok — regresyon guard atlandı" };
   emitChatMessage("system", `🛡️ Regresyon guard (Faz ${afterPhase} düzeltmesi sonrası) — tüm testleri yeniden koşuyorum: \`${cmd.slice(0, 70)}\``);
   let code: number;
@@ -46,9 +59,16 @@ export async function runRegressionGuard(
     code = typeof err.code === "number" ? err.code : 1;
     out = `${err.stdout ?? ""}\n${err.stderr ?? ""}`;
   }
-  // Çevre/hesap hatası (komut yok, E2BIG, kredi) → proje regresyonu DEĞİL → sessiz atla (yanlış-red yazma).
+  // Çevre/hesap hatası (komut yok, E2BIG, kredi) → proje regresyonu DEĞİL → yanlış-red yazma. AMA sessizce
+  // geçme (sessiz-fallback denetimi): regresyon ne onaylandı ne reddedildi → fix DOĞRULANMADI; bunu GÖRÜNÜR
+  // kıl ki "yeşil" sanılmasın (kullanıcı/müfettiş regresyonun kontrol EDİLMEDİĞİNİ bilsin).
   if (isApiAccountError(out) || isEnvironmentError(out)) {
-    return { ran: false, note: "ortam/hesap hatası — regresyon değil, atlandı" };
+    emitChatMessage(
+      "system",
+      `⚠️ Regresyon guard (Faz ${afterPhase}): testler ORTAM/hesap hatası verdi (proje regresyonu değil) → fix ` +
+        `regresyon açısından DOĞRULANAMADI (ne onay ne red). Ortamı düzeltip tekrar koşman önerilir. (${out.trim().slice(0, 100)})`,
+    );
+    return { ran: false, note: "ortam/hesap hatası — regresyon doğrulanamadı (görünür)" };
   }
   const pass = code === 0;
   await appendAudit(state.project_root, {

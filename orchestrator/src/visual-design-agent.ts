@@ -58,8 +58,24 @@ export function nonStyleFiles(files: string[]): string[] {
 }
 
 async function git(root: string, args: string[]): Promise<string> {
+  // SALT-OKUNUR sorgular için (diff). Mutasyon (checkout/clean) için gitMutate kullan → başarıyı DOĞRULAR.
   const { stdout } = await execFileP("git", ["-C", root, ...args]).catch(() => ({ stdout: "" }));
   return stdout;
+}
+
+/**
+ * Durum-DEĞİŞTİREN git (checkout/clean): hatayı YUTMA (sessiz-fallback denetimi) — revert sessizce
+ * başarısız olursa stil-dışı/CSP-ihlalli dosyalar working-tree'de kalır ama "geri alındı" sanılır →
+ * app ihlalli yayınlanır. Başarısızsa false dön; caller RE-VERIFY edip fail-closed davranır.
+ */
+async function gitMutate(root: string, args: string[]): Promise<boolean> {
+  try {
+    await execFileP("git", ["-C", root, ...args]);
+    return true;
+  } catch (e) {
+    log.error("visual-design", "git mutasyonu başarısız (revert güvenilmez)", { args, error: String(e) });
+    return false;
+  }
 }
 
 /** Görsel ajanın working-tree'de değiştirdiği dosyalar (git-add baseline'ından SONRA). */
@@ -164,7 +180,17 @@ export async function runVisualDesignAgent(
   if (hasGit) {
     const offenders = nonStyleFiles(await gitWorkingChanges(root));
     if (offenders.length > 0) {
-      await git(root, ["checkout", "--", ...offenders]);
+      const ok = await gitMutate(root, ["checkout", "--", ...offenders]);
+      // RE-VERIFY: revert gerçekten temizledi mi (sessiz başarısızlık yakalansın).
+      const stillOffending = ok ? nonStyleFiles(await gitWorkingChanges(root)) : offenders;
+      if (stillOffending.length > 0) {
+        log.error("visual-design", "stil-dışı revert başarısız — offenders kaldı", { stillOffending });
+        emitChatMessage(
+          "system",
+          `🎨 KRİTİK: ajan stil-dışı dosyalara dokundu ve GERİ ALMA başarısız oldu (${stillOffending.slice(0, 3).join(", ")}${stillOffending.length > 3 ? "…" : ""}) → görsel iyileştirme güvenli değil, mevcut UI korunuyor (elle kontrol gerekebilir).`,
+        );
+        return false; // fail-closed: stil-dışı değişiklik temizlenemedi → iyileştirmeyi kabul etme
+      }
       emitChatMessage(
         "system",
         `🎨 Görsel tasarım: ajan stil-dışı dosyalara dokundu (${offenders.slice(0, 3).join(", ")}${offenders.length > 3 ? "…" : ""}) → o değişiklikler GERİ ALINDI (yalnız CSS'e izin var).`,
@@ -175,14 +201,28 @@ export async function runVisualDesignAgent(
   // 4) CSP re-scan: görsel rötuş inline-style eklediyse %100 CSP bozulur → TÜM görsel değişikliği geri al.
   const cspViol = await scanCspViolations(root);
   if (cspViol.length > 0) {
-    if (hasGit) await git(root, ["checkout", "--", "."]); // codegen staged kalır; yalnız görsel working-değişiklik geri
+    const reverted = hasGit ? await gitMutate(root, ["checkout", "--", "."]) : false; // codegen staged kalır; görsel working-değişiklik geri
+    // RE-VERIFY: CSP ihlali GERÇEKTEN sıfıra düştü mü — revert sessizce başarısız olduysa app ihlalli kalır.
+    const remaining = reverted ? await scanCspViolations(root) : cspViol;
+    if (remaining.length > 0) {
+      log.error("visual-design", "CSP revert başarısız — app CSP-ihlalli kaldı", { remaining: remaining.length, hadGit: hasGit });
+      emitChatMessage(
+        "system",
+        `🎨 KRİTİK: görsel iyileştirme CSP ihlali doğurdu (${cspViol.length}) ve GERİ ALMA başarısız oldu — app HÂLÂ CSP-ihlalli (${remaining.length}). Faz 6'ya bu hâliyle GİTMEMELİ; elle müdahale gerek.`,
+      );
+      await appendAudit(root, {
+        ts: Date.now(), phase: 5, event: "visual-design-csp-revert-FAILED", caller: "mycl-orchestrator",
+        detail: `${cspViol.length} ihlal, revert sonrası ${remaining.length} kaldı (hasGit=${hasGit})`,
+      });
+      return false;
+    }
     emitChatMessage(
       "system",
-      `🎨 Görsel tasarım: iyileştirme CSP ihlali doğurdu (${cspViol.length}: inline-style) → GERİ ALINDI. CSP %100 korunur, estetik bu sefer atlandı.`,
+      `🎨 Görsel tasarım: iyileştirme CSP ihlali doğurdu (${cspViol.length}: inline-style) → GERİ ALINDI (doğrulandı: 0 ihlal). CSP %100 korunur, estetik bu sefer atlandı.`,
     );
     await appendAudit(root, {
       ts: Date.now(), phase: 5, event: "visual-design-reverted-csp", caller: "mycl-orchestrator",
-      detail: `${cspViol.length} csp ihlali → revert`,
+      detail: `${cspViol.length} csp ihlali → revert (doğrulandı)`,
     });
     return false;
   }

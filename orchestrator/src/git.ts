@@ -396,6 +396,7 @@ export async function getChangedFiles(
   const base = since && /^[0-9a-f]{4,40}$/i.test(since) ? since : "HEAD";
   const files = new Set<string>();
 
+  let anyFailed = false;
   // Tracked değişiklikler: working tree (staged + unstaged) vs base.
   const diff = await runGit(projectRoot, ["diff", "--name-only", "--relative", base, "--"]);
   if (diff.code === 0) {
@@ -403,7 +404,7 @@ export async function getChangedFiles(
       const f = line.trim();
       if (f.length > 0) files.add(f);
     }
-  }
+  } else anyFailed = true;
   // Untracked (fix'in yeni oluşturduğu dosyalar).
   const untracked = await runGit(projectRoot, ["ls-files", "--others", "--exclude-standard"]);
   if (untracked.code === 0) {
@@ -411,8 +412,20 @@ export async function getChangedFiles(
       const f = line.trim();
       if (f.length > 0) files.add(f);
     }
-  }
+  } else anyFailed = true;
 
+  // KISMİ başarısızlık tehlikesi (sessiz-fallback denetimi): diff geçip ls-files başarısız olursa elde
+  // untracked'siz PARTIAL bir küme kalır; boş olmadığı için caller full-fallback yapmaz → yeni runtime
+  // dosyaları taranmadan gate geçer (false-green). Herhangi biri başarısızsa küme GÜVENİLMEZ → boş dön
+  // (caller tüm-proje fallback yapar = "kuşkuda full") + GÖRÜNÜR log (asla partial-scope ile daraltma).
+  if (anyFailed) {
+    log.error("git", "getChangedFiles: git komutu başarısız → değişen-dosya kümesi güvenilmez, tüm-proje fallback", {
+      diffCode: diff.code,
+      untrackedCode: untracked.code,
+      stderr: `${diff.stderr ?? ""} ${untracked.stderr ?? ""}`.trim().slice(0, 200),
+    });
+    return [];
+  }
   return [...files].filter((f) => !isExcludedScopePath(f));
 }
 
