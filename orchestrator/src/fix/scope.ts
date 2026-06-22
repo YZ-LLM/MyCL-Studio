@@ -30,7 +30,12 @@ const WRITE_EVENTS: ReadonlySet<string> = new Set([
 
 /** Non-git fallback: codegen'in bu iterasyonda yazdığı dosyalar (audit write-event'lerinden). Deterministik. */
 async function changedFilesFromAudit(projectRoot: string, sinceTs: number): Promise<string[]> {
-  const events = await readAuditLog(projectRoot).catch(() => []);
+  const events = await readAuditLog(projectRoot).catch((e) => {
+    // readAuditLog ENOENT'i (audit yok) zaten [] yapar → bu catch yalnız GERÇEK hatayı (bozulma) maskeler.
+    // Sessiz [] = non-git değişen-dosya türetmesi BOŞ → scope yanlış (sessiz-fallback denetimi). Görünür kıl.
+    log.error("fix-scope", "audit okunamadı — non-git değişen-dosya scope'u boş türetildi (gerçek hata)", { error: String(e) });
+    return [];
+  });
   const out = new Set<string>();
   for (const e of events) {
     if (e.ts < sinceTs || !e.detail) continue;

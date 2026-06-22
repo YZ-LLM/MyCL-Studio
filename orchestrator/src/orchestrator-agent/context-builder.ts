@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readAuditLogTail, readDecisions, readHandoffs, readWtf } from "../audit.js";
 import type { HandoffRecord, WtfRecord } from "../audit.js";
+import { log } from "../logger.js";
 import { peekProjectMap, formatProjectMap } from "../onboarding/project-map.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
@@ -173,16 +174,31 @@ export async function buildAgentContext(
     readProjectMemory(state.project_root, 15).catch(() => []),
     readGeneralMemory(8, state.stack).catch(() => []),
   ]);
+  // errno NOT (sessiz-fallback denetimi): readDecisions/Handoffs/Wtf ENOENT'i (dosya yok) upstream'de
+  // [] yapar → buradaki catch yalnız GERÇEK hatayı (bozulma/parse) yakalar. Sessiz [] orkestratörün
+  // ADR/devir/tuzak bağlamını kaybettirir (WTF kaybı = bilerek-böyle olanı bozma riski) → log.error ile
+  // izlenebilir kıl (best-effort bağlam olduğundan chat-spam yapma, ama sessiz de bırakma).
   const recentDecisions = (
-    await readDecisions(state.project_root).catch(() => [])
+    await readDecisions(state.project_root).catch((e) => {
+      log.error("context-builder", "decisions okunamadı (ADR bağlamı kayıp — gerçek hata, ENOENT değil)", { error: String(e) });
+      return [];
+    })
   ).slice(-8);
   // ③ (Missions handoff): son faz devirleri — orkestratör son sonuçları (özellikle fail +
   // keşfedilen sorun) görüp HEDEFLİ takip önerebilsin (rewrite değil). Defansif limit.
   const recentHandoffs = (
-    await readHandoffs(state.project_root).catch(() => [])
+    await readHandoffs(state.project_root).catch((e) => {
+      log.error("context-builder", "handoffs okunamadı (faz-devir bağlamı kayıp — gerçek hata)", { error: String(e) });
+      return [];
+    })
   ).slice(-6);
   // WTF/gotcha: bilinen tuzaklar — orkestratör dokunmadan önce görsün (bilerek-böyle olanı bozmasın).
-  const recentWtf = (await readWtf(state.project_root).catch(() => [])).slice(-6);
+  const recentWtf = (
+    await readWtf(state.project_root).catch((e) => {
+      log.error("context-builder", "WTF/gotcha okunamadı — bilinen-tuzak bağlamı kayıp (bilerek-böyle olanı bozma riski)", { error: String(e) });
+      return [];
+    })
+  ).slice(-6);
   // v15.11: features.md başlık-indeksi (ucuz; full body değil — token bütçesi).
   const featureHeadings = (
     await extractFeatureChunks(state.project_root).catch(() => [])

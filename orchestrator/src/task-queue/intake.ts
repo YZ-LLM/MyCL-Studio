@@ -148,7 +148,15 @@ export async function intakeAndEnqueue(
   if (!clean) return []; // boş/yalnız-boşluk talep → iş yok (boş-text task üretme)
   // Bekleyen işleri ÖNCE oku — hem LLM'e semantik-dedup için ver (parafrazı yakalar) hem aşağıdaki
   // kelime-örtüşme backstop'una. (YZLLM 2026-06-15: "zaten listede varsa ekleme".)
-  const acceptedTexts: string[] = (await readTasks(projectRoot).catch(() => []))
+  const acceptedTexts: string[] = (
+    await readTasks(projectRoot).catch((e) => {
+      // readTasks ENOENT'i [] yapar → bu catch yalnız GERÇEK hatayı (bozuk kuyruk dosyası) maskeler.
+      // Sessiz [] = yinelenen-iş kontrolü DEVRE DIŞI → aynı iş tekrar eklenebilir (sessiz-fallback denetimi).
+      log.error("task-intake", "iş kuyruğu okunamadı — yinelenen-iş kontrolü bu turda devre dışı (gerçek hata)", { error: String(e) });
+      emitChatMessage("system", "⚠️ İş kuyruğu okunamadı (dosya bozuk olabilir) — yinelenen-iş kontrolü bu sefer atlandı; aynı iş iki kez eklenebilir.");
+      return [];
+    })
+  )
     .filter((it) => taskStatus(it) === "pending")
     .map((it) => it.text);
   const split = await splitTasks(config, projectRoot, clean, acceptedTexts).catch((e: unknown) => {
