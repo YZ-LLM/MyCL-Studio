@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseVerdict,
+  parseClarifyVerdict,
   runInspectorCheckpoint,
   mahkemeRuling,
   type InspectorContext,
@@ -45,6 +46,30 @@ describe("inspector · parseVerdict (robust ajan-çıktısı parse)", () => {
 
   it("geçersiz stance → null", () => {
     expect(parseVerdict('```json\n{"stance":"maybe","reason":"x"}\n```')).toBeNull();
+  });
+});
+
+describe("inspector · parseClarifyVerdict (netleştirme gerekli mi; fail-closed)", () => {
+  const opts = ["✅ Önerilen seti onayla", "⚙️ Tüm fazlar"];
+  it("ask=true → insana sor (gerçek belirsizlik)", () => {
+    const r = parseClarifyVerdict('```json\n{"ask":true,"reason":"zevk/tercih"}\n```', opts);
+    expect(r?.ask).toBe(true);
+  });
+  it("ask=false + GEÇERLİ seçenek → ilerle", () => {
+    const r = parseClarifyVerdict('```json\n{"ask":false,"answer":"⚙️ Tüm fazlar","reason":"çıkarılabilir"}\n```', opts);
+    expect(r?.ask).toBe(false);
+    expect(r?.answer).toBe("⚙️ Tüm fazlar");
+  });
+  it("ask=false + GEÇERSİZ/uydurma seçenek → fail-closed (ask=true, kör-ilerle YOK)", () => {
+    const r = parseClarifyVerdict('```json\n{"ask":false,"answer":"uydurma secenek","reason":"x"}\n```', opts);
+    expect(r?.ask).toBe(true);
+  });
+  it("ask=false + answer YOK → fail-closed (ask=true)", () => {
+    const r = parseClarifyVerdict('```json\n{"ask":false,"reason":"x"}\n```', opts);
+    expect(r?.ask).toBe(true);
+  });
+  it("blok yok → null (caller fail-closed sor)", () => {
+    expect(parseClarifyVerdict("hiç JSON yok", opts)).toBeNull();
   });
 });
 

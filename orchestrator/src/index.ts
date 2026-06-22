@@ -103,7 +103,7 @@ import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { discoverModelsViaWeb, verifyModelCallable } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
-import { inspectGateFinding, mahkemeRuling, type MahkemeAction } from "./inspector.js";
+import { inspectGateFinding, mahkemeRuling, inspectClarify, type MahkemeAction } from "./inspector.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { runPhaseContributionReport } from "./phase-contribution.js";
@@ -1964,6 +1964,13 @@ async function handleUserMessageInner(text: string): Promise<void> {
 // KALDIRILDI — classifier path silindi, confirm askq artık açılmıyor.
 // Agent her zaman doğrudan executeAgentDecision çağırıyor.
 
+// Netleştirme-mahkemesi döngü-emniyeti (YZLLM 2026-06-22): müfettiş bir netleştirmeyi "ilerle" diye
+// çözünce orkestratör yeniden karar verir; arka arkaya ÇÖZÜLEN ama ilerleme getirmeyen netleştirme
+// sayısı bu kapağa varınca insana sorulur (müfettiş yargısı zaten kör-pick değil, ama kademeli emniyet).
+// ask_clarify DIŞINDA bir aksiyon (gerçek ilerleme) çalışınca sıfırlanır.
+const CLARIFY_INSPECT_MAX = 2;
+let _clarifyInspectChain = 0;
+
 /**
  * v15.5 — Orkestrator agent AgentDecision'ı executeDispatchedIntent'in
  * beklediği DispatchOutcome formatına map eder + uygun handler'ı çağırır.
@@ -2025,6 +2032,8 @@ async function executeAgentDecision(
   // Prompt-level HARD RULE'lar (orchestrator-system.md / phase-01-intent.md)
   // source of truth; regex shadow check yanlış pozitif riski + audit gürültüsü.
   // Kullanıcı kuralı: "regex güvenilir değil".
+  // Netleştirme-mahkemesi döngü-emniyeti: ask_clarify DIŞINDA bir aksiyon = gerçek ilerleme → sayacı sıfırla.
+  if (decision.action !== "ask_clarify") _clarifyInspectChain = 0;
   switch (decision.action) {
     case "chat": {
       const msg = decision.message_to_user ?? decision.reason;
@@ -2034,14 +2043,68 @@ async function executeAgentDecision(
     case "ask_clarify": {
       // Doğru-karar/proaktif-risk (2026-06-04): clarify_options doluysa SOMUT
       // seçenekler (risk + gerçek alternatifler); yoksa jenerik Evet/Hayır/Vazgeç.
-      // Cevap akışı DEĞİŞMEZ: agent_clarify_ → handleAskqAnswer → "Vazgeç" sessiz
-      // kapanış, diğer seçim handleUserMessage'e → ajan o yönle yeniden karar verir.
+      // Cevap akışı: agent_clarify_ → handleAskqAnswer → "Vazgeç" sessiz kapanış,
+      // diğer seçim handleUserMessage'e → ajan o yönle yeniden karar verir.
       const askqId = `agent_clarify_${randomUUID()}`;
       const rich = decision.clarify_options && decision.clarify_options.length > 0;
+      const clarifyOptions = rich ? [...decision.clarify_options!, "Vazgeç"] : ["Evet", "Hayır", "Vazgeç"];
+      const clarifyQuestion = decision.message_to_user ?? decision.reason;
+      // ⚖️ MAHKEME (YZLLM 2026-06-22 "müfettişle konuşsun, mahkeme kurulsun"): orkestratör "emin değilim,
+      // sorayım" derken müfettiş BAĞIMSIZ tartar — gerçek belirsizlik mi (tercih/zevk/geri-alınamaz/eksik-
+      // bilgi → insana), yoksa gereksiz mi soruyor (cevap çıkarılabilir → ilerle). Oto-cevap açıkken
+      // (kullanıcı izlemiyor) devreye girer: insana yalnız GERÇEK belirsizlikte gidilir, gereksiz kart
+      // boşuna bekletmez. Kör auto-pick DEĞİL (müfettiş yargısı) + kademeli döngü-emniyeti → sonsuz-clarify yok.
+      const cfg = runtime.config;
+      if (autoAnswerSuggested() && cfg.features.inspector_enabled) {
+        if (_clarifyInspectChain >= CLARIFY_INSPECT_MAX) {
+          emitChatMessage(
+            "system",
+            `⚖️ Mahkeme: arka arkaya ${_clarifyInspectChain} netleştirme çözüldü ama ilerleme yok → ` +
+              `döngü-emniyeti, sana soruyorum.`,
+          );
+        } else {
+          try {
+            const ruling = await inspectClarify(cfg, {
+              projectRoot: runtime.state.project_root,
+              intent: text,
+              trajectory: decision.reason,
+              question: clarifyQuestion,
+              options: clarifyOptions.filter((o) => o !== "Vazgeç"),
+            });
+            await appendAuditModule(runtime.state.project_root, {
+              ts: Date.now(),
+              phase: runtime.state.current_phase,
+              event: `mahkeme-clarify-${ruling.ask ? "ask" : "proceed"}`,
+              caller: "mycl-orchestrator",
+              detail: ruling.summary.slice(0, 400),
+            }).catch(() => {});
+            if (!ruling.ask && ruling.answer) {
+              _clarifyInspectChain++;
+              const answer = ruling.answer;
+              emitChatMessage(
+                "system",
+                `⚖️ Mahkeme: bu netleştirme gereksiz — müfettiş **"${answer}"** ile ilerlemeyi uygun gördü ` +
+                  `(sana sormadan).\n${ruling.summary}`,
+              );
+              // Kilit-DIŞINA ertele: inline handleUserMessage busy-guard'a takılıp çalışan işi ABORT eder
+              // → setImmediate ile lock boşalınca gerçek-cevap yoluyla birebir işle.
+              setImmediate(() => {
+                void handleUserMessage(answer);
+              });
+              return;
+            }
+            emitChatMessage("system", `⚖️ Mahkeme: belirsizlik gerçek — sana soruyorum.\n${ruling.summary}`);
+          } catch (e) {
+            log.warn("orchestrator", "mahkeme clarify-incelemesi hata (yutuldu → insana sor)", {
+              error: String(e),
+            });
+          }
+        }
+      }
       emitAskq({
         id: askqId,
-        question: decision.message_to_user ?? decision.reason,
-        options: rich ? [...decision.clarify_options!, "Vazgeç"] : ["Evet", "Hayır", "Vazgeç"],
+        question: clarifyQuestion,
+        options: clarifyOptions,
         multi_select: false,
         allow_other: true,
       });

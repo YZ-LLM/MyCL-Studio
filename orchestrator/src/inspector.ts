@@ -376,6 +376,106 @@ export async function inspectGateFinding(
   return runInspectorCheckpoint(config, ctx, signals);
 }
 
+/** Netleştirme-incelemesi sonucu (mahkeme): orkestratör "emin değilim, insana sorayım" derken
+ *  müfettiş insana SORULMALI mı yoksa orkestratör kendi cevabıyla İLERLESİN mi karar verir. */
+export interface ClarifyRuling {
+  /** true → insana sor (gerçek belirsizlik / tercih / zevk / geri-alınamaz / eksik-bilgi).
+   *  false → orkestratör çıkarılabilir cevapla ilerlesin (gereksiz soruyordu). */
+  ask: boolean;
+  /** ask=false ise: hangi seçenekle ilerlenecek (verilen seçeneklerden biri, birebir). */
+  answer?: string;
+  /** İnsan-okunur Türkçe gerekçe (chat'e). */
+  summary: string;
+}
+
+/** Netleştirme verdict'i parse (forced-tool yok; CLI metin-JSON parite). ask=false ama geçersiz/
+ *  eksik answer → fail-closed (ask=true): kör "ilerle" yok, kuşkuda insana. */
+export function parseClarifyVerdict(text: string, validOptions: string[]): ClarifyRuling | null {
+  const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]);
+  const candidates = fences.length > 0 ? fences : [text];
+  for (const c of candidates.reverse()) {
+    const start = c.indexOf("{");
+    const end = c.lastIndexOf("}");
+    if (start < 0 || end <= start) continue;
+    try {
+      const obj = JSON.parse(c.slice(start, end + 1)) as Record<string, unknown>;
+      if (typeof obj.ask !== "boolean") continue;
+      const reason = String(obj.reason ?? "").trim();
+      if (obj.ask) return { ask: true, summary: reason };
+      const answer = String(obj.answer ?? "").trim();
+      // Çıkarılan cevap GERÇEKTEN verilen seçeneklerden biri olmalı (model uydurmasın).
+      const valid = validOptions.find((o) => o === answer || o.includes(answer) || answer.includes(o));
+      if (!answer || !valid) {
+        return { ask: true, summary: `Müfettiş "ilerle" dedi ama geçerli bir seçenek vermedi → güvenli taraf: insana. (${reason})` };
+      }
+      return { ask: false, answer: valid, summary: reason };
+    } catch {
+      /* sonraki adaya geç */
+    }
+  }
+  return null;
+}
+
+/**
+ * MAHKEME (netleştirme-sınıfı, YZLLM 2026-06-22 "müfettişle konuşsun, mahkeme kurulsun"): orkestratör
+ * "emin değilim, insana sorayım" derken müfettiş BAĞIMSIZ tartar — gerçek belirsizlik mi (tercih/zevk/
+ * geri-alınamaz/eksik-bilgi → insana), yoksa orkestratör gereksiz mi soruyor (cevap niyetten/bağlamdan/
+ * ilkelerden çıkarılabilir → ilerle). Tek-geçiş (savunulacak işlenmiş karar yok). Fail-closed: müfettiş
+ * üretemez/parse edilemez/geçersiz cevap → insana sor. Kör auto-pick DEĞİL → sonsuz-clarify döngüsü yok.
+ */
+export async function inspectClarify(
+  config: MyclConfig,
+  opts: { projectRoot: string; intent: string; trajectory: string; question: string; options: string[] },
+): Promise<ClarifyRuling> {
+  void config; // müfettiş SABİT model (çapraz-aile Sonnet); config ileride API-paritesi için.
+  const protocol = await loadDebateProtocol();
+  const system = [
+    protocol,
+    "",
+    "## YOUR ROLE — THE INSPECTOR: is this clarification NECESSARY?",
+    "The orchestrator is UNCERTAIN and wants to ask the human a clarifying question. Judge INDEPENDENTLY:",
+    "is this ambiguity GENUINE — only the human can resolve it: a real preference/taste, an irreversible or",
+    "destructive choice, or information truly ABSENT from the intent + project — or is the orchestrator",
+    "OVER-ASKING, where the answer is clearly inferable from the user's intent, the project context, or the",
+    "project's principles? GATHER EVIDENCE first (read the intent and the project files). BIAS: ask the human",
+    "for genuine preference/taste/irreversible choices — never guess those. Say 'proceed' ONLY when the answer",
+    "is clearly inferable AND low-risk. When in doubt → ask the human. Respond in TURKISH.",
+    "End with EXACTLY one JSON block — either:",
+    '```json',
+    '{"ask": true, "reason": "<Türkçe: neden gerçek belirsizlik, insana gitmeli>"}',
+    '```',
+    "or, if the orchestrator is over-asking:",
+    '```json',
+    '{"ask": false, "answer": "<verilen seçeneklerden biri, BİREBİR>", "reason": "<Türkçe: cevap neden çıkarılabilir + düşük-risk>"}',
+    '```',
+  ].join("\n");
+  const user = [
+    `## ORİJİNAL NİYET (kullanıcının mesajı)\n${opts.intent}`,
+    `## YÖRÜNGE (orkestratör neden sormak istiyor)\n${opts.trajectory}`,
+    `## ORKESTRATÖRÜN SORMAK İSTEDİĞİ\n${opts.question}\n\nSeçenekler: ${opts.options.join(" | ")}`,
+    "Bu netleştirme GERÇEKTEN gerekli mi, yoksa orkestratör gereksiz mi soruyor? Bizzat kanıt topla, sonra karar ver.",
+  ].join("\n\n");
+  const res = await runClaudeCli({
+    systemPrompt: system,
+    userMessage: user,
+    modelId: INSPECTOR_MODEL_DEFAULT,
+    cwd: opts.projectRoot,
+    effort: "max",
+    allowedTools: ["Read", "Grep", "Glob", "Bash"], // bizzat kanıt toplama (yazma/alt-ajan yasak)
+    disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
+  });
+  if (!res.ok || !res.text.trim()) {
+    log.warn("inspector", "clarify-incelemesi üretilemedi → ask (fail-closed)", { error: res.error });
+    return { ask: true, summary: "Müfettiş değerlendirmesi üretilemedi → güvenli taraf: sana soruyorum." };
+  }
+  const r = parseClarifyVerdict(res.text, opts.options);
+  if (!r) {
+    log.warn("inspector", "clarify verdict parse edilemedi → ask (fail-closed)");
+    return { ask: true, summary: "Müfettiş geçerli bir verdict üretmedi → güvenli taraf: sana soruyorum." };
+  }
+  return r;
+}
+
 /** CheckpointResult'ı insan-okunur tek satıra çevir (gözlem mesajı için). */
 export function formatCheckpoint(r: CheckpointResult): string {
   if (!r.acted || !r.outcome) return `sus (${r.decision.reason})`;

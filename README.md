@@ -115,7 +115,10 @@ entegre eder.
   arka arkaya otomatik düzeltmeye rağmen geçmiyorsa (orkestratörün kendi göremediği
   yapısal kör-nokta), müfettiş döngüyü bağımsız inceler — fantom (false-positive) bir
   döngü kanıtlanırsa çalışan koda dönülüp devam edilir, aksi halde müfettişin bağımsız
-  okuması eklenerek karar insana taşınır. Varsayılan **açık** (Ayarlar →
+  okuması eklenerek karar insana taşınır. Ve **netleştirme sınıfı**: orkestratör "emin
+  değilim, sorayım" derken (oto-cevap açıkken) müfettiş bunu bağımsız tartar — gerçek
+  belirsizlik (tercih/zevk/geri-alınamaz) ise sana sorar, gereksiz bir soruysa
+  çıkarılabilir cevapla seni bekletmeden ilerler. Varsayılan **açık** (Ayarlar →
   müfettiş'ten kapatılabilir).
 - **Sızma testi / DAST** — `katana` (gezinme) + `nuclei` ile çalışan uygulama
   aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı
