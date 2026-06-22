@@ -1417,7 +1417,8 @@ async function handleSaveSelectedModels(
       const clean: Partial<AgentBackends> = {};
       for (const role of ["orchestrator", "translator", "main"] as const) {
         const v = backends[role];
-        if (v === "api" || v === "cli" || v === "auto") clean[role] = v;
+        // "zai" = z.ai (GLM) sağlayıcısı (YZLLM 2026-06-21) — sessizce eleme; geçerli 4. değer.
+        if (v === "api" || v === "cli" || v === "auto" || v === "zai") clean[role] = v;
       }
       if (Object.keys(clean).length > 0) {
         await persistAgentBackends(clean);
@@ -1430,7 +1431,8 @@ async function handleSaveSelectedModels(
     const fresh = runtime.config as MyclConfig | null;
     if (ok && fresh) {
       const b = fresh.agent_backends;
-      const label = (v: string | undefined) => (v === "cli" ? "Abonelik" : v === "auto" ? "Auto" : "API");
+      const label = (v: string | undefined) =>
+        v === "cli" ? "Abonelik" : v === "auto" ? "Auto" : v === "zai" ? "Z.AI" : "API";
       emitChatMessage(
         "system",
         `✅ Ayarlar uygulandı — yeniden başlatma GEREKMEZ. Bir sonraki iş şu ayarla koşar:\n` +

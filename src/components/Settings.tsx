@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { t as i18nT } from "../i18n";
-import type { ModelInfo, AgentBackends, ModelTiers, DesignWorkflowMode } from "../types/events";
+import type { ModelInfo, AgentBackend, AgentBackends, ModelTiers, DesignWorkflowMode } from "../types/events";
 import { isAutoUpdateOnBootEnabled } from "./UpdateButton";
 
 /**
@@ -65,7 +65,14 @@ interface Props {
   ) => void;
   /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
   currentBackends?: AgentBackends;
-  onSaveApiKeys: (translator: string, main: string, orchestrator?: string, zai?: string) => void;
+  onSaveApiKeys: (
+    translator: string,
+    main: string,
+    orchestrator?: string,
+    zaiTranslator?: string,
+    zaiMain?: string,
+    zaiOrchestrator?: string,
+  ) => void;
   onClose: () => void;
   savingModels: boolean;
   savingKeys: boolean;
@@ -89,6 +96,16 @@ interface Props {
   /** v15.14 (F2): mevcut prompt cache ömrü (5m/1h). */
   currentCacheTtl?: "5m" | "1h";
 }
+
+// z.ai (GLM) statik model listesi — Sağlayıcı=Z.AI seçili rollerde + tier seçimlerinde sunulur.
+// Orkestratör GLM_CATALOG'una paralel (model-catalog.ts); ②b canlı /v4/models ile tazelenecek.
+const GLM_MODELS: { id: string; label: string }[] = [
+  { id: "glm-5.2", label: "GLM-5.2 (güçlü · 1M)" },
+  { id: "glm-4.7", label: "GLM-4.7 (güçlü)" },
+  { id: "glm-4-plus", label: "GLM-4-Plus (dengeli)" },
+  { id: "glm-4.6", label: "GLM-4.6 (dengeli · 200K)" },
+  { id: "glm-4-flash", label: "GLM-4-Flash (hızlı/ucuz)" },
+];
 
 function ModelDropdown({
   label,
@@ -123,15 +140,25 @@ function ModelDropdown({
         <select
           value={selected ?? ""}
           onChange={(e) => onChange(e.target.value)}
-          disabled={loading || models.length === 0}
+          disabled={loading}
           style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12 }}
         >
           {!selected && <option value="">— seçin —</option>}
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.display_name} ({m.id})
-            </option>
-          ))}
+          <optgroup label="Claude (Anthropic)">
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name} ({m.id})
+              </option>
+            ))}
+          </optgroup>
+          {/* z.ai (GLM) — Sağlayıcı=Z.AI seçili rolde bu modeller kullanılır. */}
+          <optgroup label="GLM (z.ai)">
+            {GLM_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} ({m.id})
+              </option>
+            ))}
+          </optgroup>
         </select>
         <button
           type="button"
@@ -177,6 +204,7 @@ export function Settings({
   onSaveFeatures,
   effort,
   currentModelTiers,
+  currentBackends,
   currentDesignWorkflow,
   currentAgentTeamsOptIn,
   currentMultiAgentSelection,
@@ -200,9 +228,12 @@ export function Settings({
     translator: "auto",
     main: "auto",
   };
-  // YZLLM 2026-06-20: "sadece auto çalışsın, ayarlardan seçmeye gerek yok" → backend SABİT all-auto;
-  // rol-başı API/Abonelik/Auto seçici UI kaldırıldı (Auto zaten CLI→limit→API→limit-açılınca-CLI yönetir).
-  const backends: AgentBackends = DEFAULT_BACKENDS;
+  // YZLLM 2026-06-21: z.ai (GLM) 3. sağlayıcı geldi → "auto" onu seçemez (sadece api↔cli). Rol-başına
+  // Sağlayıcı combobox'ı GERİ geldi: Otomatik/Claude API/Claude Abonelik/Z.AI. Default hâlâ all-auto
+  // (z.ai açıkça seçilmedikçe davranış aynen claude).
+  const [backends, setBackends] = useState<AgentBackends>(currentBackends ?? DEFAULT_BACKENDS);
+  const setBackend = (role: keyof AgentBackends, v: AgentBackend) =>
+    setBackends((prev) => ({ ...prev, [role]: v }));
   // v15.13 (auto-model + çok-ajanlı tasarım): iş-seviyesi model katmanları + tasarım flag'leri.
   const [modelTiersSel, setModelTiersSel] = useState<ModelTiers>(currentModelTiers ?? {});
   const setTier = (tier: keyof ModelTiers, v: string) =>
@@ -225,8 +256,10 @@ export function Settings({
   // v15.5 Orkestrator agent API key — opsiyonel; explicit set edilirse agent
   // aktif olur, boş bırakılırsa klasik Haiku classifier kullanılır.
   const [apiKeyOrchestrator, setApiKeyOrchestrator] = useState("");
-  // z.ai (GLM) fallback key — opsiyonel; fallback ladder'ın 3. halkası.
-  const [apiKeyZai, setApiKeyZai] = useState("");
+  // z.ai (GLM) rol-başına key'ler — provider=zai seçili rolde kullanılır + claude→z.ai fallback'ın halkası.
+  const [apiKeyZaiTranslator, setApiKeyZaiTranslator] = useState("");
+  const [apiKeyZaiMain, setApiKeyZaiMain] = useState("");
+  const [apiKeyZaiOrchestrator, setApiKeyZaiOrchestrator] = useState("");
   const [showSecret, setShowSecret] = useState(false);
 
   // Modeller tabı ilk açılıştaysa auto-fetch.
@@ -375,6 +408,34 @@ export function Settings({
                   </div>
                 </div>
               </div>
+              {/* YZLLM 2026-06-21: rol-başına SAĞLAYICI combobox'ı (z.ai geldi → "auto" onu seçemez).
+                  Otomatik = claude CLI↔API yönetir; Z.AI = o rol z.ai key'iyle GLM modeline gider. */}
+              <div style={{ marginTop: 4, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+                <span style={{ fontSize: 11, color: "var(--fg-dim)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+                  Sağlayıcı (rol-başına)
+                </span>
+                {(["translator", "main", "orchestrator"] as const).map((role) => (
+                  <div key={role} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                    <span style={{ fontSize: 11, width: 96, color: "var(--fg-dim)", textTransform: "capitalize" }}>
+                      {role === "orchestrator" ? "Orkestratör" : role === "translator" ? "Translator" : "Main"}
+                    </span>
+                    <select
+                      value={backends[role]}
+                      onChange={(e) => setBackend(role, e.target.value as AgentBackend)}
+                      style={{ flex: 1, fontSize: 12 }}
+                    >
+                      <option value="auto">Otomatik (Claude CLI↔API · önerilen)</option>
+                      <option value="api">Claude API</option>
+                      <option value="cli">Claude Abonelik</option>
+                      <option value="zai">Z.AI (GLM)</option>
+                    </select>
+                  </div>
+                ))}
+                <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "2px 0 0" }}>
+                  <strong>Z.AI</strong> seçilen rol, o rolün z.ai key'iyle GLM modeline gider (yukarıda model
+                  listesinde GLM'i seç). z.ai key yoksa güvenli claude'a düşer. Default Otomatik → davranış aynen claude.
+                </p>
+              </div>
               {/* YZLLM 2026-06-16 ("merdiven kullanmıcaz"): Main + Orkestrator model seçimi AÇIK (kilit kaldırıldı).
                   Model iş-türüne göre seçilen tier'dan çözülür (config kral); kullanıcı tier modellerini buradan belirler. */}
               <div>
@@ -499,11 +560,20 @@ export function Settings({
                       style={{ flex: 1 }}
                     >
                       <option value="">(main)</option>
-                      {modelsMain.models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.display_name || m.id}
-                        </option>
-                      ))}
+                      <optgroup label="Claude (Anthropic)">
+                        {modelsMain.models.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.display_name || m.id}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="GLM (z.ai)">
+                        {GLM_MODELS.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </optgroup>
                     </select>
                   </div>
                 ))}
@@ -613,26 +683,55 @@ export function Settings({
                   approve. Latency +3-6sn her mesaj için.
                 </span>
               </label>
-              {/* z.ai (GLM) fallback key — opsiyonel; claude (CLI+API) erişilemezse 3. halka. */}
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 11, color: "var(--fg-dim)", textTransform: "uppercase" }}>
-                  z.ai (GLM) API Key (opsiyonel — fallback)
+              {/* z.ai (GLM) rol-başına key'ler — Sağlayıcı=Z.AI seçili rolde kullanılır + claude→z.ai fallback'ın halkası.
+                  3 ayrı key: translator / main / orchestrator (her rol kendi z.ai key'iyle çağrılabilir). */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 6 }}>
+                <span style={{ fontSize: 11, color: "var(--fg-dim)", textTransform: "uppercase", fontWeight: 600 }}>
+                  z.ai (GLM) API Key'leri — rol-başına (opsiyonel)
                 </span>
-                <input
-                  type={showSecret ? "text" : "password"}
-                  placeholder="z.ai key (boş → fallback kapalı, davranış aynen claude)"
-                  value={apiKeyZai}
-                  onChange={(e) => setApiKeyZai(e.target.value)}
-                  style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
-                />
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: "var(--fg-dim)", textTransform: "uppercase" }}>
+                    z.ai Translator
+                  </span>
+                  <input
+                    type={showSecret ? "text" : "password"}
+                    placeholder="z.ai translator key (boş → bu rol z.ai kullanmaz)"
+                    value={apiKeyZaiTranslator}
+                    onChange={(e) => setApiKeyZaiTranslator(e.target.value)}
+                    style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: "var(--fg-dim)", textTransform: "uppercase" }}>
+                    z.ai Main
+                  </span>
+                  <input
+                    type={showSecret ? "text" : "password"}
+                    placeholder="z.ai main key (boş → bu rol z.ai kullanmaz)"
+                    value={apiKeyZaiMain}
+                    onChange={(e) => setApiKeyZaiMain(e.target.value)}
+                    style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: "var(--fg-dim)", textTransform: "uppercase" }}>
+                    z.ai Orkestratör
+                  </span>
+                  <input
+                    type={showSecret ? "text" : "password"}
+                    placeholder="z.ai orchestrator key (boş → bu rol z.ai kullanmaz)"
+                    value={apiKeyZaiOrchestrator}
+                    onChange={(e) => setApiKeyZaiOrchestrator(e.target.value)}
+                    style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                  />
+                </label>
                 <span style={{ fontSize: 10, color: "var(--fg-dim)" }}>
-                  Fallback ladder'ın 3. halkası: claude aboneliği → claude API → z.ai
-                  (GLM). Claude kredi/limit dolunca otomatik z.ai'ye düşer (görünür
-                  mesajla). Anthropic-uyumlu endpoint, model glm-4.6 (env ile
-                  değiştirilebilir). Key:{" "}
+                  Sağlayıcı (aşağıda) bir rol için "Z.AI" seçiliyse o rolün çağrıları bu key'le
+                  GLM modeline gider (Anthropic-uyumlu endpoint). Ayrıca claude kredi/limit dolunca
+                  o rolün çağrısı otomatik z.ai'ye düşer (görünür mesajla). Key:{" "}
                   <a href="https://z.ai" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>z.ai</a>.
                 </span>
-              </label>
+              </div>
               <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--fg-dim)" }}>
                 <input
                   type="checkbox"
@@ -650,7 +749,9 @@ export function Settings({
                     apiKeyTranslator.trim(),
                     apiKeyMain.trim(),
                     apiKeyOrchestrator.trim() || undefined,
-                    apiKeyZai.trim() || undefined,
+                    apiKeyZaiTranslator.trim() || undefined,
+                    apiKeyZaiMain.trim() || undefined,
+                    apiKeyZaiOrchestrator.trim() || undefined,
                   )
                 }
               >

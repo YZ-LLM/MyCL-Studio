@@ -792,7 +792,9 @@ function App() {
     translator: string,
     main: string,
     orchestrator?: string,
-    zai?: string,
+    zaiTranslator?: string,
+    zaiMain?: string,
+    zaiOrchestrator?: string,
   ) => {
     setSavingKeys(true);
     void orch.send({
@@ -801,7 +803,9 @@ function App() {
         translator,
         main,
         ...(orchestrator ? { orchestrator } : {}),
-        ...(zai ? { zai } : {}),
+        ...(zaiTranslator ? { zai_translator: zaiTranslator } : {}),
+        ...(zaiMain ? { zai_main: zaiMain } : {}),
+        ...(zaiOrchestrator ? { zai_orchestrator: zaiOrchestrator } : {}),
       },
     });
   };
