@@ -99,7 +99,13 @@ async function removeAddedFiles(dir: string, backupRoot: string, projectRoot: st
   let entries: import("node:fs").Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code && code !== "ENOENT" && code !== "ENOTDIR") {
+      // Dizin VAR ama okunamadı (EACCES/EIO) → bu alt-ağaçtaki fix-eklediği dosyalar SİLİNEMEDİ →
+      // restore EKSİK (sessiz-fallback denetimi). Görünür kıl.
+      log.error("fix-snapshot", "removeAddedFiles: dizin okunamadı — restore eksik (eklenen dosyalar kaldı)", { dir, code });
+    }
     return; // dizin yok/okunamadı → atla
   }
   for (const e of entries) {
@@ -108,7 +114,24 @@ async function removeAddedFiles(dir: string, backupRoot: string, projectRoot: st
     const top = rel.split(/[/\\]/)[0];
     if (EXCLUDE_TOP.has(top)) continue; // yedeklenmemiş/korunan dizin → dokunma
     const inBackup = join(backupRoot, rel);
-    const existsInBackup = await stat(inBackup).then(() => true).catch(() => false);
+    // VERİ-KAYBI önleme (sessiz-fallback denetimi): stat'ı errno'ya göre ayır. ENOENT = backup'ta gerçekten
+    // yok → fix ekledi → silinebilir. BAŞKA hata (EACCES/EIO) = belirsiz → "yok" sanıp SİLMEK veri-kaybı →
+    // güvenli taraf: KORU (dokunma), görünür kıl.
+    let existsInBackup: boolean;
+    try {
+      await stat(inBackup);
+      existsInBackup = true;
+    } catch (statErr) {
+      if ((statErr as { code?: string }).code === "ENOENT") {
+        existsInBackup = false;
+      } else {
+        log.error("fix-snapshot", "stat belirsiz hata — dosya KORUNDU (silinmedi, veri-kaybı önleme)", {
+          inBackup,
+          code: (statErr as { code?: string }).code,
+        });
+        continue;
+      }
+    }
     if (!existsInBackup) {
       // backup'ta yok → fix ekledi → sil (dosya VEYA tüm alt-ağaç).
       await rm(full, { recursive: true, force: true }).catch((err) =>

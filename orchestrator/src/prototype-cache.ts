@@ -392,14 +392,19 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
     // Zengin parmak izi (base + spec'ten dil/framework) — klasör adı tam stack'i taşır.
     const stack = await stackFingerprint(state);
     const destDir = prototypeDir(stack);
-    // Tazele: eski prototipi temizle (stale dosya kalmasın), yeniden yaz.
-    await fs.rm(destDir, { recursive: true, force: true });
+    // ATOMİK yaz (sessiz-fallback/veri-kaybı denetimi): eski kod `rm(destDir)` SONRA copy yapıyordu →
+    // copy ortada başarısız olursa canlı destDir YARIM/BOZUK kalıyordu (sonraki proje bozuk prototip yükler).
+    // Önce tmp'ye TAM yaz, sonra swap → destDir asla yarım kalmaz; tmp-build başarısızsa eski prototip korunur.
+    const tmpDir = `${destDir}.tmp`;
+    await fs.rm(tmpDir, { recursive: true, force: true });
     for (const rel of files) {
       const src = join(state.project_root, rel);
-      const dest = join(destDir, rel);
+      const dest = join(tmpDir, rel);
       await fs.mkdir(join(dest, ".."), { recursive: true });
       await fs.copyFile(src, dest);
     }
+    await fs.rm(destDir, { recursive: true, force: true });
+    await fs.rename(tmpDir, destDir);
     const modules = deriveModules(files); // sayfa/route/API manifest'i → yeni-proje hızlı modül-araması
     const meta: PrototypeMeta = {
       stack,
@@ -427,8 +432,13 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
         : `📦 Prototip iskeleti güncellendi (${stack}, ${files.length} baseline dosyası) — koşu tamamen yeşil olunca TAM proje kaydedilir.`,
     );
   } catch (err) {
-    // Yan-yarar; ana akışı ASLA bozma. Görünür uyarı (sessiz değil) ama non-fatal.
-    log.warn("prototype-cache", "snapshot failed (non-fatal)", err);
+    // Yan-yarar; ana akışı ASLA bozma. AMA GÖRÜNÜR kıl (sessiz-fallback denetimi: log.warn kullanıcıya
+    // görünmez) + yarım tmp'yi temizle (mevcut prototip atomik swap sayesinde zaten korundu).
+    log.error("prototype-cache", "snapshot BAŞARISIZ (non-fatal, atomik → mevcut prototip korundu)", err);
+    emitChatMessage(
+      "system",
+      `⚠️ Golden prototip kaydedilemedi (disk/izin?) — mevcut prototip korundu (atomik swap). Yarım kayıt sonraki koşuda temizlenir. (${String(err).slice(0, 100)})`,
+    );
   }
 }
 
