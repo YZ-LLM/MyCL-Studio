@@ -100,6 +100,12 @@ export interface ApiKeys {
    * API key) veya farklı kotaya bağlayabilir.
    */
   orchestrator?: string;
+  /**
+   * z.ai (GLM) API key — fallback ladder'ın 3. halkası (claude-CLI → claude-API → z.ai).
+   * Anthropic-uyumlu endpoint (api.z.ai/api/anthropic). Opsiyonel — yoksa fallback DEVRE DIŞI,
+   * davranış aynen claude. env: MYCL_API_KEY_ZAI ya da secrets.json api_keys.zai.
+   */
+  zai?: string;
 }
 
 export interface SelectedModels {
@@ -347,6 +353,8 @@ function resolveApiKeys(secrets: SecretsFile): ApiKeys {
   // Orchestrator agent (v15.5) opsiyonel — set edilmezse main key fallback
   // (orchestratorApiKey() helper'ı ile).
   const orchestratorKey = envOrchestrator ?? secrets.api_keys?.orchestrator;
+  // z.ai (GLM) fallback key — opsiyonel; yoksa fallback devre dışı (davranış aynen claude).
+  const zaiKey = process.env.MYCL_API_KEY_ZAI ?? secrets.api_keys?.zai;
   if (!translatorKey || !mainKey) {
     throw new ApiKeyMissingError(
       `API key eksik. Settings → API Keys'ten girin.`,
@@ -357,6 +365,7 @@ function resolveApiKeys(secrets: SecretsFile): ApiKeys {
     main: mainKey,
     ...(relevanceKey ? { relevance: relevanceKey } : {}),
     ...(orchestratorKey ? { orchestrator: orchestratorKey } : {}),
+    ...(zaiKey ? { zai: zaiKey } : {}),
   };
 }
 

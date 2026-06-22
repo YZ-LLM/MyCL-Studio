@@ -139,10 +139,13 @@ function isTransientError(err: unknown): boolean {
  */
 export function makeAnthropicClient(
   apiKey: string,
-  opts?: { timeoutMs?: number; maxRetries?: number; betas?: readonly string[] },
+  opts?: { timeoutMs?: number; maxRetries?: number; betas?: readonly string[]; baseURL?: string },
 ): Anthropic {
   return new Anthropic({
     apiKey,
+    // z.ai (GLM) gibi Anthropic-uyumlu sağlayıcılar: baseURL override → AYNI SDK, AYNI protokol
+    // (tool_use/system/cache_control birebir). Adapter YOK. undefined → Anthropic default endpoint.
+    ...(opts?.baseURL ? { baseURL: opts.baseURL } : {}),
     timeout: opts?.timeoutMs ?? 600_000,
     maxRetries: opts?.maxRetries ?? 3,
     defaultHeaders:
@@ -151,6 +154,12 @@ export function makeAnthropicClient(
         : undefined,
   });
 }
+
+// z.ai (GLM) Anthropic-uyumlu endpoint + model — fallback ladder'ın 3. halkası (claude-CLI →
+// claude-API → z.ai). Env ile override edilebilir (Aşama 2: Settings/per-rol). API key
+// config.api_keys.zai (secrets.json). Anthropic-uyumlu → claude-api.ts OLDUĞU GİBİ reuse.
+export const ZAI_BASE_URL = process.env.MYCL_ZAI_BASE_URL ?? "https://api.z.ai/api/anthropic";
+export const ZAI_MODEL = process.env.MYCL_ZAI_MODEL ?? "glm-4.6";
 
 // Anthropic API "Overloaded" (529) yoğun günlerde sık görülüyor. Phase 6 fix
 // turn'leri uzun + paralel kullanım yüksek → daha sabırlı retry kullanıcı için
@@ -222,6 +231,8 @@ export interface RunTurnOptions {
    * API modunda da merdiven eforu (low→medium→high→xhigh→max) `output_config.effort`'a yansır (CLI paritesi).
    */
   effortOverride?: string;
+  /** Anthropic-uyumlu sağlayıcı endpoint override (z.ai/GLM fallback). undefined → Anthropic. */
+  baseURL?: string;
 }
 
 export interface TurnUsage {
@@ -340,7 +351,8 @@ export function thinkingConfigFor(
  * Tek bir API turunu stream eder. Tool_use yayılırsa caller tool_result
  * yazıp aynı conversation history ile tekrar çağırarak multi-turn devam eder.
  */
-export async function runTurn(
+// Tek-tur (tek sağlayıcı). runTurn (aşağıda) bunu önce claude, gerekirse z.ai ile sarar.
+async function runTurnOnce(
   config: MyclConfig,
   apiKey: string,
   opts: RunTurnOptions,
@@ -352,6 +364,7 @@ export async function runTurn(
     timeoutMs: 600_000,
     maxRetries: 0,
     betas: opts.betas,
+    baseURL: opts.baseURL, // z.ai/GLM fallback → Anthropic-uyumlu endpoint
   });
 
   log.info("claude-api", "runTurn", {
@@ -557,4 +570,38 @@ export async function runTurn(
   // For loop her path'ten ya return ya throw eder; bu satıra ulaşılmaz.
   // TS exhaustive narrow için defensive throw.
   throw new ClaudeApiError("runTurn retry loop exhausted unexpectedly");
+}
+
+/**
+ * Fallback ladder'ın 3. halkası (claude-CLI → claude-API → z.ai). runTurn'ü claude ile dener;
+ * HESAP/ERİŞİM hatası (isApiAccountError: kredi/limit/auth — transient DEĞİL, runTurn onları zaten retry'ladı)
+ * + z.ai key varsa → AYNI turu z.ai (GLM, Anthropic-uyumlu endpoint) ile tekrarlar. GÖRÜNÜR mesaj
+ * (sessiz fallback yasağı). z.ai DE account-error/başka hata verirse YUKARI fırlatır (dürüst hata; sessiz
+ * yutma yok). z.ai turuna Anthropic-spesifik `betas` geçilmez (GLM bilmez). Diğer hatalar → claude'a aittir.
+ */
+export async function runTurn(
+  config: MyclConfig,
+  apiKey: string,
+  opts: RunTurnOptions,
+  onEvent: StreamHandler,
+): Promise<TurnResult> {
+  try {
+    return await runTurnOnce(config, apiKey, opts, onEvent);
+  } catch (err) {
+    const zaiKey = config.api_keys.zai;
+    if (zaiKey && err instanceof ClaudeApiError && isApiAccountError(err.message)) {
+      emitChatMessage(
+        "system",
+        `⚠️ Claude API erişilemedi (kredi/limit) → z.ai (GLM \`${ZAI_MODEL}\`) fallback deneniyor.`,
+      );
+      log.warn("claude-api", "claude API account-error → z.ai fallback", { model: ZAI_MODEL });
+      return await runTurnOnce(
+        config,
+        zaiKey,
+        { ...opts, model: ZAI_MODEL, baseURL: ZAI_BASE_URL, betas: undefined },
+        onEvent,
+      );
+    }
+    throw err;
+  }
 }
