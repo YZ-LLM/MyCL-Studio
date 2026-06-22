@@ -241,15 +241,11 @@ export function Settings({
   const [modelTiersSel, setModelTiersSel] = useState<ModelTiers>(currentModelTiers ?? {});
   const setTier = (tier: keyof ModelTiers, v: string) =>
     setModelTiersSel((prev) => ({ ...prev, [tier]: v || undefined }));
-  const [designWorkflowSel, setDesignWorkflowSel] = useState<DesignWorkflowMode>(
-    currentDesignWorkflow ?? "off",
-  );
-  const [agentTeamsOptInSel, setAgentTeamsOptInSel] = useState<boolean>(
-    currentAgentTeamsOptIn ?? false,
-  );
-  const [multiAgentSelectionSel, setMultiAgentSelectionSel] = useState<boolean>(
-    currentMultiAgentSelection ?? false,
-  );
+  // SABİT (YZLLM 2026-06-22): bu 3 ayar kullanıcı-değiştirilemez (config read-force ezer). Setter YOK +
+  // interaktif kontroller UI'dan kaldırıldı; değer yalnız onSaveModels'a (no-op) geçer. Default'lar = sabit değer.
+  const [designWorkflowSel] = useState<DesignWorkflowMode>(currentDesignWorkflow ?? "create-only");
+  const [agentTeamsOptInSel] = useState<boolean>(currentAgentTeamsOptIn ?? false);
+  const [multiAgentSelectionSel] = useState<boolean>(currentMultiAgentSelection ?? true);
   // v15.14 (F2): prompt cache ömrü (5m/1h).
   const [cacheTtlSel, setCacheTtlSel] = useState<"5m" | "1h">(currentCacheTtl ?? "5m");
 
@@ -510,48 +506,13 @@ export function Settings({
                   <strong> ultracode</strong> = xhigh + dinamik iş akışları; yalnızca Opus 4.7/4.8.
                 </p>
               </div>
-              {/* v15.13: Çok-ajanlı tasarım (deneysel) — Faz 5 tasarım paneli + auto-model katmanları. */}
+              {/* Çok-ajanlı tasarım ayarları SABİTLENDİ (YZLLM 2026-06-22) — UI'dan kaldırıldı. Bu div
+                  iş-seviyesi model katmanlarını da sarar (aşağıda korunur). */}
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-                <label
-                  style={{
-                    fontSize: 11,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    color: "var(--fg-dim)",
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  Çok-ajanlı tasarım (deneysel)
-                </label>
-                <select
-                  value={designWorkflowSel}
-                  onChange={(e) => setDesignWorkflowSel(e.target.value as DesignWorkflowMode)}
-                  style={{ width: "100%" }}
-                >
-                  <option value="off">Tasarım paneli: kapalı</option>
-                  <option value="create-only">Tasarım paneli: yeni proje + kompleks işler (önerilen)</option>
-                  <option value="always">Tasarım paneli: her Faz 5 (her iterasyon)</option>
-                </select>
-                <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "4px 0 0" }}>
-                  Faz 5'te architect/ux/security/data perspektifleri paralel → sentez → tasarım planı (.mycl/design.md).
+                <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "0 0 8px" }}>
+                  ℹ️ Çok-ajanlı tasarım sabitlendi: tasarım paneli <strong>create-only</strong> (yeni proje +
+                  kompleks işler) · Çoklu Ajan Seçimi <strong>açık</strong> · Agent Teams kapalı.
                 </p>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12 }}>
-                  <input
-                    type="checkbox"
-                    checked={agentTeamsOptInSel}
-                    onChange={(e) => setAgentTeamsOptInSel(e.target.checked)}
-                  />
-                  Gerçek çok-ajanlı derinlik: tasarım çatışma-müzakeresi (Agent Teams) + debug hipotez fan-out (abonelik; ek maliyet)
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12 }}>
-                  <input
-                    type="checkbox"
-                    checked={multiAgentSelectionSel}
-                    onChange={(e) => setMultiAgentSelectionSel(e.target.checked)}
-                  />
-                  Çoklu Ajan Seçimi: develop'ta ≥2 bağımsız modülü izole worktree'lerde PARALEL yazdır (hız; kapı + fail-closed)
-                </label>
                 <p
                   style={{
                     fontSize: 11,

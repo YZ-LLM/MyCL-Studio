@@ -591,7 +591,15 @@ export async function loadConfig(): Promise<MyclConfig> {
   return {
     api_keys,
     selected_models,
-    claude_code_flags: { ...DEFAULT_FLAGS, ...(fileConfig.claude_code_flags ?? {}) },
+    claude_code_flags: {
+      ...DEFAULT_FLAGS,
+      ...(fileConfig.claude_code_flags ?? {}),
+      // SABİT (YZLLM 2026-06-22): bu 3 ayar kullanıcı-değiştirilemez (Settings'ten kaldırıldı) → her
+      // config-yüklemede ZORLANIR (kayıtlı değer EZİLİR). create-only tasarım paneli + Çoklu Ajan Seçimi açık.
+      design_workflow: "create-only",
+      agent_teams_optin: false,
+      multi_agent_selection: true,
+    },
     agent_backends: resolveAgentBackends(fileConfig),
     features: { ...DEFAULT_FEATURES, ...(fileConfig.features ?? {}) },
     timeouts_ms: { ...DEFAULT_TIMEOUTS, ...(fileConfig.timeouts_ms ?? {}) },
@@ -737,7 +745,14 @@ export async function persistClaudeCodeFlags(
 /** Mevcut effort'u okur (Settings'te seçili göstermek için). */
 export async function readClaudeCodeFlags(): Promise<ClaudeCodeFlags> {
   const file = await loadConfigFile();
-  return { ...DEFAULT_FLAGS, ...(file.claude_code_flags ?? {}) };
+  return {
+    ...DEFAULT_FLAGS,
+    ...(file.claude_code_flags ?? {}),
+    // SABİT (YZLLM 2026-06-22): kullanıcı-değiştirilemez (Settings'ten kaldırıldı) — kayıtlı değer EZİLİR.
+    design_workflow: "create-only",
+    agent_teams_optin: false,
+    multi_agent_selection: true,
+  };
 }
 
 /**
