@@ -226,8 +226,10 @@ export interface RunTurnOptions {
    * API modunda da merdiven eforu (low→medium→high→xhigh→max) `output_config.effort`'a yansır (CLI paritesi).
    */
   effortOverride?: string;
-  /** Anthropic-uyumlu sağlayıcı endpoint override (z.ai/GLM fallback). undefined → Anthropic. */
+  /** Anthropic-uyumlu sağlayıcı endpoint override (z.ai/GLM). undefined → Anthropic. */
   baseURL?: string;
+  /** Bu tur z.ai/GLM mi (provider=zai). true → betas strip (GLM Anthropic-beta'yı bilmez). */
+  isZai?: boolean;
 }
 
 export interface TurnUsage {
@@ -358,8 +360,11 @@ async function runTurnOnce(
   const client = makeAnthropicClient(apiKey, {
     timeoutMs: 600_000,
     maxRetries: 0,
-    betas: opts.betas,
-    baseURL: opts.baseURL, // z.ai/GLM fallback → Anthropic-uyumlu endpoint
+    // z.ai/GLM Anthropic-beta header'larını (context-1m/prompt-caching vb.) BİLMEZ → strip.
+    // thinking/effort KALIR: GLM'in Deep Think'i (thinking:{type:enabled}+reasoning_effort)
+    // Anthropic'in param şeklini birebir yansıtır → endpoint map'ler.
+    betas: opts.isZai ? undefined : opts.betas,
+    baseURL: opts.baseURL, // z.ai/GLM → Anthropic-uyumlu endpoint
   });
 
   log.info("claude-api", "runTurn", {
@@ -593,7 +598,7 @@ export async function runTurn(
       return await runTurnOnce(
         config,
         zaiKey,
-        { ...opts, model: ZAI_MODEL, baseURL: ZAI_BASE_URL, betas: undefined },
+        { ...opts, model: ZAI_MODEL, baseURL: ZAI_BASE_URL, isZai: true, betas: undefined },
         onEvent,
       );
     }
