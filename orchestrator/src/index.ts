@@ -447,7 +447,11 @@ async function emitVerificationSummary(state: State): Promise<void> {
   let audit: Awaited<ReturnType<typeof readAuditLogTail>>;
   try {
     audit = await readAuditLogTail(state.project_root, 500);
-  } catch {
+  } catch (e) {
+    // Doğrulama özeti için audit okunamadı (sessiz-fallback denetimi): sessiz return → kullanıcı hangi
+    // gate'lerin atlandığını/koştuğunu göremez. Görünür kıl.
+    log.warn("orchestrator", "doğrulama özeti için audit okunamadı", { error: String(e) });
+    emitChatMessage("system", "ℹ️ Doğrulama özeti üretilemedi (audit okunamadı) — hangi gate'lerin atlandığını elle kontrol et.");
     return;
   }
   const since = state.iteration_started_at ?? 0;
@@ -1216,7 +1220,8 @@ async function detectInterruptedPhase1(
     // v15.7 (2026-05-25): tail 300 — son iter-N-start aramak için yeterli;
     // full read büyük projede 5K+ token boşa.
     audit = await readAuditLogTail(state.project_root, 300);
-  } catch {
+  } catch (e) {
+    log.warn("orchestrator", "boot-resume(Faz 1) audit okunamadı — resume tespiti atlandı", { error: String(e) });
     return null;
   }
   // En son iteration-N-start event'ini bul
@@ -1257,7 +1262,8 @@ async function detectInterruptedPhase2To9(
   let audit;
   try {
     audit = await readAuditLogTail(state.project_root, 300);
-  } catch {
+  } catch (e) {
+    log.warn("orchestrator", "boot-resume(Faz 2-9) audit okunamadı — resume tespiti atlandı", { error: String(e) });
     return null;
   }
   // Karar mantığı saf modülde (resume-detection.ts) — orchestrator vitest'te test edilebilir.
@@ -5858,7 +5864,10 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
       const allEvents = await readAuditLog(state.project_root);
       verdict = computeVerdict(eventsSince(allEvents, state.iteration_started_at ?? 0));
     } catch (err) {
-      log.warn("orchestrator", "verdict compute failed (non-blocking)", err);
+      // Pipeline-sonu hüküm (sessiz-fallback denetimi): audit okunamazsa verdict null kalır → özet hükümsüz.
+      // log.warn→log.error + GÖRÜNÜR (kullanıcı gate sonuçlarını elle kontrol etsin).
+      log.error("orchestrator", "pipeline-sonu hüküm (verdict) hesaplanamadı (audit okunamadı)", err);
+      emitChatMessage("system", "⚠️ Pipeline sonu hükmü hesaplanamadı (audit okunamadı) — gate sonuçlarını elle kontrol et.");
     }
     // Token okuma kendi içinde fail-safe — okunamazsa boş döküm (özet yine çıkar).
     let costs: Awaited<ReturnType<typeof readCosts>> = [];

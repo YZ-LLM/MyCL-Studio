@@ -50,8 +50,12 @@ function ensureChromium(): Promise<boolean> {
         timeout: 240_000,
       });
       p.on("close", (code) => res(code === 0));
-      p.on("error", () => res(false));
-    } catch {
+      p.on("error", (e) => {
+        log.warn("guide-shots", "Chromium kurulum süreci hata verdi", { error: String(e) });
+        res(false);
+      });
+    } catch (e) {
+      log.warn("guide-shots", "Chromium kurulum spawn'ı başlatılamadı", { error: String(e) });
       res(false);
     }
   });
@@ -187,7 +191,7 @@ export async function generateGuideShots(state: State): Promise<void> {
       event: "guide-shots-generated",
       caller: "mycl-orchestrator",
       detail: `dir=${SHOTS_DIR_REL}/{tr,en} captured=${captured}/${total}`,
-    }).catch(() => {});
+    }).catch((e) => log.warn("guide-shots", "guide-shots audit yazılamadı", { error: String(e) }));
     emitChatMessage(
       "system",
       `🖼️ Kılavuz ekran görüntüleri güncellendi (TR+EN): \`${SHOTS_DIR_REL}/{tr,en}/\` (${captured}/${total} görüntü).`,

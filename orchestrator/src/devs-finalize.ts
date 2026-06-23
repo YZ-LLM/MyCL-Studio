@@ -156,7 +156,7 @@ export async function finalizeDevsArtifacts(state: State): Promise<FinalizeOutco
     }
 
     // _pending/<ts>/ taşındı → temizle (bir sonraki iterasyon temiz başlasın).
-    await fs.rm(pendingDir, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(pendingDir, { recursive: true, force: true }).catch((e) => log.warn("devs-finalize", "_pending temizliği başarısız (bayat dizin kalabilir)", { error: String(e) }));
     log.info("devs-finalize", "iterasyon artefaktları birimlere taşındı", {
       ts: tsLabel,
       units: allUnitsRef.length,
