@@ -8,10 +8,12 @@ import {
   runInspectorCheckpoint,
   mahkemeRuling,
   buildMahkemeLesson,
+  lessonContradictsRuling,
   type InspectorContext,
   type CheckpointResult,
   type DebateResolution,
 } from "../src/inspector.js";
+import type { Lesson } from "../src/experience-layer.js";
 import type { MyclConfig } from "../src/config.js";
 import type { InterventionSignals } from "../src/inspector-trigger.js";
 
@@ -173,5 +175,23 @@ describe("inspector · buildMahkemeLesson (tecrübe RECORD — mahkeme→ders)",
     const l = buildMahkemeLesson({ signature: "sig", problem: "p", result: flagRes("agree"), ruling: { action: "proceed", convened: true, summary: "s" }, ts: 1 });
     expect(l?.verified).toBe(false);
     expect(l?.principle).toMatch(/GERÇEK/);
+  });
+});
+
+describe("inspector · lessonContradictsRuling (tecrübe RETRACT — yanlış-ders sinyali)", () => {
+  const fp: Lesson = { signature: "s", problem: "p", resolution: "r", principle: "Bu bulgu-deseni FALSE-POSITIVE — ...", verified: true, ts: 1 };
+  const real: Lesson = { signature: "s", problem: "p", resolution: "r", principle: "Bu bulgu-deseni GERÇEK kod sorunu — ...", verified: true, ts: 1 };
+  it("ders=false-positive AMA hüküm=proceed(gerçek) → ZIT (retract)", () => {
+    expect(lessonContradictsRuling(fp, { action: "proceed", convened: true, summary: "x" })).toBe(true);
+  });
+  it("ders=gerçek AMA hüküm=suppress(false-positive) → ZIT (retract)", () => {
+    expect(lessonContradictsRuling(real, { action: "suppress", convened: true, summary: "x" })).toBe(true);
+  });
+  it("ders=false-positive + hüküm=suppress → uyumlu (retract YOK)", () => {
+    expect(lessonContradictsRuling(fp, { action: "suppress", convened: true, summary: "x" })).toBe(false);
+  });
+  it("hüküm escalate / toplanmadı → asla retract (false)", () => {
+    expect(lessonContradictsRuling(real, { action: "escalate", convened: true, summary: "x" })).toBe(false);
+    expect(lessonContradictsRuling(fp, { action: "proceed", convened: false, summary: "x" })).toBe(false);
   });
 });

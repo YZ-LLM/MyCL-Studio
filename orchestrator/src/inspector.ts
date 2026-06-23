@@ -22,7 +22,7 @@ import { runReasoning } from "./llm-reasoning.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { modelForTier } from "./model-catalog.js";
 import { decideIntervention, type InterventionSignals, type InterventionDecision } from "./inspector-trigger.js";
-import { recordLesson, recallLessons, type Lesson } from "./experience-layer.js";
+import { recordLesson, recallLessons, retractLesson, type Lesson } from "./experience-layer.js";
 import type { MyclConfig } from "./config.js";
 import { log } from "./logger.js";
 
@@ -318,6 +318,8 @@ export interface CheckpointResult {
   outcome?: DebateOutcome | InspectorVerdict;
   /** Yüksek-risk konu mu (güvenlik/veri/geri-alınamaz). mahkemeRuling: yüksek-riskte oto-suppress YOK → insana. */
   highStakes?: boolean;
+  /** RECALL'da getirilen dersler (RETRACT için: yeni hüküm bunlara ZIT ise yanlış-ders geri-alınır). */
+  recalledLessons?: Lesson[];
 }
 
 /**
@@ -395,7 +397,8 @@ export async function inspectGateFinding(
     isGateFix: true, // yumuşak sinyal: bir bulgu "düzeltilmek" üzere → false-positive riski
     severity: highStakes ? "high" : "medium",
   };
-  return runInspectorCheckpoint(config, ctx, signals);
+  const result = await runInspectorCheckpoint(config, ctx, signals);
+  return { ...result, recalledLessons: recalled }; // RETRACT için recall'ı sonuca taşı
 }
 
 /** Netleştirme-incelemesi sonucu (mahkeme): orkestratör "emin değilim, insana sorayım" derken
@@ -584,6 +587,15 @@ export function buildMahkemeLesson(opts: {
   };
 }
 
+/** SAF (test-edilebilir): recall edilen ders, yeni mahkeme hükmüne ZIT mı? false-positive ↔ gerçek
+ *  çelişkisi = ders YANLIŞ çıktı (mahkeme kendi taze kanıtıyla aksini buldu) → RETRACT sinyali. */
+export function lessonContradictsRuling(lesson: Lesson, ruling: MahkemeRuling): boolean {
+  if (!ruling.convened || ruling.action === "escalate") return false;
+  const lessonSaidFalsePositive = /FALSE-POSITIVE/.test(lesson.principle);
+  const rulingSaysFalsePositive = ruling.action === "suppress";
+  return lessonSaidFalsePositive !== rulingSaysFalsePositive;
+}
+
 export async function recordMahkemeLesson(opts: {
   signature: string;
   problem: string;
@@ -591,6 +603,12 @@ export async function recordMahkemeLesson(opts: {
   ruling: MahkemeRuling;
   ts: number;
 }): Promise<void> {
+  // RETRACT (zehirlenme önleme, Parça 2): mahkeme TAZE kanıtla, recall edilen bir derse ZIT karar verdiyse
+  // o ders YANLIŞTI → geri-al (yanlış ders bir daha recall edilip yanıltmasın). Fuzzy-recall exact-record'la
+  // örtüşmeyebilir → eski yanlış ders aksi halde kalıcı olurdu; çelişki = en güçlü "yanlış-ders" sinyali.
+  for (const old of opts.result.recalledLessons ?? []) {
+    if (lessonContradictsRuling(old, opts.ruling)) await retractLesson(old.signature);
+  }
   const lesson = buildMahkemeLesson(opts);
   if (lesson) await recordLesson(lesson);
 }
