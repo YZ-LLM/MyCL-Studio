@@ -791,6 +791,9 @@ async function handleOpenProject(path: string): Promise<void> {
   // Yeni proje → güvenlik yakınsama-kırıcı durumunu sıfırla (eski projenin sayacı taşınmasın).
   _securityFindingsPrev = null;
   _securityNoProgress = 0;
+  // Netleştirme-mahkemesi sayacı da sıfırlanmalı (Pillar A): yoksa eski projede CLARIFY_INSPECT_MAX'a
+  // ulaşan sayaç yeni projeye TAŞINIR → yeni projenin ilk gerçek netleştirme sorusu sessizce bastırılır.
+  _clarifyInspectChain = 0;
   // Aktif controller varsa yeni proje açma — state ortasında değişim yasak.
   if (runtime.controller) {
     emitError("active phase running — close current project first", {
