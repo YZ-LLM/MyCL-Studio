@@ -4125,6 +4125,14 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
                 secMahkemeAction = ruling.action === "suppress" ? "escalate" : ruling.action;
                 if (secMahkemeAction === "proceed") secMahkemeGuidance = ruling.summary;
                 emitChatMessage("system", `⚖️ Mahkeme (Faz 13 güvenlik — ${secMahkemeAction}): ${ruling.summary}`);
+                // TECRÜBE-RECORD (Parça 2): EFEKTİF aksiyonla (güvenlik-suppress→escalate=ders yok); proceed=gerçek-bulgu dersi.
+                await recordMahkemeLesson({
+                  signature: `${phaseLabelTR(13, spec)} ${outcome.stderr.slice(0, 100)}`,
+                  problem: outcome.stderr,
+                  result: insp,
+                  ruling: { ...ruling, action: secMahkemeAction },
+                  ts: Date.now(),
+                });
               }
             } catch (e) {
               log.warn("orchestrator", "mahkeme Faz 13 incelemesi hata (yutuldu → proceed)", { error: String(e) });
@@ -4317,6 +4325,14 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               errors: outcome.stderr,
             });
             const ruling = mahkemeRuling(insp);
+            // TECRÜBE-RECORD (Parça 2): bu gate-mahkemesi kararını da derse çevir.
+            await recordMahkemeLesson({
+              signature: `${phaseLabelTR(next, spec)} ${outcome.stderr.slice(0, 100)}`,
+              problem: outcome.stderr,
+              result: insp,
+              ruling,
+              ts: Date.now(),
+            });
             if (ruling.convened) {
               mahkemeAction = ruling.action;
               if (ruling.action === "proceed") mahkemeGuidance = ruling.summary; // B5: gerekçe fix'e taşınır
