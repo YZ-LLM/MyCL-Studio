@@ -23,7 +23,7 @@ import { resolveLlmClient } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
-import { VERIFY_BEFORE_CLAIM } from "./agent-language.js";
+import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES } from "./agent-language.js";
 import { log } from "./logger.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -223,6 +223,8 @@ export function buildErrorAnalysisPrompt(
     "clearly points to corrupted deps. Prefer fixes MyCL can execute over manual ones.",
     "",
     VERIFY_BEFORE_CLAIM, // YZLLM 2026-06-12: kök-neden bir HİPOTEZDIR — doğrulamadan fix uygulama (yanlış-fix önle).
+    "",
+    DECISION_PRINCIPLES, // Parça 3: no-silent-fallback / kuşkuda-fail-closed / correct-by-construction (YZLLM gibi karar).
   ].join("\n");
 }
 

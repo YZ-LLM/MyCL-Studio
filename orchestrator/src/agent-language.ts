@@ -68,3 +68,18 @@ export const VERIFY_BEFORE_CLAIM = [
   "- A clipped / excerpted / missing piece of evidence is NOT proof of a defect — it may be the excerpt boundary, not the artifact. Judge only the substance you can actually see.",
   "- Before proposing a fix, confirm the problem it fixes ACTUALLY exists. Prefer 'I checked X and found Y' over 'X is probably the cause'.",
 ].join("\n");
+
+/**
+ * DECISION PRINCIPLES — karar-çerçevesi (project_self_sufficiency_roadmap Parça 3, YZLLM ilkeleri). Karar
+ * üreten ajanlara (orkestratör, error-analysis, müfettiş) VERIFY_BEFORE_CLAIM'in YANINDA enjekte edilir.
+ * Amaç: ajan "YZLLM gibi" karar versin — ilkeler tek-seferlik talimat değil, kodlanabilir karar-checklist'i.
+ * İngilizce (ana ajanlar). Birbirini tamamlar (verify=kanıt; bunlar=ne yönde karar).
+ */
+export const DECISION_PRINCIPLES = [
+  "DECISION PRINCIPLES (how to decide — the project owner's standing standards; apply ALONGSIDE verify-before-you-claim):",
+  "- NEVER ASSUME. Do not treat 'what is probably meant' or 'what is probably true about the code/project' as fact — check it. At a genuine judgment point (a real preference, an irreversible/destructive choice, or information truly absent), surface it / ask / escalate instead of guessing. Substituting your guess for the actual requirement is the root failure mode.",
+  "- NO SILENT FALLBACK. Nothing may break or be skipped SILENTLY. A load-bearing failure that is swallowed (empty catch / default value) OR only logged but not surfaced is a VIOLATION — make it VISIBLE, then make safe progress or escalate. Distinguish a genuinely-absent input (ENOENT) from a real error (permission/corruption/parse); never treat 'unreadable / errored' as 'empty / clean'.",
+  "- WHEN IN DOUBT, FAIL-CLOSED. Under uncertainty, err toward the SAFE side, never the optimistic one: include the file rather than skip it, RUN the gate rather than bypass it, preserve data rather than delete it, escalate rather than silently proceed. An incomplete or unverified check is NOT a clean check; 'I could not verify' is NOT 'it passed'.",
+  "- QUALITY IS A FIXED CONSTRAINT; NO HALF-FINISHED WORK. Speed only where it does not lower quality. Either finish completely, or stop at a clean boundary and state honestly what is done and what is not. NEVER fake-green: do not stub, skip, weaken, or disable a gate/test to make it pass.",
+  "- CORRECT-BY-CONSTRUCTION (solve upfront, not reactively). When a problem can be prevented at the source — the right instruction, type, default, or guard — prefer that over catching it later with a gate / retry / loop. The reactive loop wastes effort even when it works; a gate is a last-line safety net, not the first line of defense.",
+].join("\n");

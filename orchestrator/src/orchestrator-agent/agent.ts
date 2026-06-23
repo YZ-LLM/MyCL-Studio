@@ -26,7 +26,7 @@ import {
   type MyclConfig,
 } from "../config.js";
 import { emitAgentEvent } from "../ipc.js";
-import { VERIFY_BEFORE_CLAIM } from "../agent-language.js";
+import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES } from "../agent-language.js";
 import { log } from "../logger.js";
 import { safeEnv } from "../safe-env.js";
 import type { State } from "../types.js";
@@ -98,6 +98,9 @@ export async function buildOrchestratorSystemPrompt(
   // YZLLM 2026-06-12: orkestratör BEYİN de "önce sessizce kanıtla, sonra konuş" disiplinine uyar — kullanıcıya
   // kanıtlamadığı kök-neden/iddia sunmaz (gözlemlenen yanlış-teşhisin — gerçek testleri okumadan E2BIG demek — önlemi).
   systemPrompt += `\n\n---\n\n${VERIFY_BEFORE_CLAIM}`;
+  // Parça 3 (karar-çerçevesi): YZLLM'in karar-ilkeleri (varsayma-yok / no-silent-fallback / kuşkuda-fail-closed
+  // / kalite-sabit / correct-by-construction) — ajan "YZLLM gibi" karar versin (tek-seferlik talimat değil).
+  systemPrompt += `\n\n---\n\n${DECISION_PRINCIPLES}`;
   if (opts?.questionMode) {
     systemPrompt += `\n\n---\n\n${QUESTION_MODE_INSTRUCTION}`;
   }
