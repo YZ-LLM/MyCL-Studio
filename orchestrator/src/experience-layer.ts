@@ -23,6 +23,9 @@ export interface Lesson {
   principle: string;
   /** Düşman-doğrulanmış mı (güçlü) yoksa zayıf-öneri mi. */
   verified: boolean;
+  /** Bulgu false-positive mi (suppress) yoksa gerçek mi (proceed). RETRACT-çelişki mantığı bunu kullanır —
+   *  principle metnine bağlı kırılgan regex YERİNE açık alan (Sonnet müfettiş 2026-06-23 düzeltmesi). */
+  isFalsePositive?: boolean;
   /** Geri-alındı mı (yanlış ders → zehirlenme önleme). */
   retracted?: boolean;
   ts: number;

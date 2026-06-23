@@ -106,9 +106,14 @@ async function removeAddedFiles(dir: string, backupRoot: string, projectRoot: st
   } catch (e) {
     const code = (e as { code?: string }).code;
     if (code && code !== "ENOENT" && code !== "ENOTDIR") {
-      // Dizin VAR ama okunamadı (EACCES/EIO) → bu alt-ağaçtaki fix-eklediği dosyalar SİLİNEMEDİ →
-      // restore EKSİK (sessiz-fallback denetimi). Görünür kıl.
+      // Dizin VAR ama okunamadı (EACCES/EIO) → bu alt-ağaçtaki fix-eklediği dosyalar SİLİNEMEDİ → restore EKSİK.
+      // Sonnet müfettiş düzeltmesi: restoreSnapshot yine true dönüyor → KULLANICIYA görünür uyarı (sessiz-kısmi-restore
+      // değil; "temiz" sanılmasın). (Tam çözüm caller'a partial-flag taşımak; en az: görünür kıl.)
       log.error("fix-snapshot", "removeAddedFiles: dizin okunamadı — restore eksik (eklenen dosyalar kaldı)", { dir, code });
+      emitChatMessage(
+        "system",
+        `⚠️ Geri-alma KISMEN eksik — bir dizin okunamadı (${code}), fix'in eklediği bazı dosyalar silinemedi. Repo tam temiz olmayabilir; elle kontrol et.`,
+      );
     }
     return; // dizin yok/okunamadı → atla
   }

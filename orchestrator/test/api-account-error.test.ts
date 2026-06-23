@@ -42,6 +42,10 @@ describe("isEnvironmentError (YZLLM: escalation yalnız PROJE hatasında)", () =
     expect(isEnvironmentError("Test failed: expected 3 got 5")).toBe(false);
     expect(isEnvironmentError("lint: 'foo' is assigned but never used")).toBe(false);
   });
+  it("çıplak EAGAIN/EPERM proje test-çıktısında → false (Sonnet müfettiş: spawn-context'siz false-positive değil)", () => {
+    expect(isEnvironmentError("test: expected errno to equal 'EAGAIN'")).toBe(false);
+    expect(isEnvironmentError("assert: error.code === 'EPERM' failed")).toBe(false);
+  });
 });
 
 import { isSpawnEnvFailure } from "../src/base/mechanical-runner.js";

@@ -114,7 +114,9 @@ async function runInspectorSdkLoop(
           model: opts.modelId,
           tools: INSPECTOR_TOOLS,
           max_tokens: 8192,
-          effortOverride: opts.effort, // CLI --effort paritesi (max)
+          // CLI tarafında --effort=max iletilir; API/SDK tarafında efor yalnız adaptive-thinking destekleyen
+          // modelde output_config'e yansır (Sonnet 4.6 thinkingConfigFor'da almıyorsa efektif no-op — dürüst not).
+          effortOverride: opts.effort,
           // role VERİLMEZ + noZaiFallback → çapraz-aile Claude korunur (z.ai'ye yönlenmez VE account-error'da
           // z.ai'ye düşmez → erişilemezse fail-closed escalate; default z.ai key'i olan kullanıcıda bile güvenli).
           noZaiFallback: true,
@@ -127,7 +129,14 @@ async function runInspectorSdkLoop(
     messages.push({ role: "assistant", content: r.assistantContent });
     const turnText = extractText(r.assistantContent);
     if (turnText) lastText = turnText;
-    if (r.toolUses.length === 0) return { ok: true, text: lastText }; // model durdu → verdict hazır
+    if (r.toolUses.length === 0) {
+      // Sonnet müfettiş düzeltmesi: max_tokens'da kesilirse verdict TRUNCATE olabilir → görünür kıl
+      // (parseVerdict yine null'da fail-closed escalate eder ama truncate sinyali log'da kaybolmasın).
+      if (r.stop_reason === "max_tokens") {
+        log.warn("inspector", "SDK turu max_tokens'da kesildi — verdict truncate olabilir (kısmi metin)", { turn });
+      }
+      return { ok: true, text: lastText }; // model durdu → verdict hazır
+    }
     const toolResults: Anthropic.MessageParam["content"] = [];
     for (const tu of r.toolUses) {
       const result = await executeTool(tu.name, tu.input as Record<string, unknown>, ctx).catch((e) => ({
@@ -704,6 +713,7 @@ export function buildMahkemeLesson(opts: {
     resolution: opts.ruling.summary.slice(0, 500),
     principle,
     verified: debated,
+    isFalsePositive: opts.ruling.action === "suppress", // açık alan (principle-regex kırılganlığı yerine)
     ts: opts.ts,
   };
 }
@@ -712,7 +722,8 @@ export function buildMahkemeLesson(opts: {
  *  çelişkisi = ders YANLIŞ çıktı (mahkeme kendi taze kanıtıyla aksini buldu) → RETRACT sinyali. */
 export function lessonContradictsRuling(lesson: Lesson, ruling: MahkemeRuling): boolean {
   if (!ruling.convened || ruling.action === "escalate") return false;
-  const lessonSaidFalsePositive = /FALSE-POSITIVE/.test(lesson.principle);
+  // Açık alan (Sonnet müfettiş düzeltmesi); eski derslerde alan yoksa principle-regex'e düş (backward-compat).
+  const lessonSaidFalsePositive = lesson.isFalsePositive ?? /FALSE-POSITIVE/.test(lesson.principle);
   const rulingSaysFalsePositive = ruling.action === "suppress";
   return lessonSaidFalsePositive !== rulingSaysFalsePositive;
 }

@@ -632,10 +632,16 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
           caller: "mycl-orchestrator",
           detail: ruling.summary.slice(0, 400),
         }).catch(() => {});
+        // Sonnet müfettiş düzeltmesi: suppress (false-positive KANITLANDI) ile escalate (KUŞKULU/çözülmedi)
+        // davranışı aynı (oto-modda kabul-devam, frozen-goal) AMA ANLAMI farklı → mesajı ayrıştır (kullanıcı
+        // suppress'i "kanıtlı geçti", escalate'i "kuşkulu, sonra incele" olarak görsün; yanlış sinyal verme).
         emitChatMessage(
           "system",
-          `⚖️ Mahkeme (${ruling.action}): oto-modda akış BLOKLANMAZ — Faz ${n} bulgusu RAPORA yazıldı, çalışan ` +
-            `kod riske atılmadan kabul-devam edildi (sonra inceleyebilirsin).\n${ruling.summary}`,
+          ruling.action === "suppress"
+            ? `⚖️ Mahkeme (suppress): Faz ${n} bulgusu FALSE-POSITIVE kanıtlandı (iki bağımsız değerlendirme kanıtla ` +
+                `hemfikir) — oto-fix yapılmadı, geçti sayıldı.\n${ruling.summary}`
+            : `⚖️ Mahkeme (escalate): Faz ${n} bulgusu KUŞKULU/çözülmedi — oto-modda akış bloklanmadı (sessiz-stall ` +
+                `önleme), RAPORA yazıldı, çalışan kod riske atılmadı; sonra incele.\n${ruling.summary}`,
         );
         await advanceToNextPhase(n);
         return;
