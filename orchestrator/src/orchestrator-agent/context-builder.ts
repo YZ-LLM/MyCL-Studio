@@ -171,8 +171,14 @@ export async function buildAgentContext(
   // Doğru-karar/recall (2026-06-04): proje 10→15, genel 5→8, ADR 3→8. Daha derin
   // "ne yapmıştık / neden böyle karar vermiştik" bağlamı (limitler defansif kalır).
   const [projectMemory, generalMemory] = await Promise.all([
-    readProjectMemory(state.project_root, 15).catch(() => []),
-    readGeneralMemory(8, state.stack).catch(() => []),
+    readProjectMemory(state.project_root, 15).catch((e) => {
+      log.error("context-builder", "proje-belleği okunamadı (gerçek hata, ENOENT değil)", { error: String(e) });
+      return [];
+    }),
+    readGeneralMemory(8, state.stack).catch((e) => {
+      log.error("context-builder", "genel-bellek okunamadı (gerçek hata)", { error: String(e) });
+      return [];
+    }),
   ]);
   // errno NOT (sessiz-fallback denetimi): readDecisions/Handoffs/Wtf ENOENT'i (dosya yok) upstream'de
   // [] yapar → buradaki catch yalnız GERÇEK hatayı (bozulma/parse) yakalar. Sessiz [] orkestratörün
@@ -201,7 +207,10 @@ export async function buildAgentContext(
   ).slice(-6);
   // v15.11: features.md başlık-indeksi (ucuz; full body değil — token bütçesi).
   const featureHeadings = (
-    await extractFeatureChunks(state.project_root).catch(() => [])
+    await extractFeatureChunks(state.project_root).catch((e) => {
+      log.error("context-builder", "features.md başlık-indeksi okunamadı (gerçek hata)", { error: String(e) });
+      return [];
+    })
   )
     .map((c) => c.metadata.heading)
     .filter((h): h is string => typeof h === "string");
@@ -426,7 +435,10 @@ export async function buildAgentSystemPrompt(
       : Promise.resolve(""),
     // YZLLM 2026-06-10: beyin (orkestratör) projenin temel gerçeklerini (dil JS/TS, framework) BİLSİN —
     // körüne karar vermesin. "Proje bilgisini cömertçe ver → daha iyi yanıt."
-    buildProjectFacts(state.project_root).catch(() => null),
+    buildProjectFacts(state.project_root).catch((e) => {
+      log.error("context-builder", "proje-gerçekleri (dil/framework/paket) kurulamadı — bağlam EKSİK", { error: String(e) });
+      return null;
+    }),
   ]);
   const askqSection = renderActiveAskqSection(getActiveAskq());
   const convSection = renderConversationSection(conv);

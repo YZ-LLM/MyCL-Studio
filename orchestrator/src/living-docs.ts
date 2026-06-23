@@ -68,7 +68,12 @@ async function readDocSafe(projectRoot: string, rel: string): Promise<string> {
   try {
     const c = await fs.readFile(join(projectRoot, rel), "utf-8");
     return c.trim() || SENTINEL_EMPTY;
-  } catch {
+  } catch (e) {
+    // errno-AYRIMI (sessiz-fallback denetimi): ENOENT = doküman gerçekten yok (SENTINEL_EMPTY meşru). Diğer hata
+    // (EACCES/EIO/bozulma) = var ama okunamadı → "boş" sanıp üstüne ince doküman yazmak içerik-kaybı. Görünür.
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.error("living-docs", "doküman okunamadı (var ama erişilemez) — SENTINEL_EMPTY döndü, üstüne yazma riski", { rel, code: (e as { code?: string }).code });
+    }
     return SENTINEL_EMPTY;
   }
 }

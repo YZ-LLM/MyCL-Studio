@@ -45,7 +45,11 @@ async function hasPlaywrightDep(projectRoot: string): Promise<boolean> {
       "utf-8",
     );
     return /@playwright\/test/.test(pkg);
-  } catch {
+  } catch (e) {
+    // ENOENT = package.json yok (meşru → false). Diğer hata (EACCES/EISDIR) = var ama okunamadı → görünür kıl.
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.warn("phase-0-ui-probe", "package.json okunamadı (var ama erişilemez) — Playwright bağımlılığı doğrulanamadı", { code: (e as { code?: string }).code });
+    }
     return false;
   }
 }

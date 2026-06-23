@@ -146,7 +146,13 @@ export async function runVisualDesignAgent(
 
   // 2) git baseline: Faz 5 codegen değişikliklerini stage'le → ajan SONRASI working-tree değişikliği = SADECE
   //    görsel ajanın dokunduğu dosyalar (izolasyon). git yoksa diff-verify atlanır; prompt + CSP-scan yine korur.
-  const hasGit = await fs.stat(join(root, ".git")).then(() => true).catch(() => false);
+  const hasGit = await fs.stat(join(root, ".git")).then(() => true).catch((e) => {
+    // ENOENT = git yok (meşru). Diğer hata (EACCES/EIO) → görünür kıl (git-tabanlı stil-dışı/CSP revert güvenliği etkilenir).
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.warn("visual-design", ".git stat hatası (var ama erişilemez) — git-tabanlı revert güvenliği belirsiz", { code: (e as { code?: string }).code });
+    }
+    return false;
+  });
   if (hasGit) await git(root, ["add", "-A"]);
 
   const { modelId, effort } = escalatedModelEffort(state, config, "ui-codegen");

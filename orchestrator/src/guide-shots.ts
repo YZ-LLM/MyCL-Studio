@@ -106,8 +106,12 @@ export async function generateGuideShots(state: State): Promise<void> {
       routes = Array.isArray(hp)
         ? [...new Set(hp.map((p) => (p as { route?: unknown })?.route).filter((r): r is string => typeof r === "string"))]
         : [];
-    } catch {
-      return; // help-pages.json yok → no-op
+    } catch (e) {
+      // errno-AYRIMI: ENOENT = help-pages.json yok (meşru no-op). Parse-hatası/EACCES = bozuk/erişilemez → görünür kıl.
+      if ((e as { code?: string }).code !== "ENOENT") {
+        log.warn("guide-shots", "help-pages.json okunamadı/parse edilemedi (bozuk?) — kılavuz çekimi atlandı", { error: String(e) });
+      }
+      return;
     }
     if (routes.length === 0) return;
     const port = await detectLivePort();
@@ -119,7 +123,14 @@ export async function generateGuideShots(state: State): Promise<void> {
       return;
     }
     browser = await launchChromium();
-    if (!browser) return;
+    if (!browser) {
+      // Load-bearing skip (sessiz-fallback denetimi): kılavuz çekimi atlanıyor → kullanıcı NEDEN bilmeli.
+      emitChatMessage(
+        "system",
+        "ℹ️ Kılavuz ekran görüntüleri alınamadı — Chromium kurulamadı/başlatılamadı (sahte-yeşil yok). Sonraki tazelemede denenir.",
+      );
+      return;
+    }
     // YZLLM 2026-06-20: ÇİFT DİLLİ çekim — her dil için ayrı context (locale → app
     // navigator.language'ı algılar) + `?lang=<code>` deterministik override (şablon
     // bunu zorunlu kılar). Çıktı guide-shots/<lang>/<route>.png; "?" popup kullanıcının
