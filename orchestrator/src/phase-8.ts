@@ -739,7 +739,7 @@ export class Phase8Controller {
             event: "repro-static-only-exempt",
             caller: "mycl-orchestrator",
             detail: "tip-only/ölü-kod değişiklik — runtime red→green imkansız; suite-green regresyon guard'ı kalır",
-          }).catch(() => {});
+          }).catch((e) => log.error("phase-8", "repro-static-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
         }
       } catch {
         /* belirsizse reproRequired aynı kalır (güvenli taraf) */
@@ -763,7 +763,7 @@ export class Phase8Controller {
         event: "repro-test-only-exempt",
         caller: "mycl-orchestrator",
         detail: "yalnız test/non-prod dosya değişti — düzeltilecek prod bug yok; suite-green+AC-coverage guard kalır",
-      }).catch(() => {});
+      }).catch((e) => log.error("phase-8", "repro-test-only-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     }
     // GÖREV-SINIFI #3 (YZLLM 2026-06-21, Vestel canlı): fix YALNIZ build/test-tooling CONFIG (+ test/
     // kozmetik) dosyası değiştirdiyse — playwright.config.ts'e testMatch eklemek gibi — bu bir test-toplama/
@@ -786,7 +786,7 @@ export class Phase8Controller {
         event: "repro-config-only-exempt",
         caller: "mycl-orchestrator",
         detail: "yalnız build/test-config dosyası değişti — prod kod-yolu bug'ı yok; suite-green+AC-coverage guard kalır",
-      }).catch(() => {});
+      }).catch((e) => log.error("phase-8", "repro-config-only-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     }
     const reproOk = !reproRequired || hasReproRedThenGreen(p9);
     if (tddOk && debtOk && finalSuiteRun && reproOk && acCoverageOk) {

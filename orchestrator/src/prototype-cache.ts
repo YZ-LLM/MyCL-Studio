@@ -423,7 +423,7 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
       event: "prototype-cache-saved",
       caller: "mycl-orchestrator",
       detail: `stack=${stack} files=${files.length}`,
-    }).catch(() => {});
+    }).catch((e) => log.error("prototype-cache", "prototype-cache-saved audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     const modNote = modules.length > 0 ? ` · ${modules.length} modül (${modules.slice(0, 4).map((m) => m.name).join(", ")}${modules.length > 4 ? "…" : ""})` : "";
     emitChatMessage(
       "system",
@@ -491,7 +491,7 @@ export async function applyPrototype(state: State): Promise<boolean> {
       event: "prototype-cache-applied",
       caller: "mycl-orchestrator",
       detail: `stack=${stack}`,
-    }).catch(() => {});
+    }).catch((e) => log.error("prototype-cache", "prototype-cache-applied audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     emitChatMessage(
       "system",
       `📦 ${stack} golden prototipi uygulandı — ana ajan sıfırdan değil, doğrulanmış prototip üzerine geliştirecek.${staleNote}${moduleNote}`,

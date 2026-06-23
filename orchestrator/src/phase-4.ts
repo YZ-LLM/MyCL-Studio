@@ -364,7 +364,10 @@ export class Phase4Controller {
             : "",
         });
       } catch (err) {
-        log.warn("phase-4", "decision record write failed (non-blocking)", err);
+        // ADR karar-kaydı (sessiz-fallback denetimi): spec başlık/kapsam/risk → müfettiş/orkestratör
+        // trajectory'sini besler. Sessiz log.warn → bağlam-kaybı (tekrarlayan = disk/izin). log.error + görünür.
+        log.error("phase-4", "spec karar-kaydı (ADR) yazılamadı — orkestratör belleği eksik kalabilir", err);
+        emitChatMessage("system", "⚠️ Faz 4: spec karar-kaydı yazılamadı (disk/izin?) — orkestratör belleği eksik kalabilir.");
       }
       this.statePatch = {
         spec_approved: true,

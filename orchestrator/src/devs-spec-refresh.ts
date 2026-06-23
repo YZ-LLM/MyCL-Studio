@@ -206,7 +206,7 @@ export async function refreshDevsSpecs(
       event: "devs-spec-refresh",
       caller: "mycl-bridge",
       detail: `root + ${pageCount} page-spec`,
-    }).catch(() => {});
+    }).catch((e) => log.error("devs-spec-refresh", "devs-spec-refresh audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     emitChatMessage(
       "system",
       `📝 Proje spec'i tazelendi (.mycl/spec.md)${pageCount ? ` + ${pageCount} sayfa-spec'i` : ""}.`,

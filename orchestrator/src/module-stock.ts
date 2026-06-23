@@ -213,7 +213,7 @@ export async function extractModule(state: State, descriptor: ModuleDescriptor):
       event: "module-extracted",
       caller: "mycl-orchestrator",
       detail: `token=${token} files=${copied.length}`,
-    }).catch(() => {});
+    }).catch((e) => log.error("module-stock", "module-extracted audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     emitChatMessage(
       "system",
       `📦 '${descriptor.name}' modülü stoklandı (${copied.length} dosya) — yeni projede yeniden kullanılabilir.`,
@@ -273,7 +273,7 @@ export async function extractStockedModules(state: State, config: MyclConfig): P
         event: "modules-extract-skipped",
         caller: "mycl-orchestrator",
         detail: "no clear reusable module",
-      }).catch(() => {});
+      }).catch((e) => log.error("module-stock", "modules-extract-skipped audit yazılamadı", { error: String(e) }));
       return; // net modül yok → sessiz-çöp değil, audit'e yazıldı (spam yok)
     }
     let n = 0;
