@@ -103,10 +103,13 @@ export function isEnvironmentError(text: string): boolean {
   // — bunlar PROJE kodu hatası DEĞİL (kod kurcalayarak çözülmez) ve mechanical-runner.isSpawnEnvFailure bunları
   // zaten tanıyordu ama merkezi text-sınıflandırıcı KAÇIRIYORDU → faz-hatası proje-fix döngüsüne sızıyordu.
   // Yanlış-pozitif riski düşük (errno'lar test-iddiası metninde nadir) + sonuç SESLİ escalate (sessiz stall değil).
-  // Sonnet müfettiş düzeltmesi (2026-06-23): EAGAIN/EPERM çıplak errno olarak proje test-çıktısında da görünebilir
-  // (false-env-pozitif → gerçek bug fix-döngüsü kesilir) → spawn/OS-mesaj BAĞLAMINA çapala. ENOSPC/ENOMEM/EMFILE/
-  // E2BIG/ELOOP unambiguous (test-iddiasında nadir) → çıplak kalır. EACCES/command-not-found mevcut (out-of-scope).
-  return /E2BIG|argument list too long|EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)|spawn \w+ ENOENT|command not found|: not found|EACCES|EPERM[:,]? operation not permitted|spawn \S+ EPERM|ECONNREFUSED|ENOTFOUND|\bENOMEM\b|\bENOSPC\b|\bEMFILE\b|\bENFILE\b|spawn \S+ EAGAIN|\bELOOP\b|out of memory|no space left|too many open files|\[ENV\] (command timed out|spawn failed)/i.test(
+  // EAGAIN/EPERM çıplak errno olarak proje test-çıktısında da görünebilir (false-env-pozitif → gerçek bug fix-döngüsü
+  // kesilir) → spawn/OS-mesaj BAĞLAMINA çapala. AMA iki yön de kapanmalı: spawn-formunda OLMAYAN gerçek ortam-EAGAIN'i
+  // (libuv "EAGAIN: resource temporarily unavailable") de yakala — kaçarsa ortam hatası proje-fix döngüsüne sızar (false-
+  // env-negatif, bu sınıfta DAHA kötü). Bu yüzden kanonik mesaj "resource temporarily unavailable" da ortam sayılır; çıplak
+  // 'EAGAIN' (test-iddiası metni) bu mesajı İÇERMEDİĞİNDEN proje kalır. ENOSPC/ENOMEM/EMFILE/E2BIG/ELOOP unambiguous →
+  // çıplak kalır. EPERM "operation not permitted" ile çapalı (test'teki çıplak 'EPERM' eşleşmez). EACCES/command-not-found mevcut.
+  return /E2BIG|argument list too long|EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)|spawn \w+ ENOENT|command not found|: not found|EACCES|EPERM[:,]? operation not permitted|spawn \S+ EPERM|ECONNREFUSED|ENOTFOUND|\bENOMEM\b|\bENOSPC\b|\bEMFILE\b|\bENFILE\b|spawn \S+ EAGAIN|resource temporarily unavailable|\bELOOP\b|out of memory|no space left|too many open files|\[ENV\] (command timed out|spawn failed)/i.test(
     text,
   );
 }

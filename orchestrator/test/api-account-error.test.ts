@@ -46,6 +46,11 @@ describe("isEnvironmentError (YZLLM: escalation yalnız PROJE hatasında)", () =
     expect(isEnvironmentError("test: expected errno to equal 'EAGAIN'")).toBe(false);
     expect(isEnvironmentError("assert: error.code === 'EPERM' failed")).toBe(false);
   });
+  it("spawn-formu olmayan GERÇEK ortam-EAGAIN → true (kanonik mesaj; false-env-negatif kapatıldı, 2026-06-23)", () => {
+    expect(isEnvironmentError("Error: EAGAIN: resource temporarily unavailable, read")).toBe(true);
+    expect(isEnvironmentError("EAGAIN: resource temporarily unavailable")).toBe(true);
+    expect(isEnvironmentError("posix_spawn: resource temporarily unavailable")).toBe(true);
+  });
 });
 
 import { isSpawnEnvFailure } from "../src/base/mechanical-runner.js";
