@@ -407,7 +407,7 @@ export async function analyzeAndAskError(
       event: "error-analysis",
       caller: "mycl-orchestrator",
       detail: `blocking=${blocking} solutions=${analysis.solutions_tr.length}`,
-    }).catch(() => {});
+    }).catch((e) => log.error("error-analysis", "error-analysis audit yazılamadı (denetim izi eksik)", { error: String(e) }));
 
     return {
       id,

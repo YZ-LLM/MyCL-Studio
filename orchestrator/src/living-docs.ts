@@ -295,7 +295,7 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
         event: "living-docs-update-failed",
         caller: "mycl-bridge",
         detail: detail.slice(0, 200),
-      }).catch(() => {});
+      }).catch((e) => log.error("living-docs", "update-failed audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     };
 
     if (!res.ok) {
@@ -351,7 +351,7 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
       phase: state.current_phase ?? 0,
       event: "living-docs-update",
       caller: "mycl-bridge",
-    }).catch(() => {});
+    }).catch((e) => log.error("living-docs", "update audit yazılamadı (denetim izi eksik)", { error: String(e) }));
     emitChatMessage(
       "system",
       `📚 Proje dökümantasyonu güncellendi (.mycl/features.md${includeUserGuide ? " + user-guide.md" : ""}).`,

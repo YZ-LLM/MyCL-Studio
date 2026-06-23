@@ -246,7 +246,7 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
             ts: Date.now(),
             kind: "claude_stream",
             data: { sub: "retry", text: "no_tool_use_retry", ts: Date.now() },
-          }).catch(() => {});
+          }).catch((e) => log.warn(tag, "retry-marker history yazılamadı", { error: String(e) }));
           continue;
         }
         log.error(tag, "no tool_use after retry — failed");

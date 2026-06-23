@@ -589,7 +589,10 @@ export class Phase5Controller {
     try {
       await ensureViteRuntimeInjection(this.state.project_root);
     } catch (err) {
-      log.warn("phase-5", "vite injection failed (non-fatal)", err);
+      // Load-bearing (sessiz-fallback denetimi): bu enjeksiyon UI çalışma-anı hatalarını yakalar → başarısızsa
+      // runtime hataları sessizce yakalanmayabilir. log.warn→log.error + GÖRÜNÜR (kullanıcı bilsin).
+      log.error("phase-5", "vite runtime-hata yakalama enjekte edilemedi — runtime hataları yakalanmayabilir", err);
+      emitChatMessage("system", "⚠️ UI runtime-hata yakalama enjekte edilemedi — bazı çalışma-anı hataları otomatik yakalanmayabilir.");
     }
     // dev-ortam ≠ proje sorunu: dev server ZATEN çalışıyor mu? Kullanıcı dışarıdan başlatmış olabilir
     // (örn. MyCL 5173'te başlatamadı, kullanıcı 5176'da elle çalıştırdı). Spawn'dan ÖNCE aday + yaygın dev

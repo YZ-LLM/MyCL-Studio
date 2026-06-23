@@ -11,7 +11,7 @@ import type { ProductionBackend } from "./base/production-schema-controller.js";
 import { createProductionSchemaBackend } from "./base/production-schema-cli-backend.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
-import { emitError } from "./ipc.js";
+import { emitError, emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
 import { substitute } from "./template-engine.js";
@@ -319,7 +319,10 @@ export class Phase7Controller {
           : "",
       });
     } catch (err) {
-      log.warn("phase-7", "decision record write failed (non-blocking)", err);
+      // ADR karar-kaydı (DB şeması — müfettiş/orkestratör trajectory'sini besler) → sessiz log.warn yerine
+      // log.error + görünür (phase-3/4 ile tutarlı; tekrarlayan = disk/izin).
+      log.error("phase-7", "DB-şeması karar-kaydı (ADR) yazılamadı — orkestratör belleği eksik kalabilir", err);
+      emitChatMessage("system", "⚠️ Faz 7: DB-şeması karar-kaydı yazılamadı (disk/izin?) — orkestratör belleği eksik kalabilir.");
     }
     log.info("phase-7", "complete");
     return "complete";
