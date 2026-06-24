@@ -4085,6 +4085,40 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // Faz GEÇTİ → iyi ilerlemeyi KİLİTLE: rollback noktasını temizle ki sonraki bir hatanın geri-alması
         // bu başarılı fazı UNDO etmesin (YZLLM: "veri kaybına yol açmayanı tercih ederim").
         disarmRollback();
+        // İkili Soru Bankası tripwire (flag-arkası, YZLLM 2026-06-24): mekanik faz normal-gate'i
+        // GEÇİNCE ek deterministik tripwire koşar (kod-kararlı değişmezler). phase-complete YAZILMADAN
+        // ÖNCE çalışır ki halt'ta faz PARKTA kalsın. Hayır → DUR: bulgu mevcut faz-fail makinesine
+        // (failPhase) route edilir — mahkeme/oto-çözüm/askq-park; tüm gate'lerle tutarlı, yeni
+        // kontrol-akışı icat edilmez. Flag KAPALI (default) → blok hiç koşmaz, flag-off yolu bit-bit
+        // aynı; gate'in KENDİ hatası try/catch ile yutulur (tripwire pipeline'ı asla bozmaz).
+        if (cfg.features.question_bank_enabled && outcome.kind === "pass") {
+          let bg: Awaited<ReturnType<typeof runBankGateLive>> = null;
+          try {
+            bg = await runBankGateLive(state, next);
+          } catch (e) {
+            log.warn("orchestrator", "question-bank tripwire failed (yutuldu, flag-arkası)", e);
+          }
+          if (bg && bg.decision !== "skip_no_bank") {
+            emitChatMessage("system", bg.report);
+            if (bg.decision === "halt_defect" || bg.decision === "halt_infra") {
+              // phase-complete YAZILMADI → faz parkta. Bulguyu faz-fail makinesine route et + döngüden çık.
+              await appendAuditModule(state.project_root, {
+                ts: Date.now(),
+                phase: next,
+                event: `question-bank-${bg.decision}`,
+                caller: "mycl-orchestrator",
+                detail: `coverage=${bg.result?.coverage.pass ?? 0}/${bg.result?.coverage.total ?? 0} stale=${bg.stale.length}`,
+              });
+              const qbHolder: FailReasonHolder = {
+                lastFailReason:
+                  `Faz ${next} ikili-soru tripwire DUR (${bg.decision}).` +
+                  `\n\nThe actual finding (diagnose THIS):\n${bg.report}`,
+              };
+              await failPhase(next, qbHolder);
+              return;
+            }
+          }
+        }
         // Skipped (örn. missing command) akışı kırmaz — phase-N-complete
         // yazılır ki ardışık akış devam etsin. Runner zaten skip event'i
         // (phase-N-skipped) + sade Türkçe mesaj yazmış olur.
@@ -4099,35 +4133,6 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // doğrulandığını dürüstçe ekle (yer tutucu test / giriş yapılmadı).
         if (outcome.kind === "pass" && next === 16) {
           await emitPhase16HonestyNote(state);
-        }
-        // İkili Soru Bankası tripwire (flag-arkası, YZLLM 2026-06-24): mekanik faz GEÇİNCE
-        // ek deterministik tripwire koşar (kod-kararlı değişmezler). Bu İLK-CUT GÖRÜNÜR +
-        // LOUD raporlar/escalate eder ama pipeline KONTROL-AKIŞINI DEĞİŞTİRMEZ (hard-park
-        // enforcement bilinçle ayrı dilim — auto/manuel askq-surfacing emin olunmadan splice yok).
-        // Flag KAPALI (default) → blok hiç koşmaz; try/catch → tripwire hatası pipeline'ı bozmaz.
-        if (cfg.features.question_bank_enabled && outcome.kind === "pass") {
-          try {
-            const bg = await runBankGateLive(state, next);
-            if (bg && bg.decision !== "skip_no_bank") {
-              emitChatMessage("system", bg.report);
-              if (bg.decision === "halt_defect" || bg.decision === "halt_infra") {
-                emitChatMessage(
-                  "system",
-                  `🛑 İkili-soru tripwire DUR önerdi (${bg.decision}) — bulgu yukarıda. Bu ilk-cut ` +
-                    `GÖRÜNÜR raporlar; pipeline'ı henüz park ETMEZ (enforcement sonraki dilim).`,
-                );
-                await appendAuditModule(state.project_root, {
-                  ts: Date.now(),
-                  phase: next,
-                  event: `question-bank-${bg.decision}`,
-                  caller: "mycl-orchestrator",
-                  detail: `coverage=${bg.result?.coverage.pass ?? 0}/${bg.result?.coverage.total ?? 0} stale=${bg.stale.length}`,
-                });
-              }
-            }
-          } catch (e) {
-            log.warn("orchestrator", "question-bank tripwire failed (yutuldu, flag-arkası)", e);
-          }
         }
         cur = next;
         continue;
