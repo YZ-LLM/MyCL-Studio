@@ -201,6 +201,13 @@ export interface FeatureFlags {
    * Türkçe rapor chat'e (kullanıcı gereksiz fazı görüp KENDİ budar). Tek runReasoning çağrısı; varsayılan AÇIK.
    */
   phase_contribution_report?: boolean;
+  /**
+   * İkili Soru Bankası (YZLLM 2026-06-24): kontrol-noktası deterministik TRIPWIRE — kod-kararlı
+   * değişmezleri ikili (Evet=yeşil) sorulara indirger, yanıtı KOD verir. `false` (default): hiçbir
+   * kod yolu değişmez (canlı pipeline bugünküyle bit-bit aynı). `true`: mekanik fazlarda bank-gate
+   * koşar (yük-taşıyan; question-bank/). DENEYSEL, flag-arkası geliştirme.
+   */
+  question_bank_enabled?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -213,6 +220,8 @@ const DEFAULT_FEATURES: FeatureFlags = {
   // ayarlar (DEFAULT_FEATURES spread etmeyenler etkilenmez); gate/fix yollarındaki çağrı flag-arkası.
   inspector_enabled: true,
   phase_contribution_report: true,
+  // İkili Soru Bankası varsayılan KAPALI — yük-taşıyan canlı yol flag-arkası; açılınca mekanik gate koşar.
+  question_bank_enabled: false,
 };
 
 /**

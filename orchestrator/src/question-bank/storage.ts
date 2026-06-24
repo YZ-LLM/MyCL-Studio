@@ -13,18 +13,18 @@ import type { QuestionBank } from "./types.js";
 let tmpCounter = 0;
 
 /**
- * Bankayı atomik yaz: dirname oluştur → temp dosyaya yaz → rename. Okuyucu
- * yalnız tam-yazılmış dosyayı görür.
+ * JSON'u atomik yaz: dirname oluştur → temp dosyaya yaz → rename. Okuyucu yalnız
+ * tam-yazılmış dosyayı görür (parallel-codegen race'inde yarı-yazım okunmaz).
  */
-export async function writeBankAtomic(path: string, bank: QuestionBank): Promise<void> {
+export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.${tmpCounter++}.tmp`;
-  await writeFile(tmp, JSON.stringify(bank, null, 2) + "\n", "utf-8");
+  await writeFile(tmp, JSON.stringify(value, null, 2) + "\n", "utf-8");
   await rename(tmp, path);
 }
 
-/** Bankayı oku. Dosya yoksa null (caller üretime düşer). JSON bozuksa throw. */
-export async function readBank(path: string): Promise<QuestionBank | null> {
+/** JSON oku. Dosya yoksa null. JSON bozuksa throw (sessizce yutma yok). */
+export async function readJson<T>(path: string): Promise<T | null> {
   let raw: string;
   try {
     raw = await readFile(path, "utf-8");
@@ -32,5 +32,15 @@ export async function readBank(path: string): Promise<QuestionBank | null> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
-  return JSON.parse(raw) as QuestionBank;
+  return JSON.parse(raw) as T;
+}
+
+/** Bankayı atomik yaz (writeJsonAtomic'in tipli sarmalı). */
+export function writeBankAtomic(path: string, bank: QuestionBank): Promise<void> {
+  return writeJsonAtomic(path, bank);
+}
+
+/** Bankayı oku. Dosya yoksa null (caller üretime düşer). */
+export function readBank(path: string): Promise<QuestionBank | null> {
+  return readJson<QuestionBank>(path);
 }
