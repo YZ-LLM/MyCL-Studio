@@ -3115,7 +3115,10 @@ async function shouldRunMechanical(
   }
   const lower = spec.toLowerCase();
   if (skip_unless === "has_ui") {
-    return /\b(ui|frontend|görsel|ekran|sayfa|button|web|react|vue|svelte)\b/.test(
+    // 'web' ÇIKARILDI (mahkeme: library/API spec'lerinde "web browsers/environments" geçer → yanlış UI tetiği;
+    // 'web' has_web_target'a ait, has_ui'ye değil). UI-spesifik terimler eklendi — misclassified-api-with-dashboard
+    // gibi gerçek-UI vakalarını yakalar (pozitif-override rolü). Bu sinyal Faz 5'te yalnız POZİTİF (UI var→koş).
+    return /\b(ui|frontend|görsel|ekran|sayfa|button|react|vue|svelte|angular|dashboard|panel|portal|widget|layout|component|screen|chart)\b/.test(
       lower,
     );
   }

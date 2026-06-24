@@ -8,7 +8,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { buildCodebaseSnapshot, isExistingProject } from "../src/phase-1-codebase-probe.js";
+import { buildCodebaseSnapshot, hasDeliverable, isExistingProject } from "../src/phase-1-codebase-probe.js";
 
 describe("phase-1-codebase-probe · buildCodebaseSnapshot", () => {
   let projectRoot: string;
@@ -167,5 +167,50 @@ describe("phase-1-codebase-probe · isExistingProject", () => {
   it("sadece README → false (kaynak/manifest yok)", async () => {
     await writeFile(join(projectRoot, "README.md"), "# x", "utf-8");
     expect(await isExistingProject(projectRoot)).toBe(false);
+  });
+});
+
+describe("phase-1-codebase-probe · hasDeliverable (boş-build sahte-yeşil koruması, 2026-06-24)", () => {
+  let projectRoot: string;
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "mycl-deliv-"));
+  });
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it("BOŞ-BUILD: yalnız .mycl + devs → false (deliverable yok = sahte-yeşil olamaz)", async () => {
+    // Tam olarak canlı olay: Faz 5 atlandı → .mycl/spec.md yazıldı, devs/ var ama HİÇ app dosyası yok.
+    await mkdir(join(projectRoot, ".mycl"), { recursive: true });
+    await writeFile(join(projectRoot, ".mycl", "spec.md"), "# spec", "utf-8");
+    await mkdir(join(projectRoot, "devs"), { recursive: true });
+    expect(await hasDeliverable(projectRoot)).toBe(false);
+    // isExistingProject AYNI projede true döner (.mycl/spec.md'den) → bu yüzden o yetmez, hasDeliverable lazım.
+    expect(await isExistingProject(projectRoot)).toBe(true);
+  });
+
+  it("index.html (tek-dosya app) → true", async () => {
+    await writeFile(join(projectRoot, "index.html"), "<!doctype html>", "utf-8");
+    expect(await hasDeliverable(projectRoot)).toBe(true);
+  });
+
+  it("src/ veya package.json → true", async () => {
+    await mkdir(join(projectRoot, "src"), { recursive: true });
+    expect(await hasDeliverable(projectRoot)).toBe(true);
+  });
+
+  it("yalnız node_modules → false (türetilen, deliverable değil)", async () => {
+    await mkdir(join(projectRoot, "node_modules", "x"), { recursive: true });
+    expect(await hasDeliverable(projectRoot)).toBe(false);
+  });
+
+  it("yalnız nokta-dosya (.gitignore) → false (app değil)", async () => {
+    await writeFile(join(projectRoot, ".gitignore"), "node_modules\n", "utf-8");
+    expect(await hasDeliverable(projectRoot)).toBe(false);
+  });
+
+  it("dist/ → true (mahkeme fix: dist artık gerçek deliverable sayılır, false-fail yok)", async () => {
+    await mkdir(join(projectRoot, "dist"), { recursive: true });
+    expect(await hasDeliverable(projectRoot)).toBe(true);
   });
 });

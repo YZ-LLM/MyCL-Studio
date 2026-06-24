@@ -403,9 +403,12 @@ export async function isExistingProject(projectRoot: string): Promise<boolean> {
   return false;
 }
 
-// .mycl (MyCL state) + devs (spec çalışma alanı) + türetilen/araç dizinleri = deliverable DEĞİL.
+// .mycl (MyCL state) + devs (spec çalışma alanı) + ASLA-deliverable-olmayan türetilen/cache dizinleri.
+// NOT (mahkeme): dist/build/out BİLEREK ÇIKARILDI — bunlar gerçek bir çıktı/deliverable dizini OLABİLİR
+// (ör. Go `-o out/`, statik `dist/`), blocklist'te false-fail üretirler. Boş-build'de zaten hiçbiri yok
+// (yalnız .mycl+devs) → çıkarmak guard'ı zayıflatmaz, yalnız dist-only gerçek build'i yanlış-FAIL'den korur.
 const NON_DELIVERABLE_TOP = new Set([
-  "devs", "node_modules", "dist", "build", "out", "coverage", "error_folder", ".turbo", ".cache", ".vite",
+  "devs", "node_modules", "coverage", "error_folder", ".turbo", ".cache", ".vite",
 ]);
 
 /**

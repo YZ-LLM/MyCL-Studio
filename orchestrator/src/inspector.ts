@@ -503,7 +503,7 @@ export async function inspectGateFinding(
   // (true→daha çok inceleme); fazla-eşleşme güvenli yön (asimetrik: kaçırmak pahalı, fazla-alarm ucuz).
   const highStakes =
     opts.highStakes ??
-    /güvenlik|security|secret|credential|\bcsp\b|injection|\bauth|\bxss\b|\bcsrf\b|\bssrf\b|\brce\b|sqli|sql injection|\bidor\b|\bxxe\b|\bssti\b|deserial|prototype pollution|traversal|\bcve-|\blfi\b|\brfi\b|command injection|open redirect|vulnerab|exploit|hardcoded|sanitiz|clickjack|\bcors\b|\bjwt\b|şifre|parola/i.test(
+    /güvenlik|security|secret|credential|\bcsp\b|injection|\bauth(entication|orization|n|z)?\b|\bxss\b|\bcsrf\b|\bssrf\b|\brce\b|sqli|sql injection|\bidor\b|\bxxe\b|\bssti\b|deserial|prototype pollution|\btraversal\b|\bcve-|\blfi\b|\brfi\b|command injection|open redirect|vulnerab|\bexploit\b|hardcoded|sanitiz|clickjack|\bcors\b|\bjwt\b|şifre|parola/i.test(
       `${opts.gateLabel} ${opts.errors}`,
     );
   const loop = opts.loop;
