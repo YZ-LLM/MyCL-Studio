@@ -10,6 +10,7 @@
 
 import { aggregateGate, classifyExit } from "./engine.js";
 import {
+  WIDEST_ARTIFACT,
   bankKeyToPath,
   bankKeysFor,
   classifyArtifacts,
@@ -107,6 +108,9 @@ function buildReport(
 /** Bir checkpoint için ikili-soru tripwire'ını koş. */
 export async function runBankGate(input: BankGateInput): Promise<BankGateOutcome> {
   const artifacts = classifyArtifacts(input.profile, input.changedFiles);
+  // Boş kapsam (full-mod / değişen-dosya yok) → en azından en geniş bankayı kontrol et
+  // (under-check'ten kaçın; gate hiç koşmadan atlamasın).
+  if (artifacts.size === 0) artifacts.add(WIDEST_ARTIFACT);
   const keys = bankKeysFor(input.checkpoint, input.stack, artifacts);
   const keysConsidered = keys.map((k) => k.artifact);
 

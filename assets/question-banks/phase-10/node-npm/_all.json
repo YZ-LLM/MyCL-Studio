@@ -1,0 +1,27 @@
+{
+  "key": { "checkpoint": "phase-10", "stack": "node-npm", "artifact": "*" },
+  "version": 1,
+  "questions": [
+    {
+      "id": "package-json-valid-json",
+      "text": "package.json geçerli JSON mü?",
+      "check": {
+        "cmd": "node -e \"JSON.parse(require('fs').readFileSync('package.json','utf8'))\""
+      },
+      "blocking_class": "blocking",
+      "real_to_proxy": "gerçek: package.json ayrıştırılabilir bir manifesttir → proxy: node JSON.parse hata vermeden çalışır (exit 0)",
+      "fixtures": [
+        {
+          "name": "gecerli-package-json",
+          "files": { "package.json": "{ \"name\": \"x\", \"version\": \"1.0.0\" }" },
+          "expect": "PASS"
+        },
+        {
+          "name": "bozuk-package-json",
+          "files": { "package.json": "{ bozuk json" },
+          "expect": "FAIL"
+        }
+      ]
+    }
+  ]
+}

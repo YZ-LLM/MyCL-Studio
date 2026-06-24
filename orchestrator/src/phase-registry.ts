@@ -39,6 +39,16 @@ export function profilePath(name: string): string {
 }
 
 /**
+ * İkili Soru Bankası kökü: `assets/question-banks/<checkpoint>/<stack>/<artifact>.json`.
+ * Banka KEY'i (checkpoint × stack × artefakt) buradan SAF inşa edilir
+ * (question-bank/key.ts bankKeyToPath). Stack-bağımsız, project_type'tan bağımsız.
+ * NOT: .app paketinde resources'a eklenmeli (reference_tauri_bundle_resources).
+ */
+export function questionBanksRoot(): string {
+  return join(ASSETS_ROOT, "question-banks");
+}
+
+/**
  * Güvenlik-baseline gömülü araçları (örn. csp-check.mjs) orchestrator KÖKÜNDE
  * durur (harness.mjs gibi — .mjs, tsc derlemez). Mekanik runner extra_scan'i
  * HEDEF-PROJE cwd'sinde koşar → MUTLAK yol gerekir (aksi halde script bulunamaz).
