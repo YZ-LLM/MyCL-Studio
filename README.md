@@ -60,7 +60,7 @@ ortak controller'a dayanır:
 | 3 | Mühendislik Brifingi | production-schema |
 | 4 | Spec Yazımı | production-schema |
 | 5 | UI Yapımı | codegen |
-| 6 | UI İnceleme | qa-askq |
+| 6 | UI İnceleme (+ WCAG erişilebilirlik salt-raporu) | qa-askq |
 | 7 | Veritabanı Tasarımı | production-schema |
 | 8 | TDD Uygulama | codegen |
 | 9 | Risk İncelemesi | qa-askq |
@@ -131,6 +131,25 @@ entegre eder.
   yüzdesini değerlendirip Türkçe rapor olarak gösterir; düşük-katkılı fazlar
   işaretlenir, kullanıcı gereksizleri kendisi budamaya karar verir (otomatik
   budama yok).
+- **Erişilebilirlik (WCAG) — salt-rapor** — Faz 6 UI incelemesinde, uygulama
+  tarayıcıda açıkken çalışan adrese `axe-core` (WCAG 2.1 A/AA) ile bakılır. Bir
+  **kapı değildir**: hiçbir fazı bloklamaz, otomatik düzeltme döngüsü tetiklemez —
+  bulgular incelemenin yanında bilgi olarak gösterilir (yalnız `critical`/`serious`
+  öne çıkar; karar kullanıcının). Hedef stack'ten bağımsızdır (MyCL'in kendi
+  Playwright + axe'ı URL'e vurur); araç/erişim hatası "taranamadı" diye **görünür**
+  şekilde geçer (sessiz "temiz" yok).
+- **Mimari Karar Kayıtları (ADR)** — MyCL projenin gerçek mimari kararlarını
+  (kimlik doğrulama stratejisi, veri deposu seçimi, güvenlik ödünleşimleri…)
+  `.mycl/decisions/ADR-NNNN-*.md` altında MADR formatında tutar. Kayıtlar gerçek
+  koddan türetilir, numara/tarih içerik değişmedikçe korunur, tarihsel olduğu için
+  silinmez. Kararlar Faz 2 hassasiyet denetimine geri beslenir → ajan önceki kararla
+  çelişmez / gereksiz yeniden-karar vermez.
+- **Linear aynası (opt-in, varsayılan KAPALI)** — istenirse pipeline sonu hükmü
+  (PASS/PARTIAL/FAIL + başarısız kapılar) Linear'a **tek yönlü** yansıtılabilir.
+  Kaynak her zaman yereldir (`.mycl/audit.jsonl`); Linear yalnız aynadır. **Fail-open
+  ve görünür**: Linear hatası pipeline'ı asla durdurmaz, görünür uyarı verip devam eder.
+  `linear_sync_enabled` + `linear_team_id` ayarı ve `LINEAR_API_KEY` ortam değişkeniyle
+  açılır; anahtar yalnız ortamdan okunur (config dosyasına yazılmaz).
 
 ## Golden prototip
 
