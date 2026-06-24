@@ -235,12 +235,29 @@ export async function restartDevServerForPhase7(
 export async function ensureDevServerForReview(
   state: State,
   config: MyclConfig,
-): Promise<{ ok: boolean; alreadyAlive: boolean }> {
+): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number }> {
   const alive =
     state.dev_server_pid !== undefined && isProcessAliveSync(state.dev_server_pid);
-  if (alive) return { ok: true, alreadyAlive: true };
+  if (alive) return { ok: true, alreadyAlive: true, port: deriveDevPort(state) };
   const restart = await restartDevServerSimple(state, config);
-  return { ok: restart.ok, alreadyAlive: false };
+  return { ok: restart.ok, alreadyAlive: false, port: restart.port };
+}
+
+/**
+ * Çalışan dev-server'ın portunu en-iyi-çaba türet (zaten ayakta → handle yok).
+ * Stack komutu + script'lerden beklenen portu; bulunamazsa 5173 (yaygın Vite). Erişilebilirlik
+ * taraması için URL kurmaya yeter; yanlışsa tarama görünür şekilde "taranamadı" der (blocking değil).
+ */
+function deriveDevPort(state: State): number | undefined {
+  try {
+    const stack = detectStack(state.project_root);
+    const scripts = readNodeScripts(state.project_root);
+    const cmd = commandsFor(stack, "run", scripts)[0];
+    if (!cmd) return undefined;
+    return expectedPortsFor(cmd, scripts, state.project_root)[0];
+  } catch {
+    return undefined;
+  }
 }
 
 /**

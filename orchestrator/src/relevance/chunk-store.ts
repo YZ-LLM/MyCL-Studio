@@ -215,6 +215,43 @@ export async function extractUserGuideChunks(
 }
 
 /**
+ * ADR → her `.mycl/decisions/ADR-*.md` dosyası 1 chunk. Mimari kararlar recall'a
+ * girer → Faz 2 grounding'de ajan önceki kararla çelişmez / gereksiz yeniden-karar
+ * vermez. text: başlık + karar + sonuç (ilk 500 char). Dizin yoksa boş array.
+ */
+export async function extractDecisionChunks(
+  projectRoot: string,
+): Promise<Chunk[]> {
+  const dir = join(projectRoot, MYCL_DIR, "decisions");
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  const chunks: Chunk[] = [];
+  for (const name of names.sort()) {
+    if (!name.endsWith(".md") || !name.startsWith("ADR-")) continue;
+    let raw: string;
+    try {
+      raw = await fs.readFile(join(dir, name), "utf-8");
+    } catch {
+      continue;
+    }
+    const title = raw.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? name;
+    const slug = raw.match(/^- Slug:\s*(.+)$/m)?.[1]?.trim() ?? name;
+    chunks.push({
+      id: `decisions-${slug}`,
+      source: "decisions",
+      text: `${title}\n${raw.slice(0, 500)}`,
+      metadata: { heading: title },
+    });
+  }
+  return chunks;
+}
+
+/**
  * Git history → her commit 1 chunk. text: kısa sha + subject + dosya özeti
  * + insert/delete stats. metadata.ts (commit timestamp), metadata.heading
  * (kısa sha, debug için).

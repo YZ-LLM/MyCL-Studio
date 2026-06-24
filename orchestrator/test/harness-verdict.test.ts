@@ -138,4 +138,14 @@ describe("harness-verdict · computeVerdict", () => {
     expect(r.gateFailures.map((g) => g.phase)).toContain(13);
     expect(r.gateFailures[0]!.event).toBe("security-fail");
   });
+
+  it("BOŞ-BUILD: tamamlandı + tüm gate yeşil AMA deliverable yok → FAIL (sahte-yeşil koruması, 2026-06-24)", () => {
+    // Canlı kanıt: Faz 5 yanlış atlandı → app HİÇ kurulmadı → gate'ler yoklukta sahte-geçti → PASS/PARTIAL.
+    expect(computeVerdict(cleanRun(), { deliverableExists: false }).verdict).toBe("FAIL");
+    expect(computeVerdict(cleanRun(), { deliverableExists: false }).exitCode).toBe(1);
+    // deliverable VAR → eski davranış korunur (PASS)
+    expect(computeVerdict(cleanRun(), { deliverableExists: true }).verdict).toBe("PASS");
+    // opts verilmedi (caller kontrol etmedi) → geriye-uyumlu (PASS)
+    expect(computeVerdict(cleanRun()).verdict).toBe("PASS");
+  });
 });

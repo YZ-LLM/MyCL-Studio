@@ -402,3 +402,29 @@ export async function isExistingProject(projectRoot: string): Promise<boolean> {
   }
   return false;
 }
+
+// .mycl (MyCL state) + devs (spec çalışma alanı) + ASLA-deliverable-olmayan türetilen/cache dizinleri.
+// NOT (mahkeme): dist/build/out BİLEREK ÇIKARILDI — bunlar gerçek bir çıktı/deliverable dizini OLABİLİR
+// (ör. Go `-o out/`, statik `dist/`), blocklist'te false-fail üretirler. Boş-build'de zaten hiçbiri yok
+// (yalnız .mycl+devs) → çıkarmak guard'ı zayıflatmaz, yalnız dist-only gerçek build'i yanlış-FAIL'den korur.
+const NON_DELIVERABLE_TOP = new Set([
+  "devs", "node_modules", "coverage", "error_folder", ".turbo", ".cache", ".vite",
+]);
+
+/**
+ * Proje GERÇEK bir deliverable (üretilmiş uygulama/kaynak dosyası) içeriyor mu? `isExistingProject`'ten
+ * FARKLI: o `.mycl/spec.md` (MyCL metadata) varlığında bile true döner → boş-build'i (Faz 5 yanlış atlandı,
+ * hiç kod üretilmedi) "var" sanar. Bu ise YALNIZ gerçek dosyaya bakar: .mycl/devs/türetilen-dizinler DIŞINDA
+ * görünür (nokta-olmayan) bir top-level girdi varsa true. STACK-BAĞIMSIZ (framework/manifest varsaymaz).
+ * Boş-build sahte-yeşil koruması için: deliverable yoksa koşu YEŞİL sayılamaz. Fail-safe: erişim hatası →
+ * TRUE (okunamayan dizinde gerçek build'i yanlışlıkla FAIL etme; guard yalnız BARİZ boş projeyi yakalar).
+ */
+export async function hasDeliverable(projectRoot: string): Promise<boolean> {
+  try {
+    const entries = await fs.readdir(projectRoot, { withFileTypes: true });
+    return entries.some((e) => !e.name.startsWith(".") && !NON_DELIVERABLE_TOP.has(e.name));
+  } catch (e) {
+    log.warn("phase-1-probe", "hasDeliverable: proje kökü okunamadı → true (boş-build guard'ı atlanır)", { error: String(e) });
+    return true;
+  }
+}

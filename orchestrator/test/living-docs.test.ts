@@ -20,6 +20,7 @@ describe("buildLivingDocsPrompt", () => {
       intentSummary: "kategori ekle",
       existingFeatures: "## CRUD",
       existingUserGuide: "## Nasıl",
+      existingDecisions: "(none yet)",
       includeUserGuide: true,
     });
     expect(p).toContain("intent=kategori ekle");
@@ -34,6 +35,7 @@ describe("buildLivingDocsPrompt", () => {
       intentSummary: "",
       existingFeatures: "(none yet)",
       existingUserGuide: "(none yet)",
+      existingDecisions: "(none yet)",
       includeUserGuide: false,
     });
     expect(p).toContain("intent=(no intent recorded)"); // boş intent fallback
@@ -86,6 +88,15 @@ describe("parseLivingDocsBlock", () => {
     const r = parseLivingDocsBlock(`{"kind":"docs","features_md":"## X"}`);
     expect(r!.tech_doc_md).toBe("");
     expect(r!.help_pages).toEqual([]);
+    expect(r!.adr_decisions).toEqual([]);
+  });
+
+  it("adr_decisions parse edilir (geçerli kararlar)", () => {
+    const text = `{"kind":"docs","features_md":"## X","adr_decisions":[{"slug":"auth-strategy","title":"Auth","status":"accepted","context":"c","options":"o","decision":"JWT","consequences":"q"}]}`;
+    const r = parseLivingDocsBlock(text);
+    expect(r!.adr_decisions).toHaveLength(1);
+    expect(r!.adr_decisions[0].slug).toBe("auth-strategy");
+    expect(r!.adr_decisions[0].decision).toBe("JWT");
   });
 });
 

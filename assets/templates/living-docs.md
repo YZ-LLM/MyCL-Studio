@@ -33,12 +33,18 @@ UPDATED, COMPLETE versions of the document(s) below.
 3. {{USER_GUIDE_INSTRUCTION}}
 4. {{TECH_DOC_INSTRUCTION}}
 5. {{HELP_PAGES_INSTRUCTION}}
+6. {{ADR_INSTRUCTION}}
+
+## Existing architecture decisions (ADRs) — keep consistent, do NOT contradict
+---
+{{EXISTING_DECISIONS}}
+---
 
 ## Output — a SINGLE JSON block, nothing else (no prose around it)
 Do NOT write files yourself. Emit EXACTLY one block:
 
 ```json
-{"kind":"docs","features_md":"<full updated features.md>","user_guide_tr_md":"<full Turkish user-guide, or empty string>","user_guide_en_md":"<full English user-guide, or empty string>","tech_doc_md":"<full Turkish technical document for THIS iteration>","help_pages":[{"route":"/path","title_tr":"<task name TR>","title_en":"<task name EN>","body_tr":"<Turkish step-by-step help>","body_en":"<English step-by-step help>"}]}
+{"kind":"docs","features_md":"<full updated features.md>","user_guide_tr_md":"<full Turkish user-guide, or empty string>","user_guide_en_md":"<full English user-guide, or empty string>","tech_doc_md":"<full Turkish technical document for THIS iteration>","help_pages":[{"route":"/path","title_tr":"<task name TR>","title_en":"<task name EN>","body_tr":"<Turkish step-by-step help>","body_en":"<English step-by-step help>"}],"adr_decisions":[{"slug":"auth-strategy","title":"Authentication strategy","status":"accepted","context":"<why needed>","options":"<alternatives>","decision":"<what was chosen>","consequences":"<trade-offs>"}]}
 ```
 
 Rules:

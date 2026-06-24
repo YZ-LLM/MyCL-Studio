@@ -136,6 +136,17 @@ Only flag what the CURRENT request genuinely leaves ambiguous.
 {{EXISTING_FEATURES_DIGEST}}
 ---
 
+## Recorded architecture decisions (ADRs — .mycl/decisions/)
+
+Prior architecture decisions relevant to this request. Do NOT contradict them
+silently or re-open a settled decision without cause; if the current request
+genuinely conflicts with one, flag it as a COMPLIANCE concern (it may supersede
+an ADR — surface that, don't bury it).
+
+---
+{{RELEVANT_DECISIONS}}
+---
+
 ## Previously abandoned intents in this project
 
 If non-empty, the current intent has overlap risk — flag it as a COMPLIANCE

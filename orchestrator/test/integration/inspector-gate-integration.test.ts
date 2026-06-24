@@ -138,4 +138,16 @@ describe("entegrasyon · wiring sinyalleri → tartışma yolu (Aşama 2-4)", ()
     expect(cp.highStakes).toBe(true);
     expect(mahkemeRuling(cp).action).toBe("escalate");
   });
+
+  it("highStakes false-positive YOK: 'author' yüksek-risk sayılmaz (mahkeme: \\bauth → \\bauth(...)\\b fix)", async () => {
+    runTurnMock.mockResolvedValue(verdictTurn("agree"));
+    // '@author' eskiden \bauth ile MATCH → gereksiz highStakes+debate. Artık eşleşmiyor.
+    const cp = await inspectGateFinding(cfg, {
+      projectRoot: myclHome,
+      gateLabel: "Faz 10",
+      errors: "unused import in file // @author John Doe",
+    });
+    expect(cp.highStakes).toBe(false);
+    expect(mahkemeRuling(cp).action).toBe("proceed"); // medium flag yolu → agree → proceed
+  });
 });

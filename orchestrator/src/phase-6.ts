@@ -14,6 +14,7 @@
 // state.current_phase = 6 yapıp STOP eder; bir sonraki user_message router'da
 // Phase 6 context'inde işlenir (classifier currentPhase=6 ile çağrılır).
 
+import { formatA11yReport, runAccessibilityScan } from "./accessibility-scan.js";
 import { appendAudit } from "./audit.js";
 import type { MyclConfig } from "./config.js";
 import { emitChatMessage } from "./ipc.js";
@@ -21,6 +22,30 @@ import { log } from "./logger.js";
 import type { PhaseDeps } from "./phase-deps.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import type { State } from "./types.js";
+
+/**
+ * Erişilebilirlik raporunu kur (SALT-RAPOR; ASLA throw etmez → inceleme akışını bozmaz).
+ * Port bilinmiyorsa yaygın 5173'e düşer (yanlışsa tarama görünür "taranamadı" der). Audit'e yazar.
+ */
+async function buildA11yReport(state: State, port: number | undefined): Promise<string> {
+  try {
+    const url = `http://localhost:${port ?? 5173}`;
+    const result = await runAccessibilityScan(url);
+    await appendAudit(state.project_root, {
+      ts: Date.now(),
+      phase: 6,
+      event: result.ran ? "a11y-scan" : "a11y-scan-skipped",
+      caller: "mycl-orchestrator",
+      detail: result.ran
+        ? `${result.violations.length} violation(s)`
+        : (result.skippedReason ?? "").slice(0, 120),
+    }).catch(() => {});
+    return formatA11yReport(result);
+  } catch (err) {
+    log.warn("phase-6", "erişilebilirlik raporu kurulamadı (non-fatal)", { error: String(err) });
+    return "♿ **Erişilebilirlik (WCAG):** taranamadı (beklenmedik hata; incelemeyi engellemez).";
+  }
+}
 
 export class Phase6Controller {
   public statePatch: Partial<State> = {};
@@ -68,10 +93,16 @@ export class Phase6Controller {
       return "deferred";
     }
 
+    // ♿ Erişilebilirlik (WCAG) SALT-RAPOR — dev-server ayakta, tam da kullanıcının UI'yi incelediği an.
+    // Mahkeme kararı: GATE DEĞİL (false-positive→tıkanma riski) → bilgi olarak incelemeye eklenir, oto-fix yok,
+    // hiçbir şeyi bloklamaz. Hata olursa görünür "taranamadı" (sessiz değil). Bütünüyle best-effort.
+    const a11yReport = await buildA11yReport(this.state, dev.port);
+
     emitChatMessage(
       "system",
       "👀 **Faz 6: UI İncelemesi** — Uygulama tarayıcıda açıldı.\n\n" +
-        "UI'yi inceledikten sonra composer'a yaz:\n" +
+        a11yReport +
+        "\n\nUI'yi inceledikten sonra composer'a yaz:\n" +
         "• Beğendiysen → `tamam` / `devam et` / `onayla` → Faz 7'e geçeriz.\n" +
         "• Değişiklik istiyorsan → ne istediğini doğal cümleyle yaz (örn. _\"butonun rengini koyulaştır\"_) → Faz 5'da uygulanır.\n" +
         "• İptal etmek istiyorsan → `iptal` / `vazgeç` → pipeline durur.",

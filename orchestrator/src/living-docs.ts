@@ -11,6 +11,7 @@
 import { selectEffortForTask } from "./model-catalog.js";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import { type AdrDecision, DECISIONS_DIR_REL, parseAdrDecisions, writeAdrs } from "./adr.js";
 import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
@@ -84,6 +85,7 @@ export function buildLivingDocsPrompt(opts: {
   intentSummary: string;
   existingFeatures: string;
   existingUserGuide: string;
+  existingDecisions: string;
   includeUserGuide: boolean;
 }): string {
   // YZLLM 2026-06-20: kullanım kılavuzu ÇİFT DİLLİ — TR + EN ikisi de üretilir.
@@ -95,10 +97,17 @@ export function buildLivingDocsPrompt(opts: {
   const helpPagesInstruction = opts.includeUserGuide
     ? 'Also produce **help_pages** — a JSON array. For EACH user-guide task emit one object {route, title_tr, title_en, body_tr, body_en}: `route` = the in-app route/path where that task happens (e.g. "/kullanicilar"); `title_tr`/`title_en` = the task name in Turkish/English; `body_tr`/`body_en` = the step-by-step help for that page in Turkish/English (these become the TR/EN tabs of the in-app "?" help popup). Routes MUST be REAL app routes (do NOT invent — they are cross-checked against features).'
     : "No UI → set `help_pages` to [].";
+  // ADR (mimari karar kayıtları): yalnız GERÇEK mimari kararları yakala — uydurma/jenerik
+  // ("X seçildi çünkü iyi") YASAK (mahkeme: içeriksiz ADR tiyatrodur). Mevcut kararlar verilir
+  // ki ajan ÇELİŞMESİN / gereksiz yeniden-karar vermesin; değişen kararı status:superseded ile güncelle.
+  const adrInstruction =
+    "Also produce **adr_decisions** — a JSON array of the project's REAL architecture decisions (auth strategy, data store choice, state management, API style, key security trade-offs, framework/library picks with lasting impact). Each: {slug (stable kebab-case id), title, status (accepted|proposed|superseded|deprecated), context (why the decision was needed), options (alternatives considered), decision (what was chosen), consequences (trade-offs)}. ONLY record decisions actually evidenced in the code/spec — do NOT invent or pad. If a previously-recorded decision changed, re-emit it with the SAME slug and status:superseded + a note. If there are no genuine architecture decisions, set adr_decisions to []. Prose in English (agent-facing, like features.md). The EXISTING decisions are provided below — keep them consistent, do NOT contradict silently.";
   return substitute(opts.tmpl, {
     INTENT_SUMMARY: opts.intentSummary || "(no intent recorded)",
     EXISTING_FEATURES: opts.existingFeatures,
     EXISTING_USER_GUIDE: opts.existingUserGuide,
+    EXISTING_DECISIONS: opts.existingDecisions,
+    ADR_INSTRUCTION: adrInstruction,
     USER_GUIDE_INSTRUCTION: guideInstruction,
     // Her zaman: o iterasyonun TR teknik dökümanı. Bootstrap/ilk-açılışta DERİN tarama (klasör ağacı, her modül/route/endpoint).
     TECH_DOC_INSTRUCTION:
@@ -139,6 +148,7 @@ export function parseLivingDocsBlock(text: string): {
   user_guide_en_md: string;
   tech_doc_md: string;
   help_pages: Array<Omit<HelpPage, "updated_at">>;
+  adr_decisions: AdrDecision[];
 } | null {
   const block = extractKindBlock(text, ["docs"]);
   if (!block) return null;
@@ -155,7 +165,33 @@ export function parseLivingDocsBlock(text: string): {
     user_guide_en_md: str(b.user_guide_en_md),
     tech_doc_md: str(b.tech_doc_md),
     help_pages: parseHelpPages(b.help_pages, extractRoutesFromFeatures(features_md)),
+    adr_decisions: parseAdrDecisions(b.adr_decisions),
   };
+}
+
+/** Mevcut `.mycl/decisions/*.md` içeriğini tek digest'e topla — living-docs ajanına "çelişme" girdisi.
+ *  Dizin yoksa SENTINEL_EMPTY. Token sınırı: dosya başına ilk ~700 char. */
+async function readDecisionsDigest(projectRoot: string): Promise<string> {
+  const dir = join(projectRoot, DECISIONS_DIR_REL);
+  let names: string[];
+  try {
+    names = (await fs.readdir(dir)).filter((n) => n.endsWith(".md") && n.startsWith("ADR-")).sort();
+  } catch (e) {
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.warn("living-docs", "kararlar dizini okunamadı (var ama erişilemez)", { code: (e as { code?: string }).code });
+    }
+    return SENTINEL_EMPTY;
+  }
+  if (names.length === 0) return SENTINEL_EMPTY;
+  const parts: string[] = [];
+  for (const n of names) {
+    try {
+      parts.push((await fs.readFile(join(dir, n), "utf-8")).trim().slice(0, 700));
+    } catch {
+      /* tek dosya okunamadı → atla */
+    }
+  }
+  return parts.length ? parts.join("\n\n---\n\n") : SENTINEL_EMPTY;
 }
 
 function withTrailingNewline(s: string): string {
@@ -262,6 +298,7 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
       existingUserGuide: includeUserGuide
         ? await readDocSafe(state.project_root, USER_GUIDE_REL)
         : SENTINEL_EMPTY,
+      existingDecisions: await readDecisionsDigest(state.project_root),
       includeUserGuide,
     });
 
@@ -350,6 +387,15 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
         JSON.stringify(dated, null, 2) + "\n",
         "utf-8",
       );
+    }
+    // ADR (mimari karar kayıtları): .mycl/decisions/ADR-NNNN-<slug>.md (MADR). Numara+tarih
+    // korunur (içerik değişmediyse); kararlar TARİHSEL → silinmez. Relevance recall (source
+    // "decisions") bunları Faz 2 grounding'e enjekte eder → ajan önceki kararla çelişmez.
+    if (parsed.adr_decisions.length > 0) {
+      const { written } = await writeAdrs(state.project_root, parsed.adr_decisions, stampDate());
+      if (written > 0) {
+        emitChatMessage("system", `🗏 Mimari karar kaydı güncellendi (.mycl/decisions/ — ${written} ADR).`);
+      }
     }
     await appendAudit(state.project_root, {
       ts: Date.now(),

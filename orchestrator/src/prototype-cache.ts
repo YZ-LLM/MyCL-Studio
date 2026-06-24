@@ -23,7 +23,7 @@ import { appendAudit, readAuditLog } from "./audit.js";
 import { computeVerdict, eventsSince } from "./harness-verdict.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
-import { isExistingProject } from "./phase-1-codebase-probe.js";
+import { hasDeliverable, isExistingProject } from "./phase-1-codebase-probe.js";
 import type { State } from "./types.js";
 
 /** Prototip taze sayılma süresi (gün). Aşılırsa apply'da görünür "bayat" uyarısı. */
@@ -382,6 +382,14 @@ export async function snapshotPrototype(state: State, opts?: { force?: boolean }
       const verdict = computeVerdict(eventsSince(events, state.iteration_started_at ?? 0));
       if (!verdict.completed) return; // en azından iterasyon SONUNA ulaşmış olmalı (yarım koşu prototip olmaz)
       green = verdict.verdict === "PASS";
+    }
+
+    // BOŞ-BUILD KORUMASI (2026-06-24): deliverable üretilmemiş projeden prototip KAYDETME — boş/iskelet
+    // baseline sonraki projeleri zehirler (canlı kanıt: Faz 5 atlandı → app yok → yine de "2 baseline dosyası"
+    // kaydedildi). force dahil: manuel snapshot bile boş projeyi baseline yapmamalı.
+    if (!(await hasDeliverable(state.project_root))) {
+      log.warn("prototype-cache", "deliverable yok → prototip kaydedilmedi (boş-build koruması)");
+      return;
     }
 
     const files = green

@@ -68,8 +68,27 @@ export function eventsSince(events: AuditEvent[], iterStart: number): AuditEvent
  * skipped (örn. scope/missing-command) başarısızlık SAYILMAZ.
  * NOT: çapraz-iterasyon carryover'ı önlemek için ÇAĞIRMADAN ÖNCE eventsSince ile süz.
  */
-export function computeVerdict(events: AuditEvent[]): HarnessVerdict {
+export function computeVerdict(
+  events: AuditEvent[],
+  opts?: { deliverableExists?: boolean },
+): HarnessVerdict {
   const completed = events.some((e) => COMPLETE_EVENTS.has(e.event));
+
+  // BOŞ-BUILD SAHTE-YEŞİL KORUMASI (2026-06-24, canlı kanıt): pipeline tamamlandı AMA hiçbir deliverable
+  // üretilmedi (caller hasDeliverable=false geçti — örn. Faz 5 yanlış atlanıp app HİÇ kurulmadı). Gate'ler
+  // yoklukta sahte-geçer → bu en yüksek-öncelik FAIL'dir. (deliverableExists undefined → caller kontrol
+  // etmedi → eski davranış; geriye-uyumlu.)
+  if (completed && opts?.deliverableExists === false) {
+    return {
+      verdict: "FAIL",
+      completed,
+      gateFailures: [],
+      securitySkipped: [],
+      exitCode: 1,
+      summary:
+        "Pipeline tamamlandı AMA hiçbir deliverable/uygulama dosyası üretilmedi — boş build YEŞİL sayılamaz (gate'ler yoklukta sahte-geçti).",
+    };
+  }
 
   const failByPhase = new Map<number, GateFailure>();
   for (const e of events) {

@@ -64,6 +64,29 @@ export async function buildRelevantFeatureDigest(
 }
 
 /**
+ * ADR (.mycl/decisions/) içinden mevcut intent'e en alakalı mimari kararları
+ * markdown digest olarak döndür. Faz 2 `{{RELEVANT_DECISIONS}}` placeholder'ı için —
+ * ajan ÖNCEKİ mimari kararla çelişmez / gereksiz yeniden-karar vermez (ADR'yi
+ * "tiyatro" olmaktan kurtaran OKUYUCU; mahkeme düşman-müfettiş şartı).
+ */
+export async function buildRelevantDecisionsDigest(
+  config: MyclConfig,
+  state: State,
+  intent: string,
+): Promise<string> {
+  const chunks = await getRelevantChunks(config, state, {
+    sources: ["decisions"],
+    intent,
+    max_chunks: 5,
+    min_score: 5,
+  });
+  if (chunks.length === 0) {
+    return "(no recorded architecture decisions yet)";
+  }
+  return chunks.map(formatSpecChunk).join("\n\n");
+}
+
+/**
  * abandoned-intents.jsonl'dan mevcut intent'e en alakalı vazgeçmeleri
  * markdown digest olarak döndür. Faz 2 `{{ABANDONED_INTENTS_DIGEST}}`
  * placeholder'ı bunu kullanır.

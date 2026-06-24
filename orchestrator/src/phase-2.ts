@@ -19,6 +19,7 @@ import {
 } from "./project-type-classifier.js";
 import {
   buildRelevantAbandonedDigest,
+  buildRelevantDecisionsDigest,
   buildRelevantFeatureDigest,
   buildRelevantSpecDigest,
 } from "./relevance/injectors.js";
@@ -174,11 +175,13 @@ export class Phase2Controller {
     // yapar — hata GİZLENMEZ ama compliance pass context'siz devam eder.
     // YZLLM 2026-06-12 (perf): 3 digest BAĞIMSIZ relevance-LLM çağrısı — ardışık beklemek yerine PARALEL (3× hız).
     // Her biri kendi fail-policy'sini taşır (sentinel döner, faz çökmez) → Promise.all güvenli.
-    const [existingSpecDigest, abandonedDigest, featuresDigest] = await Promise.all([
+    const [existingSpecDigest, abandonedDigest, featuresDigest, decisionsDigest] = await Promise.all([
       buildRelevantSpecDigest(this.config, this.state, auditIntent),
       buildRelevantAbandonedDigest(this.config, this.state, auditIntent),
       // v15.11: mevcut özellik dökümantasyonu — ajan gereksiz/kapsam-dışı soru sormasın.
       buildRelevantFeatureDigest(this.config, this.state, auditIntent),
+      // ADR: mevcut mimari kararlar — ajan önceki kararla çelişmesin / gereksiz yeniden-karar vermesin.
+      buildRelevantDecisionsDigest(this.config, this.state, auditIntent),
     ]);
 
     let systemPrompt: string;
@@ -194,6 +197,7 @@ export class Phase2Controller {
         INTENT_SUMMARY: auditIntent,
         EXISTING_SPEC_DIGEST: existingSpecDigest,
         EXISTING_FEATURES_DIGEST: featuresDigest,
+        RELEVANT_DECISIONS: decisionsDigest,
         ABANDONED_INTENTS_DIGEST: abandonedDigest,
         CONVERSATION_CONTEXT: convSection,
       });

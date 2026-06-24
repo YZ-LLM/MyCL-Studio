@@ -19,6 +19,7 @@ import {
   extractAbandonedChunks,
   extractAuditChunks,
   extractBriefChunks,
+  extractDecisionChunks,
   extractFeatureChunks,
   extractGitChunks,
   extractHistoryChunks,
@@ -106,6 +107,7 @@ async function gatherChunks(
   if (sources.has("brief")) tasks.push(extractBriefChunks(projectRoot));
   if (sources.has("features")) tasks.push(extractFeatureChunks(projectRoot));
   if (sources.has("user-guide")) tasks.push(extractUserGuideChunks(projectRoot));
+  if (sources.has("decisions")) tasks.push(extractDecisionChunks(projectRoot));
   if (sources.has("git")) tasks.push(extractGitChunks(projectRoot));
   if (sources.has("history") && typeof options.history_phase === "number") {
     tasks.push(extractHistoryChunks(projectRoot, options.history_phase));
