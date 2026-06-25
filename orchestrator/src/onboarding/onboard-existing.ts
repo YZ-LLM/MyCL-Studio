@@ -20,6 +20,9 @@ import { log } from "../logger.js";
 import { getCachedProjectMap, type ProjectMap } from "./project-map.js";
 import { buildProjectFacts, type ProjectFacts } from "../project-facts.js";
 import { bootstrapLivingDocs } from "../living-docs.js";
+import { randomUUID } from "node:crypto";
+import { appendTask } from "../task-queue/store.js";
+import type { TaskQueueItem } from "../task-queue/types.js";
 
 const PROJECT_MAP_REL = join(".mycl", "project-map.json");
 const ONBOARD_REPORT_REL = join(".mycl", "onboarding-report.md");
@@ -47,6 +50,8 @@ interface GapItem {
   phase: string;
   /** Uygulanırsa yabancı kaynağın nesine dokunulur (risk şeffaflığı). */
   touches: string;
+  /** İŞ LİSTESİNE eklenecek eylem metni (YZLLM: gap'ler oto-kuyruğa eklenip sırayla gate'li pipeline'da yapılır). */
+  task: string;
 }
 
 /** Deterministik tarih damgası (YYYY-AA-GG). */
@@ -91,36 +96,42 @@ export async function buildGapReport(root: string): Promise<GapItem[]> {
         : "ön-değerlendirme: test altyapısı görünmüyor",
       phase: "Faz 8 / 14",
       touches: "test dosyaları + (gerekirse) üretim kodu eklenir",
+      task: "Bu projeye test altyapısı kur ve mevcut kodu testlerle kapsa (MyCL standardı: TDD; varsa eksiği tamamla).",
     },
     {
       standard: "Responsive + karanlık/aydınlık mod",
       status: "iterasyonda doğrulanır",
       phase: "Faz 5 / 6",
       touches: "tema/CSS + bileşenler (mevcut tema ezilebilir → dikkat)",
+      task: "Arayüzü tam responsive (mobil + tablet) ve karanlık/aydınlık mod yap (MyCL standardı; mevcut tasarımı koru, eksiği ekle).",
     },
     {
       standard: "Güvenlik baseline (CSP / secret / SAST)",
       status: "iterasyonda salt-okuma taranır (bulgular rapora girer)",
       phase: "Faz 13",
       touches: "tarama salt-okuma; düzeltme başlık/config + kaynak (onayla)",
+      task: "Güvenlik baseline uygula: CSP/secret/SAST taraması yap ve bulunan açıkları gider (MyCL standardı).",
     },
     {
       standard: "Dijital parmak-izi + giriş-doğrulama (step-up)",
       status: "iterasyonda doğrulanır",
       phase: "Faz 5 / güvenlik",
       touches: "auth middleware + yeni DB tablo + e-posta doğrulama akışı",
+      task: "Her ziyaretçiye dijital parmak-izi + profil/işlem-log + login-mismatch'te e-posta doğrulama (step-up) ekle (MyCL standardı).",
     },
     {
       standard: "Hata-kataloğu route/UI (/api/errors, ErrorBoundary)",
       status: "iterasyonda doğrulanır (DB ilk iterasyonda Faz 0'da kurulur)",
       phase: "Faz 5",
       touches: "API route + ErrorBoundary + 'Hata Kodları' sayfası",
+      task: "Hata-kataloğu altyapısını kur: /api/errors + /api/log-error route'ları, ErrorBoundary ve 'Hata Kodları' sayfası (MyCL standardı).",
     },
     {
       standard: "App-içi '?' kullanım kılavuzu",
       status: "iterasyonda doğrulanır",
       phase: "Faz 17",
       touches: "kılavuz sayfası + public/ ekran-görüntüsü varlıkları",
+      task: "App-içi '?' kullanım kılavuzu ekle (sayfa-bazlı yardım + ekran görüntüleri; MyCL standardı).",
     },
   ];
 }
@@ -168,11 +179,12 @@ ${projectMapLine}
 - \`.mycl/features.md\` + \`.mycl/tech-doc.md\` — ${docsStatus}
 - \`.mycl/onboarding-report.md\` — bu rapor
 
-## 3. MyCL Standartlarına Göre Eksikler (GAP — OTOMATİK UYGULANMADI)
+## 3. MyCL Standartlarına Göre Eksikler (GAP — İŞ LİSTESİNE EKLENDİ, SIRAYLA OTOMATİK YAPILIYOR)
 
-> Aşağıdakiler **kaynak-değiştiren** standartlar. MyCL bunları onboarding'de **uygulamaz** (projeni bozmamak
-> için). Her biri **senin onayınla** normal gate'li iterasyonda (Faz 1→17) yapılır. Durum sütunu bir
-> **ön-değerlendirmedir** — kesin kontrol ilgili fazda olur.
+> Aşağıdaki **kaynak-değiştiren** standartlar **iş listesine eklendi** ve sırayla otomatik yapılıyor — her biri
+> gate'li pipeline'dan (Faz 1→17) geçer (kalite + Faz 6 UI incelemesi korunur). Onboarding'in kendisi kaynağına
+> dokunmadı; eksik-giderme ayrı, GATE'Lİ bir geliştirme işidir. Onay beklenmiyor; istemediğini iş kuyruğundan
+> iptal edebilirsin. Durum sütunu bir **ön-değerlendirmedir** — kesin kontrol ilgili fazda olur.
 
 | Standart | Durum (ön-değerlendirme) | Hangi faz çözer | Uygulanırsa neye dokunur |
 |---|---|---|---|
@@ -180,8 +192,8 @@ ${gapRows}
 
 ## 4. Sıradaki Adım
 
-Bir geliştirme/iyileştirme yaz → proje artık birinci-sınıf MyCL projesi; normal pipeline (Faz 1→17)
-çalışır. Yukarıdaki eksiklerden istediğini tek tek söyle; MyCL onaylı + gate'li olarak ekler.
+Yukarıdaki eksikler iş kuyruğunda sırayla işleniyor. Ek bir geliştirme/iyileştirme istiyorsan yaz → proje artık
+birinci-sınıf MyCL projesi; normal pipeline (Faz 1→17) çalışır.
 `;
 }
 
@@ -189,7 +201,11 @@ Bir geliştirme/iyileştirme yaz → proje artık birinci-sınıf MyCL projesi; 
  * Yabancı projeyi MyCL'e entegre et. handleOpenProject 'foreign' sınıfında + integrate bayrağıyla çağırır.
  * Idempotent: BAŞARI işareti (.mycl/onboarded.json) varsa no-op. Fail-soft + GÖRÜNÜR (her adım yan-yarar; bloklamaz).
  */
-export async function runOnboarding(state: State, config: MyclConfig): Promise<void> {
+export async function runOnboarding(
+  state: State,
+  config: MyclConfig,
+  deps?: { kickQueue?: () => Promise<void> },
+): Promise<void> {
   const root = state.project_root;
   // Idempotent: BAŞARI işareti varsa (önceden GERÇEKTEN okunup onboard edildi) → no-op. Apology/no-access koşusu
   // işaret BIRAKMADIĞI için yeniden dener (rapor-var DEĞİL — rapor apology koşusunda da yazılıyordu, yanlış kapıydı).
@@ -301,10 +317,40 @@ export async function runOnboarding(state: State, config: MyclConfig): Promise<v
     emitChatMessage(
       "system",
       `✅ **${projectName} entegre edildi.** ${map?.available ? map.fileCount + " dosya analiz edildi." : "Yapı tarandı."}${centralTop}\n` +
-        `MyCL meta dosyaları \`.mycl/\` altına kuruldu; **kaynağına dokunulmadı**. ` +
-        `Eksikler (test/güvenlik/responsive vb.) \`.mycl/onboarding-report.md\`'de — otomatik uygulanmadı. ` +
-        `Bir geliştirme yaz, normal pipeline'dan onaylı+gate'li geçer.`,
+        `MyCL meta dosyaları \`.mycl/\` altına kuruldu; **kaynağına dokunulmadı**. Detay: \`.mycl/onboarding-report.md\`.`,
     );
-    emitChatMessage("system", "📄 Onboarding raporu: `.mycl/onboarding-report.md`");
+
+    // 7. GAP'leri İŞ LİSTESİNE ekle + otomatik işle (YZLLM: "teker teker ekle, yapmaya başla, onayımı bekleme").
+    //    Yalnız BAŞARILI onboarding'de (kod okundu). Her task gate'li pipeline'dan (Faz 1→17) geçer → kalite +
+    //    Faz 6 UI-incelemesi korunur; kullanıcı kuyruktan görüp iptal edebilir. source="auto", öncelik 5+
+    //    (manuel iş 1-2 öne geçsin). Onboarding'in non-destructive'liği KORUNUR (onboarding kaynağa dokunmaz);
+    //    eksik-giderme artık ayrı, GATE'Lİ geliştirme işidir (kullanıcı bunu açıkça istedi: onay bekleme).
+    let queued = 0;
+    for (let i = 0; i < gaps.length; i++) {
+      const t: TaskQueueItem = {
+        id: randomUUID(),
+        ts: Date.now(),
+        text: gaps[i].task,
+        priority: 5 + i,
+        status: "pending",
+        source: "auto",
+      };
+      try {
+        await appendTask(root, t);
+        queued++;
+      } catch (e) {
+        log.warn("onboarding", "gap task kuyruğa eklenemedi", e);
+      }
+    }
+    if (queued > 0) {
+      emitChatMessage(
+        "system",
+        `📋 ${queued} MyCL-standart eksiği **iş listesine eklendi**, sırayla otomatik yapılacak — her biri gate'li ` +
+          `pipeline'dan geçer (kuyruktan görüp iptal edebilirsin). Onay beklenmiyor.`,
+      );
+      if (deps?.kickQueue) {
+        await deps.kickQueue().catch((e: unknown) => log.warn("onboarding", "kuyruk tetiklenemedi", e));
+      }
+    }
   }
 }

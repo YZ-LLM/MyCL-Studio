@@ -1150,9 +1150,14 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
       // runOnboarding YALNIZ .mycl/ dosyaları yazar (state.json'a DOKUNMAZ → stale-ref yarışı yok) ve BAŞARI
       // işaretini (.mycl/onboarded.json) yalnız projeyi GERÇEKTEN okuyabildiyse bırakır → no-access koşu işaretsiz
       // kalır, re-open yeniden dener. Aşağıdaki arka-plan bootstrap+map ATLANIR (eş-zamanlı yazım yarışı). Bloklamaz.
-      void runOnboarding(runtime.state, runtime.config).catch((e: unknown) =>
-        log.warn("orchestrator", "onboarding başarısız (non-fatal)", e),
-      );
+      // GAP'leri iş kuyruğuna ekleyip otomatik işle (YZLLM: onay bekleme). kickQueue inject (circular import
+      // önler): onboarding başarılıysa gap-task'ları kuyruğa atar + bunu çağırır → emit + drain başlar.
+      void runOnboarding(runtime.state, runtime.config, {
+        kickQueue: async () => {
+          await emitQueueChangedFor(path);
+          await kickWorkQueue();
+        },
+      }).catch((e: unknown) => log.warn("orchestrator", "onboarding başarısız (non-fatal)", e));
     } else if (wantOnboard && !runtime.config) {
       // KATI #4 (sessiz-skip yok — mahkeme Mercek-C): config yüklenemediyse onboarding başlamaz → GÖRÜNÜR.
       emitChatMessage("system", "ℹ️ Onboarding başlatılamadı — yapılandırma yüklenemedi.");

@@ -29,6 +29,8 @@ describe("onboard-existing · buildGapReport", () => {
       expect(g.phase.length).toBeGreaterThan(0);
       expect(g.touches.length).toBeGreaterThan(0);
       expect(g.status.length).toBeGreaterThan(0);
+      // İş listesine eklenecek eylem metni dolu olmalı (oto-kuyruk; YZLLM "onay bekleme").
+      expect(g.task.length).toBeGreaterThan(0);
     }
   });
 
