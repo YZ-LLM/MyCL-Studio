@@ -8,7 +8,8 @@
 //
 // Akış: derin anla (snapshot + bağımlılık-merkezi + git-arka-plan + dil/framework) → `.mycl/project-map.json`
 //       kalıcılaştır → living-docs (features/tech-doc) → gap-raporu → `.mycl/onboarding-report.md` →
-//       chat özeti → state.onboarded_at damgala (idempotent: re-open'da yeniden tam-tarama yapılmaz).
+//       chat özeti → BAŞARI işareti (.mycl/onboarded.json) — YALNIZ kod okunabildiyse (no-access değil) yazılır;
+//       idempotency buna bakar (apology koşusu işaretsiz → re-open yeniden dener).
 
 import { promises as fs } from "node:fs";
 import { basename, join } from "node:path";
@@ -22,6 +23,20 @@ import { bootstrapLivingDocs } from "../living-docs.js";
 
 const PROJECT_MAP_REL = join(".mycl", "project-map.json");
 const ONBOARD_REPORT_REL = join(".mycl", "onboarding-report.md");
+// BAŞARI işareti: onboarding YALNIZ MyCL projeyi GERÇEKTEN OKUYABİLDİYSE (no-access değil) bunu yazar.
+// Idempotency BUNA bakar (eski onboarded_at DEĞİL): başarısız (apology/no-access) koşu işaret BIRAKMAZ →
+// re-open YENİDEN dener. (cave5: eski dist apology yazıp onboarded_at damgaladı → re-open atlıyordu; bu fix açar.)
+const ONBOARD_MARKER_REL = join(".mycl", "onboarded.json");
+
+/** Onboarding BAŞARIYLA tamamlandı mı (MyCL projeyi okuyabildi mi)? handleOpenProject + runOnboarding idempotency bunu kullanır. */
+export async function onboardingSucceeded(root: string): Promise<boolean> {
+  try {
+    await fs.access(join(root, ONBOARD_MARKER_REL));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Bir MyCL standardı ve onboarding'de NEDEN uygulanmadığı (kaynak-değiştiren → gap). */
 interface GapItem {
@@ -172,19 +187,16 @@ Bir geliştirme/iyileştirme yaz → proje artık birinci-sınıf MyCL projesi; 
 
 /**
  * Yabancı projeyi MyCL'e entegre et. handleOpenProject 'foreign' sınıfında + integrate bayrağıyla çağırır.
- * Idempotent: state.onboarded_at set ise no-op. Fail-soft + GÖRÜNÜR (her adım yan-yarar; ana akışı bloklamaz).
+ * Idempotent: BAŞARI işareti (.mycl/onboarded.json) varsa no-op. Fail-soft + GÖRÜNÜR (her adım yan-yarar; bloklamaz).
  */
 export async function runOnboarding(state: State, config: MyclConfig): Promise<void> {
   const root = state.project_root;
-  // Idempotent (defansif ikinci kapı): rapor zaten varsa önceden onboard edilmiş → no-op. onboarded_at'i
-  // handleOpenProject SENKRON damgalar (state yarışını önlemek için); runOnboarding state'e DOKUNMAZ — yalnız
-  // .mycl/ dosyaları yazar (mahkeme Mercek-B/C: stale-ref save yarışı bu ayrımla kaynağında çözüldü).
-  try {
-    await fs.access(join(root, ONBOARD_REPORT_REL));
-    log.info("onboarding", "rapor zaten var — atlanıyor");
+  // Idempotent: BAŞARI işareti varsa (önceden GERÇEKTEN okunup onboard edildi) → no-op. Apology/no-access koşusu
+  // işaret BIRAKMADIĞI için yeniden dener (rapor-var DEĞİL — rapor apology koşusunda da yazılıyordu, yanlış kapıydı).
+  // runOnboarding state.json'a DOKUNMAZ — yalnız .mycl/ dosyaları yazar (stale-ref yarışı bu ayrımla çözülü).
+  if (await onboardingSucceeded(root)) {
+    log.info("onboarding", "başarı işareti var — atlanıyor");
     return;
-  } catch {
-    // rapor yok → onboarding çalışır
   }
   const projectName = basename(root.replace(/\/+$/, "")) || "proje";
   emitChatMessage(
@@ -273,16 +285,26 @@ export async function runOnboarding(state: State, config: MyclConfig): Promise<v
     .writeFile(join(root, ONBOARD_REPORT_REL), report, "utf-8")
     .catch((e: unknown) => log.warn("onboarding", "onboarding-report.md yazılamadı", e));
 
-  // 6. Chat özeti — kısa, dürüst, non-destructive vurgulu. (Durum: onboarded_at + origin handleOpenProject'te
-  //    SENKRON damgalanır; bu modül state'e DOKUNMAZ → yarış yok.)
-  const centralTop =
-    map && map.available && map.central[0] ? ` En merkezi modül: \`${map.central[0].file}\`.` : "";
-  emitChatMessage(
-    "system",
-    `✅ **${projectName} entegre edildi.** ${map?.available ? map.fileCount + " dosya analiz edildi." : "Yapı tarandı."}${centralTop}\n` +
-      `MyCL meta dosyaları \`.mycl/\` altına kuruldu; **kaynağına dokunulmadı**. ` +
-      `Eksikler (test/güvenlik/responsive vb.) \`.mycl/onboarding-report.md\`'de — otomatik uygulanmadı. ` +
-      `Bir geliştirme yaz, normal pipeline'dan onaylı+gate'li geçer.`,
-  );
-  emitChatMessage("system", "📄 Onboarding raporu: `.mycl/onboarding-report.md`");
+  // 6. BAŞARI işareti + "✅ entegre edildi" özeti — YALNIZ MyCL projeyi okuyabildiyse (no-access DEĞİL).
+  //    Apology/no-access koşusu işaret BIRAKMAZ → re-open yeniden dener; "OKUYAMADI" mesajı zaten yukarıda verildi.
+  //    runOnboarding state.json'a dokunmaz; işaret .mycl/ dosyasıdır (yarış yok).
+  if (docsResult.reason !== "no-access") {
+    await fs
+      .writeFile(
+        join(root, ONBOARD_MARKER_REL),
+        JSON.stringify({ at: Date.now(), docs: docsResult.reason }, null, 2) + "\n",
+        "utf-8",
+      )
+      .catch((e: unknown) => log.warn("onboarding", "başarı işareti yazılamadı", e));
+    const centralTop =
+      map && map.available && map.central[0] ? ` En merkezi modül: \`${map.central[0].file}\`.` : "";
+    emitChatMessage(
+      "system",
+      `✅ **${projectName} entegre edildi.** ${map?.available ? map.fileCount + " dosya analiz edildi." : "Yapı tarandı."}${centralTop}\n` +
+        `MyCL meta dosyaları \`.mycl/\` altına kuruldu; **kaynağına dokunulmadı**. ` +
+        `Eksikler (test/güvenlik/responsive vb.) \`.mycl/onboarding-report.md\`'de — otomatik uygulanmadı. ` +
+        `Bir geliştirme yaz, normal pipeline'dan onaylı+gate'li geçer.`,
+    );
+    emitChatMessage("system", "📄 Onboarding raporu: `.mycl/onboarding-report.md`");
+  }
 }

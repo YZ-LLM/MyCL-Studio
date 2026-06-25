@@ -299,11 +299,9 @@ export interface State {
    * komutu/UI eklenince SET edilecek (yarım-kontrat değil, bilinçli rezerve).
    */
   source_edit_approved?: boolean;
-  /**
-   * Yabancı proje "Proje Aç" ile entegre edildiğinde (onboarding) tamamlanma zamanı (Date.now).
-   * Set ise onboarding tekrar KOŞMAZ (idempotent — re-open'da yeniden tam-tarama yapılmaz).
-   */
-  onboarded_at?: number;
+  // NOT: onboarding "tamamlandı" işareti artık state alanı DEĞİL, `.mycl/onboarded.json` dosyasıdır
+  // (yalnız MyCL projeyi GERÇEKTEN okuyabildiyse yazılır). Eski `onboarded_at` (her denemede damgalanıyordu →
+  // başarısız apology koşusu da "yapıldı" sanılıyordu, cave5 bug) KALDIRILDI. Bkz onboarding/onboard-existing.ts.
   /**
    * Frontend build tool (vite/webpack/next/astro/...). Phase 5 sonrası
    * runtime injector seçimi için. v15.0'da sadece vite implement.

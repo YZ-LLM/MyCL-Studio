@@ -258,8 +258,13 @@ export async function bootstrapLivingDocs(
     // YZLLM 2026-06-14 (çıktı-başına kapı, onaylı): features.md VE tech-doc.md ikisi de varsa no-op. features.md
     // varken tech-doc.md yoksa (bu özellikten önce açılmış proje) eksik-üretimi TAMAMLA — onboarding tazelenir.
     const root = state.project_root;
-    if ((await fileExists(join(root, FEATURES_REL))) && (await fileExists(join(root, TECH_DOC_REL))))
-      return { ok: true, reason: "exists" };
+    if ((await fileExists(join(root, FEATURES_REL))) && (await fileExists(join(root, TECH_DOC_REL)))) {
+      // Mevcut features.md APOLOGY ise (önceki no-access koşusu: "kod tabanına erişilemiyor…") "exists" SAYMA
+      // → yeniden üret (cave5: eski apology → bu sefer (A)-fix ile gerçek docs). isNoAccessDoc apology'yi yakalar.
+      const existing = await readDocSafe(root, FEATURES_REL).catch(() => "");
+      if (!isNoAccessDoc({ features_md: existing })) return { ok: true, reason: "exists" };
+      log.info("living-docs", "mevcut features.md apology → yeniden üretiliyor");
+    }
     const { isExistingProject } = await import("./phase-1-codebase-probe.js");
     if (!(await isExistingProject(state.project_root))) return { ok: false, reason: "empty" }; // boş proje → pipeline üretir
     // v15.13: docs'u ORKESTRATÖR rolü yazar (ana ajan değil — kullanıcı kuralı).

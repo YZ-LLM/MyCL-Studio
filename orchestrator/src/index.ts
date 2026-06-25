@@ -149,7 +149,7 @@ import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
-import { runOnboarding } from "./onboarding/onboard-existing.js";
+import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
@@ -1127,34 +1127,29 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
         log.warn("orchestrator", "origin persist edilemedi", e),
       );
     }
-    // integrate bayrağı (UI "Proje Aç") + foreign + henüz-onboard-edilmemiş → TAM onboarding.
+    // integrate bayrağı (UI "Proje Aç") + foreign + henüz-BAŞARIYLA-onboard-edilmemiş → TAM onboarding.
+    // İdempotency BAŞARI işaretine (.mycl/onboarded.json) bakar — eski onboarded_at DEĞİL. Apology/no-access
+    // koşusu işaret BIRAKMAZ → re-open yeniden dener (cave5 fix: eski apology features.md → bu sefer (A)-sandbox-
+    // fix ile gerçek okunur). origin="foreign" yukarıda senkron set+save edildi; runOnboarding state'e dokunmaz.
+    const onboardedOk = await onboardingSucceeded(path);
     const wantOnboard =
-      integrate &&
-      (folderClass === "foreign" || runtime.state.origin === "foreign") &&
-      !runtime.state.onboarded_at;
+      integrate && (folderClass === "foreign" || runtime.state.origin === "foreign") && !onboardedOk;
 
     if (integrate && !wantOnboard) {
-      // "Proje Aç" (entegre et) tıklandı ama onboarding koşulları sağlanmadı → SESSİZ kalma (KATI #4): nedeni söyle.
+      // "Proje Aç" tıklandı ama onboarding koşulları sağlanmadı → SESSİZ kalma (KATI #4): nedeni söyle.
       const why =
         folderClass === "empty"
           ? "Bu klasör boş — entegre edilecek mevcut kod yok. Yeni proje için '📁 Yeni Klasör Seç' kullan."
-          : runtime.state.onboarded_at
-            ? "Bu proje zaten MyCL'e entegre edilmiş — doğrudan geliştirmeye devam edebilirsin."
+          : onboardedOk
+            ? "Bu proje zaten başarıyla MyCL'e entegre edilmiş — doğrudan geliştirmeye devam edebilirsin."
             : "Bu klasör zaten bir MyCL projesi gibi görünüyor — normal açıldı.";
       emitChatMessage("system", `ℹ️ ${why}`);
     }
 
     if (wantOnboard && runtime.config) {
-      // onboarded_at'i SENKRON damgala + persist. runOnboarding async ve runtime.state faz tarafından YENİ
-      // objeyle reassign edilebilir (örn. handleUserMessageInner) → runOnboarding'in stale-ref save'i state'i
-      // clobber ederdi (mahkeme Mercek-B/C; reassign'lar kanıtlandı). Bu save handleOpenProject İÇİNDE biter
-      // (sonraki user_message işlenmeden, kilit-güvenli). runOnboarding artık state'e DOKUNMAZ → yarış kalmaz.
-      runtime.state.onboarded_at = Date.now();
-      await saveState(runtime.state).catch((e: unknown) =>
-        log.warn("orchestrator", "onboarded_at persist edilemedi", e),
-      );
-      // Tam onboarding: anlama + .mycl iskele + gap-rapor. bootstrapLivingDocs'u İÇERİDE çağırır → aşağıdaki
-      // arka-plan bootstrap + project-map'i ATLA (eş-zamanlı .mycl/features.md yazım yarışı). open'ı bloklamaz.
+      // runOnboarding YALNIZ .mycl/ dosyaları yazar (state.json'a DOKUNMAZ → stale-ref yarışı yok) ve BAŞARI
+      // işaretini (.mycl/onboarded.json) yalnız projeyi GERÇEKTEN okuyabildiyse bırakır → no-access koşu işaretsiz
+      // kalır, re-open yeniden dener. Aşağıdaki arka-plan bootstrap+map ATLANIR (eş-zamanlı yazım yarışı). Bloklamaz.
       void runOnboarding(runtime.state, runtime.config).catch((e: unknown) =>
         log.warn("orchestrator", "onboarding başarısız (non-fatal)", e),
       );
