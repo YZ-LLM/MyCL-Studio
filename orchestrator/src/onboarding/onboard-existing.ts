@@ -212,20 +212,39 @@ export async function runOnboarding(state: State, config: MyclConfig): Promise<v
       .catch((e: unknown) => log.warn("onboarding", "project-map.json yazılamadı", e));
   }
 
-  // 3. Living-docs (features.md + tech-doc.md). API modunda görünür-atlanır (KATI #4 — living-docs.ts içinde).
-  //    Not: handleOpenProject onboarding yolunda arka-plan bootstrapLivingDocs çağrısını ATLAR (yarış yok).
-  let docsStatus = "üretildi";
-  try {
-    await bootstrapLivingDocs(state, config);
-  } catch (e) {
-    log.warn("onboarding", "bootstrapLivingDocs başarısız", e);
-    docsStatus = "üretilemedi (görünür uyarı verildi)";
+  // 3. Living-docs (features.md + tech-doc.md). Onboarding'de döküman ÇEKİRDEK iş (YZLLM: "entegrasyon
+  //    sırasında her şey önemli") → onboarding:true ile 3× tekrar denenir; geçersiz blok aralıklı gelirse
+  //    yeniden istenir; kalıcı başarısızlık "ÖNEMLİ" tonunda yüzeye çıkar, "ana akış etkilenmez" DENMEZ.
+  //    Sonucu (gerçek reason) rapora dürüst yansıt — eski "features.md var mı" tahmini KALDIRILDI (provider-
+  //    skip ile gerçek-fail'i karıştırıyordu). handleOpenProject onboarding yolunda arka-plan çağrısını ATLAR.
+  const docsResult = await bootstrapLivingDocs(state, config, { onboarding: true }).catch(
+    (e: unknown) => {
+      log.warn("onboarding", "bootstrapLivingDocs başarısız", e);
+      return { ok: false, reason: "failed" as const };
+    },
+  );
+  let docsStatus: string;
+  switch (docsResult.reason) {
+    case "written":
+      docsStatus = "üretildi";
+      break;
+    case "exists":
+      docsStatus = "zaten vardı";
+      break;
+    case "provider-skip":
+      docsStatus = "bu sağlayıcı modunda atlandı (CLI/abonelik VEYA z.ai gerektirir)";
+      break;
+    case "empty":
+      docsStatus = "atlandı (boş proje)";
+      break;
+    default:
+      docsStatus = "ÜRETİLEMEDİ (LLM geçerli blok döndürmedi, 3 deneme) — entegrasyon için önemli, tekrar denenebilir";
   }
-  // features.md gerçekten yazıldı mı? (API modunda no-op → kullanıcıya dürüst durum)
-  try {
-    await fs.access(join(root, ".mycl", "features.md"));
-  } catch {
-    docsStatus = "bu sağlayıcı modunda atlandı (CLI/abonelik VEYA z.ai gerektirir)";
+  if (docsResult.reason === "failed") {
+    emitChatMessage(
+      "system",
+      "⚠️ Entegrasyon dökümanı (features/tech-doc) üretilemedi — bu ÖNEMLİ. Projeyi yeniden '📂 Proje Aç' ile açarak veya bir geliştirme başlatarak tekrar denenir.",
+    );
   }
 
   // 4. GAP-RAPORU (kaynak-değiştiren standartlar — UYGULAMA YOK).

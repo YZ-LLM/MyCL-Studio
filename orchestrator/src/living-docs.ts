@@ -246,14 +246,19 @@ export function assignHelpPageDates(
  * (boş greenfield'de pipeline-sonu hook üretir). Arka planda (await edilmeden)
  * çağrılmalı — open'ı bloklamasın. Non-blocking.
  */
-export async function bootstrapLivingDocs(state: State, config: MyclConfig): Promise<void> {
+export async function bootstrapLivingDocs(
+  state: State,
+  config: MyclConfig,
+  opts?: { onboarding?: boolean },
+): Promise<{ ok: boolean; reason: "written" | "exists" | "empty" | "provider-skip" | "failed" }> {
   try {
     // YZLLM 2026-06-14 (çıktı-başına kapı, onaylı): features.md VE tech-doc.md ikisi de varsa no-op. features.md
     // varken tech-doc.md yoksa (bu özellikten önce açılmış proje) eksik-üretimi TAMAMLA — onboarding tazelenir.
     const root = state.project_root;
-    if ((await fileExists(join(root, FEATURES_REL))) && (await fileExists(join(root, TECH_DOC_REL)))) return;
+    if ((await fileExists(join(root, FEATURES_REL))) && (await fileExists(join(root, TECH_DOC_REL))))
+      return { ok: true, reason: "exists" };
     const { isExistingProject } = await import("./phase-1-codebase-probe.js");
-    if (!(await isExistingProject(state.project_root))) return; // boş proje → pipeline üretir
+    if (!(await isExistingProject(state.project_root))) return { ok: false, reason: "empty" }; // boş proje → pipeline üretir
     // v15.13: docs'u ORKESTRATÖR rolü yazar (ana ajan değil — kullanıcı kuralı).
     if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
       // KATI #4 (sessiz fallback yok — çapraz-aile mahkeme): API modunda orkestratör derin docs ÜRETMEZ →
@@ -262,23 +267,35 @@ export async function bootstrapLivingDocs(state: State, config: MyclConfig): Pro
         "system",
         "ℹ️ Derin proje dökümantasyonu (features/tech-doc) CLI/abonelik VEYA z.ai modunda üretilir — API modunda atlandı.",
       );
-      return;
+      return { ok: false, reason: "provider-skip" };
     }
     emitChatMessage(
       "system",
       "📚 İlk açılış: mevcut koddan proje dökümantasyonu + kullanma kılavuzu üretiliyor…",
     );
-    await updateLivingDocs(state, config);
+    // Onboarding (entegrasyon) bağlamında döküman ÇEKİRDEK iş → 3× tekrar dene + fail "önemli" tonunda.
+    const ok = await updateLivingDocs(state, config, {
+      attempts: opts?.onboarding ? 3 : 1,
+      onboarding: opts?.onboarding,
+    });
+    return { ok, reason: ok ? "written" : "failed" };
   } catch (err) {
     log.warn("living-docs", "bootstrap failed (non-fatal)", err);
+    return { ok: false, reason: "failed" };
   }
 }
 
 /**
- * Yaşayan dökümantasyonu güncelle. Non-blocking — her fail görünür uyarı + audit,
- * ASLA throw etmez (ana pipeline'ı bloklamaz).
+ * Yaşayan dökümantasyonu güncelle. Non-blocking — her fail görünür uyarı + audit, ASLA throw etmez.
+ * Döner: true=döküman yazıldı, false=üretilemedi/atlandı. opts.attempts → LLM geçersiz blok döndürürse
+ * tekrar dene (aralıklı hata; onboarding 3× geçer). opts.onboarding → entegrasyon bağlamı: fail mesajı
+ * "ana akış etkilenmez" DEMEZ (YZLLM: "entegrasyon sırasında her şey önemli").
  */
-export async function updateLivingDocs(state: State, config: MyclConfig): Promise<void> {
+export async function updateLivingDocs(
+  state: State,
+  config: MyclConfig,
+  opts?: { attempts?: number; onboarding?: boolean },
+): Promise<boolean> {
   try {
     // v15.13: Yaşayan dökümantasyonu ORKESTRATÖR rolü yazar — ana ajana (codegen) GİTMEZ
     // (kullanıcı kuralı). Orkestratör "her şeyi bilen" hafif rol → docs için doğru yer.
@@ -289,7 +306,7 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
         "system",
         "ℹ️ Yaşayan dökümantasyon şu an CLI/abonelik VEYA z.ai modunda güncellenir (orkestratör rolü).",
       );
-      return;
+      return false;
     }
     const includeUserGuide = !(state.skip_ui_phases ?? false);
     // Orkestratör modeli (yoksa main'e fallback — SelectedModels.orchestrator opsiyonel).
@@ -320,45 +337,61 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
       model: docsModel,
       cwd: state.project_root,
     });
-    const res = await runClaudeCli({
-      systemPrompt: prompt,
-      userMessage: "Inspect the codebase and emit the updated documentation JSON block now.",
-      modelId: docsModel,
-      extraEnv: docsCli.extraEnv, // ⑥ z.ai ise claude CLI'yi z.ai endpoint'ine yönlendir
-      cwd: state.project_root,
-      allowedTools: ["Read", "Grep", "Glob"],
-      // salt-okunur: ajan kodu Read/Grep/Glob ile gezip JSON döner, dosyaları MyCL'in kendi Node kodu yazar.
-      // Bash KALDIRILDI (çapraz-aile mahkeme): Bash açıkken salt-okunur niyete rağmen `cat > dosya << EOF`
-      // ile YABANCI projenin kaynağını ezebiliyordu (tool-policy.ts belgeli kaçış). Doküman-üretimi için
-      // Read/Grep/Glob yeterli — onboarding'in non-destructive garantisi buna dayanır.
-      disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // Write/Edit/alt-ajan yasak
-      effort: selectEffortForTask("verification", config.claude_code_flags.effort), // oto-efor: doküman güncelleme hafif iş
-      onText: (t) => emitClaudeStream({ sub: "text", text: t }),
-      observer: (tu) =>
-        emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
-      timeoutMs: 300_000,
-    });
-    if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
+    // Tekrar-deneme: LLM bazen geçerli {kind:docs} bloğu döndürmüyor (aralıklı). attempts kez dene; ilkten
+    // sonra "yalnız blok" hatırlatması ekle. Onboarding 3× geçer (entegrasyon dökümanı çekirdek iş).
+    const maxAttempts = Math.max(1, opts?.attempts ?? 1);
+    let parsed: ReturnType<typeof parseLivingDocsBlock> = null;
+    let lastDetail = "";
+    for (let attempt = 1; attempt <= maxAttempts && !parsed; attempt++) {
+      if (attempt > 1) {
+        emitChatMessage(
+          "system",
+          `↻ Döküman bloğu geçersiz/eksik geldi — tekrar isteniyor (deneme ${attempt}/${maxAttempts})…`,
+        );
+      }
+      const res = await runClaudeCli({
+        systemPrompt: prompt,
+        userMessage:
+          attempt === 1
+            ? "Inspect the codebase and emit the updated documentation JSON block now."
+            : 'Reminder: output ONLY the single {"kind":"docs", ...} JSON block — no prose before or after, no code fences. Emit it now.',
+        modelId: docsModel,
+        extraEnv: docsCli.extraEnv, // ⑥ z.ai ise claude CLI'yi z.ai endpoint'ine yönlendir
+        cwd: state.project_root,
+        allowedTools: ["Read", "Grep", "Glob"],
+        // salt-okunur: ajan kodu Read/Grep/Glob ile gezip JSON döner, dosyaları MyCL'in kendi Node kodu yazar.
+        // Bash KALDIRILDI (çapraz-aile mahkeme): Bash açıkken salt-okunur niyete rağmen `cat > dosya << EOF`
+        // ile YABANCI projenin kaynağını ezebiliyordu (tool-policy.ts belgeli kaçış). Doküman-üretimi için
+        // Read/Grep/Glob yeterli — onboarding'in non-destructive garantisi buna dayanır.
+        disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // Write/Edit/alt-ajan yasak
+        effort: selectEffortForTask("verification", config.claude_code_flags.effort), // oto-efor: doküman güncelleme hafif iş
+        onText: (t) => emitClaudeStream({ sub: "text", text: t }),
+        observer: (tu) =>
+          emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
+        timeoutMs: 300_000,
+      });
+      if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
+      if (!res.ok) {
+        lastDetail = String(res.error ?? "claude hatası");
+        continue; // tekrar dene
+      }
+      parsed = parseLivingDocsBlock(res.text);
+      if (!parsed) lastDetail = "no valid {kind:docs} block";
+    }
 
-    const fail = async (msg: string, detail: string): Promise<void> => {
-      emitChatMessage("system", `⚠️ ${msg} — bu tur atlandı (ana akış etkilenmez).`);
+    if (!parsed) {
+      // Entegrasyon (onboarding) bağlamında döküman ÇEKİRDEK iş → "ana akış etkilenmez" YAZMA (YZLLM:
+      // "entegrasyon sırasında her şey önemli"). Rutin pipeline güncellemesinde ise yan-yarar → eski ton.
+      const tail = opts?.onboarding ? "" : " — bu tur atlandı (ana akış etkilenmez)";
+      emitChatMessage("system", `⚠️ Dökümantasyon üretilemedi (${maxAttempts} deneme)${tail}.`);
       await appendAudit(state.project_root, {
         ts: Date.now(),
         phase: state.current_phase ?? 0,
         event: "living-docs-update-failed",
         caller: "mycl-bridge",
-        detail: detail.slice(0, 200),
+        detail: lastDetail.slice(0, 200),
       }).catch((e) => log.error("living-docs", "update-failed audit yazılamadı (denetim izi eksik)", { error: String(e) }));
-    };
-
-    if (!res.ok) {
-      await fail("Dökümantasyon güncellenemedi (claude hatası)", String(res.error ?? ""));
-      return;
-    }
-    const parsed = parseLivingDocsBlock(res.text);
-    if (!parsed) {
-      await fail("Dökümantasyon bloğu üretilemedi", "no valid {kind:docs} block");
-      return;
+      return false;
     }
     await fs.writeFile(
       join(state.project_root, FEATURES_REL),
@@ -418,10 +451,12 @@ export async function updateLivingDocs(state: State, config: MyclConfig): Promis
       "system",
       `📚 Proje dökümantasyonu güncellendi (.mycl/features.md${includeUserGuide ? " + user-guide.md" : ""}).`,
     );
+    return true;
   } catch (err) {
     // Hiçbir koşulda pipeline'ı bloklama — görünür uyarı + log.
     log.warn("living-docs", "updateLivingDocs failed (non-fatal)", err);
     emitChatMessage("system", "⚠️ Yaşayan dökümantasyon güncellemesi atlandı (beklenmedik hata).");
+    return false;
   } finally {
     emitPhaseIdle(); // 30s heartbeat banner'ını kapat (her durumda)
   }
