@@ -674,6 +674,9 @@ function App() {
    * send'i bloklar. onProjectSelected'ta reset (yeni proje = fresh request).
    */
   const historyRequestedRef = useRef(false);
+  /** "Proje Aç" (mevcut projeyi entegre et) → open_project'e integrate=true taşır. Tek-atış: ilk
+   *  gönderimden sonra temizlenir (reconnect re-send'leri yeniden onboarding tetiklemesin). */
+  const pendingIntegrateRef = useRef(false);
   /** Sağ panel (Translator + Claude Code) açık/kapalı toggle. Default kapalı —
    *  kullanıcı chat'e odaklansın; ihtiyaç halinde header `⇤` ile açar. */
   const [rightPanelsOpen, setRightPanelsOpen] = useState(false);
@@ -875,12 +878,14 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [configStatus]);
 
-  const onProjectSelected = (path: string) => {
+  const onProjectSelected = (path: string, opts?: { integrate?: boolean }) => {
     // Yeni proje = fresh history request gerekir → ref reset (boot effect
     // tekrar tetiklensin). open_project send'i tek noktadan (useEffect)
     // tetiklenir — burada inline send YAPMA, aksi takdirde projectPath dep'i
     // değişip useEffect de tetikleniyor → çift open_project + duplicate
     // backend boot mesajları.
+    // "Proje Aç" (mevcut projeyi entegre et) → integrate bayrağını taşı (useEffect open_project'e koyar).
+    pendingIntegrateRef.current = opts?.integrate === true;
     historyRequestedRef.current = false;
     setProjectPath(path);
     setMainState({ ...INITIAL_STATE });
@@ -892,7 +897,9 @@ function App() {
   // ki runtime.state null kalmasın (L1 — "no active project" fix).
   useEffect(() => {
     if (orch.ready && projectPath) {
-      void orch.send({ kind: "open_project", data: { path: projectPath } }).catch(
+      const integrate = pendingIntegrateRef.current;
+      pendingIntegrateRef.current = false; // tek-atış: reconnect re-send'i yeniden onboarding tetiklemesin
+      void orch.send({ kind: "open_project", data: { path: projectPath, integrate } }).catch(
         () => {},
       );
       // v15.7 (2026-05-24): Rust state'e window→project register et — diğer

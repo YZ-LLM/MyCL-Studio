@@ -433,7 +433,7 @@ export interface UnknownEvent {
 /** UI → orchestrator komut tipleri. */
 export type OrchestratorCommand =
   | { kind: "ping"; data?: unknown }
-  | { kind: "open_project"; data: { path: string } }
+  | { kind: "open_project"; data: { path: string; integrate?: boolean } }
   | { kind: "user_message"; data: { text: string } }
   /** YZLLM 2026-06-16: SORU modu — composer toggle açıkken mesaj buradan gider (user_message yerine).
    * Salt-okunur danışma: orkestratör-ajan devs/ + .mycl + kodu okuyup Türkçe cevaplar; pipeline TETİKLENMEZ. */

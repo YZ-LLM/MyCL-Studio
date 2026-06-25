@@ -532,6 +532,23 @@ select:focus {
   font-size: 14px;
 }
 
+/* "Proje Aç" (mevcut projeyi entegre et) — birincil "Yeni Klasör Seç"ten görsel olarak ayrı (ikincil). */
+.splash-btn-integrate {
+  margin-top: 10px;
+  background: transparent;
+  border: 1px solid var(--accent, #5b8def);
+  color: var(--fg-bright);
+}
+.splash-btn-integrate:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(91, 141, 239, 0.12));
+}
+
+/* İki butonun altındaki kısa fark-açıklaması — daha küçük, üst boşluklu. */
+.splash-desc-sub {
+  margin-top: 14px;
+  font-size: 12px;
+}
+
 .splash-recent {
   margin-top: 24px;
   border-top: 1px solid var(--border);

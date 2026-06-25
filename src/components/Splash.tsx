@@ -14,7 +14,8 @@ interface OpenProject {
 }
 
 interface Props {
-  onProjectSelected: (path: string) => void;
+  /** opts.integrate=true → "Proje Aç" (mevcut/yabancı projeyi MyCL'e entegre et — onboarding). */
+  onProjectSelected: (path: string, opts?: { integrate?: boolean }) => void;
 }
 
 export function Splash({ onProjectSelected }: Props) {
@@ -41,30 +42,35 @@ export function Splash({ onProjectSelected }: Props) {
   // v15.7 (2026-05-24): set'e çevir — O(1) lookup
   const openPathsSet = new Set(openProjects.map((o) => o.path));
 
-  const pickFolder = useCallback(async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: false,
-        title: "MyCL Studio — Proje Klasörü Seç",
-      });
-      if (!selected || typeof selected !== "string") {
-        setBusy(false);
-        return;
-      }
+  const pickFolder = useCallback(
+    async (integrate: boolean) => {
+      setError(null);
+      setBusy(true);
       try {
-        await invoke("add_recent_project", { path: selected });
-      } catch {
-        // recent kaydı opsiyonel
+        const selected = await openDialog({
+          directory: true,
+          multiple: false,
+          title: integrate
+            ? "MyCL Studio — Entegre Edilecek Mevcut Projeyi Seç"
+            : "MyCL Studio — Proje Klasörü Seç",
+        });
+        if (!selected || typeof selected !== "string") {
+          setBusy(false);
+          return;
+        }
+        try {
+          await invoke("add_recent_project", { path: selected });
+        } catch {
+          // recent kaydı opsiyonel
+        }
+        onProjectSelected(selected, { integrate });
+      } catch (err) {
+        setError(`Klasör seçilemedi: ${err}`);
+        setBusy(false);
       }
-      onProjectSelected(selected);
-    } catch (err) {
-      setError(`Klasör seçilemedi: ${err}`);
-      setBusy(false);
-    }
-  }, [onProjectSelected]);
+    },
+    [onProjectSelected],
+  );
 
   return (
     <main className="splash" data-testid="splash">
@@ -80,11 +86,25 @@ export function Splash({ onProjectSelected }: Props) {
           type="button"
           className="primary splash-btn"
           data-testid="splash-pick-folder"
-          onClick={pickFolder}
+          onClick={() => pickFolder(false)}
           disabled={busy}
         >
           {busy ? "Açılıyor..." : "📁 Yeni Klasör Seç"}
         </button>
+        <button
+          type="button"
+          className="splash-btn splash-btn-integrate"
+          data-testid="splash-integrate-existing"
+          onClick={() => pickFolder(true)}
+          disabled={busy}
+          title="Var olan (yabancı) bir projeyi MyCL'e entegre et — MyCL kodu derinlemesine anlar, .mycl dosyalarını kurar, eksikleri rapor eder. Mevcut KAYNAĞINA DOKUNMAZ."
+        >
+          {busy ? "Açılıyor..." : "📂 Proje Aç (Mevcut Projeyi Entegre Et)"}
+        </button>
+        <p className="splash-desc splash-desc-sub">
+          Yeni/boş proje için <strong>Yeni Klasör Seç</strong>; var olan bir projeyi MyCL'e taşımak için{" "}
+          <strong>Proje Aç</strong> — MyCL anlar ve eksikleri raporlar, kaynağını bozmaz.
+        </p>
         {recent.length > 0 && (
           <div className="splash-recent">
             <p className="splash-recent-title">Son projeler</p>

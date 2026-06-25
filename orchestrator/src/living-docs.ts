@@ -255,8 +255,15 @@ export async function bootstrapLivingDocs(state: State, config: MyclConfig): Pro
     const { isExistingProject } = await import("./phase-1-codebase-probe.js");
     if (!(await isExistingProject(state.project_root))) return; // boş proje → pipeline üretir
     // v15.13: docs'u ORKESTRATÖR rolü yazar (ana ajan değil — kullanıcı kuralı).
-    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai)
-      return; // API modu (claude): updateLivingDocs not basar; z.ai → çalışır
+    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
+      // KATI #4 (sessiz fallback yok — çapraz-aile mahkeme): API modunda orkestratör derin docs ÜRETMEZ →
+      // GÖRÜNÜR not (eski kod sessizce return ediyordu). Onboarding'de bu, raporda da yer alır.
+      emitChatMessage(
+        "system",
+        "ℹ️ Derin proje dökümantasyonu (features/tech-doc) CLI/abonelik VEYA z.ai modunda üretilir — API modunda atlandı.",
+      );
+      return;
+    }
     emitChatMessage(
       "system",
       "📚 İlk açılış: mevcut koddan proje dökümantasyonu + kullanma kılavuzu üretiliyor…",

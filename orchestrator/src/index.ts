@@ -42,7 +42,7 @@ import {
 } from "./audit.js";
 import { computeVerdict, eventsSince, type HarnessVerdict } from "./harness-verdict.js";
 import { mirrorVerdictToLinear } from "./linear-sync.js";
-import { hasDeliverable } from "./phase-1-codebase-probe.js";
+import { classifyOpenedFolder, hasDeliverable } from "./phase-1-codebase-probe.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import { detectInterruptedPhase2To9Pure } from "./resume-detection.js";
 import { SerialWorkQueue } from "./serial-queue.js";
@@ -149,6 +149,7 @@ import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
+import { runOnboarding } from "./onboarding/onboard-existing.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
@@ -851,8 +852,8 @@ async function emitConfigStatus(): Promise<boolean> {
   }
 }
 
-async function handleOpenProject(path: string): Promise<void> {
-  log.info("orchestrator", "open_project", { path });
+async function handleOpenProject(path: string, integrate = false): Promise<void> {
+  log.info("orchestrator", "open_project", { path, integrate });
   // Yeni proje → güvenlik yakınsama-kırıcı durumunu sıfırla (eski projenin sayacı taşınmasın).
   _securityFindingsPrev = null;
   _securityNoProgress = 0;
@@ -878,6 +879,10 @@ async function handleOpenProject(path: string): Promise<void> {
       // Idempotent re-emit: backend loadConfig çağırmadan event yollanır.
       emit("config_status", { ready: true });
     }
+    // Onboarding (yabancı projeyi entegre et — "Proje Aç"): klasörü loadOrInit'ten ÖNCE sınıflandır.
+    // loadOrInit `.mycl/state.json` yazınca sınıf "mycl"e döner → foreign tespiti kaçardı (mahkeme Mercek-A/B/C).
+    // classifyOpenedFolder fail-safe (erişim hatası → "empty", throw etmez) → her açılışı bozma riski yok.
+    const folderClass = await classifyOpenedFolder(path);
     runtime.state = await loadOrInit(path);
     await log.rotateForProject(path);
     // Persistence root'u set et — sonraki emit'ler history.log'a yazılır.
@@ -1113,18 +1118,54 @@ async function handleOpenProject(path: string): Promise<void> {
       !!interrupted29 ||
       !!runtime.state.pending_ui_tweak ||
       !!runtime.state.pending_diagnostic;
-    if (runtime.config && runtime.state && !midPipeline) {
+    // Onboarding kararı (yabancı projeyi MyCL'e entegre et — "Proje Aç"). classify loadOrInit'ten ÖNCE yapıldı.
+    // İlk-açışta yabancı projeyi origin="foreign" diye İŞARETLE (integrate olmasa bile) → vite-injector
+    // non-destructive guard'ı bu projede devreye girer (kaynağı onaysız ezmez).
+    if (folderClass === "foreign" && runtime.state.origin == null) {
+      runtime.state.origin = "foreign";
+      await saveState(runtime.state).catch((e: unknown) =>
+        log.warn("orchestrator", "origin persist edilemedi", e),
+      );
+    }
+    // integrate bayrağı (UI "Proje Aç") + foreign + henüz-onboard-edilmemiş → TAM onboarding.
+    const wantOnboard =
+      integrate &&
+      (folderClass === "foreign" || runtime.state.origin === "foreign") &&
+      !runtime.state.onboarded_at;
+
+    if (integrate && !wantOnboard) {
+      // "Proje Aç" (entegre et) tıklandı ama onboarding koşulları sağlanmadı → SESSİZ kalma (KATI #4): nedeni söyle.
+      const why =
+        folderClass === "empty"
+          ? "Bu klasör boş — entegre edilecek mevcut kod yok. Yeni proje için '📁 Yeni Klasör Seç' kullan."
+          : runtime.state.onboarded_at
+            ? "Bu proje zaten MyCL'e entegre edilmiş — doğrudan geliştirmeye devam edebilirsin."
+            : "Bu klasör zaten bir MyCL projesi gibi görünüyor — normal açıldı.";
+      emitChatMessage("system", `ℹ️ ${why}`);
+    }
+
+    if (wantOnboard && runtime.config) {
+      // Tam onboarding: anlama + .mycl iskele + gap-rapor. bootstrapLivingDocs'u İÇERİDE çağırır → aşağıdaki
+      // arka-plan bootstrap + project-map'i ATLA (aynı .mycl/features.md'ye iki eş-zamanlı yazım = yarış;
+      // mahkeme Mercek-B). open'ı bloklamaz (void) — kullanıcı raporu inceleyip geliştirmeye başlar.
+      void runOnboarding(runtime.state, runtime.config).catch((e: unknown) =>
+        log.warn("orchestrator", "onboarding başarısız (non-fatal)", e),
+      );
+    } else if (runtime.config && runtime.state && !midPipeline) {
       void bootstrapLivingDocs(runtime.state, runtime.config).catch((e: unknown) =>
         log.warn("orchestrator", "living-docs bootstrap failed (non-fatal)", e),
       );
     }
 
-    // Onboarding (yabancı koda hakimiyet): proje haritasını ARKA PLANDA hesapla (open'ı bloklamaz) →
-    // orkestratör recall'ı sonraki turlarda merkezi modülleri görür. Proje değişti → eski harita temizlendi.
+    // Proje haritasını ARKA PLANDA hesapla (open'ı bloklamaz) → orkestratör recall'ı merkezi modülleri görür.
+    // Proje değişti → eski harita cache'i her durumda temizlenir. Onboarding zaten haritayı kalıcılaştırıyor →
+    // onboarding yolunda tekrar hesaplama (yarış + gereksiz iş).
     clearProjectMapCache();
-    void getCachedProjectMap(runtime.state.project_root).catch((e: unknown) =>
-      log.warn("orchestrator", "project-map onboarding failed (non-fatal)", e),
-    );
+    if (!wantOnboard) {
+      void getCachedProjectMap(runtime.state.project_root).catch((e: unknown) =>
+        log.warn("orchestrator", "project-map onboarding failed (non-fatal)", e),
+      );
+    }
 
     // agent-skills AUTO-KURULUM (YZLLM 2026-06-09: "sadece önermesin, bağlasın"): yoksa pinli commit'ten
     // arka planda kur → cli-backend --plugin-dir ile codegen ajanlarına bağlar. Non-blocking, fail görünür.
@@ -6079,10 +6120,10 @@ ipcRouter.register("ping", (data: unknown) =>
   emit("pong", { ts: Date.now(), echo: data ?? null }),
 );
 ipcRouter.register("open_project", async (data: unknown) => {
-  const d = data as { path?: string } | undefined;
+  const d = data as { path?: string; integrate?: boolean } | undefined;
   // Proje değişiyor → önceki projeye ait bekleyen command_direct'ler bayat → at.
   commandDirectQueue.clear();
-  await handleOpenProject(String(d?.path ?? ""));
+  await handleOpenProject(String(d?.path ?? ""), d?.integrate === true);
 });
 ipcRouter.register("user_message", async (data: unknown) => {
   const d = data as { text?: string } | undefined;

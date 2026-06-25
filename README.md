@@ -73,6 +73,26 @@ ortak controller'a dayanır:
 | 16 | E2E Testler (UI varsa) | mechanical |
 | 17 | Sızma Testi — **otomatik koşmaz**, 🛡️ Güvenlik Taraması butonuyla manuel | — |
 
+## Var olan projeyi entegre etme ("Proje Aç")
+
+Açılış ekranında iki yol vardır: **📁 Yeni Klasör Seç** (yeni/boş proje) ve
+**📂 Proje Aç (Mevcut Projeyi Entegre Et)**. İkincisi, MyCL'in üretmediği — ilk kez
+gördüğü — var olan bir projeyi MyCL'e taşır:
+
+- **Derinlemesine anlama (salt-okuma):** yapı, hafif bağımlılık-merkezi haritası,
+  dil/framework ve README + git geçmişinden "neden" türetilir (ağır graph DB yok).
+- **MyCL dosyaları yalnız `.mycl/` altına kurulur:** `state.json`, `project-map.json`,
+  yaşayan dökümantasyon (`features.md` / `tech-doc.md`) ve `onboarding-report.md`.
+- **Eksikler GAP-RAPORU olur, otomatik uygulanmaz:** test / responsive / güvenlik /
+  parmak-izi gibi kaynak-değiştiren MyCL standartları rapora yazılır; her biri **senin
+  onayınla** normal gate'li iterasyonda yapılır.
+- **Mevcut projeyi BOZMAZ:** yabancı kaynak dosyalarına dokunulmaz; MyCL yabancı bir
+  projenin `vite.config`'ini onaysız düzenlemez ve mevcut `.gitignore`'a yalnız varsa
+  ekler (yeni oluşturmaz).
+
+Onboarding bittiğinde proje birinci-sınıf bir MyCL projesi olur; sonraki tüm
+geliştirmeler normal pipeline'dan (Faz 1 → 17) geçer.
+
 ## Codegen backend'leri
 
 Her ajan rolünün backend'i Ayarlar'dan rol başına seçilir:

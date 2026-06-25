@@ -298,6 +298,11 @@ export interface State {
    */
   source_edit_approved?: boolean;
   /**
+   * Yabancı proje "Proje Aç" ile entegre edildiğinde (onboarding) tamamlanma zamanı (Date.now).
+   * Set ise onboarding tekrar KOŞMAZ (idempotent — re-open'da yeniden tam-tarama yapılmaz).
+   */
+  onboarded_at?: number;
+  /**
    * Frontend build tool (vite/webpack/next/astro/...). Phase 5 sonrası
    * runtime injector seçimi için. v15.0'da sadece vite implement.
    */

@@ -61,6 +61,7 @@ export interface EnsureResult {
  */
 export async function ensureErrorCatalog(
   projectRoot: string,
+  opts?: { gitignoreOnlyIfExists?: boolean },
 ): Promise<EnsureResult> {
   const folderPath = join(projectRoot, FOLDER_NAME);
   const dbPath = join(folderPath, DB_NAME);
@@ -106,8 +107,9 @@ export async function ensureErrorCatalog(
     }
   }
 
-  // .gitignore append (idempotent)
-  await appendGitignoreEntry(projectRoot, `${FOLDER_NAME}/`);
+  // .gitignore append (idempotent). Yabancı-köken projede "varsa ekle" (gitignoreOnlyIfExists) → YENİ
+  // .gitignore oluşturmaz (YZLLM onboarding kararı).
+  await appendGitignoreEntry(projectRoot, `${FOLDER_NAME}/`, opts?.gitignoreOnlyIfExists);
 
   return { created: createdFolder || createdDb, dbPath };
 }
@@ -346,9 +348,10 @@ function runSqlite(dbPath: string, sql: string): Promise<boolean> {
 async function appendGitignoreEntry(
   projectRoot: string,
   entry: string,
+  onlyIfExists?: boolean,
 ): Promise<void> {
   try {
-    const wrote = await ensureGitignoreEntry(projectRoot, entry);
+    const wrote = await ensureGitignoreEntry(projectRoot, entry, { onlyIfExists });
     if (wrote) log.info("errors-db", ".gitignore entry appended", { entry });
   } catch (err) {
     log.warn("errors-db", ".gitignore write failed (non-fatal)", err);

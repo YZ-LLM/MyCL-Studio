@@ -217,7 +217,9 @@ export class Phase0Controller {
     }
     // Eski projeler (pipeline güncellemelerinden önce üretilmiş) error_folder
     // yoksa otomatik kur. Idempotent — varsa dokunulmaz.
-    const ensured = await ensureErrorCatalog(this.state.project_root);
+    const ensured = await ensureErrorCatalog(this.state.project_root, {
+      gitignoreOnlyIfExists: this.state.origin === "foreign",
+    });
     if (ensured.created) {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
