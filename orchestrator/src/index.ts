@@ -2719,6 +2719,14 @@ async function executeDispatchedIntent(
     const diag = runtime.state?.pending_diagnostic;
     if (result === "complete" && diag?.phase === "D2_WAITING" && diag.auto_selected_label) {
       await handleAskqAnswer(diag.askq_id, diag.auto_selected_label);
+    } else if (result === "fail") {
+      // FROZEN-GOAL #5: Faz 0 (debug) iş-kuyruğu DIŞINDA → reconcileAndDrainTasks orphan-drop tetiklenmez +
+      // bazı fail yolları (abort/SDK-fail) hiç mesaj emit etmiyordu → kullanıcı SESSİZCE terk ediliyordu.
+      // Pass-or-escalate: her fail'de görünür + eyleme dönük kapanış mesajı.
+      emitChatMessage(
+        "system",
+        "⏹ Hata ayıklama tamamlanamadı. Sorunu farklı/daha açık bir cümleyle tekrar yazarsan yeniden denerim; ya da `Çalıştır` ile pipeline'a devam edebilirsin.",
+      );
     }
     return;
   }

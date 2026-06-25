@@ -268,6 +268,8 @@ export class Phase2Controller {
       return "fail";
     }
 
+    // FROZEN-GOAL #9: appendAudit I/O hatası (disk/izin) yakalanmazsa statePatch uygulanmadan fırlar →
+    // pipeline sessizce durabilir. .catch ile yut (diğer kontrolcülerdeki appendAuditModule(...).catch deseni).
     for (const d of dimensions) {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
@@ -275,7 +277,7 @@ export class Phase2Controller {
         event: "precision-dimension",
         caller: "mycl-orchestrator",
         detail: `${d.name}=${d.decision}`,
-      });
+      }).catch(() => {});
     }
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
@@ -283,13 +285,13 @@ export class Phase2Controller {
       event: "phase-2-precision-complete",
       caller: "user",
       detail: enriched.slice(0, 200),
-    });
+    }).catch(() => {});
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 2,
       event: "phase-2-complete",
       caller: "mycl-orchestrator",
-    });
+    }).catch(() => {});
     // v15.0 Batch D: project_type sınıflandırma. Haiku ile spec özetinden
     // tip türetilir; state'e yazılır. Faz 16/18 runner seçimi + Faz 5/7 skip
     // kararı buna bağlı. Confirm askq v15.1'e ertelendi — şimdilik auto +

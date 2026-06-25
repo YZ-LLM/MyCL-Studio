@@ -186,8 +186,10 @@ export class Phase0Controller {
     const previousPhase = this.state.current_phase;
     emitPhaseChanged(previousPhase, 0, "running");
     emitPhaseRunning("🔍 Hata araştırılıyor", "Phase 0 D1");
+    let result: "complete" | "fail" = "fail";
     try {
-      return await this.runD1();
+      result = await this.runD1();
+      return result;
     } finally {
       emitPhaseIdle();
       // D2_WAITING durumunda phase event'i complete YAPMA — askq açık, Phase 0
@@ -195,7 +197,9 @@ export class Phase0Controller {
       const stillWaiting =
         this.statePatch.pending_diagnostic?.phase === "D2_WAITING";
       if (!stillWaiting) {
-        emitPhaseChanged(0, previousPhase, "complete");
+        // FROZEN-GOAL #6: fail'de (runD1='fail' veya throw → result='fail') UI'ya 'complete' DEĞİL 'error'
+        // sinyali — yanlış "tamamlandı" göstermesin (kullanıcı hatanın olduğunu görsün).
+        emitPhaseChanged(0, previousPhase, result === "complete" ? "complete" : "error");
       }
     }
   }

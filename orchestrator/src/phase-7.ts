@@ -283,6 +283,10 @@ export class Phase7Controller {
         "Faz 7: migration yazımı başarısız",
         `${String(err).slice(0, 200)} — DB şeması eksik olabilir; disk/izin kontrol et.`,
       );
+      // FROZEN-GOAL #13: eski kod yine 'complete' dönüyordu → eksik DB şeması SESSİZCE Faz 8'e gidip
+      // "yanlış-temiz" oluyordu. 'fail' dön → failPhase görünür hata + eyleme dönük askq açar (sessiz-pass YOK).
+      this.lastFailReason = "Faz 7: migration yazımı başarısız — DB şeması eksik (disk/izin)";
+      return "fail";
     }
 
     await appendAudit(this.state.project_root, {
