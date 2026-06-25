@@ -244,7 +244,16 @@ export function buildAgentSandboxSettings(params: {
   const subForms = (p: string): string[] => (platform === "darwin" ? [p] : [p, `${p}/**`]);
   const denyRead: string[] = subForms(home); // TÜM home deny — tek kural (argv küçük)
   const allowRead: string[] = [...subForms(projectRoot)]; // proje re-allow (deny home'dan istisna)
-  const permDeny: string[] = [`Read(/${home})`, `Read(/${home}/**)`];
+  // EV-ALTI PROJE FIX (YZLLM cave5, çapraz-aile mahkeme): proje EV ALTINDA (ör. ~/cave5) ise broad PROMPT-deny
+  // `Read(~/**)` projeyi DE kapsar ve claude-code'da DENY > ALLOW → `permAllow:[Read(proje/**)]` EZİLEMEZ → ajan
+  // projeyi OKUYAMAZ ("izin reddedildi"; /tmp çalışır ama ~/proje çalışmaz → onboarding dökümanı üretilemez).
+  // ÇEKİRDEK filesystem katmanı (denyRead[home] + allowRead[proje], kernel-seviye allowRead-override) ev'i zaten
+  // korur + projeyi re-allow eder → ev-altı projede redundant `~/**` PROMPT-deny'i EKLEME (kapsadığı her şeyi
+  // kernel zaten koruyor; eklemek yalnız işlevi kırıyor). Home dizini listesini (`~` kendisi) yine reddet.
+  const projectUnderHome = projectRoot === home || projectRoot.startsWith(`${home}/`);
+  const permDeny: string[] = projectUnderHome
+    ? [`Read(/${home})`]
+    : [`Read(/${home})`, `Read(/${home}/**)`];
   const permAllow: string[] = [`Read(${projectRoot}/**)`];
   for (const name of allow) {
     const entry = pathPosix.join(home, name);

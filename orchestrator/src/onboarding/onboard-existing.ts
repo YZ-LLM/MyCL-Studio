@@ -240,11 +240,24 @@ export async function runOnboarding(state: State, config: MyclConfig): Promise<v
     case "failed":
       docsStatus = "ÜRETİLEMEDİ (LLM geçerli blok döndürmedi) — entegrasyon için önemli, tekrar denenebilir";
       break;
+    case "no-access":
+      docsStatus = "ÜRETİLEMEDİ — MyCL projeyi OKUYAMADI (izin/sandbox); uydurma YAPILMADI";
+      break;
     default:
       // Savunmacı (mahkeme: ileride yeni reason eklenirse sessizce yanlış-bilgi vermesin).
       docsStatus = "durum bilinmiyor";
   }
-  if (docsResult.reason === "failed") {
+  if (docsResult.reason === "no-access") {
+    // "Düşünme" (YZLLM): MyCL erişemediğini ANLAR → özrü döküman diye YAZMAZ → net, dürüst, aksiyon-önerili escalate.
+    emitChatMessage(
+      "system",
+      `⚠️ **MyCL bu projeyi OKUYAMADI** (\`${root}\`) — ajanın dosya-okuma izni engellendi (izin/sandbox). ` +
+        "Bu yüzden derin döküman/analiz üretilemedi ve **hiçbir şey uydurulmadı**. " +
+        "Olası neden: sandbox izin çakışması (ev ~ altındaki projeler bu sürümde düzeltildi) veya projenin dosya izinleri. " +
+        "Çözüm: MyCL'i güncelle + projeyi yeniden '📂 Proje Aç' ile aç. Sürerse proje izinlerini kontrol et / okunabilir " +
+        "bir yola taşı **ya da bana projenin ne olduğunu yaz** — ona göre ilerleyeyim.",
+    );
+  } else if (docsResult.reason === "failed") {
     emitChatMessage(
       "system",
       "⚠️ Entegrasyon dökümanı (features/tech-doc) üretilemedi — bu ÖNEMLİ. Projeyi yeniden '📂 Proje Aç' ile açarak veya bir geliştirme başlatarak tekrar denenir.",

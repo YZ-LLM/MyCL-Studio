@@ -8,6 +8,7 @@ import {
   parseHelpPages,
   assignHelpPageDates,
   extractRoutesFromFeatures,
+  isNoAccessDoc,
 } from "../src/living-docs.js";
 
 const TMPL =
@@ -159,5 +160,52 @@ describe("assignHelpPageDates", () => {
   it("yeni sayfa → bugün", () => {
     const r = assignHelpPageDates(fresh, [], "2026-06-14");
     expect(r[0].updated_at).toBe("2026-06-14");
+  });
+});
+
+describe("isNoAccessDoc (ajan kodu okuyamadı tespiti — YZLLM cave5)", () => {
+  it("MYCL_NO_ACCESS belirteci → true (kesin sinyal)", () => {
+    expect(isNoAccessDoc({ features_md: "MYCL_NO_ACCESS", tech_doc_md: "" })).toBe(true);
+    expect(isNoAccessDoc({ features_md: "  mycl_no_access: izin yok", tech_doc_md: "" })).toBe(true);
+  });
+
+  it("kısa erişim-hatası özrü (≥2 ibare) → true (heuristik fallback)", () => {
+    expect(
+      isNoAccessDoc({
+        features_md: "Hiçbir özellik belgelenemedi: kod tabanına erişilemiyor (okuma izni reddediliyor).",
+        tech_doc_md: "",
+      }),
+    ).toBe(true);
+  });
+
+  // Çapraz-aile mahkeme false-pozitif bulgusu: kısa GERÇEK feature-doc, TEK tesadüfi ibare → no-access SANILMASIN.
+  it("kısa gerçek doc, tek tesadüfi 'erişilemedi' → false (mahkeme false-pozitif fix)", () => {
+    expect(
+      isNoAccessDoc({
+        features_md: "Dosya erişilemedi hatalarını yönetir. Basit bir hata takip uygulamasıdır.",
+        tech_doc_md: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("olumlu erişim cümleleri ('koda erişilebilir') → false", () => {
+    expect(
+      isNoAccessDoc({ features_md: "API'ye koda erişilebilir; kod tabanına erişildi ve tarandı.", tech_doc_md: "" }),
+    ).toBe(false);
+  });
+
+  it("gerçek + UZUN döküman, tek tesadüfi ibare → false (yanlış-pozitif değil)", () => {
+    const longDoc =
+      "## Kullanıcı Yönetimi\n" +
+      "Roller ve izinler yönetilir; admin kullanıcı ekler/siler. ".repeat(40) +
+      "Belgelenemedi diye bir not yok aslında ama uzun.";
+    // 'belgelenemedi' geçse de doc UZUN (>600) + tek ibare → tetiklenmez.
+    expect(isNoAccessDoc({ features_md: longDoc, tech_doc_md: "" })).toBe(false);
+  });
+
+  it("normal döküman → false", () => {
+    expect(
+      isNoAccessDoc({ features_md: "## Sipariş\n- Sepet, ödeme, kargo takibi.", tech_doc_md: "Vite + React." }),
+    ).toBe(false);
   });
 });

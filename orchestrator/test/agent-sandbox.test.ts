@@ -213,6 +213,31 @@ describe("agent-sandbox · proje home'un ALTINDA olsa bile allowRead ile re-allo
     expect(allowRead).not.toContain(`${HOME}/Documents`); // Documents kökü açılmaz → gerisi deny
     expect(deny(settings)).toEqual([HOME]); // home tek-deny değişmez
   });
+
+  // YZLLM cave5: ev-altı projede PROMPT-katmanı broad Read(~/**) deny'i, deny>allow ile projeyi de keser →
+  // ajan okuyamaz (/tmp çalışır, ~/proje çalışmaz). Fix: ev-altı projede `~/**` PROMPT-deny'i EKLENMEZ.
+  it("EV-ALTI proje (~/cave5): prompt-katmanı Read(~/**) deny'i EKLENMEZ; proje okunur, kernel ev'i korur", () => {
+    const PROJ = `${HOME}/cave5`;
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: PROJ, ultracode: false, policy: "enforce", platform: "darwin", home: HOME,
+    });
+    const permDeny = (settings.permissions as { deny: string[] }).deny;
+    const permAllow = (settings.permissions as { allow: string[] }).allow;
+    expect(permDeny).not.toContain(`Read(/${HOME}/**)`); // broad ~/** prompt-deny YOK (projeyi kesmesin)
+    expect(permDeny).toContain(`Read(/${HOME})`); // home dizini listesi yine reddedilir
+    expect(permAllow).toContain(`Read(${PROJ}/**)`); // proje okuma izni var
+    expect(deny(settings)).toEqual([HOME]); // çekirdek katman ev'i hâlâ korur (tek-deny)
+    expect(allow(settings)).toContain(PROJ); // çekirdek katman projeyi re-allow eder
+  });
+
+  it("ev-DIŞI proje (/tmp/...): broad Read(~/**) prompt-deny KORUNUR (regresyon yok)", () => {
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot: "/tmp/mycl-x/app", ultracode: false, policy: "enforce", platform: "darwin", home: HOME,
+    });
+    const permDeny = (settings.permissions as { deny: string[] }).deny;
+    expect(permDeny).toContain(`Read(/${HOME})`);
+    expect(permDeny).toContain(`Read(/${HOME}/**)`); // ev-dışı projede broad deny korunur
+  });
 });
 
 describe("agent-sandbox · buildAgentSandboxSettings · mac/linux dışı (örn. win32, sandbox yok)", () => {

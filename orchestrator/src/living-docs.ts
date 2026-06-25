@@ -250,7 +250,10 @@ export async function bootstrapLivingDocs(
   state: State,
   config: MyclConfig,
   opts?: { onboarding?: boolean },
-): Promise<{ ok: boolean; reason: "written" | "exists" | "empty" | "provider-skip" | "failed" }> {
+): Promise<{
+  ok: boolean;
+  reason: "written" | "exists" | "empty" | "provider-skip" | "failed" | "no-access";
+}> {
   try {
     // YZLLM 2026-06-14 (çıktı-başına kapı, onaylı): features.md VE tech-doc.md ikisi de varsa no-op. features.md
     // varken tech-doc.md yoksa (bu özellikten önce açılmış proje) eksik-üretimi TAMAMLA — onboarding tazelenir.
@@ -274,11 +277,12 @@ export async function bootstrapLivingDocs(
       "📚 İlk açılış: mevcut koddan proje dökümantasyonu + kullanma kılavuzu üretiliyor…",
     );
     // Onboarding (entegrasyon) bağlamında döküman ÇEKİRDEK iş → 3× tekrar dene + fail "önemli" tonunda.
-    const ok = await updateLivingDocs(state, config, {
+    const r = await updateLivingDocs(state, config, {
       attempts: opts?.onboarding ? 3 : 1,
       onboarding: opts?.onboarding,
     });
-    return { ok, reason: ok ? "written" : "failed" };
+    // r: "written" | "failed" | "no-access" → reason'a doğrudan taşı (no-access ayrı ele alınır).
+    return { ok: r === "written", reason: r };
   } catch (err) {
     log.warn("living-docs", "bootstrap failed (non-fatal)", err);
     return { ok: false, reason: "failed" };
@@ -286,16 +290,42 @@ export async function bootstrapLivingDocs(
 }
 
 /**
+ * Ajanın "kod tabanını okuyamadım" sinyali/özrü mü?
+ *  - BİRİNCİL + KESİN: prompt-yönlendirmeli MYCL_NO_ACCESS belirteci (yanlış-pozitif YOK).
+ *  - FALLBACK (ajan belirteci izlemezse): YALNIZ açık BAŞARISIZLIK ibareleri + KONSERVATİF eşik (≥2 kısa-doc /
+ *    ≥3 her boy). Çapraz-aile mahkeme false-pozitif bulgusu: meşru bir feature-doc'ta tek tesadüfi "erişilemedi"
+ *    (ör. "dosya-erişilemedi hatalarını yönetir") ARTIK TETİKLEMEZ — ≥2 ayrı ibare gerekir. Olumlu/belirsiz
+ *    formlar (koda erişilebilir/erişildi, uydurulamaz, kabuk-sandbox noise, çıplak "belgelenemedi") LİSTEDE YOK.
+ *  Kullanıcı: "erişemediğini ANLAMALI, körü körüne yazmamalı" — bu, özrü döküman diye yazmayı engeller.
+ */
+export function isNoAccessDoc(parsed: { features_md?: string; tech_doc_md?: string }): boolean {
+  const f = (parsed.features_md ?? "").trim();
+  if (/^MYCL_NO_ACCESS/i.test(f)) return true;
+  const blob = `${parsed.features_md ?? ""}\n${parsed.tech_doc_md ?? ""}`.toLowerCase();
+  const markers = [
+    // TR — açık başarısızlık (olumsuz form; olumlu "erişilebilir/erişildi" eşleşmez):
+    "erişilemiyor", "erişilemedi", "erişemedim", "ulaşamadım", "okuyamadım", "inceleyemedim", "göremedim",
+    "okuma izni reddedil", "izni reddedil", "erişim engellendi", "erişim reddedil",
+    "kod tabanına erişilem", "koda erişilem", "hiçbir özellik belgelenem",
+    // EN — açık başarısızlık:
+    "permission denied", "access denied", "cannot access", "couldn't access", "could not access",
+    "unable to read", "could not read", "no files could", "no features could",
+  ];
+  const hits = markers.filter((m) => blob.includes(m)).length;
+  return (blob.length < 300 && hits >= 2) || hits >= 3;
+}
+
+/**
  * Yaşayan dökümantasyonu güncelle. Non-blocking — her fail görünür uyarı + audit, ASLA throw etmez.
- * Döner: true=döküman yazıldı, false=üretilemedi/atlandı. opts.attempts → LLM geçersiz blok döndürürse
- * tekrar dene (aralıklı hata; onboarding 3× geçer). opts.onboarding → entegrasyon bağlamı: fail mesajı
- * "ana akış etkilenmez" DEMEZ (YZLLM: "entegrasyon sırasında her şey önemli").
+ * Döner: "written"=yazıldı, "failed"=üretilemedi, "no-access"=ajan kodu OKUYAMADI (özrü yazma; escalate).
+ * opts.attempts → LLM geçersiz blok döndürürse tekrar dene (aralıklı; onboarding 3×). opts.onboarding →
+ * entegrasyon bağlamı: fail mesajı "ana akış etkilenmez" DEMEZ (YZLLM: "entegrasyon sırasında her şey önemli").
  */
 export async function updateLivingDocs(
   state: State,
   config: MyclConfig,
   opts?: { attempts?: number; onboarding?: boolean },
-): Promise<boolean> {
+): Promise<"written" | "failed" | "no-access"> {
   // emitPhaseRunning gerçekten çağrıldıysa true → finally emitPhaseIdle'ı YALNIZ o zaman çalıştırır.
   // Provider-skip / erken-template-hatası dalında emitPhaseRunning'siz emitPhaseIdle, bekleyen bir AskQ'nun
   // _askqPending'ini yanlışlıkla temizlerdi (çapraz-aile mahkeme; ipc.ts:471 doğrulandı).
@@ -310,7 +340,7 @@ export async function updateLivingDocs(
         "system",
         "ℹ️ Yaşayan dökümantasyon şu an CLI/abonelik VEYA z.ai modunda güncellenir (orkestratör rolü).",
       );
-      return false;
+      return "failed";
     }
     const includeUserGuide = !(state.skip_ui_phases ?? false);
     // Orkestratör modeli (yoksa main'e fallback — SelectedModels.orchestrator opsiyonel).
@@ -346,8 +376,9 @@ export async function updateLivingDocs(
     // sonra "yalnız blok" hatırlatması ekle. Onboarding 3× geçer (entegrasyon dökümanı çekirdek iş).
     const maxAttempts = Math.max(1, opts?.attempts ?? 1);
     let parsed: ReturnType<typeof parseLivingDocsBlock> = null;
+    let noAccess = false;
     let lastDetail = "";
-    for (let attempt = 1; attempt <= maxAttempts && !parsed; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts && !parsed && !noAccess; attempt++) {
       if (attempt > 1) {
         emitChatMessage(
           "system",
@@ -357,9 +388,10 @@ export async function updateLivingDocs(
       const res = await runClaudeCli({
         systemPrompt: prompt,
         userMessage:
-          attempt === 1
+          (attempt === 1
             ? "Inspect the codebase and emit the updated documentation JSON block now."
-            : 'Reminder: output ONLY the single {"kind":"docs", ...} JSON block — no prose before or after, no code fences. Emit it now.',
+            : 'Reminder: output ONLY the single {"kind":"docs", ...} JSON block — no prose before or after, no code fences. Emit it now.') +
+          ' IMPORTANT: If you CANNOT read the project files (Read/Grep/Glob fail due to permission or sandbox errors), do NOT apologize or invent documentation — instead emit exactly {"kind":"docs","features_md":"MYCL_NO_ACCESS"} and stop.',
         modelId: docsModel,
         extraEnv: docsCli.extraEnv, // ⑥ z.ai ise claude CLI'yi z.ai endpoint'ine yönlendir
         cwd: state.project_root,
@@ -380,8 +412,38 @@ export async function updateLivingDocs(
         lastDetail = String(res.error ?? "claude hatası (error alanı boş)");
         continue; // tekrar dene
       }
-      parsed = parseLivingDocsBlock(res.text);
-      if (!parsed) lastDetail = `no valid {kind:docs} block (çıktı başı: ${(res.text ?? "").slice(0, 100)})`;
+      const candidate = parseLivingDocsBlock(res.text);
+      if (!candidate) {
+        lastDetail = `no valid {kind:docs} block (çıktı başı: ${(res.text ?? "").slice(0, 100)})`;
+        continue;
+      }
+      if (isNoAccessDoc(candidate)) {
+        // Ajan kodu OKUYAMADI → MYCL_NO_ACCESS sinyali veya "erişemedim" özrü üretti. Retry FUTİL (izin
+        // değişmez) → döngüyü kır + özrü döküman diye YAZMA (YZLLM: "düşünmesi lazım", körü körüne yazma).
+        noAccess = true;
+        lastDetail = `no-access: ajan kod tabanını okuyamadı (${(candidate.features_md ?? "").slice(0, 80)})`;
+        break;
+      }
+      parsed = candidate;
+    }
+
+    if (noAccess) {
+      // Görünür + escalate: ajan projeyi okuyamadı → döküman üretilemez. Rutin yolda uyar; onboarding'de
+      // runOnboarding aksiyon-önerili tek mesajı verir (çift-mesaj yok). Audit no-access olarak.
+      if (!opts?.onboarding) {
+        emitChatMessage(
+          "system",
+          "⚠️ Dökümantasyon üretilemedi — ajan proje dosyalarını OKUYAMADI (izin/sandbox engeli). Bu tur atlandı.",
+        );
+      }
+      await appendAudit(state.project_root, {
+        ts: Date.now(),
+        phase: state.current_phase ?? 0,
+        event: "living-docs-no-access",
+        caller: "mycl-bridge",
+        detail: lastDetail.slice(0, 200),
+      }).catch((e) => log.error("living-docs", "no-access audit yazılamadı (denetim izi eksik)", { error: String(e) }));
+      return "no-access";
     }
 
     if (!parsed) {
@@ -400,7 +462,7 @@ export async function updateLivingDocs(
         caller: "mycl-bridge",
         detail: lastDetail.slice(0, 200),
       }).catch((e) => log.error("living-docs", "update-failed audit yazılamadı (denetim izi eksik)", { error: String(e) }));
-      return false;
+      return "failed";
     }
     await fs.writeFile(
       join(state.project_root, FEATURES_REL),
@@ -460,12 +522,12 @@ export async function updateLivingDocs(
       "system",
       `📚 Proje dökümantasyonu güncellendi (.mycl/features.md${includeUserGuide ? " + user-guide.md" : ""}).`,
     );
-    return true;
+    return "written";
   } catch (err) {
     // Hiçbir koşulda pipeline'ı bloklama — görünür uyarı + log.
     log.warn("living-docs", "updateLivingDocs failed (non-fatal)", err);
     emitChatMessage("system", "⚠️ Yaşayan dökümantasyon güncellemesi atlandı (beklenmedik hata).");
-    return false;
+    return "failed";
   } finally {
     // YALNIZ emitPhaseRunning çağrıldıysa kapat → provider-skip/erken-hata dalında emitPhaseRunning'siz
     // emitPhaseIdle, bekleyen AskQ'nun _askqPending'ini yanlışlıkla temizlemesin (çapraz-aile mahkeme).
