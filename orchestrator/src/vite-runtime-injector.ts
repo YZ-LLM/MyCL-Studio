@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { ensureGitignoreEntry } from "./gitignore-util.js";
 import { log } from "./logger.js";
 import { getRuntimeHttpPort } from "./runtime-http-server.js";
+import type { State } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,18 +40,44 @@ const VITE_CONFIG_NAMES = [
 const FRONTEND_SUBDIRS = ["", "frontend", "client", "ui", "apps/web"];
 
 /**
+ * Yabancı-köken projede MyCL'in build-config (vite.config) gibi KAYNAK dosyalarını düzenlemesine izin var mı?
+ * MyCL'in kendi projesi (origin!=="foreign", eski state'lerde undefined) → her zaman serbest (eski davranış).
+ * "Proje Aç" ile entegre edilen YABANCI proje → yalnız kullanıcı açıkça onayladıysa (source_edit_approved).
+ * Tek doğruluk kaynağı: vite-injector çağıranları (phase-5/smoke/command) bunu `allowSourceEdit` olarak geçer.
+ */
+export function viteSourceEditAllowed(
+  state: Pick<State, "origin" | "source_edit_approved">,
+): boolean {
+  return state.origin !== "foreign" || state.source_edit_approved === true;
+}
+
+/**
  * Kullanıcı projesinde dev server spawn edilmeden ÖNCE çağrılır. Vite
  * config'i bulup MyCL plugin import'unu ekler. İkinci çağrıda no-op
  * (idempotent). Vite stack bulunamazsa hiçbir şey yapmaz.
  */
-export async function ensureViteRuntimeInjection(projectRoot: string): Promise<{
+export async function ensureViteRuntimeInjection(
+  projectRoot: string,
+  opts?: { allowSourceEdit?: boolean },
+): Promise<{
   injected: boolean;
   configPath: string | null;
+  skippedSourceEdit?: boolean;
 }> {
   const configPath = await findViteConfig(projectRoot);
   if (!configPath) {
     log.info("vite-injector", "no vite config — skip", { projectRoot });
     return { injected: false, configPath: null };
+  }
+
+  // Non-destructive guard (onboarding — çapraz-aile mahkeme Mercek-A BLOK-1): YABANCI-köken projede
+  // (allowSourceEdit=false) MyCL bu projenin vite.config'ini ONAYSIZ DEĞİŞTİRMEZ. Hiçbir şeye dokunmadan
+  // çık (plugin-copy + .gitignore dahil) → mevcut kaynağı bozma yolu kalmaz. Kullanıcı gap-raporundan
+  // onaylarsa (state.source_edit_approved) çağıran allowSourceEdit=true geçer → eski davranış.
+  const allowSourceEdit = opts?.allowSourceEdit ?? true;
+  if (!allowSourceEdit) {
+    log.info("vite-injector", "yabancı-köken: kaynak-edit atlandı (onaysız)", { configPath });
+    return { injected: false, configPath, skippedSourceEdit: true };
   }
 
   // 1) Plugin dosyasını projenin .mycl/'ine kopyala (idempotent: aynı içerikse skip).

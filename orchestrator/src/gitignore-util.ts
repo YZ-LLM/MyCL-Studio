@@ -33,13 +33,21 @@ function ignoreBase(s: string): string {
 export async function ensureGitignoreEntry(
   projectRoot: string,
   entry: string,
+  opts?: { onlyIfExists?: boolean },
 ): Promise<boolean> {
   const giPath = join(projectRoot, ".gitignore");
   let current = "";
+  let exists = false;
   try {
     current = await readFile(giPath, "utf-8");
+    exists = true;
   } catch {
-    // .gitignore yok — yeni oluşturulacak
+    // .gitignore yok — varsayılan: yeni oluşturulur.
+  }
+  // YZLLM kararı (onboarding "varsa ekle"): yabancı-köken projede mevcut .gitignore'a eklenir ama
+  // YENİ .gitignore OLUŞTURULMAZ (yabancı projeye dosya enjekte etmeme). onlyIfExists yalnız onboarding'de geçer.
+  if (opts?.onlyIfExists && !exists) {
+    return false;
   }
   const target = ignoreBase(entry);
   const lines = current.split("\n").map((l) => l.trim());

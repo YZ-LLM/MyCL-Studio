@@ -52,4 +52,19 @@ describe("ensureGitignoreEntry (idempotent)", () => {
     await ensureGitignoreEntry(dir, "dist/");
     expect(readFileSync(gi(), "utf-8")).toBe("node_modules/\ndist/\n");
   });
+
+  // YZLLM onboarding kararı "varsa ekle": yabancı projeye YENİ .gitignore oluşturma.
+  it("onlyIfExists: .gitignore YOKSA oluşturmaz (no-op, false)", async () => {
+    expect(existsSync(gi())).toBe(false);
+    const wrote = await ensureGitignoreEntry(dir, "error_folder/", { onlyIfExists: true });
+    expect(wrote).toBe(false);
+    expect(existsSync(gi())).toBe(false); // dosya OLUŞTURULMADI
+  });
+
+  it("onlyIfExists: .gitignore VARSA mevcut dosyaya ekler", async () => {
+    writeFileSync(gi(), "node_modules/\n");
+    const wrote = await ensureGitignoreEntry(dir, "error_folder/", { onlyIfExists: true });
+    expect(wrote).toBe(true);
+    expect(readFileSync(gi(), "utf-8")).toContain("error_folder/");
+  });
 });

@@ -50,6 +50,14 @@ export type ProjectType =
   | "unknown";
 
 /**
+ * Projenin MyCL'e geliş yolu (non-destructive onboarding garantisi — "Proje Aç").
+ *  - "mycl"    : MyCL'in ürettiği/yönettiği proje (eski/varsayılan davranış; kaynak düzenleme serbest).
+ *  - "foreign" : "Proje Aç" ile entegre edilen YABANCI proje. MyCL kaynak dosyalarını onaysız DEĞİŞTİRMEZ.
+ *  undefined = eski state'ler → "mycl" gibi davranır (backward-compat).
+ */
+export type ProjectOrigin = "mycl" | "foreign";
+
+/**
  * UI karmaşıklık seviyesi (v15.13 spec gate). Faz 2 sınıflandırıcı üretir;
  * Faz 5 tasarım paneli gate'i kullanır. Yalnız UI tipleri için anlamlı.
  * undefined → fan-out KOŞAR (regresyon-güvenli; yalnız "simple" atlar).
@@ -275,6 +283,20 @@ export interface State {
    * kararı buna bağlı.
    */
   project_type?: ProjectType;
+  /**
+   * Projenin MyCL'e geliş yolu (non-destructive onboarding garantisi).
+   *  - undefined / "mycl": MyCL'in ürettiği/yönettiği proje — kaynak düzenleme serbest (eski davranış).
+   *  - "foreign": "Proje Aç" ile entegre edilen YABANCI proje. MyCL bu projenin KAYNAK dosyalarını
+   *    (vite.config gibi) ONAYSIZ DEĞİŞTİRMEZ (vite-injector kaynak-edit'i atlar) + mevcut .gitignore'a
+   *    yalnız VARSA ekler (yeni .gitignore oluşturmaz). handleOpenProject 'foreign' sınıfında set eder.
+   */
+  origin?: ProjectOrigin;
+  /**
+   * Yabancı-köken projede kullanıcı MyCL'in KAYNAK dosyalarını düzenlemesine (build config'e
+   * runtime-error plugin enjeksiyonu vb.) açıkça onay verdi mi? false/undefined → kaynak-edit ATLANIR
+   * + gap-raporuna yazılır. origin!=="foreign" iken yok sayılır (MyCL projesi serbest düzenlenir).
+   */
+  source_edit_approved?: boolean;
   /**
    * Frontend build tool (vite/webpack/next/astro/...). Phase 5 sonrası
    * runtime injector seçimi için. v15.0'da sadece vite implement.

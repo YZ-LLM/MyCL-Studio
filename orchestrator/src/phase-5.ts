@@ -39,7 +39,7 @@ import { emitChatMessage, emitError, emitPhaseRunning } from "./ipc.js";
 import { loadProfile, resolveCommand } from "./profile-loader.js";
 import { applyPrototype, surfacePrototypeModuleSearch } from "./prototype-cache.js";
 import { replaceActiveWatcher } from "./runtime-error-watcher.js";
-import { ensureViteRuntimeInjection } from "./vite-runtime-injector.js";
+import { ensureViteRuntimeInjection, viteSourceEditAllowed } from "./vite-runtime-injector.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import { TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js";
@@ -587,7 +587,9 @@ export class Phase5Controller {
     }));
     // Vite plugin inject — UI runtime hatalarını yakalama (idempotent).
     try {
-      await ensureViteRuntimeInjection(this.state.project_root);
+      await ensureViteRuntimeInjection(this.state.project_root, {
+        allowSourceEdit: viteSourceEditAllowed(this.state),
+      });
     } catch (err) {
       // Load-bearing (sessiz-fallback denetimi): bu enjeksiyon UI çalışma-anı hatalarını yakalar → başarısızsa
       // runtime hataları sessizce yakalanmayabilir. log.warn→log.error + GÖRÜNÜR (kullanıcı bilsin).

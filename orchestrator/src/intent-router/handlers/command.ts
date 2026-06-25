@@ -34,7 +34,7 @@ import { emitChatMessage } from "../../ipc.js";
 import { log } from "../../logger.js";
 import { replaceActiveWatcher } from "../../runtime-error-watcher.js";
 import { safeEnv } from "../../safe-env.js";
-import { ensureViteRuntimeInjection } from "../../vite-runtime-injector.js";
+import { ensureViteRuntimeInjection, viteSourceEditAllowed } from "../../vite-runtime-injector.js";
 import type { State, StackId } from "../../types.js";
 import type { IntentClassification } from "../types.js";
 
@@ -601,7 +601,9 @@ async function runDevServer(
   // Vite plugin inject — kullanıcı projesine browser runtime hata hook'larını
   // ekle (idempotent). Sadece Vite stack için aktif olur.
   try {
-    await ensureViteRuntimeInjection(state.project_root);
+    await ensureViteRuntimeInjection(state.project_root, {
+      allowSourceEdit: viteSourceEditAllowed(state),
+    });
   } catch (err) {
     log.warn("command-handler", "vite injection failed (non-fatal)", err);
   }

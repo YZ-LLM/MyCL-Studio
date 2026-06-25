@@ -29,7 +29,7 @@ import {
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { replaceActiveWatcher } from "./runtime-error-watcher.js";
-import { ensureViteRuntimeInjection } from "./vite-runtime-injector.js";
+import { ensureViteRuntimeInjection, viteSourceEditAllowed } from "./vite-runtime-injector.js";
 import { safeEnv } from "./safe-env.js";
 import { isProcessAliveSync } from "./process-utils.js";
 import type { State } from "./types.js";
@@ -167,7 +167,9 @@ export async function restartDevServerForPhase7(
   // YZLLM 2026-06-15: dev-server'dan önce Vite injection'ı garantile (Faz 5 atlanan işlerde
   // plugin yoksa vite crash eder; idempotent self-heal — bkz. restartDevServerSimple notu).
   try {
-    await ensureViteRuntimeInjection(state.project_root);
+    await ensureViteRuntimeInjection(state.project_root, {
+      allowSourceEdit: viteSourceEditAllowed(state),
+    });
   } catch (err) {
     log.warn("smoke-test", "ensureViteRuntimeInjection (phase7) failed (non-fatal)", err);
   }
@@ -276,7 +278,9 @@ export async function restartDevServerSimple(
   // → "Could not resolve ./.mycl/runtime-error-plugin.cjs" ile vite başlangıçta crash ediyordu. Burada
   // her dev-server başlatmadan önce ensure → fresh-clone / .mycl temizliği / Faz-5-atlama hepsinde kendini onarır.
   try {
-    await ensureViteRuntimeInjection(state.project_root);
+    await ensureViteRuntimeInjection(state.project_root, {
+      allowSourceEdit: viteSourceEditAllowed(state),
+    });
   } catch (err) {
     log.warn("smoke-test", "ensureViteRuntimeInjection failed (non-fatal, dev-server yine denenecek)", err);
   }
