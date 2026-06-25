@@ -517,6 +517,50 @@ async function recordPhaseComplete(n: PhaseId): Promise<void> {
   await recordRungOutcome(n, true);
 }
 
+/**
+ * FROZEN-GOAL FIX (sessiz-stall kapatma, 2026-06-25): hata analizi HİÇ üretilemediğinde (analyzeAndAskError null)
+ * sessizce DÜŞME — pass-or-escalate. Eski hata: null → runtime.pendingErrorAnalysis null → isPipelineParked()
+ * false → reconcileAndDrainTasks task'ı sessizce 'dropped' yapıp pipeline'ı öldürüyordu (bayat 'Model çalışıyor'
+ * banner, kullanıcıya tıklanacak hiçbir şey yok). Bu yardımcı: pendingErrorAnalysis'e sentinel yazar (park =
+ * isPipelineParked true → drop YOK) + eyleme dönük askq açar (OPT_REANALYZE/OPT_QUEUE). Oto-modda kullanıcı
+ * izlemiyor → park = sessiz-stall → OPT_QUEUE OTO-route (hata iş listesine + görünür dur; OPT_REANALYZE
+ * oto-seçilmediği için reanalyze→null→reanalyze sonsuz döngüsü YOK). Tüm failPhase null-yolları bunu çağırır.
+ */
+async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean): Promise<void> {
+  // Savunmacı guard (sentinel-routing finding-e): mevcut gerçek bir bekleme varsa EZME.
+  // 3 çağrı sitesinin hepsi bugün null garantili, ama gelecek site için kapıyı kapat.
+  if (runtime.pendingErrorAnalysis !== null) {
+    log.warn(
+      "orchestrator",
+      "escalateUnanalyzableError çağrıldı ama pendingErrorAnalysis zaten dolu — ezme korunuyor",
+      { existingId: runtime.pendingErrorAnalysis.id, requestedPhase: n },
+    );
+    return;
+  }
+  const fbId = `error_analysis_fallback_${randomUUID()}`;
+  runtime.pendingErrorAnalysis = {
+    id: fbId,
+    phase: n,
+    blocking: true,
+    options: [OPT_REANALYZE, OPT_QUEUE],
+    solutions_tr: [],
+  };
+  emitChatMessage(
+    "system",
+    `⚠️ Faz ${n}: hata analizi üretilemedi — sessizce durmuyorum. Seçenek: tekrar analiz, ya da iş listesine kaydedip devam.`,
+  );
+  emitAskq({
+    id: fbId,
+    question: `Faz ${n}: hata analizi üretilemedi. Ne yapalım?`,
+    options: [OPT_REANALYZE, OPT_QUEUE],
+  });
+  if (autoResolve) {
+    await handleAskqAnswer(fbId, OPT_QUEUE).catch((e: unknown) =>
+      log.error("orchestrator", "escalateUnanalyzableError auto-route (queue) failed", e),
+    );
+  }
+}
+
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // Kullanıcı çalışan fazı yönlendirmeyle durdurduysa bu bir HATA değil — analiz/oto-çözüm BAŞLATMA.
   // (YZLLM: "beni dinlemedi" — durdurma sonrası MyCL kendi analizine dalmasın, kullanıcının isteğine geçsin.)
@@ -752,9 +796,18 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   if (pendingAuto?.auto_selected_solution) {
     autoSolveSig.set(n, { sig, count: priorCount + 1 });
     // Aynı routing'i (askq-cevap dalı) otomatik sür — soru kartı hiç açılmadı.
-    await handleAskqAnswer(pendingAuto.id, pendingAuto.auto_selected_solution).catch((e: unknown) =>
-      log.error("orchestrator", "auto-solve routing failed", e),
-    );
+    const routed = await handleAskqAnswer(pendingAuto.id, pendingAuto.auto_selected_solution)
+      .then(() => true)
+      .catch((e: unknown) => {
+        log.error("orchestrator", "auto-solve routing failed", e);
+        return false;
+      });
+    // FIX #3 (frozen-goal): oto-route throw etti + yeni park açılmadı → sessiz drop olmasın → fallback escalate.
+    if (!routed && !runtime.pendingErrorAnalysis) await escalateUnanalyzableError(n, autoResolve);
+  } else if (!pendingAuto) {
+    // FIX #1 (frozen-goal EVRENSEL kök): hata analizi HİÇ üretilemedi (null) → eski davranış sessiz drop'tu →
+    // artık pass-or-escalate (fallback askq + oto-modda OPT_QUEUE oto-route).
+    await escalateUnanalyzableError(n, autoResolve);
   }
 }
 
@@ -4894,9 +4947,17 @@ export async function handleAskqAnswer(
         runtime.config,
         errCtx,
       ).catch(() => null);
+      // FIX #2 (frozen-goal): yeniden-analiz de HİÇ üretemedi (null) → eski davranış sessiz drop'tu → fallback
+      // escalate. OPT_REANALYZE kullanıcının BİLİNÇLİ tıkı (yanıt-bağlamı) → autoResolve=false: PARK et (kullanıcı
+      // OPT_QUEUE ile çıkar), oto-route YOK (reanalyze→null→reanalyze döngüsü + istemsiz task yazımı önlenir).
+      if (!runtime.pendingErrorAnalysis) await escalateUnanalyzableError(cached.phase, false);
       return;
     }
     if (sel === OPT_QUEUE) {
+      // sentinel-routing finding-f: appendTask throws → eski .catch sadece log yapıyordu
+      // → task kuyrukta yok ama pendingErrorAnalysis=null → pipeline sessiz devam ediyordu
+      // (frozen-goal ihlali). Artık I/O hatası görünür emitChatMessage ile yüzeye çıkar.
+      let appendOk = true;
       await appendTask(runtime.state.project_root, {
         id: randomUUID(),
         ts: Date.now(),
@@ -4905,11 +4966,20 @@ export async function handleAskqAnswer(
         // oto-çalıştırma yok; kullanıcı "Uygula" ile bilerek tetikler).
         status: "pending",
         source: "manual",
-      }).catch((e) => log.warn("orchestrator", "error-analysis task append fail", e));
-      emitChatMessage(
-        "system",
-        "📋 Hata iş listesine kaydedildi — çözmeden devam edebilirsin.",
-      );
+      }).catch((e) => {
+        appendOk = false;
+        log.warn("orchestrator", "error-analysis task append fail", e);
+        emitChatMessage(
+          "error",
+          `⚠️ Faz ${cached.phase}: hata iş listesine yazılamadı (disk/izin hatası). Lütfen el ile not al: ${cached.solutions_tr[0] ?? "—"}`,
+        );
+      });
+      if (appendOk) {
+        emitChatMessage(
+          "system",
+          "📋 Hata iş listesine kaydedildi — çözmeden devam edebilirsin.",
+        );
+      }
       return;
     }
     // Güvenlik-baseline Unit 2: "Kabul et, devam et" (blocking gate override). Kullanıcı
