@@ -229,6 +229,19 @@ export async function runOnboarding(
     return;
   }
   const projectName = basename(root.replace(/\/+$/, "")) || "proje";
+  // Kopya bağlamı (kalıcı): bu proje, sandbox yüzünden okunamayan bir projenin erişilebilir KOPYASIysa kullanıcıya
+  // söyle — re-open'da chat sıfırlandığı için kopya-öncesi mesajlar kaybolur; bu işaret bağlamı korur.
+  try {
+    const cf = JSON.parse(await fs.readFile(join(root, ".mycl", "copied-from.json"), "utf-8")) as { origin?: string };
+    if (typeof cf?.origin === "string") {
+      emitChatMessage(
+        "system",
+        `📁 Bu, sandbox izni yüzünden okunamayan **\`${cf.origin}\`** projesinin erişilebilir KOPYASIDIR (orijinal DOKUNULMADI, yedek). Buradan okuyup geliştiriyorum.`,
+      );
+    }
+  } catch {
+    // kopya değil → normal akış
+  }
   emitChatMessage(
     "system",
     `📂 **Proje entegrasyonu başladı — ${projectName}**\nYabancı proje anlaşılıyor, MyCL dosyaları (\`.mycl/\`) kuruluyor. Mevcut KAYNAĞINA DOKUNULMAZ; eksikler rapor olarak çıkar.`,

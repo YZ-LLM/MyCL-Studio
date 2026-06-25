@@ -9,6 +9,7 @@
 import { promises as fs } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir, platform as osPlatform, tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { log } from "../logger.js";
 
 /** Kopyalanmayan (gereksiz/türetilmiş) dizinler — kaynak anlamak için gerekmez, kopyayı küçük tutar. */
@@ -46,12 +47,20 @@ export function isUnderHome(root: string): boolean {
  */
 export async function copyProjectToAccessible(srcRoot: string): Promise<string> {
   const baseDir = myclProjelerDir();
-  const name = basename(srcRoot.replace(/\/+$/, "")) || "proje";
-  const dest = join(baseDir, name);
+  const src = srcRoot.replace(/\/+$/, "");
+  const name = basename(src) || "proje";
+  // Hedef adını KAYNAK YOLUNUN hash'iyle benzersizle (mahkeme medium): aynı klasör-adlı farklı projeler
+  // (ör. ~/dev/app + ~/work/app) ÇAKIŞMAZ — aksi halde "hedef var → re-copy yok" yanlış kopyayı açardı.
+  const hash = createHash("sha1").update(src).digest("hex").slice(0, 8);
+  const dest = join(baseDir, `${name}-${hash}`);
 
-  await fs.mkdir(baseDir, { recursive: true });
+  // GİZLİLİK (mahkeme HIGH): baseDir SADECE sahibi okusun (0o700). /Users/Shared world-readable + umask 0022 →
+  // mkdir 755 yapardı → kopyadaki .env/.git/secret TÜM yerel kullanıcılara açılırdı. mode + chmod (mevcut için).
+  await fs.mkdir(baseDir, { recursive: true, mode: 0o700 });
+  await fs.chmod(baseDir, 0o700).catch(() => { /* mevcut gevşek izin → sıkılaştırılamadıysa best-effort */ });
 
-  // Hedef zaten var mı? Varsa RE-COPY ETME (kullanıcının kopyadaki işini koru) → mevcut yolu dön.
+  // Hedef zaten var mı? Varsa RE-COPY ETME (kullanıcının kopyadaki işini koru) → mevcut yolu dön. (hash sayesinde
+  // bu yalnız AYNI kaynak yeniden açılınca olur — yanlış-proje çakışması yok.)
   try {
     await fs.access(dest);
     log.info("copy-to-accessible", "hedef zaten var — re-copy YOK (kullanıcı işi korunur)", { dest });
@@ -60,11 +69,21 @@ export async function copyProjectToAccessible(srcRoot: string): Promise<string> 
     // yok → kopyala
   }
 
-  await fs.cp(srcRoot, dest, {
+  await fs.cp(src, dest, {
     recursive: true,
     errorOnExist: false,
-    filter: (src) => !EXCLUDED.has(basename(src)),
+    filter: (p) => !EXCLUDED.has(basename(p)),
   });
-  log.info("copy-to-accessible", "proje erişilebilir konuma kopyalandı", { srcRoot, dest });
+  // Kopyanın bağlamı: orijinal yolu işaretle → runOnboarding "bu okunamayan bir projenin kopyası" diyebilsin (UX;
+  // re-open'da chat sıfırlandığı için pre-reopen mesajları kaybolur — bu işaret KALICI bağlam verir).
+  await fs.mkdir(join(dest, ".mycl"), { recursive: true }).catch(() => {});
+  await fs
+    .writeFile(
+      join(dest, ".mycl", "copied-from.json"),
+      JSON.stringify({ origin: src, at: Date.now() }, null, 2) + "\n",
+      "utf-8",
+    )
+    .catch(() => {});
+  log.info("copy-to-accessible", "proje erişilebilir konuma kopyalandı", { srcRoot: src, dest });
   return dest;
 }
