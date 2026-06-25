@@ -296,6 +296,10 @@ export async function updateLivingDocs(
   config: MyclConfig,
   opts?: { attempts?: number; onboarding?: boolean },
 ): Promise<boolean> {
+  // emitPhaseRunning gerçekten çağrıldıysa true → finally emitPhaseIdle'ı YALNIZ o zaman çalıştırır.
+  // Provider-skip / erken-template-hatası dalında emitPhaseRunning'siz emitPhaseIdle, bekleyen bir AskQ'nun
+  // _askqPending'ini yanlışlıkla temizlerdi (çapraz-aile mahkeme; ipc.ts:471 doğrulandı).
+  let phaseStarted = false;
   try {
     // v15.13: Yaşayan dökümantasyonu ORKESTRATÖR rolü yazar — ana ajana (codegen) GİTMEZ
     // (kullanıcı kuralı). Orkestratör "her şeyi bilen" hafif rol → docs için doğru yer.
@@ -331,6 +335,7 @@ export async function updateLivingDocs(
     // hiç çalışmıyordu. Banner açıkken heartbeat (HEARTBEAT_MS=30_000) observer'ın tool_use'larını "şu an: X" basar
     // (yedek timer KURMA). emitPhaseIdle finally'de.
     emitPhaseRunning("📚 Proje inceleniyor / döküman üretiliyor…");
+    phaseStarted = true;
     emitClaudeStream({
       sub: "init",
       text: "cli-living-docs",
@@ -372,18 +377,22 @@ export async function updateLivingDocs(
       });
       if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
       if (!res.ok) {
-        lastDetail = String(res.error ?? "claude hatası");
+        lastDetail = String(res.error ?? "claude hatası (error alanı boş)");
         continue; // tekrar dene
       }
       parsed = parseLivingDocsBlock(res.text);
-      if (!parsed) lastDetail = "no valid {kind:docs} block";
+      if (!parsed) lastDetail = `no valid {kind:docs} block (çıktı başı: ${(res.text ?? "").slice(0, 100)})`;
     }
 
     if (!parsed) {
-      // Entegrasyon (onboarding) bağlamında döküman ÇEKİRDEK iş → "ana akış etkilenmez" YAZMA (YZLLM:
-      // "entegrasyon sırasında her şey önemli"). Rutin pipeline güncellemesinde ise yan-yarar → eski ton.
-      const tail = opts?.onboarding ? "" : " — bu tur atlandı (ana akış etkilenmez)";
-      emitChatMessage("system", `⚠️ Dökümantasyon üretilemedi (${maxAttempts} deneme)${tail}.`);
+      // onboarding'de TEK, bağlam-zengin mesajı runOnboarding verir → updateLivingDocs SUSTAR (çift-mesaj yok;
+      // çapraz-aile mahkeme). Rutin pipeline'da bu fail mesajı tek kaynak → bırak (eski ton: "ana akış etkilenmez").
+      if (!opts?.onboarding) {
+        emitChatMessage(
+          "system",
+          `⚠️ Dökümantasyon üretilemedi (${maxAttempts} deneme) — bu tur atlandı (ana akış etkilenmez).`,
+        );
+      }
       await appendAudit(state.project_root, {
         ts: Date.now(),
         phase: state.current_phase ?? 0,
@@ -458,6 +467,8 @@ export async function updateLivingDocs(
     emitChatMessage("system", "⚠️ Yaşayan dökümantasyon güncellemesi atlandı (beklenmedik hata).");
     return false;
   } finally {
-    emitPhaseIdle(); // 30s heartbeat banner'ını kapat (her durumda)
+    // YALNIZ emitPhaseRunning çağrıldıysa kapat → provider-skip/erken-hata dalında emitPhaseRunning'siz
+    // emitPhaseIdle, bekleyen AskQ'nun _askqPending'ini yanlışlıkla temizlemesin (çapraz-aile mahkeme).
+    if (phaseStarted) emitPhaseIdle();
   }
 }

@@ -237,8 +237,12 @@ export async function runOnboarding(state: State, config: MyclConfig): Promise<v
     case "empty":
       docsStatus = "atlandı (boş proje)";
       break;
+    case "failed":
+      docsStatus = "ÜRETİLEMEDİ (LLM geçerli blok döndürmedi) — entegrasyon için önemli, tekrar denenebilir";
+      break;
     default:
-      docsStatus = "ÜRETİLEMEDİ (LLM geçerli blok döndürmedi, 3 deneme) — entegrasyon için önemli, tekrar denenebilir";
+      // Savunmacı (mahkeme: ileride yeni reason eklenirse sessizce yanlış-bilgi vermesin).
+      docsStatus = "durum bilinmiyor";
   }
   if (docsResult.reason === "failed") {
     emitChatMessage(
