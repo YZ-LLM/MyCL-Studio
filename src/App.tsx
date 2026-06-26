@@ -113,9 +113,9 @@ interface MainState {
   loadingOlder: boolean;
   /** v15.6 — Orkestrator ajan event listesi (max 100 entry, dedup by ts). */
   agentEvents: AgentThinkingEvent[];
-  /** Orkestratörün ÖNEMLİ kararları (decision/error) — Orkestra panelini besler; agentEvents'ten ayrı,
-   *  daha yüksek cap (300) → uzun oturumda kararlar tool gürültüsüne yutulmaz ("BÜTÜN kararlar"). */
-  orchestratorDecisions: AgentThinkingEvent[];
+  /** Orkestratörün TÜM önemli aktivitesi (tool_use + decision + error) — Orkestra panelini besler;
+   *  agentEvents'ten ayrı, daha yüksek cap (500) → uzun oturumda aktivite yutulmaz ("yaptığı herşey"). */
+  orchestratorActivity: AgentThinkingEvent[];
   /**
    * v15.6 — Aktif agent.respond() çağrı sayısı. started → +1, completed → -1.
    * 0 değil ise composer'da loading spinner gösterilir. Paralel boot + user
@@ -159,7 +159,7 @@ const INITIAL_STATE: MainState = {
   olderAvailable: true,
   loadingOlder: false,
   agentEvents: [],
-  orchestratorDecisions: [],
+  orchestratorActivity: [],
   agentBusyCount: 0,
   taskQueue: [],
   tokenTotals: {
@@ -568,13 +568,14 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     const merged = [...state.agentEvents, newEvent];
     // Max 100 entry — en eskileri drop (slice from end)
     const capped = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
-    // Orkestratörün ÖNEMLİ kararları (decision/error) AYRI + daha yüksek cap'li store'da birikir → agentEvents'in
-    // 100-cap'i (tool_use gürültüsüyle dolu) kararları yutmasın. YZLLM "BÜTÜN önemli kararlar gözüksün". Cap 300:
-    // kararlar seyrek + küçük (kısa metin) → çok uzun oturum bile kapsanır; bu store yalnız Orkestra paneline besler.
-    const isDecisionLike = d.sub === "decision" || d.sub === "error";
-    const decs = isDecisionLike ? [...state.orchestratorDecisions, newEvent] : state.orchestratorDecisions;
-    const decCapped = decs.length > 300 ? decs.slice(decs.length - 300) : decs;
-    return { ...state, agentEvents: capped, orchestratorDecisions: decCapped };
+    // Orkestratörün TÜM önemli aktivitesi (tool_use + decision + error) AYRI + daha yüksek cap'li store'da
+    // birikir → agentEvents'in 100-cap'i bunu yutmasın. YZLLM "yaptığı HERŞEYİ yazsın; o iterasyonda neler
+    // yapıldı hepsini anlayabileyim". Cap 500 (tool_use bol olabilir); started/completed (yaşam-döngüsü gürültüsü)
+    // hariç. Orkestra paneli bu store'u sade Türkçe gösterir.
+    const isActivity = d.sub === "tool_use" || d.sub === "decision" || d.sub === "error";
+    const acts = isActivity ? [...state.orchestratorActivity, newEvent] : state.orchestratorActivity;
+    const actCapped = acts.length > 500 ? acts.slice(acts.length - 500) : acts;
+    return { ...state, agentEvents: capped, orchestratorActivity: actCapped };
   }
   // v15.7 (2026-05-24): İş kuyruğu — backend her değişiklikte tam listeyi yollar
   if (ev.kind === "task_queue_loaded" || ev.kind === "task_queue_changed") {
@@ -1377,7 +1378,7 @@ function App() {
                 />
               )}
               {activeRightPanel === "orchestrator" && (
-                <OrchestratorPanel events={mainState.orchestratorDecisions} />
+                <OrchestratorPanel events={mainState.orchestratorActivity} />
               )}
             </div>
           </>

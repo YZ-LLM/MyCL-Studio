@@ -1434,14 +1434,43 @@ select:focus {
   background: var(--bg);
 }
 
-/* Orkestra Ajanı paneli — önemli kararlar listesi (EventRow). */
+/* Orkestra Ajanı paneli — orkestratörün yaptıkları (sade Türkçe satırlar). */
 .orchestrator-log {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 8px 10px;
   font-size: 12px;
   line-height: 1.5;
   background: var(--bg);
+}
+.orch-row {
+  padding: 5px 4px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.12);
+}
+.orch-row-text {
+  display: block;
+}
+/* tool_use — soluk (yardımcı/araç adımı). */
+.orch-row-tool {
+  color: var(--fg-dim);
+}
+/* ÖNEMLİ KARAR — farklı/vurgulu renk (YZLLM: "önemli kararlar farklı renkte"). */
+.orch-row-decision {
+  border-left: 3px solid var(--accent, #5b9dff);
+  padding-left: 8px;
+  background: rgba(91, 157, 255, 0.08);
+}
+.orch-row-label {
+  display: block;
+  font-weight: 600;
+  color: var(--accent, #5b9dff);
+  margin-bottom: 2px;
+}
+/* Hata — kırmızı vurgulu. */
+.orch-row-error {
+  border-left: 3px solid var(--error, #d85d5d);
+  padding-left: 8px;
+  color: var(--error, #d85d5d);
 }
 
 .translator-entry {
