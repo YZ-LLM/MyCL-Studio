@@ -697,8 +697,8 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
           ruling.action === "suppress"
             ? `⚖️ Mahkeme (suppress): Faz ${n} bulgusu FALSE-POSITIVE kanıtlandı (iki bağımsız değerlendirme kanıtla ` +
                 `hemfikir) — oto-fix yapılmadı, geçti sayıldı.\n${ruling.summary}`
-            : `⚖️ Mahkeme (escalate): Faz ${n} bulgusu KUŞKULU/çözülmedi — oto-modda akış bloklanmadı (sessiz-stall ` +
-                `önleme), RAPORA yazıldı, çalışan kod riske atılmadı; sonra incele.\n${ruling.summary}`,
+            : `⚖️ Mahkeme (escalate): Faz ${n} bulgusu KUŞKULU/çözülmedi — otomatik modda akış bloklanmadı (sessiz ` +
+                `tıkanma önleme), RAPORA yazıldı, çalışan kod riske atılmadı; sonra incele.\n${ruling.summary}`,
         );
         await advanceToNextPhase(n);
         return;
@@ -707,7 +707,7 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
       log.warn("orchestrator", "mahkeme failPhase incelemesi hata (yutuldu → normal akış)", { error: String(e) });
       // SESSİZ FALLBACK YOK (CLAUDE.md #4): mahkeme erişilemezse sistem denetimsiz akışa düşüyordu, kullanıcı
       // bunu hiç görmüyordu → görünür kıl. Davranış (normal akış) korunur; yalnız bildirim eklenir.
-      emitChatMessage("system", "⚖️ Mahkeme (faz-hatası) erişilemedi — inceleme atlandı, normal otomatik akışa düşüldü (denetimsiz). Müfettişe ulaşılamıyorsa anahtar/bağlantıyı kontrol et.");
+      emitChatMessage("system", "⚖️ Mahkeme (faz hatası) erişilemedi — inceleme atlandı, normal otomatik akışa düşüldü (denetimsiz). Müfettişe ulaşılamıyorsa anahtar/bağlantıyı kontrol et.");
     }
   }
   if (!autoResolve && !mahkemeDiverted) {
@@ -780,14 +780,14 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
         }
       } catch (e) {
         log.warn("orchestrator", "mahkeme döngü-incelemesi hata (yutuldu → normal akış)", { error: String(e) });
-        emitChatMessage("system", "⚖️ Mahkeme (döngü-incelemesi) erişilemedi — inceleme atlandı, normal akışa düşüldü (denetimsiz).");
+        emitChatMessage("system", "⚖️ Mahkeme (döngü incelemesi) erişilemedi — inceleme atlandı, normal akışa düşüldü (denetimsiz).");
       }
     }
   }
   if (mahkemeLoopSummary) {
     emitChatMessage(
       "system",
-      `🕵️ Müfettişin bağımsız döngü-okuması (kararına yardımcı; orkestratörün göremediği açı):\n${mahkemeLoopSummary}`,
+      `🕵️ Müfettişin bağımsız döngü okuması (kararına yardımcı; orkestratörün göremediği açı):\n${mahkemeLoopSummary}`,
     );
   }
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
@@ -1244,7 +1244,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
             );
             emitAskq({
               id: askqId,
-              question: `Yeni güçlü model ${t.strong} çıkmış. Main ajan + strong (kalite-kritik) görevler için buna geçeyim mi?`,
+              question: `Yeni güçlü model ${t.strong} çıkmış. Main ajan + strong (kalite açısından kritik) görevler için buna geçeyim mi?`,
               options: ["Evet, geç", "Hayır, kalsın"],
               allow_other: false,
             });
@@ -1986,7 +1986,7 @@ async function handleAskQuestion(text: string): Promise<void> {
   const q = text.trim();
   if (!q) return;
   try {
-    emitPhaseRunning("🔎 Soru cevaplanıyor (salt-okunur danışma)…");
+    emitPhaseRunning("🔎 Soru cevaplanıyor (salt okunur danışma)…");
     // Oturum geçmişini bağlam olarak ekle (follow-up'lar bağlansın) — yoksa düz soru.
     const historyBlock = formatQuestionModeHistory();
     const promptText = historyBlock ? `${historyBlock}Şimdiki soru: ${q}` : q;
@@ -2243,7 +2243,7 @@ async function executeAgentDecision(
           emitChatMessage(
             "system",
             `⚖️ Mahkeme: arka arkaya ${_clarifyInspectChain} netleştirme çözüldü ama ilerleme yok → ` +
-              `döngü-emniyeti, sana soruyorum.`,
+              `döngü emniyeti için sana soruyorum.`,
           );
         } else {
           try {
@@ -2930,7 +2930,7 @@ async function runDevelopIteration(
     setRecordContext({ iteration: runtime.state.iteration_count ?? 1, phase: opts.startPhase });
     emitChatMessage(
       "system",
-      `🛡️ Güvenlik sistem-işi Faz ${opts.startPhase}'ten ele alınıyor (niyet bulgudan türetildi; Faz 1/2 atlandı).`,
+      `🛡️ Güvenlik sistem işi Faz ${opts.startPhase}'ten ele alınıyor (niyet bulgudan türetildi; Faz 1/2 atlandı).`,
     );
     await advanceToNextPhase((opts.startPhase - 1) as PhaseId);
     return;
@@ -3259,7 +3259,7 @@ async function shouldRunMechanical(
     log.error("orchestrator", "shouldRunMechanical: spec okunamadı → gate emniyetli KOŞULUYOR (atlanmıyor)", { code, error: String(e) });
     emitChatMessage(
       "system",
-      `⚠️ Faz skip-koşulu için spec okunamadı (${code ?? "hata"}) → gate atlanmıyor, emniyetli şekilde KOŞULUYOR (kuşkuda full).`,
+      `⚠️ Faz atlama koşulu için spec okunamadı (${code ?? "hata"}) → gate atlanmıyor, emniyetli şekilde KOŞULUYOR (kuşkuda full).`,
     );
     return true;
   }
@@ -3609,7 +3609,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         state = { ...state, stack: freshStack };
         emitChatMessage(
           "system",
-          `🧭 Proje stack'i tespit edildi: **${freshStack}** — mekanik kalite-gate'leri (lint/test/…) bu profile göre çalışacak.`,
+          `🧭 Proje stack'i tespit edildi: **${freshStack}** — mekanik kalite gate'leri (lint/test/…) bu profile göre çalışacak.`,
         );
         log.info("orchestrator", "stack re-detected post-codegen", {
           stack: freshStack,
@@ -3644,7 +3644,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       });
       emitChatMessage(
         "system",
-        "Faz 6 (UI İncelemesi) atlandı — entegre modunda yapılmaz (mevcut projede gap-işleri UI-yapımı değil; sürdürülüyor).",
+        "Faz 6 (UI İncelemesi) atlandı — entegre modunda yapılmaz (mevcut projede boşluk işleri UI yapımı değil; sürdürülüyor).",
       );
       log.info("orchestrator", "phase 6 skipped (integrate mode)", { origin: state.origin });
       cur = 6 as PhaseId;
@@ -4135,7 +4135,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             await saveState(state);
             emitChatMessage(
               "system",
-              `🎯 Scoped kalite: değişen ${sc.files.length} dosya + bağımlıları taranıyor; sistem-gate'leri (sadeleştirme/perf/entegrasyon/load) tam taramaya bırakıldı.`,
+              `🎯 Scoped kalite: değişen ${sc.files.length} dosya + bağımlıları taranıyor; sistem gate'leri (sadeleştirme/perf/entegrasyon/load) tam taramaya bırakıldı.`,
             );
           } else if (state.fix_checkpoint_ref) {
             state = { ...state, fix_checkpoint_ref: undefined };
@@ -4166,7 +4166,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         });
         emitChatMessage(
           "system",
-          `⏭ Faz ${next} (${phaseLabelTR(next, spec)}) bu scoped koşuda atlandı — tüm-sistem taraması büyük taramada koşar.`,
+          `⏭ Faz ${next} (${phaseLabelTR(next, spec)}) bu scoped koşuda atlandı — tüm sistem taraması büyük taramada koşar.`,
         );
         cur = next;
         continue;
@@ -4587,7 +4587,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           } catch (e) {
             // Mahkeme hatası → güvenli varsayılan proceed (mevcut davranış korunur; mahkeme akışı BOZMAZ).
             log.warn("orchestrator", "mahkeme gate-incelemesi hata (yutuldu → proceed)", { error: String(e) });
-            emitChatMessage("system", "⚖️ Mahkeme (gate-incelemesi) erişilemedi — bulgu denetimsiz geçti (proceed).");
+            emitChatMessage("system", "⚖️ Mahkeme (gate incelemesi) erişilemedi — bulgu denetimsiz geçti (proceed).");
           }
         }
         if (mahkemeAction === "suppress") {
@@ -4814,7 +4814,7 @@ async function handleRunDastRequest(): Promise<void> {
     return;
   }
   if (runtime.pendingDast) {
-    emitChatMessage("system", "Zaten bir güvenlik-tarama onayı bekleniyor.");
+    emitChatMessage("system", "Zaten bir güvenlik taraması onayı bekleniyor.");
     return;
   }
   const askqId = `dast_confirm_${randomUUID()}`;
@@ -4826,9 +4826,9 @@ async function handleRunDastRequest(): Promise<void> {
       "**Tüm projeyi tarar**: önce uygulamayı gezip (katana ile) tüm sayfa/route'ları " +
       "bulur, her birini test eder — yalnız ana sayfayı değil. **Yalnız localhost/127.0.0.1** " +
       "hedeflenir; üretim veya uzak sunucuya ASLA çalışmaz. Gezme gerçek GET istekleri attığı " +
-      "için durum-değiştiren bağlantılar tetiklenebilir — `logout`/`delete`/`purge` gibi açıkça " +
-      "yıkıcı görünen yollar güvenlik için atlanır, ama özel durum-değiştiren GET endpoint'lerin " +
-      "olabilir. Aktif test + tüm-app gezme nedeniyle geçici yük / yan etki olabilir ve tarama " +
+      "için durumu değiştiren bağlantılar tetiklenebilir — `logout`/`delete`/`purge` gibi açıkça " +
+      "yıkıcı görünen yollar güvenlik için atlanır, ama özel, durumu değiştiren GET endpoint'lerin " +
+      "olabilir. Aktif test + tüm uygulamayı gezme nedeniyle geçici yük / yan etki olabilir ve tarama " +
       "birkaç dakika sürebilir (geliştirme ortamında çalıştır). Onaylıyor musun?",
   );
   emitAskq({
@@ -5022,7 +5022,7 @@ export async function handleAskqAnswer(
       if (dep.ran && !dep.clean) {
         await enqueueSecurityFixTask(
           st.project_root,
-          `Bağımlılık zafiyetlerini gider — \`${dep.tool}\` eşik-üstü (yüksek+) zafiyet bildirdi. İlgili paketleri güvenli sürüme güncelle; tarama temiz geçsin.`,
+          `Bağımlılık zafiyetlerini gider — \`${dep.tool}\` eşik üstü (yüksek+) zafiyet bildirdi. İlgili paketleri güvenli sürüme güncelle; tarama temiz geçsin.`,
         );
       }
       for (const label of sast.findings) {
@@ -5449,7 +5449,7 @@ export async function handleAskqAnswer(
         fixCheckpointRef = cp.ref;
         emitChatMessage(
           "system",
-          "📌 Fix öncesi checkpoint alındı — regresyonda otomatik geri alınabilir; mekanik kalite-gate'leri değişen dosyalara odaklanacak (scoped).",
+          "📌 Fix öncesi checkpoint alındı — regresyonda otomatik geri alınabilir; mekanik kalite gate'leri değişen dosyalara odaklanacak (scoped).",
         );
       } else {
         // Git yok/kirli → scoped-gate yok AMA yine de geri-alınabilir yedek al (.mycl/backups).
@@ -5810,7 +5810,7 @@ async function runPhaseOnce(
     });
     emitChatMessage(
       "system",
-      "Faz 6 (UI İncelemesi) atlandı — entegre modunda yapılmaz (mevcut projede gap-işleri UI-yapımı değil).",
+      "Faz 6 (UI İncelemesi) atlandı — entegre modunda yapılmaz (mevcut projede boşluk işleri UI yapımı değil).",
     );
     log.info("orchestrator", "phase 6 skipped (integrate mode, runPhaseOnce)", { origin: state.origin });
     return "skipped";
@@ -6120,7 +6120,7 @@ async function emitPhase16HonestyNote(state: State): Promise<void> {
     const notes: string[] = [];
     if (v.smokeKind === "placeholder") {
       notes.push(
-        "Çalışan test MyCL'in oluşturduğu **genel bir sayfa-açılır kontrolü** — senin özel isteğini (örneğin belirli bir özelliğin gerçekten çalışması) test etmez.",
+        "Çalışan test MyCL'in oluşturduğu **genel bir sayfa açılış kontrolü** — senin özel isteğini (örneğin belirli bir özelliğin gerçekten çalışması) test etmez.",
       );
     }
     if (v.authStatus === "placeholder") {

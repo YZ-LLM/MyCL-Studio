@@ -281,7 +281,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
     // autoAnswer'ı kaçırıyordu → her onayda 47 dk takılma.
     const auto = autoAnswerPick(options_tr);
     if (auto !== null) {
-      emitChatMessage("system", `🤖 Oto-cevap (otomatik onay/ilk seçenek): "${auto}"`);
+      emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay/ilk seçenek): "${auto}"`);
       return auto;
     }
     const askqId = randomUUID();
@@ -314,7 +314,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
     const auto = autoAnswerPick(options_tr);
     let selected_tr: string;
     if (auto !== null) {
-      emitChatMessage("system", `🤖 Oto-cevap (otomatik onay): "${auto}"`);
+      emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay): "${auto}"`);
       selected_tr = auto;
     } else {
       const askqId = randomUUID();

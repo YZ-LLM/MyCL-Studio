@@ -5,9 +5,10 @@
   kullanmasın. Görünür mesaj düzeltildi ([phase-8.ts](orchestrator/src/phase-8.ts): "önceden-var kırmızıdan" →
   "zaten önceden başarısız olan testlerden"). MyCL'e öğretildi: [orchestrator-system.md](assets/agent-prompts/orchestrator-system.md)
   Dil disiplini bölümüne kural + [translator.ts](orchestrator/src/translator.ts) EN→TR sistem prompt'una 8. kural
-  (Türkçe üretirken tire-bileşik yapma — bu sadık çeviridir, yeniden ifade değil; bileşik bozuk Türkçe). DOĞRU yazım:
+  (Türkçe üretirken tireyle bileşik yapma — bu sadık çeviridir, yeniden ifade değil; bileşik bozuk Türkçe). DOĞRU yazım:
   "önceden var olan", "yaşayan dökümantasyon", "sahte yeşil". Tire yalnız gerçek teknik jetonda (dosya yolu, kod adı,
-  CLI bayrağı, model adı). Koddaki sabit string'lerde kalan yüzlerce örnek ayrı bir süpürmeyle temizlenecek. check yeşil.
+  CLI bayrağı, model adı). Koddaki kullanıcıya görünen sabit metinlerdeki ~40 örnek de süpürüldü (17 dosya, çok ajanlı
+  paralel akışla; her değişiklik elle gözden geçirildi, bir aşırı düzeltme geri alındı — "gate" terimi korundu). check yeşil (1669 test).
 
 - **feat(entegre/recent): "Proje Aç" ile açılan proje son projelerde görünür — okunamayan-proje KOPYAsı dahil:**
   YZLLM ("entegre modunda açtığım proje de son projelere gelsin"): MyCL okunamayan (ev-altı/sandbox) bir projeyi

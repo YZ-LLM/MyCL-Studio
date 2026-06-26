@@ -370,7 +370,7 @@ export class Phase8Controller {
       log.error("phase-8", "getAcCount: spec.md okunamadı → AC=0 (yeşil-eşiği güvenilmez)", { code, error: String(e) });
       emitChatMessage(
         "system",
-        `⚠️ Faz 8: kabul-kriterleri kaynağı (spec.md) okunamadı (${code ?? "hata"}) — AC sayısı doğrulanamadı; yeşil-eşiği olduğundan düşük olabilir. spec'i kontrol et.`,
+        `⚠️ Faz 8: kabul kriterleri kaynağı (spec.md) okunamadı (${code ?? "hata"}) — AC sayısı doğrulanamadı; yeşil eşiği olduğundan düşük olabilir. spec'i kontrol et.`,
       );
     }
     return this.acCountCache;
@@ -537,7 +537,7 @@ export class Phase8Controller {
               "system",
               baseRes.code === 0
                 ? "📋 Test temeli YEŞİL — fix sonrası HERHANGİ bir kırmızı regresyon sayılır."
-                : `📋 Test temeli: ${failures.size} test fix-ÖNCESİ de KIRIK (fix-dışı). Fix sonrası yalnız YENİ kırılma gate'i düşürür.`,
+                : `📋 Test temeli: ${failures.size} test düzeltmeden ÖNCE de KIRIK (düzeltme dışı). Düzeltme sonrası yalnız YENİ kırılma gate'i düşürür.`,
             );
           }
         }
@@ -704,7 +704,7 @@ export class Phase8Controller {
     if (suiteExecutionFailed) {
       const msg =
         "Faz 8 final doğrulama ÇALIŞTIRILAMADI — test koşucusu süreç başlatamadı (E2BIG / argument list too long / " +
-        "ortam faultu); testler KOŞMADI → kod DOĞRULANAMADI. KOD/TEST hatası DEĞİL; ortam temizlenmeli. Kod-fix/escalation YAPILMAZ.";
+        "ortam faultu); testler KOŞMADI → kod DOĞRULANAMADI. KOD/TEST hatası DEĞİL; ortam temizlenmeli. Kod düzeltmesi/tırmandırma YAPILMAZ.";
       emitChatMessage("system", `⛔ ${msg}`);
       this.lastFailReason = msg; // "E2BIG" / "argument list too long" içerir → failPhase isEnvironmentError → dur
       this.lastFailEscalatable = false; // model gücü ortam faultunu çözmez
@@ -860,7 +860,7 @@ export class Phase8Controller {
       );
     emitChatMessage(
       "system",
-      `❌ Faz 8 gate fail: ${reasons.join("; ")}. sıfır-teknik-borç ilkesi: "ASLA TEKNİK BORÇ BIRAKMA".`,
+      `❌ Faz 8 gate fail: ${reasons.join("; ")}. sıfır teknik borç ilkesi: "ASLA TEKNİK BORÇ BIRAKMA".`,
     );
     this.lastFailReason = `gate fail: ${reasons.join("; ")}`;
     // Eskalasyon kararı: model+efor tırmanması YALNIZ model-gücüyle düzelebilecek kod-fail'inde anlamlı
@@ -1043,16 +1043,16 @@ export class Phase8Controller {
           pass = true; // YENİ kırılma yok → fix temiz
           detailTail = `no-regression (pre-existing ${reg.preExistingCount} fail, fix added 0)`;
           verdictMsg =
-            `✅ Faz 8: final suite mutlak KIRMIZI ama ${reg.preExistingCount} kırık testin HEPSİ fix-ÖNCESİ de ` +
-            `kırıktı (alakasız/fix-dışı) — fix YENİ bir şey KIRMADI → REGRESYON YOK, gate geçti. ` +
-            `(Önceden-var kırıklar projenin ayrı sorunu; fix'in suçu değil.)`;
+            `✅ Faz 8: final suite mutlak KIRMIZI ama ${reg.preExistingCount} kırık testin HEPSİ düzeltmeden ÖNCE de ` +
+            `kırıktı (alakasız/düzeltme dışı) — düzeltme YENİ bir şey KIRMADI → REGRESYON YOK, gate geçti. ` +
+            `(Önceden var olan kırıklar projenin ayrı sorunu; düzeltmenin suçu değil.)`;
         } else {
           detailTail = `REGRESYON: ${reg.regressed.slice(0, 5).join(" | ").slice(0, 200)}`;
           verdictMsg =
             `🔴 Faz 8: fix REGRESYON yaptı — önce GEÇEN şu test(ler) şimdi DÜŞÜYOR: ` +
             `${reg.regressed.slice(0, 5).join(" | ").slice(0, 200)}` +
             `${reg.regressed.length > 5 ? ` (+${reg.regressed.length - 5} daha)` : ""}. ` +
-            `(Önceden-var ${reg.preExistingCount} fail ayrı — onlar fix-dışı.)`;
+            `(Önceden var olan ${reg.preExistingCount} fail ayrı — onlar düzeltme dışı.)`;
           // YZLLM 2026-06-12 (#2): AYNI regresyon imzası bir önceki denemede de olduysa → daha güçlü model
           // AYNI testleri kırıyor → model gücü sorunu DEĞİL → tırmanmayı KES (7-basamak Opus·xhigh'a kadar
           // boş yakma). İmza = sıralı regressed test id'leri; anahtar proje+iterasyon (iterasyonlar arası bayat eşleşme yok).
@@ -1090,7 +1090,7 @@ export class Phase8Controller {
   private async runMutationProbe(testCmd: string): Promise<void> {
     const changed = this.state.changed_scope?.files ?? [];
     if (changed.length === 0) return; // değişen dosya bilinmiyor → prob atla
-    emitChatMessage("system", "🧬 Test-geçerliliği prob'u — kodu küçük bozup testlerin gerçekten yakaladığını doğruluyorum…");
+    emitChatMessage("system", "🧬 Test geçerliliği probu — kodu küçük bozup testlerin gerçekten yakaladığını doğruluyorum…");
     const r = await probeTestValidity({
       config: this.config,
       projectRoot: this.state.project_root,
@@ -1108,11 +1108,11 @@ export class Phase8Controller {
       });
       emitChatMessage(
         "system",
-        `⚠️ Test-geçerliliği UYARISI: \`${r.file}\` küçük bir davranış-bozumunda testler HÂLÂ geçti — testler o davranışı ` +
-          "gerçekten sınamıyor olabilir (sahte-yeşil riski). Faz 9 risk incelemesi bunu ele alır.",
+        `⚠️ Test geçerliliği UYARISI: \`${r.file}\` küçük bir davranış bozumunda testler HÂLÂ geçti — testler o davranışı ` +
+          "gerçekten sınamıyor olabilir (sahte yeşil riski). Faz 9 risk incelemesi bunu ele alır.",
       );
     } else if (r.checked && r.caught) {
-      emitChatMessage("system", `✅ Test-geçerliliği: testler bozulan davranışı yakaladı (${r.file}) — koruma gerçek.`);
+      emitChatMessage("system", `✅ Test geçerliliği: testler bozulan davranışı yakaladı (${r.file}) — koruma gerçek.`);
     }
     // Bağımsız düşman-test yazarı (Özellik #2): kodu yazandan AYRI ajan kodu kırmaya çalışır (taraflı-test riski).
     await runAdversarialTester(this.state, this.config).catch((e: unknown) => log.warn("phase-8", "adversarial tester failed", e));
@@ -1252,7 +1252,7 @@ export class Phase8Controller {
       "system",
       `⚠️ Phase 8 tech-debt: ${path} — ${findings.length} bulgu ` +
         `(${findings.map((f) => f.category).join(", ")}). ` +
-        `sıfır-teknik-borç ilkesi "ASLA TEKNİK BORÇ BIRAKMA" — REFACTOR ile temizle.`,
+        `sıfır teknik borç ilkesi "ASLA TEKNİK BORÇ BIRAKMA" — REFACTOR ile temizle.`,
     );
     log.warn("phase-8", "tech debt detected", {
       path,

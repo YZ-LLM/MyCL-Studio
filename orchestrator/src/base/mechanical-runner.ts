@@ -291,7 +291,7 @@ export class MechanicalRunnerBase {
       };
     }
     // TÜM alt-taramalar da geçti → şimdi dürüstçe "geçti" denebilir.
-    if (mainOutcome.kind === "pass") emitChatMessage("system", `✅ ${this.label} — geçti (tüm alt-taramalar dahil).`);
+    if (mainOutcome.kind === "pass") emitChatMessage("system", `✅ ${this.label} — geçti (tüm alt taramalar dahil).`);
     return mainOutcome;
   }
 

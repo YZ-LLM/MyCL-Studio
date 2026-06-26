@@ -68,13 +68,13 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
   try {
     spec = await readFile(currentSpecPath(state), "utf-8");
   } catch {
-    return { ran: false, note: "spec yok — düşman-test atlandı" };
+    return { ran: false, note: "spec yok — düşman testi atlandı" };
   }
   if (backendForRole(config, "main") !== "cli") {
     // API yolu da desteklenir ama düşman-test Write/Bash gerektirir; şimdilik CLI/abonelik yolunda koşar.
-    return { ran: false, note: "düşman-test yalnız CLI/abonelik yolunda (Write/Bash gerekir)" };
+    return { ran: false, note: "düşman testi yalnız CLI/abonelik yolunda (Write/Bash gerekir)" };
   }
-  emitChatMessage("system", "🧪 Bağımsız düşman-test yazarı — kodu yazan DEĞİL ayrı bir ajan, kodu KIRMAYA çalışan testler yazıp koşuyor…");
+  emitChatMessage("system", "🧪 Bağımsız düşman testi yazarı — kodu yazan DEĞİL ayrı bir ajan, kodu KIRMAYA çalışan testler yazıp koşuyor…");
   let r: Awaited<ReturnType<typeof runClaudeCli>>;
   try {
     r = await runClaudeCli({
@@ -88,13 +88,13 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
     });
   } catch (e) {
     log.warn("adversarial-test", "çağrı başarısız", e);
-    return { ran: false, note: "düşman-test ajanı çalışamadı" };
+    return { ran: false, note: "düşman testi ajanı çalışamadı" };
   }
-  if (!r.ok) return { ran: false, note: `düşman-test ajanı hata: ${r.error ?? "?"}` };
+  if (!r.ok) return { ran: false, note: `düşman testi ajanı hata: ${r.error ?? "?"}` };
   const v = parseAdversarialVerdict(r.text);
-  if (!v) return { ran: false, note: "düşman-test verdict'i üretilemedi" };
+  if (!v) return { ran: false, note: "düşman testi verdict'i üretilemedi" };
   if (!v.broke) {
-    emitChatMessage("system", "✅ Bağımsız düşman-test: kod saldırı testlerine dayandı — AC ihlali bulunamadı.");
+    emitChatMessage("system", "✅ Bağımsız düşman testi: kod saldırı testlerine dayandı — AC ihlali bulunamadı.");
     return { ran: true, broke: false, note: "dayandı" };
   }
   await appendAudit(state.project_root, {
@@ -106,7 +106,7 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
   });
   emitChatMessage(
     "system",
-    "⚠️ Bağımsız düşman-test bir AC ihlali BULDU (kodu yazan ajanın gözden kaçırdığı):\n" +
+    "⚠️ Bağımsız düşman testi bir AC ihlali BULDU (kodu yazan ajanın gözden kaçırdığı):\n" +
       v.failures.map((f) => `• ${f}`).join("\n") +
       "\nFaz 9 risk incelemesi + sen bunu ele alın — testler 'geçti' dese de bu durum kapsanmıyor.",
   );

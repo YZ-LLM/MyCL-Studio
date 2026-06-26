@@ -267,7 +267,7 @@ export class Phase3Controller {
         // ADR karar-kaydı (sessiz-fallback denetimi): müfettiş/orkestratör trajectory'sini besler → sessiz
         // kayıp bağlam-eksiği doğurur (tekrarlayan = disk/izin). log.warn→log.error + görünür.
         log.error("phase-3", "faz-kapsamı karar kaydı (ADR) yazılamadı — orkestratör belleği/trajectory eksik kalabilir", err);
-        emitChatMessage("system", "⚠️ Faz 3: faz-kapsamı karar kaydı yazılamadı (disk/izin?) — orkestratör belleği eksik kalabilir.");
+        emitChatMessage("system", "⚠️ Faz 3: faz kapsamı karar kaydı yazılamadı (disk/izin?) — orkestratör belleği eksik kalabilir.");
       }
       log.info("phase-3", "complete");
       return "complete";

@@ -126,7 +126,7 @@ export async function computeChangedScope(
     // blast-radius (sessiz-fallback denetimi): graf inşası başarısızsa scope yalnız değişen-dosyalara DARALIR →
     // etkilenen (import-eden) dosyalar taranmadan gate geçer (false-green riski). log.warn→log.error + görünür kıl.
     log.error("fix/scope", "blast-radius (ters-import grafiği) başarısız — scope yalnız değişen-dosyalar (etkilenen dosyalar atlanmış olabilir)", err);
-    emitChatMessage("system", "⚠️ Etki-yarıçapı hesaplanamadı — gate yalnız değişen dosyalara koştu; import-eden dosyalar atlanmış olabilir.");
+    emitChatMessage("system", "⚠️ Etki yarıçapı hesaplanamadı — gate yalnız değişen dosyalara koştu; import eden dosyalar atlanmış olabilir.");
   }
 
   return { files: [...all], available: true, since };

@@ -195,7 +195,7 @@ export class Phase5Controller {
     if (panelDecision === "skip-simple") {
       emitChatMessage(
         "system",
-        "🎨 UI karmaşıklığı **basit** → tek-ajan tasarım (çok-perspektifli panel atlandı).",
+        "🎨 UI karmaşıklığı **basit** → tek ajanlı tasarım (çok perspektifli panel atlandı).",
       );
       log.info("phase-5", "design panel skipped (ui_complexity=simple)");
     }
@@ -228,7 +228,7 @@ export class Phase5Controller {
         );
         emitChatMessage(
           "system",
-          "🎨 Tasarım paneli: architect/ux/security/data perspektifleri paralel çalışıyor → sentez…",
+          "🎨 Tasarım paneli: architect/ux/security/data perspektifleri paralel çalışıyor → sentez ediliyor…",
         );
         emitPhaseRunning("Tasarım paneli çalışıyor (4 perspektif paralel)");
         const design = await runDesignFanout(this.config, this.state.project_root, specContent);
@@ -271,7 +271,7 @@ export class Phase5Controller {
                 emitChatMessage(
                   "system",
                   nego.mode === "team"
-                    ? "✅ Çatışmalar GERÇEK Agent Teams peer-müzakeresiyle çözüldü; `.mycl/design.md` güncellendi."
+                    ? "✅ Çatışmalar GERÇEK Agent Teams eş müzakeresiyle çözüldü; `.mycl/design.md` güncellendi."
                     : "✅ Çatışmalar cross-critique turuyla çözüldü (API modu); `.mycl/design.md` güncellendi.",
                 );
               } else {
@@ -296,12 +296,12 @@ export class Phase5Controller {
         } else {
           emitChatMessage(
             "system",
-            `⚠ Tasarım paneli atlandı (${design.reason}) — tek-ajan tasarımıyla devam.`,
+            `⚠ Tasarım paneli atlandı (${design.reason}) — tek ajanlı tasarımla devam.`,
           );
         }
       } catch (err) {
         log.warn("phase-5", "design fan-out error", err);
-        emitChatMessage("system", "⚠ Tasarım paneli hata verdi — tek-ajan tasarımıyla devam.");
+        emitChatMessage("system", "⚠ Tasarım paneli hata verdi — tek ajanlı tasarımla devam.");
       }
     }
 
@@ -595,7 +595,7 @@ export class Phase5Controller {
       // Load-bearing (sessiz-fallback denetimi): bu enjeksiyon UI çalışma-anı hatalarını yakalar → başarısızsa
       // runtime hataları sessizce yakalanmayabilir. log.warn→log.error + GÖRÜNÜR (kullanıcı bilsin).
       log.error("phase-5", "vite runtime-hata yakalama enjekte edilemedi — runtime hataları yakalanmayabilir", err);
-      emitChatMessage("system", "⚠️ UI runtime-hata yakalama enjekte edilemedi — bazı çalışma-anı hataları otomatik yakalanmayabilir.");
+      emitChatMessage("system", "⚠️ UI çalışma anı hatalarını yakalama enjekte edilemedi — bazı çalışma anı hataları otomatik yakalanmayabilir.");
     }
     // dev-ortam ≠ proje sorunu: dev server ZATEN çalışıyor mu? Kullanıcı dışarıdan başlatmış olabilir
     // (örn. MyCL 5173'te başlatamadı, kullanıcı 5176'da elle çalıştırdı). Spawn'dan ÖNCE aday + yaygın dev
@@ -790,7 +790,7 @@ export class Phase5Controller {
       });
       emitChatMessage(
         "error",
-        `⚠️ Dev server ayakta (port ${handle.port}) ama \`/\` kalıcı olarak **5xx** veriyor — codegen build-kıran bir hata üretti (en olası: \`'use client'\` bileşeni server-only/\`fs\`/\`server-only\` modülü import etmiş; ya da syntax/runtime hatası). "Ayakta" yetmez, app SERVİS etmeli → Faz 0 debug ASIL hatayı bulup düzeltecek.`,
+        `⚠️ Dev server ayakta (port ${handle.port}) ama \`/\` kalıcı olarak **5xx** veriyor — codegen build'i kıran bir hata üretti (en olası: \`'use client'\` bileşeni server-only/\`fs\`/\`server-only\` modülü import etmiş; ya da syntax/runtime hatası). "Ayakta" yetmez, app SERVİS etmeli → Faz 0 debug ASIL hatayı bulup düzeltecek.`,
       );
       this.lastFailReason =
         "The dev server process is UP but `/` serves a PERSISTENT 5xx response. The dev server started fine — the BUILD is broken. Most likely a `'use client'` component imports a server-only module (one that does `import 'server-only'` or uses `fs`/`node:*`), leaking it into the client bundle → Next.js fails the whole build → every route 5xx. (Other possibilities: a syntax/runtime error in a shared layout/module.) Diagnose the ACTUAL compile/build error — check client components' imports against server-only modules. Do NOT treat this as an environment/timeout/restart problem; a restart will NOT fix a broken build.";

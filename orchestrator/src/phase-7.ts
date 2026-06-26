@@ -326,7 +326,7 @@ export class Phase7Controller {
       // ADR karar-kaydı (DB şeması — müfettiş/orkestratör trajectory'sini besler) → sessiz log.warn yerine
       // log.error + görünür (phase-3/4 ile tutarlı; tekrarlayan = disk/izin).
       log.error("phase-7", "DB-şeması karar-kaydı (ADR) yazılamadı — orkestratör belleği eksik kalabilir", err);
-      emitChatMessage("system", "⚠️ Faz 7: DB-şeması karar-kaydı yazılamadı (disk/izin?) — orkestratör belleği eksik kalabilir.");
+      emitChatMessage("system", "⚠️ Faz 7: DB şeması karar kaydı yazılamadı (disk/izin?) — orkestratör belleği eksik kalabilir.");
     }
     log.info("phase-7", "complete");
     return "complete";

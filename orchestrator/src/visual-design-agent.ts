@@ -193,13 +193,13 @@ export async function runVisualDesignAgent(
         log.error("visual-design", "stil-dışı revert başarısız — offenders kaldı", { stillOffending });
         emitChatMessage(
           "system",
-          `🎨 KRİTİK: ajan stil-dışı dosyalara dokundu ve GERİ ALMA başarısız oldu (${stillOffending.slice(0, 3).join(", ")}${stillOffending.length > 3 ? "…" : ""}) → görsel iyileştirme güvenli değil, mevcut UI korunuyor (elle kontrol gerekebilir).`,
+          `🎨 KRİTİK: ajan stil dışı dosyalara dokundu ve GERİ ALMA başarısız oldu (${stillOffending.slice(0, 3).join(", ")}${stillOffending.length > 3 ? "…" : ""}) → görsel iyileştirme güvenli değil, mevcut UI korunuyor (elle kontrol gerekebilir).`,
         );
         return false; // fail-closed: stil-dışı değişiklik temizlenemedi → iyileştirmeyi kabul etme
       }
       emitChatMessage(
         "system",
-        `🎨 Görsel tasarım: ajan stil-dışı dosyalara dokundu (${offenders.slice(0, 3).join(", ")}${offenders.length > 3 ? "…" : ""}) → o değişiklikler GERİ ALINDI (yalnız CSS'e izin var).`,
+        `🎨 Görsel tasarım: ajan stil dışı dosyalara dokundu (${offenders.slice(0, 3).join(", ")}${offenders.length > 3 ? "…" : ""}) → o değişiklikler GERİ ALINDI (yalnız CSS'e izin var).`,
       );
     }
   }
@@ -214,7 +214,7 @@ export async function runVisualDesignAgent(
       log.error("visual-design", "CSP revert başarısız — app CSP-ihlalli kaldı", { remaining: remaining.length, hadGit: hasGit });
       emitChatMessage(
         "system",
-        `🎨 KRİTİK: görsel iyileştirme CSP ihlali doğurdu (${cspViol.length}) ve GERİ ALMA başarısız oldu — app HÂLÂ CSP-ihlalli (${remaining.length}). Faz 6'ya bu hâliyle GİTMEMELİ; elle müdahale gerek.`,
+        `🎨 KRİTİK: görsel iyileştirme CSP ihlali doğurdu (${cspViol.length}) ve GERİ ALMA başarısız oldu — app HÂLÂ CSP ihlalli (${remaining.length}). Faz 6'ya bu hâliyle GİTMEMELİ; elle müdahale gerek.`,
       );
       await appendAudit(root, {
         ts: Date.now(), phase: 5, event: "visual-design-csp-revert-FAILED", caller: "mycl-orchestrator",

@@ -83,7 +83,7 @@ export async function runGateAutofix(
     return outcome.kind === "done";
   } catch (e) {
     log.warn("gate-autofix", "focused fix failed (non-fatal)", e);
-    emitChatMessage("system", `⚠️ Faz ${phaseId} kendi-içinde-düzeltme denemesi hata verdi — normal akışa düşülüyor.`);
+    emitChatMessage("system", `⚠️ Faz ${phaseId} kendi içinde düzeltme denemesi hata verdi — normal akışa düşülüyor.`);
     return false;
   }
 }

@@ -300,7 +300,7 @@ export class ProductionSchemaBaseController implements ProductionBackend {
     // paritesi — CLI backend ile birebir). Önceden bu yol autoAnswer'ı kaçırıyordu → onayda takılma.
     const auto = autoAnswerPick(options_tr);
     if (auto !== null) {
-      emitChatMessage("system", `🤖 Oto-cevap (otomatik onay/ilk seçenek): "${auto}"`);
+      emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay/ilk seçenek): "${auto}"`);
       return auto;
     }
     const askqId = randomUUID();
@@ -335,7 +335,7 @@ export class ProductionSchemaBaseController implements ProductionBackend {
     const auto = autoAnswerPick(options_tr);
     let selected_tr: string;
     if (auto !== null) {
-      emitChatMessage("system", `🤖 Oto-cevap (otomatik onay): "${auto}"`);
+      emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay): "${auto}"`);
       selected_tr = auto;
     } else {
       const askqId = randomUUID();

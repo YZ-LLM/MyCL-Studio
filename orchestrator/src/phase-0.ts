@@ -361,10 +361,10 @@ export class Phase0Controller {
               contextSuffix,
             );
         if (hyps.length >= 2) {
-          const modeTr = useInvestigation ? "İNCELEME — Bash'li" : "akıl-yürütme";
+          const modeTr = useInvestigation ? "İNCELEME — Bash'li" : "akıl yürütme";
           emitChatMessage(
             "system",
-            `🔬 ${hyps.length} kök-neden hipotezi (çok-perspektifli ${modeTr}) üretildi → D1 araştırmasına rehber.`,
+            `🔬 ${hyps.length} kök neden hipotezi (çok perspektifli ${modeTr}) üretildi → D1 araştırmasına rehber.`,
           );
           const block =
             "## Candidate root-cause hypotheses (multi-perspective — confirm or refute each during investigation)\n" +
@@ -711,7 +711,7 @@ export class Phase0Controller {
     if (restartsPipeline || !otoCevap) {
       const reasonMsg = restartsPipeline
         ? `🤔 Önerilen çözüm tüm pipeline'ı yeniden başlatmayı gerektiriyor (kapsamlı): **${chosen.label}**\nBu büyük bir karar — otomatik uygulamıyorum, onayını istiyorum.`
-        : `🔍 **Tespit + önerilen çözüm:** ${chosen.label}\n${chosen.description}\n\n(Oto-cevap kapalı — otomatik uygulamıyorum; sen seç.)`;
+        : `🔍 **Tespit + önerilen çözüm:** ${chosen.label}\n${chosen.description}\n\n(Otomatik cevap kapalı — otomatik uygulamıyorum; sen seç.)`;
       emitChatMessage("system", reasonMsg + (alternatives ? `\n\nDiğer seçenekler:\n${alternatives}` : ""));
       const askqId = randomUUID();
       emitAskq({

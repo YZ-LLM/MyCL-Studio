@@ -449,7 +449,7 @@ export class CodegenBaseController {
     let selected_tr: string;
     const auto = autoAnswerPick(options_tr);
     if (auto !== null) {
-      emitChatMessage("system", `🤖 Oto-cevap (otomatik onay/ilk seçenek): "${auto}"`);
+      emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay/ilk seçenek): "${auto}"`);
       selected_tr = auto;
     } else {
       this.currentAskqId = askqId;

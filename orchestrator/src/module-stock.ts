@@ -223,7 +223,7 @@ export async function extractModule(state: State, descriptor: ModuleDescriptor):
     // Modül stoklama (copyFile/writeFile) başarısız (sessiz-fallback denetimi): sessiz log.warn → modül
     // yeniden-kullanım için KAYDEDİLMEDİ. log.error + görünür (disk/izin).
     log.error("module-stock", "modül stoklanamadı (kopya/yazım hatası) — yeniden-kullanım için kaydedilmedi", err);
-    emitChatMessage("system", "⚠️ Modül stoklanamadı (disk/izin?) — yeniden-kullanılabilir baseline'a eklenmedi.");
+    emitChatMessage("system", "⚠️ Modül stoklanamadı (disk/izin?) — yeniden kullanılabilir baseline'a eklenmedi.");
     return false;
   }
 }
@@ -246,13 +246,13 @@ export async function extractStockedModules(state: State, config: MyclConfig): P
     if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
       emitChatMessage(
         "system",
-        "ℹ️ Modül-stoğu çıkarımı şu an CLI/abonelik VEYA z.ai modunda yapılır (orkestratör rolü).",
+        "ℹ️ Modül stoğu çıkarımı şu an CLI/abonelik VEYA z.ai modunda yapılır (orkestratör rolü).",
       );
       return;
     }
     const baseModel = config.selected_models.orchestrator ?? config.selected_models.main;
     const cli = resolveCliProvider(config, "orchestrator", baseModel);
-    emitChatMessage("system", "📦 Yeniden-kullanılabilir modüller aranıyor (orkestratör)…");
+    emitChatMessage("system", "📦 Yeniden kullanılabilir modüller aranıyor (orkestratör)…");
     const res = await runClaudeCli({
       systemPrompt: buildModuleExtractPrompt(),
       userMessage: "Inspect the project and emit the modules JSON now.",
