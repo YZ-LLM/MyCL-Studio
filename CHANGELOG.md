@@ -1,5 +1,20 @@
 ## 2026-06-26
 
+- **fix(z.ai): Claude (abonelik+API) tükenince z.ai'ya OTOMATİK geç — "z.ai tükendi" YALANI kökünden düzeltildi (YZLLM canlı bug):**
+  Canlı koşuda z.ai bakiyesi $6.29 olmasına rağmen MyCL Faz 1'de "⛔ tüm sağlayıcılar tükendi (Claude kredisi/limiti + z.ai)"
+  deyip işi bloke etti — çünkü hata-analizi ([error-analysis.ts](orchestrator/src/error-analysis.ts)) Claude account-error
+  görünce z.ai'yi HİÇ DENEMEDEN `failPermanent` çağırıyordu (önceki "z.ai evrensel" işi bu yolu kapsamamıştı). İlke:
+  **"z.ai HER ZAMAN, Claude abonelik VE API yoksa kullanılsın."** Düzeltme: (1) error-analysis account-error'da z.ai
+  müsaitse (`zaiKeyForRole` var + `!isZai`) `needsProviderSwitch` sinyali döner, değilse DÜRÜST `failPermanent` (z.ai
+  zaten seçili+o da tükendi VEYA z.ai anahtarı yok'a göre net mesaj — sabit yalan yok). (2) [index.ts](orchestrator/src/index.ts)
+  `trySwitchSessionToZai()` — Claude account-error + z.ai anahtarı var + z.ai'de değiliz → TÜM rolleri (orkestratör/çevirmen/
+  main) z.ai'ya geçir (restart'sız) + fazı tekrar koş; zaten z.ai'deysek geçme (sonsuz döngü yok). `failPhase` account-error
+  dalı + `analyzeAndAskError` 3 çağrı yeri (ana / OPT_REANALYZE / Faz 13 güvenlik) + `rerunPhaseAfterProviderSwitch`
+  (n≥2→advance, n=1→`detectInterruptedPhase1 ?? lastPhase1Intent`). Çapraz-aile mahkeme (Sonnet 4.6) **4 gerçek kusur**
+  buldu+düzeltildi: Faz 13 bayat `cfg` (autofix Claude'a gidip yalanı geri getiriyordu) · iter=1 niyet (canlı
+  `lastPhase1Intent`) · `emitConfigStatus`-fail sessiz-stall (görünür hata+false) · null-deref (config-restore invariant:
+  `runtime.config` asla null kalmaz). HÜKÜM: PROCEED. check yeşil.
+
 - **feat(UI): sağ panel 3 ayrı ajan görünümüne bölündü (Main / Çeviri / Orkestra) + Orkestratör Kararları paneli (YZLLM):**
   Eski tek "Sağ Panel" butonu kaldırıldı; yerine 3 toggle buton geldi ([RightActionBar.tsx](src/components/RightActionBar.tsx)):
   **🤖 Main Ajan** (Claude Code), **🌐 Çeviri Ajanı**, **🧠 Orkestra Ajanı**. Bir butona basınca o panel sağda açılır,
