@@ -1,5 +1,15 @@
 ## 2026-06-26
 
+- **feat(UI): sağ panel 3 ayrı ajan görünümüne bölündü (Main / Çeviri / Orkestra) + Orkestratör Kararları paneli (YZLLM):**
+  Eski tek "Sağ Panel" butonu kaldırıldı; yerine 3 toggle buton geldi ([RightActionBar.tsx](src/components/RightActionBar.tsx)):
+  **🤖 Main Ajan** (Claude Code), **🌐 Çeviri Ajanı**, **🧠 Orkestra Ajanı**. Bir butona basınca o panel sağda açılır,
+  açıkken basınca kapanır, başka butona basınca o görünüme geçer (aynı anda yalnız biri açık — [App.tsx](src/App.tsx)
+  `activeRightPanel` tek-state toggle). Yeni [OrchestratorPanel.tsx](src/components/OrchestratorPanel.tsx) orkestratörün
+  TÜM önemli kararlarını (ne yaptı + neden + düşünce) gösterir; veri kaynağı mevcut `agent_event` (sub="decision") akışı,
+  ama kararlar tool gürültüsüne yutulmasın diye AYRI bir 300-cap'li store'da birikir ("bütün kararlar gözüksün").
+  Karar render'ı `AgentThinkingModal`'ın `EventRow`'uyla paylaşılır (DRY); modal aynen çalışır. Mahkeme (Sonnet 4.6):
+  PROCEED-WITH-NOTE → iki not da giderildi (300-cap store + ölü CSS). check yeşil.
+
 - **fix(sağlayıcı): Claude tükenince z.ai EVRENSEL devralır + kredi/yetki hatasında boş döngüler kırılır (YZLLM canlı bug):**
   Canlı koşuda Claude aboneliği limitli + API kredisi bitti ("credit balance too low") → MyCL anlamsız döngüye
   girdi, z.ai fallback'i devreye girmedi. Dört parça: **(1)** z.ai account-error fallback'i artık CLI/Auto yolunda da

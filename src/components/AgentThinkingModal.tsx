@@ -24,7 +24,7 @@ function formatTs(ts: number): string {
   });
 }
 
-function EventRow({ ev }: { ev: AgentThinkingEvent }) {
+export function EventRow({ ev }: { ev: AgentThinkingEvent }) {
   const subColor = {
     started: "var(--fg-dim)",
     completed: "var(--fg-dim)",

@@ -1020,9 +1020,10 @@ select:focus {
 }
 
 /* Right panel vertical split */
-.panel-right-split {
-  display: grid;
-  grid-template-rows: 1fr 1px 1fr;
+/* Tek ajan paneli (Main / Çeviri / Orkestra) — aynı anda yalnız biri açık, tüm sağ kolonu kaplar. */
+.panel-right-single {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
@@ -1032,10 +1033,6 @@ select:focus {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-}
-
-.divider-h {
-  background: var(--border);
 }
 
 /* ===== Chat panel ===== */
@@ -1425,6 +1422,16 @@ select:focus {
   padding: 10px 12px;
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.5;
+  background: var(--bg);
+}
+
+/* Orkestra Ajanı paneli — önemli kararlar listesi (EventRow). */
+.orchestrator-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 12px;
   line-height: 1.5;
   background: var(--bg);
 }

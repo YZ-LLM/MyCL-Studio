@@ -8,7 +8,8 @@ import { AgentThinkingModal } from "./components/AgentThinkingModal";
 import { GuideModal } from "./components/GuideModal";
 import { QualityAuditModal } from "./components/QualityAuditModal";
 import { AppHeader } from "./components/AppHeader";
-import { RightActionBar } from "./components/RightActionBar";
+import { RightActionBar, type RightPanel } from "./components/RightActionBar";
+import { OrchestratorPanel } from "./components/OrchestratorPanel";
 import { PhaseSidebar } from "./components/PhaseSidebar";
 import {
   ChatPanel,
@@ -113,6 +114,9 @@ interface MainState {
   loadingOlder: boolean;
   /** v15.6 — Orkestrator ajan event listesi (max 100 entry, dedup by ts). */
   agentEvents: AgentThinkingEvent[];
+  /** Orkestratörün ÖNEMLİ kararları (decision/error) — Orkestra panelini besler; agentEvents'ten ayrı,
+   *  daha yüksek cap (300) → uzun oturumda kararlar tool gürültüsüne yutulmaz ("BÜTÜN kararlar"). */
+  orchestratorDecisions: AgentThinkingEvent[];
   /**
    * v15.6 — Aktif agent.respond() çağrı sayısı. started → +1, completed → -1.
    * 0 değil ise composer'da loading spinner gösterilir. Paralel boot + user
@@ -156,6 +160,7 @@ const INITIAL_STATE: MainState = {
   olderAvailable: true,
   loadingOlder: false,
   agentEvents: [],
+  orchestratorDecisions: [],
   agentBusyCount: 0,
   taskQueue: [],
   tokenTotals: {
@@ -564,7 +569,13 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     const merged = [...state.agentEvents, newEvent];
     // Max 100 entry — en eskileri drop (slice from end)
     const capped = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
-    return { ...state, agentEvents: capped };
+    // Orkestratörün ÖNEMLİ kararları (decision/error) AYRI + daha yüksek cap'li store'da birikir → agentEvents'in
+    // 100-cap'i (tool_use gürültüsüyle dolu) kararları yutmasın. YZLLM "BÜTÜN önemli kararlar gözüksün". Cap 300:
+    // kararlar seyrek + küçük (kısa metin) → çok uzun oturum bile kapsanır; bu store yalnız Orkestra paneline besler.
+    const isDecisionLike = d.sub === "decision" || d.sub === "error";
+    const decs = isDecisionLike ? [...state.orchestratorDecisions, newEvent] : state.orchestratorDecisions;
+    const decCapped = decs.length > 300 ? decs.slice(decs.length - 300) : decs;
+    return { ...state, agentEvents: capped, orchestratorDecisions: decCapped };
   }
   // v15.7 (2026-05-24): İş kuyruğu — backend her değişiklikte tam listeyi yollar
   if (ev.kind === "task_queue_loaded" || ev.kind === "task_queue_changed") {
@@ -690,9 +701,9 @@ function App() {
   /** "Proje Aç" (mevcut projeyi entegre et) → open_project'e integrate=true taşır. Tek-atış: ilk
    *  gönderimden sonra temizlenir (reconnect re-send'leri yeniden onboarding tetiklemesin). */
   const pendingIntegrateRef = useRef(false);
-  /** Sağ panel (Translator + Claude Code) açık/kapalı toggle. Default kapalı —
-   *  kullanıcı chat'e odaklansın; ihtiyaç halinde header `⇤` ile açar. */
-  const [rightPanelsOpen, setRightPanelsOpen] = useState(false);
+  /** Sağ panelde açık olan ajan görünümü (null → kapalı). Aynı anda yalnız BİRİ açık;
+   *  butona basınca o panel açılır, açıksa kapanır (toggle). Default kapalı (chat'e odak). */
+  const [activeRightPanel, setActiveRightPanel] = useState<RightPanel | null>(null);
   /** Sol panel (Faz Sidebar) açık/kapalı toggle. Default açık — kullanıcı
    *  fazları kolayca görsün; gerekirse header `📑` ile gizler. */
   const [leftPanelsOpen, setLeftPanelsOpen] = useState(true);
@@ -1324,7 +1335,7 @@ function App() {
         className={
           "app-main" +
           (leftPanelsOpen ? "" : " left-collapsed") +
-          (rightPanelsOpen ? "" : " right-collapsed")
+          (activeRightPanel ? "" : " right-collapsed")
         }
       >
         {leftPanelsOpen && (
@@ -1368,22 +1379,28 @@ function App() {
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
         />
-        {rightPanelsOpen && (
+        {activeRightPanel && (
           <>
             <div className="divider" />
-            <div className="panel-right-split">
-              <TranslatorPanel
-                entries={mainState.translations}
-                modelLabel={translatorLabel}
-                highlightWindow={highlightWindow}
-              />
-              <div className="divider-h" />
-              <ClaudeSimulator
-                events={mainState.ccEvents}
-                banner={mainState.ccBanner}
-                modelLabel={mainLabel}
-                highlightWindow={highlightWindow}
-              />
+            <div className="panel-right-single">
+              {activeRightPanel === "main" && (
+                <ClaudeSimulator
+                  events={mainState.ccEvents}
+                  banner={mainState.ccBanner}
+                  modelLabel={mainLabel}
+                  highlightWindow={highlightWindow}
+                />
+              )}
+              {activeRightPanel === "translator" && (
+                <TranslatorPanel
+                  entries={mainState.translations}
+                  modelLabel={translatorLabel}
+                  highlightWindow={highlightWindow}
+                />
+              )}
+              {activeRightPanel === "orchestrator" && (
+                <OrchestratorPanel events={mainState.orchestratorDecisions} />
+              )}
             </div>
           </>
         )}
@@ -1392,8 +1409,11 @@ function App() {
           executeDisabled={buttonsDisabled}
           onPauseToggle={handlePauseToggle}
           paused={paused}
-          onTogglePanelsClick={() => setRightPanelsOpen((p) => !p)}
-          rightPanelsOpen={rightPanelsOpen}
+          activeRightPanel={activeRightPanel}
+          onRightPanelToggle={(panel) =>
+            setActiveRightPanel((cur) => (cur === panel ? null : panel))
+          }
+          orchestratorDecisionCount={mainState.orchestratorDecisions.length}
           onToggleLeftClick={() => setLeftPanelsOpen((p) => !p)}
           leftPanelsOpen={leftPanelsOpen}
           onToggleTaskQueueClick={() => setTaskQueueOpen((o) => !o)}

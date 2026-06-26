@@ -6,13 +6,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { UpdateButton } from "./UpdateButton";
 
+/** Sağ panelde aynı anda yalnız biri açık olabilen üç ajan görünümü. */
+export type RightPanel = "main" | "translator" | "orchestrator";
+
 interface Props {
   onExecuteClick?: () => void;
   executeDisabled?: boolean;
   onPauseToggle?: () => void;
   paused?: boolean;
-  onTogglePanelsClick?: () => void;
-  rightPanelsOpen?: boolean;
+  /** Sağ panelde şu an açık olan ajan görünümü (null → kapalı). */
+  activeRightPanel?: RightPanel | null;
+  /** Bir ajan butonuna basıldı — App toggle eder (aynıysa kapat, farklıysa o panele geç). */
+  onRightPanelToggle?: (panel: RightPanel) => void;
+  /** Orkestra Ajanı butonundaki karar sayısı rozeti. */
+  orchestratorDecisionCount?: number;
   onToggleLeftClick?: () => void;
   leftPanelsOpen?: boolean;
   onToggleTaskQueueClick?: () => void;
@@ -34,8 +41,9 @@ export function RightActionBar({
   executeDisabled,
   onPauseToggle,
   paused,
-  onTogglePanelsClick,
-  rightPanelsOpen,
+  activeRightPanel,
+  onRightPanelToggle,
+  orchestratorDecisionCount,
   onToggleLeftClick,
   leftPanelsOpen,
   onToggleTaskQueueClick,
@@ -90,16 +98,42 @@ export function RightActionBar({
           )}
         </button>
       )}
-      {onTogglePanelsClick && (
-        <button
-          type="button"
-          onClick={onTogglePanelsClick}
-          className="rab-btn"
-          title={rightPanelsOpen ? "Sağ paneli gizle (Translator + Claude Code)" : "Sağ paneli göster"}
-          aria-label={rightPanelsOpen ? "Sağ paneli gizle" : "Sağ paneli göster"}
-        >
-          {rightPanelsOpen ? "⇥" : "⇤"} Sağ Panel
-        </button>
+      {onRightPanelToggle && (
+        <>
+          <button
+            type="button"
+            onClick={() => onRightPanelToggle("main")}
+            className={`rab-btn${activeRightPanel === "main" ? " rab-active" : ""}`}
+            data-testid="panel-main-btn"
+            title="Main Ajanı (Claude Code — kod yazan ajan) panelini aç/kapat"
+            aria-label="Main Ajan paneli"
+          >
+            🤖 Main Ajan
+          </button>
+          <button
+            type="button"
+            onClick={() => onRightPanelToggle("translator")}
+            className={`rab-btn${activeRightPanel === "translator" ? " rab-active" : ""}`}
+            data-testid="panel-translator-btn"
+            title="Çeviri Ajanı (TR↔EN) panelini aç/kapat"
+            aria-label="Çeviri Ajanı paneli"
+          >
+            🌐 Çeviri Ajanı
+          </button>
+          <button
+            type="button"
+            onClick={() => onRightPanelToggle("orchestrator")}
+            className={`rab-btn${activeRightPanel === "orchestrator" ? " rab-active" : ""}`}
+            data-testid="panel-orchestrator-btn"
+            title="Orkestra Ajanı — orkestratörün tüm önemli kararları panelini aç/kapat"
+            aria-label="Orkestra Ajanı paneli"
+          >
+            🧠 Orkestra Ajanı
+            {orchestratorDecisionCount !== undefined && orchestratorDecisionCount > 0 && (
+              <span className="rab-badge">{orchestratorDecisionCount}</span>
+            )}
+          </button>
+        </>
       )}
       {onToggleLeftClick && (
         <button
