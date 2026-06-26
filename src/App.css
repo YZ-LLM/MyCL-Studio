@@ -1058,6 +1058,28 @@ select:focus {
   gap: 10px;
 }
 
+/* Faz geçiş çizgisi (chat'te bir faz başladığında): ortada "Faz N" + iki yanda ince çizgi. */
+.phase-divider {
+  display: flex;
+  align-items: center;
+  margin: 14px 6px 6px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.phase-divider::before,
+.phase-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.phase-divider-label {
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
 .msg {
   max-width: 75%;
   padding: 8px 12px;

@@ -1,6 +1,6 @@
 // ChatPanel — Sol panel: TR sohbet + composer + askq render. Spec §4.2.
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AskqCard, type AskqOption } from "./AskqCard";
 import { fmtTs } from "../utils/format";
@@ -62,6 +62,22 @@ function linkifyText(text: string): ReactNode[] {
     parts.push(text.slice(lastIndex));
   }
   return parts.length > 0 ? parts : [text];
+}
+
+/** YZLLM: "chat'teki yazılarda cümleler alt alta yazılsın." Cümle-sonu noktalama + boşluk + (büyük harf /
+ *  tırnak / parantez) görülünce satır başı eklenir → `white-space:pre-wrap` her cümleyi kendi satırına koyar.
+ *  Dosya yolu / sayı / kısaltma (noktadan SONRA boşluk yoksa ya da küçük harf gelirse) BÖLÜNMEZ. */
+function splitSentences(text: string): string {
+  return text.replace(/([.!?…])[ \t]+(?=[A-ZÇĞİÖŞÜ"'([])/g, "$1\n");
+}
+
+/** Faz geçiş çizgisi — chat'te bir faz başladığında araya girer (YZLLM: "fazlar arasındaki geçişlerde çizgi"). */
+function PhaseDivider({ faz }: { faz: number }) {
+  return (
+    <div className="phase-divider" aria-hidden="true">
+      <span className="phase-divider-label">Faz {faz}</span>
+    </div>
+  );
 }
 
 function ErrorMessage({ msg }: { msg: ChatMessage }) {
@@ -150,9 +166,12 @@ interface Props {
   composerPlaceholder?: string;
   onSend: (text: string) => void;
   onAskqAnswer: (id: string, selected: string | string[]) => void;
-  /** Cross-panel focus: tıklanan mesajın ts'i. null → highlight yok. */
+  /** Cross-panel focus: tıklanan mesajın ts'i. null → highlight yok. Faz tıklamasında o fazın
+   *  başlangıç ts'ine set edilir → ChatPanel o fazın ilk mesajına kayar. */
   selectedTs: number | null;
   onMessageSelected: (ts: number) => void;
+  /** Faz geçiş işaretçileri (ts + faz no) — chat'te faz başlangıcında çizgi göster. */
+  phaseMarkers?: { ts: number; to: number }[];
   /** Lazy-load: scroll-to-top'ta tetiklenir. */
   olderAvailable: boolean;
   loadingOlder: boolean;
@@ -191,6 +210,7 @@ export function ChatPanel({
   onAskqAnswer,
   selectedTs,
   onMessageSelected,
+  phaseMarkers,
   olderAvailable,
   loadingOlder,
   onLoadOlder,
@@ -221,6 +241,27 @@ export function ChatPanel({
   // selectedTs değiştiğinde auto-scroll'u 2sn pasifle.
   useEffect(() => {
     if (selectedTs !== null) lastFocusTs.current = Date.now();
+  }, [selectedTs]);
+
+  // Faz çizgisi: her faz işaretçisinin ts'ine göre o fazın İLK mesajının id'si → o mesajdan ÖNCE çizgi koyulur.
+  const dividerBeforeMsgId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const marker of phaseMarkers ?? []) {
+      const first = messages.find((m) => m.ts >= marker.ts);
+      if (first) map.set(first.id, marker.to);
+    }
+    return map;
+  }, [phaseMarkers, messages]);
+
+  // Faz tıklamasında (selectedTs = faz başlangıç ts) o ts'ten itibaren ilk mesaja kay.
+  const scrollTargetMsgId = useMemo(
+    () => (selectedTs === null ? null : (messages.find((m) => m.ts >= selectedTs)?.id ?? null)),
+    [selectedTs, messages],
+  );
+  const scrollTargetRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedTs === null) return;
+    scrollTargetRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [selectedTs]);
 
   // İlk mount: history.log async yüklendikten sonra scroll en altta olsun.
@@ -340,6 +381,9 @@ export function ChatPanel({
           const renderMsg = (m: ChatMessage) => {
             const highlighted = selectedTs === m.ts ? " highlighted" : "";
             const tsLabel = fmtTs(m.ts);
+            // Bu mesajdan ÖNCE faz çizgisi koyulacak mı + faz-jump scroll hedefi mi.
+            const divPhase = dividerBeforeMsgId.get(m.id);
+            const tRef = m.id === scrollTargetMsgId ? scrollTargetRef : undefined;
             const copyBtn = (
               <button
                 type="button"
@@ -370,29 +414,35 @@ export function ChatPanel({
             );
             if (m.role === "error") {
               return (
-                <div
-                  key={m.id}
-                  onClick={() => onMessageSelected(m.ts)}
-                  className={highlighted ? "msg-wrap highlighted" : "msg-wrap"}
-                >
-                  {tsLabel && <span className="msg-ts">{tsLabel}</span>}
-                  <ErrorMessage msg={m} />
-                  {replyBtn}
-                  {copyBtn}
-                </div>
+                <Fragment key={m.id}>
+                  {divPhase !== undefined && <PhaseDivider faz={divPhase} />}
+                  <div
+                    ref={tRef}
+                    onClick={() => onMessageSelected(m.ts)}
+                    className={highlighted ? "msg-wrap highlighted" : "msg-wrap"}
+                  >
+                    {tsLabel && <span className="msg-ts">{tsLabel}</span>}
+                    <ErrorMessage msg={m} />
+                    {replyBtn}
+                    {copyBtn}
+                  </div>
+                </Fragment>
               );
             }
             return (
-              <div
-                key={m.id}
-                className={`msg ${m.role}${highlighted}`}
-                onClick={() => onMessageSelected(m.ts)}
-              >
-                {tsLabel && <span className="msg-ts">{tsLabel}</span>}
-                {linkifyText(m.text)}
-                {replyBtn}
-                {copyBtn}
-              </div>
+              <Fragment key={m.id}>
+                {divPhase !== undefined && <PhaseDivider faz={divPhase} />}
+                <div
+                  ref={tRef}
+                  className={`msg ${m.role}${highlighted}`}
+                  onClick={() => onMessageSelected(m.ts)}
+                >
+                  {tsLabel && <span className="msg-ts">{tsLabel}</span>}
+                  {linkifyText(splitSentences(m.text))}
+                  {replyBtn}
+                  {copyBtn}
+                </div>
+              </Fragment>
             );
           };
           if (!pendingAskq) return messages.map(renderMsg);

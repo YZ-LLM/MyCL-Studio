@@ -4,6 +4,7 @@
 // composer altına taşındı (ChatPanel.intent-row, kullanıcı talebi 2026-05-23).
 // Sidebar artık sadece faz navigasyonu içerir, tüm 1-20 fazları listelenir.
 
+import { useRef } from "react";
 import type { PhaseId, PhaseSummary } from "../types/events";
 
 const VISIBLE_PHASES: PhaseId[] = [
@@ -22,7 +23,10 @@ interface Props {
   phases: PhaseSummary[];
   currentPhase: PhaseId;
   disabled: boolean;
+  /** ÇİFT tıklama → fazı çalıştır (eski tek-tık davranışı). */
   onPhaseClick: (id: PhaseId) => void;
+  /** TEK tıklama → o fazın chat'teki ilk mesajına git (YZLLM: "tek tıklamaya başka görev veriyoruz"). */
+  onPhaseNavigate?: (id: PhaseId) => void;
   /** Akış sonu hüküm: gate'i patlayan fazlar (soft-complete olsa da). Bu fazlar
    *  yeşil ✅ yerine ⚠️ gösterir — "sessiz yeşil" yalanını önler. */
   gateFailures?: PhaseId[];
@@ -54,11 +58,33 @@ export function PhaseSidebar({
   currentPhase,
   disabled,
   onPhaseClick,
+  onPhaseNavigate,
   gateFailures,
   maxPhase,
 }: Props) {
   const byId = new Map(phases.map((p) => [p.id, p]));
   const failedSet = new Set(gateFailures ?? []);
+  // Tek/çift tıklama ayrımı (300ms): tek → navigate (mesaja git), çift → çalıştır. React çift-tıkta iki
+  // onClick + bir onDoubleClick atar; ilk onClick timer kurar, ikinci onClick timer'ı iptal eder, onDoubleClick çalıştırır.
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSingle = (id: PhaseId): void => {
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      return; // ikinci tık → çift tıklama; onDoubleClick halleder
+    }
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      onPhaseNavigate?.(id);
+    }, 280);
+  };
+  const handleDouble = (id: PhaseId): void => {
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    if (!disabled) onPhaseClick(id); // çalıştırma yalnız müsaitken (navigate hep çalışır)
+  };
   return (
     <aside className="phase-sidebar" data-testid="phase-sidebar">
       <div className="phase-sidebar-header">Fazlar</div>
@@ -103,9 +129,9 @@ export function PhaseSidebar({
               type="button"
               data-testid={`phase-item-${id}`}
               className={`phase-item${isCurrent ? " current" : ""}${isRequired ? " required" : ""}${gateFailed ? " gate-failed" : ""}`}
-              disabled={disabled}
-              onClick={() => onPhaseClick(id)}
-              title={`Faz ${id} — ${typeLabel}${isRequired ? " (zorunlu)" : " (opsiyonel)"}${gateFailed ? " — ⚠ bu gate başarısız (akış soft devam etti, sonuç tam doğrulanmadı)" : ""}`}
+              onClick={() => handleSingle(id)}
+              onDoubleClick={() => handleDouble(id)}
+              title={`Faz ${id} — ${typeLabel}${isRequired ? " (zorunlu)" : " (opsiyonel)"}. TEK tık: bu fazın chat'teki ilk mesajına git · ÇİFT tık: fazı çalıştır${gateFailed ? " — ⚠ bu gate başarısız (akış soft devam etti, sonuç tam doğrulanmadı)" : ""}`}
             >
               <span className="phase-badge" aria-hidden>
                 {badge}

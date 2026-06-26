@@ -116,6 +116,8 @@ interface MainState {
   /** Orkestratörün TÜM önemli aktivitesi (tool_use + decision + error) — Orkestra panelini besler;
    *  agentEvents'ten ayrı, daha yüksek cap (500) → uzun oturumda aktivite yutulmaz ("yaptığı herşey"). */
   orchestratorActivity: AgentThinkingEvent[];
+  /** Faz geçiş işaretçileri (her faz başlangıcı: ts + faz no) — chat'te faz çizgisi + faza tıklayınca jump. */
+  phaseMarkers: { ts: number; to: number }[];
   /**
    * v15.6 — Aktif agent.respond() çağrı sayısı. started → +1, completed → -1.
    * 0 değil ise composer'da loading spinner gösterilir. Paralel boot + user
@@ -160,6 +162,7 @@ const INITIAL_STATE: MainState = {
   loadingOlder: false,
   agentEvents: [],
   orchestratorActivity: [],
+  phaseMarkers: [],
   agentBusyCount: 0,
   taskQueue: [],
   tokenTotals: {
@@ -337,8 +340,21 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     // Yeni akış/iterasyon Faz 1'de "running" ile başlar → eski hüküm rozetlerini
     // temizle (önceki koşunun ⚠️'leri yeni akışa sızmasın).
     const freshRun = ev.data.to === 1 && ev.data.status === "running";
+    // Faz geçiş işaretçileri (YZLLM: chat'te faz geçişinde çizgi + faza tıklayınca ilk mesaja git). Bir faz
+    // BAŞLAYINCA (status=running, yeni numara) {ts, to} kaydedilir; freshRun (yeni iterasyon) listeyi sıfırlar.
+    // ts = frontend Date.now() (backend+frontend aynı makine → mesaj ts'leriyle karşılaştırılabilir).
+    const lastMarker = state.phaseMarkers[state.phaseMarkers.length - 1];
+    let phaseMarkers = state.phaseMarkers;
+    if (ev.data.status === "running" && ev.data.to >= 1) {
+      if (freshRun) {
+        phaseMarkers = [{ ts: Date.now(), to: ev.data.to }];
+      } else if (!lastMarker || lastMarker.to !== ev.data.to) {
+        phaseMarkers = [...state.phaseMarkers, { ts: Date.now(), to: ev.data.to }].slice(-100);
+      }
+    }
     return {
       ...state,
+      phaseMarkers,
       phase: ev.data.to,
       // Debug (Faz 0) maxPhase'i DEĞİŞTİRMEZ; freshRun (yeni iterasyon) sıfırlar. "Yarım kalan" faz = maxPhase.
       maxPhase: freshRun
@@ -1052,6 +1068,11 @@ function App() {
    * Sol sidebar — faz tıklaması: backend askq açar (Çalıştır / Vazgeç).
    * v15.7 (2026-05-28): Tek deterministik mod. Chat'e optimistic balon eklenir.
    */
+  // TEK tık → o fazın chat'teki ilk mesajına git (en son geçişini bul → selectedTs = faz başlangıç ts).
+  const navigateToPhase = (id: PhaseId): void => {
+    const marker = [...mainState.phaseMarkers].reverse().find((m) => m.to === id);
+    if (marker) setSelectedTs(marker.ts);
+  };
   const sendPhaseRunRequest = (id: PhaseId) => {
     setMainState((s) => ({
       ...s,
@@ -1329,6 +1350,7 @@ function App() {
               maxPhase={mainState.maxPhase}
               disabled={buttonsDisabled}
               onPhaseClick={sendPhaseRunRequest}
+              onPhaseNavigate={navigateToPhase}
               gateFailures={mainState.pipelineVerdict?.gateFailures}
             />
             <div className="divider" />
@@ -1344,6 +1366,7 @@ function App() {
           onAskqAnswer={answerAskq}
           selectedTs={selectedTs}
           onMessageSelected={setSelectedTs}
+          phaseMarkers={mainState.phaseMarkers}
           olderAvailable={mainState.olderAvailable}
           loadingOlder={mainState.loadingOlder}
           onLoadOlder={handleLoadOlder}
