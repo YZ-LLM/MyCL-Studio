@@ -77,6 +77,7 @@ import {
   emitError,
   emitIterationIntent,
   emitPhaseChanged,
+  emitNeededPhases,
   emitPhaseRunning,
   emitPhaseIdle,
   emitTechDoc,
@@ -624,6 +625,12 @@ async function rerunPhaseAfterProviderSwitch(n: PhaseId): Promise<void> {
   }
 }
 
+/** YZLLM 2026-06-26: güncel faz kapsamını (needed_phases) frontend'e yolla — PhaseSidebar kapsam-dışı opsiyonelleri
+ *  soluk göstersin. Scope değişen HER noktada + boot'ta çağrılır (tek doğruluk kaynağı runtime.state). */
+function syncNeededPhases(): void {
+  emitNeededPhases(runtime.state?.needed_phases ?? null);
+}
+
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // Kullanıcı çalışan fazı yönlendirmeyle durdurduysa bu bir HATA değil — analiz/oto-çözüm BAŞLATMA.
   // (YZLLM: "beni dinlemedi" — durdurma sonrası MyCL kendi analizine dalmasın, kullanıcının isteğine geçsin.)
@@ -1027,6 +1034,10 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
       current_phase: runtime.state.current_phase,
     });
     emitPhaseChanged(runtime.state.current_phase, runtime.state.current_phase, "running");
+    // Mahkeme H1 (boot yarışı): kapsam emit'ini buraya koy — runtime.state loadOrInit ile POPULATE edildikten SONRA
+    // deterministik koşar. Eski tek emit (handleListPhases) ayrı IPC mesajı + open_project'in await penceresinde
+    // yarışıp null/bayat okuyabiliyordu → yeniden açılan onaylı-kapsamlı projede PhaseSidebar dimming'i bayat kalırdı.
+    syncNeededPhases();
     // Boot/welcome chat mesajları kaldırıldı (kullanıcı: "kuru kalabalık,
     // arrow'larla işaret ettim"; 2026-05-23). Sidebar faz badge'i + header
     // proje yolu + composer placeholder zaten yönlendirici. log.info("project
@@ -2595,6 +2606,7 @@ async function executeAgentDecision(
         updated_at: Date.now(),
       };
       await saveState(runtime.state);
+      syncNeededPhases(); // kapsam belirlendi → PhaseSidebar kapsam-dışı opsiyonelleri soluklaştırsın
       await appendAuditModule(runtime.state.project_root, {
         ts: Date.now(),
         phase: runtime.state.current_phase,
@@ -2989,6 +3001,7 @@ async function runDevelopIteration(
       updated_at: Date.now(),
     };
     await saveState(runtime.state);
+    syncNeededPhases(); // yeni iterasyon → kapsam sıfırlandı (Faz 3 tekrar önerecek), vurgulama kalksın
     // v15.6: yeni iterasyon — NDJSON metadata bağlamı update.
     setRecordContext({ iteration: newIter, phase: 1 });
     _securityAutoResolveCount = 0;
@@ -3853,6 +3866,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         };
         runtime.state = state;
         await saveState(state);
+        syncNeededPhases(); // kapsam sıfırlandı (niyet vazgeçildi) → vurgulama kalksın
         emitChatMessage(
           "system",
           "🛑 Niyet vazgeçildi. Faz 1'e dönüldü; yeni mesajla başlayabilirsin.",
@@ -3901,6 +3915,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             };
             runtime.state = state;
             await saveState(state);
+            syncNeededPhases(); // kapsam onaylandı (oto-cevap) → kapsam-dışı opsiyoneller soluk
             // fall-through → recordPhaseComplete(3) + cur=3 + continue
           } else {
             const askqId = `phase_scope_${randomUUID()}`;
@@ -4819,6 +4834,7 @@ function handleListPhases(): void {
     });
   }
   emit("phases_list", { phases });
+  syncNeededPhases(); // boot/resume: mevcut kapsam varsa PhaseSidebar baştan doğru vurgulasın
   log.info("orchestrator", "phases listed", { count: phases.length });
 }
 
@@ -5041,6 +5057,7 @@ export async function handleAskqAnswer(
       updated_at: Date.now(),
     };
     await saveState(runtime.state);
+    syncNeededPhases(); // kapsam onaylandı → PhaseSidebar çalışacak fazları belirgin, diğerlerini soluk gösterir
     emitChatMessage("system", `Kapsam onaylandı: ${label}. Akış devam ediyor.`);
     await advanceToNextPhase(3);
     return;
@@ -5795,6 +5812,7 @@ async function handleRunPhase(
         updated_at: Date.now(),
       };
       await saveState(runtime.state);
+      syncNeededPhases(); // kullanıcı faz ekledi → kapsam vurgusu güncellensin
       log.info("orchestrator", "user-clicked phase added to scope", {
         phaseId,
         scope: updatedScope,

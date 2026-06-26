@@ -32,6 +32,13 @@ export interface PhasesListEvent {
   data: { phases: PhaseSummary[] };
 }
 
+/** Faz kapsamı (YZLLM 2026-06-26): kapsam onaylanınca çalışacak fazlar. PhaseSidebar kapsam-dışı opsiyonelleri
+ *  soluk gösterir. phases null/[] → kapsam henüz yok (vurgulama yok, normal görünüm). */
+export interface NeededPhasesEvent {
+  kind: "needed_phases";
+  data: { phases: number[] | null };
+}
+
 export type PhaseStatus = "running" | "waiting" | "complete" | "error";
 
 /** Orchestrator → UI event'leri.
@@ -58,6 +65,7 @@ export type OrchestratorEvent =
   | ModelsListEvent
   | SelectedModelsEvent
   | PhasesListEvent
+  | NeededPhasesEvent
   | HistoryChunkEvent
   | AgentEvent
   | TaskQueueLoadedEvent

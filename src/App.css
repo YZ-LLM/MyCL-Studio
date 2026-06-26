@@ -876,6 +876,14 @@ select:focus {
   border-left: 3px solid var(--warning);
   padding-left: 9px;
 }
+/* Kapsam-dışı (YZLLM 2026-06-26): kapsam onaylanınca çalışmayacak opsiyonel fazlar SOLUK/pasif görünür
+   ("Diğerleri pasif görünsün"). Tıklanabilir kalır (navigate/çift-tık çalıştır hâlâ mümkün), yalnız vurgusu düşer. */
+.phase-item.phase-item-inactive {
+  opacity: 0.4;
+}
+.phase-item.phase-item-inactive:hover:not(:disabled) {
+  opacity: 0.7;
+}
 /* Faz 0 (Hata Ayıklama) — pipeline DIŞI standalone; kalın ayraçla pipeline'dan ayrılır. */
 .phase-item.standalone {
   border-bottom: 2px solid rgba(255, 255, 255, 0.12);
@@ -909,7 +917,8 @@ select:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* v15.7 (2026-05-26): Zorunlu fazlar (1,2,3,4,10-17) altı çizili. */
+/* Zorunlu (her zaman çalışan) fazlar vurgulu — YZLLM 2026-06-26: opsiyonel YALNIZ 5/7 (backend
+   isPhaseSkippedByScope otoritesi); diğer hepsi (1-4, 6, 8, 9, 10-17) zorunlu → bu stili alır. */
 .phase-item.required .phase-name {
   text-decoration: underline;
   text-decoration-thickness: 1px;

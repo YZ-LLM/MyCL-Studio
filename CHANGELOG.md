@@ -1,5 +1,17 @@
 ## 2026-06-26
 
+- **feat(UI): kapsam onaylanınca çalışacak fazlar belirgin, kapsam-dışı opsiyoneller SOLUK (YZLLM req 11):**
+  Kapsam onaylanınca ("Kapsam onaylandı: ...") PhaseSidebar artık çalışacağı belli fazları normal/belirgin,
+  GERÇEKTEN atlanacak opsiyonelleri SOLUK (opacity 0.4) gösterir ("Diğerleri pasif görünsün"). Backend
+  `needed_phases`'i yeni `needed_phases` IPC event'iyle frontend'e yollar ([ipc.ts](orchestrator/src/ipc.ts)
+  `emitNeededPhases` + scope değişen 6 nokta + boot); [PhaseSidebar.tsx](src/components/PhaseSidebar.tsx) kapsam-dışı
+  opsiyonelleri `.phase-item-inactive` ile soluklaştırır (tıklanabilir kalır). **Çok-eksenli mahkeme (Sonnet 4.6,
+  4 eksen paralel + düşman-doğrulama) 7 gerçek kusur buldu+düzeltildi:** en kritik — frontend {5,6,7,8,9}'u opsiyonel
+  sayıp Faz 6/8/9'u "çalışmayacak" diye yanlış soluklaştırıyordu; oysa backend `isPhaseSkippedByScope` YALNIZ Faz 5/7
+  atlar (6/8/9 her zaman koşar). Düzeltme correct-by-construction: `SKIPPABLE_PHASES={5,7}` tek kaynaktan dimming +
+  "(opsiyonel)/(zorunlu)" etiketi + vurguyu türetir (backend otoritesiyle birebir). Ayrıca boot/resume yarışı
+  (handleOpenProject kapsamı state populate sonrası emit eder) + gate-failed faz asla soluklaşmaz. HÜKÜM: PROCEED.
+
 - **fix(z.ai): Claude (abonelik+API) tükenince z.ai'ya OTOMATİK geç — "z.ai tükendi" YALANI kökünden düzeltildi (YZLLM canlı bug):**
   Canlı koşuda z.ai bakiyesi $6.29 olmasına rağmen MyCL Faz 1'de "⛔ tüm sağlayıcılar tükendi (Claude kredisi/limiti + z.ai)"
   deyip işi bloke etti — çünkü hata-analizi ([error-analysis.ts](orchestrator/src/error-analysis.ts)) Claude account-error

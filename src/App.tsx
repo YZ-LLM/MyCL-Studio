@@ -687,6 +687,9 @@ function App() {
   // v15.8: rol başına backend (api/cli). selected_models event'inden gelir.
   const [currentBackends, setCurrentBackends] = useState<AgentBackends | undefined>(undefined);
   const [phasesList, setPhasesList] = useState<PhaseSummary[]>([]);
+  // Faz kapsamı (YZLLM 2026-06-26): kapsam onaylanınca çalışacak fazlar; PhaseSidebar kapsam-dışı opsiyonelleri
+  // soluk gösterir. null → kapsam henüz belirlenmedi (normal görünüm, vurgulama yok).
+  const [neededPhases, setNeededPhases] = useState<number[] | null>(null);
   const [modelsTranslator, setModelsTranslator] = useState<ModelsList>(EMPTY_LIST);
   const [modelsMain, setModelsMain] = useState<ModelsList>(EMPTY_LIST);
   const [currentSelected, setCurrentSelected] = useState<{ translator?: string; main?: string } | null>(null);
@@ -783,6 +786,8 @@ function App() {
         if (ev.data.cache_ttl) setCurrentCacheTtl(ev.data.cache_ttl);
       } else if (ev.kind === "phases_list") {
         setPhasesList(ev.data.phases);
+      } else if (ev.kind === "needed_phases") {
+        setNeededPhases(ev.data.phases);
       } else if (ev.kind === "features_value") {
         setFeatures({
           playwright_enabled: ev.data.features.playwright_enabled,
@@ -800,6 +805,7 @@ function App() {
           ev.kind === "models_list" ||
           ev.kind === "selected_models" ||
           ev.kind === "phases_list" ||
+          ev.kind === "needed_phases" ||
           ev.kind === "features_value" ||
           ev.kind === "user_guide" ||
           ev.kind === "tech_doc"
@@ -1352,6 +1358,7 @@ function App() {
               onPhaseClick={sendPhaseRunRequest}
               onPhaseNavigate={navigateToPhase}
               gateFailures={mainState.pipelineVerdict?.gateFailures}
+              neededPhases={neededPhases}
             />
             <div className="divider" />
           </>

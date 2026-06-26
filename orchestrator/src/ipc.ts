@@ -363,6 +363,15 @@ export function emitPhaseChanged(
 }
 
 /**
+ * YZLLM 2026-06-26: Faz kapsamı (needed_phases) frontend'e — kapsam onaylanınca PhaseSidebar çalışacak fazları
+ * BELİRGİN, kapsam-dışı opsiyonelleri SOLUK gösterir. null/[] → kapsam henüz belirlenmedi (vurgulama yok, normal
+ * görünüm). Scope değişen her noktada + boot'ta çağrılır (caller runtime.state.needed_phases'i verir).
+ */
+export function emitNeededPhases(phases: number[] | null): void {
+  emit("needed_phases", { phases: phases ?? null });
+}
+
+/**
  * YZLLM 2026-06-12: NİYET kutusu, İTERASYONUN Faz 1 hedefini gösterir (iterasyon boyunca sabit) — son user
  * mesajını ("Hayır, kalsın" gibi askq cevabı) DEĞİL. Frontend "ilk user mesajı" heuristiği boot/trim sonrası
  * yanlış oluyordu (Faz 1 mesajı yüklü pencerede olmayabilir). Backend state.intent_summary_raw güvenilir kaynak;

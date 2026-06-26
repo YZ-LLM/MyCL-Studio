@@ -11,13 +11,11 @@ const VISIBLE_PHASES: PhaseId[] = [
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
 ];
 
-// v15.7 (2026-05-26): Zorunlu fazlar her geliştirmede çalışır. Opsiyoneller
-// (5,6,7,8,9) orkestra ajanı tarafından Faz 1 sonrası kullanıcıya sorulur.
-// Kaynak: backend phase-registry.ts (single source of truth) — burada sadece
-// UI presentation cache'i. İki yerde tanımlı olduğu için değişirse senkron tut.
-const REQUIRED_PHASES: ReadonlySet<PhaseId> = new Set([
-  1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 16, 17,
-]);
+// YZLLM 2026-06-26 (mahkeme H2/H5): GERÇEKTEN atlanabilen (opsiyonel) fazlar YALNIZCA 5 (UI üretimi) ve 7 (DB) —
+// backend isPhaseSkippedByScope'un TEK OTORİTESİYLE birebir (index.ts: "if (phaseId !== 5 && phaseId !== 7) return
+// false"). Faz 6/8/9 ARTIK ZORUNLU — her zaman çalışır → ASLA "opsiyonel"/"kapsam dışı" gösterilmemeli (eski liste
+// 6/8/9'u opsiyonel sayıp "çalışmayacak" yalanı veriyordu). Etiket + kapsam-soluklaştırma BU tek kaynaktan türer.
+const SKIPPABLE_PHASES: ReadonlySet<PhaseId> = new Set([5, 7]);
 
 interface Props {
   phases: PhaseSummary[];
@@ -30,6 +28,9 @@ interface Props {
   /** Akış sonu hüküm: gate'i patlayan fazlar (soft-complete olsa da). Bu fazlar
    *  yeşil ✅ yerine ⚠️ gösterir — "sessiz yeşil" yalanını önler. */
   gateFailures?: PhaseId[];
+  /** Faz kapsamı (YZLLM 2026-06-26): kapsam onaylanınca çalışacak fazlar. Kapsam-dışı opsiyonel fazlar SOLUK
+   *  gösterilir ("Diğerleri pasif görünsün"); kapsamdakiler normal/belirgin. null/[] → kapsam yok, vurgulama yok. */
+  neededPhases?: number[] | null;
   /** Ulaşılan en yüksek pipeline fazı — debug (Faz 0) sırasında "yarım kalan" fazı (⏸️) belirlemek için. */
   maxPhase: PhaseId;
 }
@@ -61,9 +62,14 @@ export function PhaseSidebar({
   onPhaseNavigate,
   gateFailures,
   maxPhase,
+  neededPhases,
 }: Props) {
   const byId = new Map(phases.map((p) => [p.id, p]));
   const failedSet = new Set(gateFailures ?? []);
+  // Kapsam aktif mi: kapsam belirlenmişse (non-empty) kapsam-dışı OPSIYONEL fazlar soluklaşır. Zorunlu fazlar
+  // ASLA soluklaşmaz (her zaman çalışır — backend isPhaseSkippedByScope da yalnız opsiyonelleri etkiler).
+  const scopeActive = Array.isArray(neededPhases) && neededPhases.length > 0;
+  const scopeSet = new Set(neededPhases ?? []);
   // Tek/çift tıklama ayrımı (300ms): tek → navigate (mesaja git), çift → çalıştır. React çift-tıkta iki
   // onClick + bir onDoubleClick atar; ilk onClick timer kurar, ikinci onClick timer'ı iptal eder, onDoubleClick çalıştırır.
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -122,16 +128,19 @@ export function PhaseSidebar({
           const name = p?.name_tr ?? p?.name_en ?? `Faz ${id}`;
           const typeLabel = p?.type ?? "";
           const isCurrent = id === currentPhase;
-          const isRequired = REQUIRED_PHASES.has(id);
+          const isOptional = SKIPPABLE_PHASES.has(id); // yalnız 5/7 opsiyonel (backend otoritesi)
+          // Kapsam-dışı: kapsam aktif + faz GERÇEKTEN atlanabilir (5/7) + kapsamda DEĞİL → soluk ("Diğerleri pasif").
+          // gate-failed faz ASLA soluklaşmaz (atlanan faz koşmaz→gate-fail olamaz; yine de savunma — mahkeme H6).
+          const isOutOfScope = scopeActive && isOptional && !scopeSet.has(id) && !gateFailed;
           return (
             <button
               key={id}
               type="button"
               data-testid={`phase-item-${id}`}
-              className={`phase-item${isCurrent ? " current" : ""}${isRequired ? " required" : ""}${gateFailed ? " gate-failed" : ""}`}
+              className={`phase-item${isCurrent ? " current" : ""}${isOptional ? "" : " required"}${gateFailed ? " gate-failed" : ""}${isOutOfScope ? " phase-item-inactive" : ""}`}
               onClick={() => handleSingle(id)}
               onDoubleClick={() => handleDouble(id)}
-              title={`Faz ${id} — ${typeLabel}${isRequired ? " (zorunlu)" : " (opsiyonel)"}. TEK tık: bu fazın chat'teki ilk mesajına git · ÇİFT tık: fazı çalıştır${gateFailed ? " — ⚠ bu gate başarısız (akış soft devam etti, sonuç tam doğrulanmadı)" : ""}`}
+              title={`Faz ${id} — ${typeLabel}${isOptional ? " (opsiyonel)" : " (zorunlu)"}. ${isOutOfScope ? "Bu iterasyonun kapsamı DIŞINDA — çalışmayacak. " : ""}TEK tık: bu fazın chat'teki ilk mesajına git · ÇİFT tık: fazı çalıştır${gateFailed ? " — ⚠ bu gate başarısız (akış soft devam etti, sonuç tam doğrulanmadı)" : ""}`}
             >
               <span className="phase-badge" aria-hidden>
                 {badge}
