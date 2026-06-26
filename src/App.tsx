@@ -939,6 +939,20 @@ function App() {
           console.warn("register_window_project failed", err);
         }
       })();
+      // Son projeler kaydı TEK NOKTADAN burada: bir proje GERÇEKTEN açıldığında (orch.ready)
+      // — Splash "Yeni Klasör/Proje Aç", recent-tıklama VE okunamayan-proje KOPYA reopen'ı
+      // (open_project_request) hepsi projectPath'i set edip bu effect'e düşer. Önceden kopya yolu
+      // Splash'ı baypas ettiği için recent'e DÜŞMÜYORDU (YZLLM: "entegre modunda açtığım proje de son
+      // projelere gelsin"). register_window_project'TEN BAĞIMSIZ kendi try'ı (mahkeme B-6: register fail
+      // edince kullanıcının asıl istediği recent kaydı sessizce atlanmasın). Idempotent (recent.rs dedupe+başa-al).
+      void (async () => {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("add_recent_project", { path: projectPath });
+        } catch (err) {
+          console.warn("add_recent_project failed", err);
+        }
+      })();
       // Restart sonrası history de yeniden yüklenmeli — guard reset.
       if (orch.bootSequence > 1) {
         historyRequestedRef.current = false;

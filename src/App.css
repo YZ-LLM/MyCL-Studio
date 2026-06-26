@@ -717,6 +717,12 @@ select:focus {
   white-space: nowrap;
 }
 
+/* Entegre-kopyası rozeti — okunamayan-proje kopyasını ayırt et (yeşilimsi ton). */
+.splash-recent-badge-integrate {
+  color: rgba(120, 200, 140, 0.95);
+  background: rgba(80, 200, 120, 0.13);
+}
+
 .splash-error {
   margin-top: 12px;
   font-size: 12px;

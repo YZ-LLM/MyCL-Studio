@@ -13,6 +13,21 @@ interface OpenProject {
   path: string;
 }
 
+/**
+ * Recent listesi görüntü-etiketi. Okunamayan-proje KOPYAları "MyCL Projeler" altında çirkin
+ * `<isim>-<sha1[0:8]>` yoluyla durur (ör. cave5-e50a21b9) — dostça göster: hash son-ekini at +
+ * entegre-kopyası işareti. SADECE görüntü; gerçek yol (reopen + tooltip) korunur. Yanlış-strip zararsız.
+ */
+export function recentDisplayLabel(path: string): {
+  label: string;
+  isIntegrateCopy: boolean;
+} {
+  if (!path.includes("/MyCL Projeler/")) return { label: path, isIntegrateCopy: false };
+  const base = path.split("/").filter(Boolean).pop() ?? path;
+  const friendly = base.replace(/-[0-9a-f]{8}$/, "");
+  return { label: friendly || base, isIntegrateCopy: true };
+}
+
 interface Props {
   /** opts.integrate=true → "Proje Aç" (mevcut/yabancı projeyi MyCL'e entegre et — onboarding). */
   onProjectSelected: (path: string, opts?: { integrate?: boolean }) => void;
@@ -111,16 +126,13 @@ export function Splash({ onProjectSelected }: Props) {
             <ul className="splash-recent-list">
               {recent.map((p) => {
                 const isOpen = openPathsSet.has(p);
+                const { label, isIntegrateCopy } = recentDisplayLabel(p);
                 return (
                   <li
                     key={p}
                     data-testid="splash-recent-item"
                     className={`splash-recent-item${isOpen ? " splash-recent-item-disabled" : ""}`}
-                    title={
-                      isOpen
-                        ? `${p} — başka pencerede açık`
-                        : p
-                    }
+                    title={isOpen ? `${p} — başka pencerede açık` : p}
                     onClick={() => {
                       if (isOpen) return; // başka pencerede açık — engelle
                       void invoke("add_recent_project", { path: p }).catch(
@@ -129,7 +141,12 @@ export function Splash({ onProjectSelected }: Props) {
                       onProjectSelected(p);
                     }}
                   >
-                    <span>{p}</span>
+                    <span>{label}</span>
+                    {isIntegrateCopy && !isOpen && (
+                      <span className="splash-recent-badge splash-recent-badge-integrate">
+                        entegre kopyası
+                      </span>
+                    )}
                     {isOpen && (
                       <span className="splash-recent-badge">
                         başka pencerede açık

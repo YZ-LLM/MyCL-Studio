@@ -1,3 +1,24 @@
+## 2026-06-26
+
+- **feat(entegre/recent): "Proje Aç" ile açılan proje son projelerde görünür — okunamayan-proje KOPYAsı dahil:**
+  YZLLM ("entegre modunda açtığım proje de son projelere gelsin"): MyCL okunamayan (ev-altı/sandbox) bir projeyi
+  ev-DIŞI `/Users/Shared/MyCL Projeler/<isim>-<hash>`'e kopyalayıp KOPYAYI açıyor (`open_project_request`), ama o
+  kopya recent'e DÜŞMÜYORDU — Splash'ın `add_recent_project`'ini baypas ediyordu. [App.tsx](src/App.tsx): recent kaydı
+  artık TEK NOKTADAN proje-açılış effect'inde (Splash-pick + recent-tıklama + kopya-reopen hepsi `projectPath` set eder),
+  `register_window_project`'TEN BAĞIMSIZ kendi try'ında (mahkeme B-6: register fail edince recent sessizce atlanmasın).
+  [Splash.tsx](src/components/Splash.tsx) `recentDisplayLabel`: "MyCL Projeler" altındaki kopya yolu dostça gösterilir
+  (hash son-eki atılır → "cave5", **"entegre kopyası"** rozeti); gerçek yol reopen + tooltip'te korunur. Kopya re-copy
+  EDİLMEZ (mevcut hedef → işin korunur), recent.rs dedupe → çift-girdi yok. Cross-family mahkeme (Sonnet 4.6): PROCEED. check yeşil (1667 test).
+
+- **feat(entegre): Faz 6 (UI İncelemesi) entegre modunda atlanır + bayat-park unpark guard (KATI #9 bilinçli istisnası):**
+  YZLLM ("entegre modunda UI incelemesi atlanmalı"): foreign-origin (mevcut) projede gap-işleri UI-yapımı değil,
+  dev-server çoğu zaman yok → Faz 6 atlanır. [index.ts](orchestrator/src/index.ts) 3 giriş yolu kapatıldı
+  (`advanceToNextPhaseInner` next===6, `runPhaseOnce` phaseId===6, boot-guard); `phase-6-complete` audit'i korunur
+  (sonraki gate'ler bekler). Cross-family mahkeme (Sonnet 4.6) gizli-stall buldu: skip eklenmeden ÖNCE Faz 6'ya girmiş
+  foreign proje restart'ta `pending_ui_review=true` ile askıda kalıyordu (`hasPendingQueueWork` boot-resume'u atlar,
+  queue-drain `isPipelineParked`'ta durur → DONMUŞ HEDEF #1 ihlali) → boot-guard bayat parkı Faz 7'ye geçirir (tek-shot).
+  +2 test [skip-ui-phases-flow.test.ts](orchestrator/test/integration/skip-ui-phases-flow.test.ts). check yeşil (1667 test). (commit 6327ed2)
+
 ## 2026-06-22
 
 - **fix(kalıcı oturum): geçici API kesintisi artık "oturum kararsız" diye YANLIŞ etiketlenmez (canlı transcript teşhisi):**
