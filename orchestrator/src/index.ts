@@ -20,6 +20,7 @@ import {
   readClaudeCodeFlags,
   readFeatures,
   readSelectedModels,
+  resolveProvider,
   zaiKeyForRole,
   type AgentBackends,
   type ApiKeys,
@@ -248,6 +249,10 @@ interface OrchestratorRuntime {
   // pipeline-end bunu "done"+tarih ile damgalar + sıradaki bekleyen işi başlatır.
   // null → kuyruk-dışı iterasyon (örn. resume) ya da çalışan iş yok.
   currentTaskId: string | null;
+  // YZLLM 2026-06-26: ŞU AN işlenen Faz 1 niyet metni. iter=1'de audit'te `iteration-N-start` YOK
+  // (detectInterruptedPhase1 null döner) → z.ai'ya geçince Faz 1'i PÜRÜZSÜZ tekrar koşabilmek için canlı niyeti
+  // burada tut (taze proje senaryosu = bildirilen bug). null → Faz 1 aktif değil.
+  lastPhase1Intent: string | null;
 }
 
 const runtime: OrchestratorRuntime = {
@@ -261,6 +266,7 @@ const runtime: OrchestratorRuntime = {
   pendingErrorAnalysis: null,
   pendingDast: null,
   currentTaskId: null,
+  lastPhase1Intent: null,
 };
 
 // WP4 DAST: onay-askq seçenek etiketi + "çalışıyor" banner etiketi. handleAskqAnswer
@@ -562,6 +568,62 @@ async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean): Prom
   }
 }
 
+/**
+ * YZLLM 2026-06-26: "z.ai, her zaman, eğer Claude abonelik VE API yoksa kullanılsın." Claude account-error
+ * (kredi/limit) anında z.ai (GLM) anahtarı VARSA + henüz z.ai'de DEĞİLSEK → TÜM rolleri (orkestratör/çevirmen/
+ * main) z.ai'ya geçir (restart'sız) + true döndür. Bakiye varken "z.ai tükendi" YALAN'ının kökü buydu (canlı:
+ * $6.29 z.ai bakiyesi, MyCL "tükendi" deyip Faz 1'i bloke etti). Zaten z.ai'deysek false (z.ai'nin KENDİSİ
+ * tükenmiş → döngü kurma, dürüst dur). Müfettiş rolü etkilenmez (o claude-key'e sabit; ayrı yol).
+ */
+async function trySwitchSessionToZai(): Promise<boolean> {
+  if (!runtime.config) return false;
+  if (resolveProvider(runtime.config, "main").isZai) return false; // zaten z.ai → z.ai de tükenmiş, döngü yok
+  if (!zaiKeyForRole(runtime.config.api_keys, "main")) return false; // z.ai anahtarı yok → geçilemez
+  const prevConfig = runtime.config; // müfettiş B5: reload-fail'de geri yükle (null bırakma → caller null-deref/stall)
+  await persistAgentBackends({ orchestrator: "zai", translator: "zai", main: "zai" });
+  runtime.config = null;
+  // Müfettiş B3+B5 (DONMUŞ HEDEF): emitConfigStatus fail ederse runtime.config null KALIRDI → caller'ın STOP
+  // mesajı (runtime.config.api_keys) null-deref ile ÇÖKERDİ + re-run sessizce return ederdi. Dönüşü kontrol et:
+  // yüklenemezse ESKİ config'i geri yükle (invariant: runtime.config asla null kalmaz) + GÖRÜNÜR hata + false.
+  const reloaded = await emitConfigStatus(); // reload + applyConfigDerivedSettings (restart'sız aktif)
+  if (!reloaded || !runtime.config) {
+    runtime.config = prevConfig; // null bırakma — caller (STOP mesajı / sonraki tur) güvenli okuyabilsin
+    emitChatMessage(
+      "error",
+      "⛔ z.ai'ya geçiş için yapılandırma yeniden yüklenemedi (disk/ayar sorunu) — Ayarlar → Sağlayıcı'dan " +
+        "z.ai'yi seçip **'Çalıştır'** ile devam edin.",
+    );
+    return false;
+  }
+  emitChatMessage(
+    "system",
+    "⚠️ Claude (abonelik + API) şu an tükendi/limitli → **z.ai (GLM) sağlayıcısına otomatik geçtim**, kaldığım " +
+      "yerden devam ediyorum. Claude kotanız/krediniz dönünce Ayarlar → Sağlayıcı'dan geri alabilirsiniz.",
+  );
+  return true;
+}
+
+/** z.ai'ya geçiş sonrası başarısız fazı tekrar koş. Faz ≥2 → advanceToNextPhase(n-1) (fazı tekrar koşar).
+ *  Faz 1 → advanceToNextPhase(0) loop-break eder → orijinal niyeti audit'ten kurtarıp restartPhase1WithIntent;
+ *  niyet bulunamazsa kullanıcıyı yönlendir (sessiz-stall YOK — frozen-goal). */
+async function rerunPhaseAfterProviderSwitch(n: PhaseId): Promise<void> {
+  if (n >= 2) {
+    await advanceToNextPhase((n - 1) as PhaseId);
+    return;
+  }
+  const interrupted = runtime.state ? await detectInterruptedPhase1(runtime.state).catch(() => null) : null;
+  // iter≥2 → audit'ten; iter=1 → audit'te iteration-N-start YOK → canlı niyete (lastPhase1Intent) düş.
+  const intentText = interrupted?.intentText ?? runtime.lastPhase1Intent ?? "";
+  if (intentText.trim()) {
+    await restartPhase1WithIntent(intentText);
+  } else {
+    emitChatMessage(
+      "system",
+      "z.ai'ya geçildi — Faz 1'i tekrar başlatmak için isteğinizi yeniden gönderin ya da 'Çalıştır'a basın.",
+    );
+  }
+}
+
 async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // Kullanıcı çalışan fazı yönlendirmeyle durdurduysa bu bir HATA değil — analiz/oto-çözüm BAŞLATMA.
   // (YZLLM: "beni dinlemedi" — durdurma sonrası MyCL kendi analizine dalmasın, kullanıcının isteğine geçsin.)
@@ -607,7 +669,13 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
       }
       return;
     }
-    // Buraya geldiyse z.ai fallback'i de (Parça 1, CLI/SDK yollarında) bu turu kurtaramadı → dürüst söyle.
+    // YZLLM 2026-06-26: Claude (abonelik + API) tükendi/limitli ama z.ai (GLM) anahtarı VAR → z.ai'ya geçir +
+    // fazı tekrar koş. "z.ai HER ZAMAN Claude yoksa kullanılsın." (CLI-switch yukarıda denendi/uygun değil.)
+    if (await trySwitchSessionToZai()) {
+      await rerunPhaseAfterProviderSwitch(n);
+      return;
+    }
+    // Buraya geldiyse z.ai de yok ya da zaten z.ai'deyiz (z.ai de tükendi) → dürüst söyle.
     const hasZai = !!zaiKeyForRole(runtime.config.api_keys, "main");
     emitChatMessage(
       "system",
@@ -801,6 +869,18 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
     autoResolve,
   }).catch(() => null);
+  // YZLLM 2026-06-26: hata-analizi Claude account-error gördü ama z.ai (GLM) var → "tükendi" YALANI yerine
+  // z.ai'ya geçir + fazı tekrar koş (askq YOK). Sinyali error-analysis verdi (z.ai müsait + z.ai'de değiliz).
+  if (runtime.pendingErrorAnalysis?.needsProviderSwitch) {
+    runtime.pendingErrorAnalysis = null; // sentinel — askq açılmadı, park yok
+    if (await trySwitchSessionToZai()) {
+      await rerunPhaseAfterProviderSwitch(n);
+    } else {
+      // Beklenmedik: sinyal geldi ama geçilemedi (yarış: bu arada z.ai'ye geçilmiş/anahtar gitmiş) → sessiz-stall yok.
+      await escalateUnanalyzableError(n, autoResolve);
+    }
+    return;
+  }
   const pendingAuto = runtime.pendingErrorAnalysis;
   if (pendingAuto?.auto_selected_solution) {
     autoSolveSig.set(n, { sig, count: priorCount + 1 });
@@ -2983,6 +3063,7 @@ async function runDevelopIteration(
   });
   // Token çizelgesi (YZLLM 2026-06-17): Faz 1 loop DIŞINDA → cost-bucket'ı burada set et (flush sonraki geçişte).
   beginPhaseCost(1, runtime.state.iteration_count ?? 1);
+  runtime.lastPhase1Intent = text; // z.ai'ya geçince iter=1 Faz 1'i pürüzsüz tekrar koşmak için (canlı niyet)
   const result = await runController(p1, () => p1.run(text), "Niyet toplanıyor");
   log.info("orchestrator", "phase 1 end", { result });
   if (result === "complete") {
@@ -3475,7 +3556,10 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
   if (!runtime.state || !runtime.config) return;
   // Narrowing — döngü içinde runtime.state assignments TS'in null-check'ini bozar.
   let state: State = runtime.state;
-  const cfg: MyclConfig = runtime.config;
+  // Müfettiş B1: cfg `let` — Faz 13 güvenlik döngüsünde z.ai'ya geçince (trySwitchSessionToZai runtime.config'i
+  // YENİDEN yükler) bu referans TAZELENMELİ; aksi halde runGateAutofix(state, cfg) STALE Claude config'le çalışıp
+  // tekrar account-error verir ("z.ai de tükendi" yalanını geri getirir).
+  let cfg: MyclConfig = runtime.config;
   let cur: PhaseId = from;
   // v15.9: değişen-kapsam bir kez hesaplanır (ilk mekanik fazda); scoped-touch
   // modunda scope'lanamayan sistem-gate'leri atlanır.
@@ -4498,6 +4582,17 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             { autoResolve: auto },
           ).catch(() => null);
         }
+        // YZLLM 2026-06-26: güvenlik analizi Claude account-error gördü ama z.ai (GLM) var → z.ai'ya geç +
+        // gate'i AYNI döngüde tekrar koş (statik tarama ucuz/deterministik; analiz bu kez z.ai'da koşar). z.ai'da
+        // da tükenirse error-analysis bu sefer sinyal vermez (zaten z.ai) → dürüst failPermanent → döngü sonlanır.
+        if (pending?.needsProviderSwitch) {
+          pending = null;
+          if (await trySwitchSessionToZai()) {
+            cfg = runtime.config ?? cfg; // müfettiş B1: TAZE zai config — autofix Claude'a gitmesin
+            cur = 13;
+            continue;
+          }
+        }
         if (auto) {
           // ELLE DÜZELTME YOK (YZLLM 2026-06-14): otomatik fix varsa uygula; yoksa OTOMATİK "kabul et + devam" (LOUD).
           if (pending?.auto_selected_solution) {
@@ -5076,6 +5171,13 @@ export async function handleAskqAnswer(
         runtime.config,
         errCtx,
       ).catch(() => null);
+      // YZLLM 2026-06-26: yeniden-analiz Claude account-error gördü ama z.ai var → z.ai'ya geç + fazı tekrar koş.
+      if (runtime.pendingErrorAnalysis?.needsProviderSwitch) {
+        runtime.pendingErrorAnalysis = null;
+        if (await trySwitchSessionToZai()) await rerunPhaseAfterProviderSwitch(cached.phase);
+        else await escalateUnanalyzableError(cached.phase, false);
+        return;
+      }
       // FIX #2 (frozen-goal): yeniden-analiz de HİÇ üretemedi (null) → eski davranış sessiz drop'tu → fallback
       // escalate. OPT_REANALYZE kullanıcının BİLİNÇLİ tıkı (yanıt-bağlamı) → autoResolve=false: PARK et (kullanıcı
       // OPT_QUEUE ile çıkar), oto-route YOK (reanalyze→null→reanalyze döngüsü + istemsiz task yazımı önlenir).
