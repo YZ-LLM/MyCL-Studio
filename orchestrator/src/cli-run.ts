@@ -289,7 +289,13 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
         toolUses,
         turns,
         usage,
-        error: ok ? undefined : `claude exit=${code}${stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""}${transientHint}`,
+        // resultErrorText (result event — account/kredi hatası BURADA) + stderrTail; isApiAccountError görsün.
+        error: ok
+          ? undefined
+          : `claude exit=${code}` +
+            (resultErrorText ? ` :: ${resultErrorText.slice(0, 300)}` : "") +
+            (stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : "") +
+            transientHint,
       });
     });
   });

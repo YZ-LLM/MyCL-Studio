@@ -277,3 +277,57 @@ describe("cli-rate-limit · autoBackendPair (yön seçimi)", () => {
     expect(cli.calls.run).toBe(1); // sonra CLI
   });
 });
+
+describe("cli-rate-limit · autoFallbackBackend (kalıcı hata → döngü kırma; YZLLM kredi-bitti bug'ı)", () => {
+  const isPermanent = (s: string) => /credit balance/i.test(s);
+
+  it("birinci kanal KALICI hata (throw) → döngü 1 denemede KIRILIR (6 değil); ikinci kanala bile gitmez", async () => {
+    let primaryRuns = 0;
+    let secondaryRuns = 0;
+    const makePrimary = () => ({
+      run: async (): Promise<Outcome> => {
+        primaryRuns++;
+        throw new Error("Your credit balance is too low");
+      },
+    });
+    const makeSecondary = () => ({
+      run: async (): Promise<Outcome> => {
+        secondaryRuns++;
+        throw new Error("Your credit balance is too low");
+      },
+    });
+    const wrapped = autoFallbackBackend(makePrimary, makeSecondary, LBL, { isPermanent, backoffMs: () => 0 });
+    await expect(wrapped.run()).rejects.toThrow(/credit balance/);
+    expect(primaryRuns + secondaryRuns).toBe(1); // kalıcı → tek deneme, boş döngü yok
+  });
+
+  it("isPermanent YOK (eski davranış) → aynı throw 6 deneme döner (regresyon guard)", async () => {
+    let runs = 0;
+    const make = () => ({
+      run: async (): Promise<Outcome> => {
+        runs++;
+        throw new Error("boom");
+      },
+    });
+    const wrapped = autoFallbackBackend(make, make, LBL, { backoffMs: () => 0 });
+    await expect(wrapped.run()).rejects.toThrow(/boom/);
+    expect(runs).toBe(6); // MAX_FALLBACK_ATTEMPTS — kalıcı işaretlenmeyen hata gidip gelir
+  });
+
+  it("KALICI 'failed' outcome → döngü kırılır, ikinci kanal denenmez", async () => {
+    let primaryRuns = 0;
+    let secondaryRuns = 0;
+    const makePrimary = () => ({
+      run: async (): Promise<Outcome> =>
+        ((primaryRuns++, { kind: "failed", reason: "credit balance too low" }) as Outcome),
+    });
+    const makeSecondary = () => ({
+      run: async (): Promise<Outcome> => ((secondaryRuns++, { kind: "approved" }) as Outcome),
+    });
+    const wrapped = autoFallbackBackend(makePrimary, makeSecondary, LBL, { isPermanent, backoffMs: () => 0 });
+    const r = await wrapped.run();
+    expect(r.kind).toBe("failed");
+    expect(primaryRuns).toBe(1);
+    expect(secondaryRuns).toBe(0);
+  });
+});

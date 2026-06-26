@@ -17,7 +17,7 @@ import {
   GLM_CATALOG,
   MODEL_CATALOG,
 } from "../src/model-catalog.js";
-import { resolveLlmClient } from "../src/claude-api.js";
+import { resolveLlmClient, resolveCliProvider } from "../src/claude-api.js";
 
 function cfg(backend: string, keys: Partial<ApiKeys>): MyclConfig {
   return {
@@ -182,5 +182,35 @@ describe("glmModelFor doğrulaması (canlı-bug 2026-06-22: config'te eski/sahte
 
   it("bilinmeyen/boş model → gerçek GLM (güvenli balanced)", () => {
     expect(realGlm(resolveLlmClient(zaiCfg, "main", "ckm", "yok-böyle").model)).toBe(true);
+  });
+});
+
+describe("resolveCliProvider — account-error → z.ai-CLI fallback (YZLLM kredi-bitti; CLI yolu da z.ai'ye düşsün)", () => {
+  it("Claude SEÇİLİ (api) + accountErrorFallback + z.ai key → z.ai extraEnv + GLM model", () => {
+    const r = resolveCliProvider(cfg("api", { zai_main: "zm" }), "main", "claude-opus-4-8", {
+      accountErrorFallback: true,
+    });
+    expect(r.extraEnv?.ANTHROPIC_BASE_URL).toBe(ZAI_BASE_URL);
+    expect(r.extraEnv?.ANTHROPIC_AUTH_TOKEN).toBe("zm");
+    expect(r.extraEnv?.ANTHROPIC_API_KEY).toBe("zm");
+    expect(r.model.startsWith("glm-")).toBe(true);
+  });
+
+  it("accountErrorFallback ama z.ai key YOK → extraEnv yok (Claude model korunur, sonra temiz dur)", () => {
+    const r = resolveCliProvider(cfg("api", {}), "main", "claude-opus-4-8", { accountErrorFallback: true });
+    expect(r.extraEnv).toBeUndefined();
+    expect(r.model).toBe("claude-opus-4-8");
+  });
+
+  it("accountErrorFallback BAYRAĞI YOK → Claude seçiliyken z.ai'ye düşmez (normal yol)", () => {
+    const r = resolveCliProvider(cfg("api", { zai_main: "zm" }), "main", "claude-opus-4-8");
+    expect(r.extraEnv).toBeUndefined();
+    expect(r.model).toBe("claude-opus-4-8");
+  });
+
+  it("Sağlayıcı=Z.AI seçimi (fallback'siz) → zaten z.ai extraEnv + GLM (mevcut davranış korunur)", () => {
+    const r = resolveCliProvider(cfg("zai", { zai_main: "zm" }), "main", "claude-opus-4-8");
+    expect(r.extraEnv?.ANTHROPIC_BASE_URL).toBe(ZAI_BASE_URL);
+    expect(r.model.startsWith("glm-")).toBe(true);
   });
 });

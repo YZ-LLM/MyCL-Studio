@@ -19,7 +19,7 @@ import { extractKindBlock } from "./cli-json.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { resolveLlmClient } from "./claude-api.js";
+import { resolveLlmClient, isApiAccountError } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
@@ -106,9 +106,10 @@ export const OPT_ACCEPT_CONTINUE = "Kabul et, devam et";
 export function buildErrorAnalysisAskq(
   solutions_tr: string[],
   blocking: boolean,
-  opts?: { allowAcceptContinue?: boolean },
+  opts?: { allowAcceptContinue?: boolean; permanentNoProvider?: boolean },
 ): { options: AskqOption[] } {
   const allowAcceptContinue = opts?.allowAcceptContinue === true;
+  const permanentNoProvider = opts?.permanentNoProvider === true;
   const seen = new Set<string>();
   const solutions: string[] = [];
   for (const s of solutions_tr) {
@@ -119,6 +120,14 @@ export function buildErrorAnalysisAskq(
   }
 
   const options: string[] = [];
+  // KALICI sağlayıcı-yok (kredi/yetki bitti): "Çöz", çözüm-uygula ve "Tekrar analiz" HEPSİ bir sağlayıcı
+  // (CLI/API/z.ai) ister → hep aynı hatayı verir → sonsuz döngü (canlı bug). Yalnız "kaydet + devam"
+  // (+ blocking gate'te kabul) sun; sağlayıcı dönünce iş listesinden tekrar denenir.
+  if (permanentNoProvider) {
+    options.push(OPT_QUEUE);
+    if (allowAcceptContinue) options.push(OPT_ACCEPT_CONTINUE);
+    return { options };
+  }
   if (!blocking) {
     // Bloklayıcı değil: çözmeden devam etme seçeneği en başta.
     options.push(OPT_QUEUE);
@@ -213,6 +222,11 @@ export function buildErrorAnalysisPrompt(
     "- 'EADDRINUSE' / port in use → port conflict (free the port / pick another).",
     "- the SAME failure persists after a fix → the cause is NOT what you changed; widen",
     "  the diagnosis (environment/external), do NOT repeat project-level edits.",
+    "- Claude account/credit/usage-limit error ('credit balance too low', usage limit, billing/auth) → an",
+    "  EXTERNAL provider/billing issue, NOT a code bug. MyCL HAS an automatic z.ai (GLM) fallback for",
+    "  main/orchestrator/translator turns (both SDK and CLI) when a z.ai key is configured — do NOT tell the",
+    "  user 'there is no fallback / no architectural z.ai switch'. The only blocking case is when z.ai is ALSO",
+    "  missing or failing; then advise topping up Claude credit OR adding a z.ai key. Do NOT retry a dead provider.",
     "GATE INTEGRITY: NEVER propose a solution that makes a gate pass by WEAKENING it — no deleting/skipping",
     "tests, loosening assertions, disabling lint rules, eslint-disable, lowering thresholds, or editing the",
     "gate/lint/tsconfig config to ignore the failure. Fix the underlying CODE so the gate passes honestly.",
@@ -265,6 +279,44 @@ export async function analyzeAndAskError(
     }).catch(() => {});
     return null;
   };
+  // KALICI sağlayıcı-yok (kredi/yetki): analizin KENDİSİ de bir sağlayıcı ister → "tekrar analiz" hep aynı
+  // hatayı verir → SONSUZ DÖNGÜ (canlı bug). Döngüyü kır: net durum mesajı + yalnız "kaydet + devam" askq'sı
+  // (Çöz/Tekrar-analiz YOK). Sağlayıcı (kredi/z.ai) dönünce iş listesinden tekrar denenir.
+  const failPermanent = async (provDetail: string): Promise<PendingErrorAnalysis> => {
+    const id = `error_analysis_${randomUUID()}`;
+    const blocking = !!errCtx.allowAcceptContinue;
+    const { options } = buildErrorAnalysisAskq([], blocking, {
+      allowAcceptContinue: errCtx.allowAcceptContinue,
+      permanentNoProvider: true,
+    });
+    const optionLabels = options.map((o) => (typeof o === "string" ? o : o.label));
+    emitChatMessage(
+      "assistant",
+      `⛔ Faz ${errCtx.phase} hata analizi YAPILAMADI: tüm sağlayıcılar tükendi (Claude kredisi/limiti + z.ai). ` +
+        `Bu bir ortam sorunu, kod hatası değil — "tekrar analiz" hep aynı hatayı verir. İşi kaydedip devam et; ` +
+        `kredi yükleyince ya da z.ai dönünce iş listesinden tekrar denenir.`,
+    );
+    emitAskq({
+      id,
+      question: `Faz ${errCtx.phase}: hata analizi yapılamadı (sağlayıcı tükendi). Ne yapalım?`,
+      options,
+    });
+    await appendAudit(state.project_root, {
+      ts: Date.now(),
+      phase: errCtx.phase,
+      event: "error-analysis-no-provider",
+      caller: "mycl-orchestrator",
+      detail: provDetail.slice(0, 200),
+    }).catch(() => {});
+    return {
+      id,
+      phase: errCtx.phase,
+      blocking,
+      options: optionLabels,
+      solutions_tr: [],
+      acceptContinuePhase: errCtx.acceptContinuePhase,
+    };
+  };
   try {
     // Hata analizi ORKESTRATÖR rolüdür. Backend'e göre: cli → araştırmalı (Read/Grep/Bash);
     // api → tek-atış triage (YZLLM 2026-06-10 "bunu çözmüştük" — API modunda da çalışmalı).
@@ -303,7 +355,11 @@ export async function analyzeAndAskError(
         wallClockMs: 900_000,
       });
       if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
-      if (!res.ok) return await fail("Hata analizi yapılamadı (claude hatası).", String(res.error ?? ""));
+      if (!res.ok) {
+        const et = String(res.error ?? "");
+        // Kredi/yetki (kalıcı) → döngü-kıran failPermanent; aksi halde normal fail (reanalyze yardımcı olabilir).
+        return isApiAccountError(et) ? await failPermanent(et) : await fail("Hata analizi yapılamadı (claude hatası).", et);
+      }
       analysisText = res.text;
     } else {
       // API yolu — Anthropic SDK tek-atış (tool yok; hata mesajı + detail'den triage).
@@ -333,7 +389,8 @@ export async function analyzeAndAskError(
           .map((c) => c.text)
           .join("\n");
       } catch (e) {
-        return await fail("Hata analizi yapılamadı (API hatası).", String(e));
+        const et = String(e);
+        return isApiAccountError(et) ? await failPermanent(et) : await fail("Hata analizi yapılamadı (API hatası).", et);
       }
     }
 

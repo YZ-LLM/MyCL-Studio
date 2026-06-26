@@ -279,7 +279,10 @@ export function autoFallbackBackend<O extends { kind: string }, B extends Fallba
   makePrimary: () => B,
   makeSecondary: () => B,
   labels: AutoFallbackLabels,
-  opts?: { backoffMs?: (attempt: number) => number }, // test enjeksiyonu; default aşağıda
+  // backoffMs: test enjeksiyonu. isPermanent: bir denemenin hatası KALICI mı (kredi/yetki) — true ise
+  // CLI↔API döndürmek anlamsız (ikisi de aynı ölü Claude hesabı), döngüyü KIR. Enjeksiyon (import değil) →
+  // claude-api ile circular import yok; caller isApiAccountError'ı geçirir.
+  opts?: { backoffMs?: (attempt: number) => number; isPermanent?: (errOrReason: string) => boolean },
 ): B {
   // İlk fallback (attempt 1) ANINDA dener (farklı kanal — beklemeye gerek yok); tekrar
   // AYNI kanala dönerken (attempt ≥2) artan backoff transient pencereye zaman tanır.
@@ -323,10 +326,20 @@ export function autoFallbackBackend<O extends { kind: string }, B extends Fallba
             backend: turn.name,
             attempt: attempt + 1,
           });
+          // KALICI hata (kredi/yetki): CLI↔API ikisi de aynı ölü Claude hesabı → döndürmek anlamsız, DUR.
+          if (opts?.isPermanent?.(String(err))) {
+            log.info("cli-rate-limit", "auto fallback: kalıcı hata → döngü kesildi", { backend: turn.name });
+            break;
+          }
           continue; // diğer kanalı dene
         }
         if (r.kind !== "failed") return r; // başarı ya da aborted → bitti
         last = r;
+        // 'failed' sonucun sebebi de kalıcıysa diğer kanalı boş yere deneme.
+        if (opts?.isPermanent?.(String((r as { reason?: string }).reason ?? ""))) {
+          log.info("cli-rate-limit", "auto fallback: kalıcı 'failed' → döngü kesildi", { backend: turn.name });
+          break;
+        }
       }
       if (last !== undefined) return last; // ≥1 'failed' sonuç → son dürüst hatayı döndür
       throw lastErr; // hiç sonuç yok, yalnız exception'lar → son exception'ı yukarı ver
@@ -349,8 +362,11 @@ export function autoBackendPair<O extends { kind: string }, B extends Fallbackab
   effective: "api" | "cli",
   makeCli: () => B,
   makeApi: () => B,
+  // KALICI-hata sınıflandırıcı (caller isApiAccountError'ı geçirir; cli-rate-limit claude-api'yi import
+  // EDEMEZ → config→cli-rate-limit cycle). Kredi/yetki hatasında CLI↔API döngüsü kırılır.
+  isPermanent?: (errOrReason: string) => boolean,
 ): B {
   return effective === "cli"
-    ? autoFallbackBackend<O, B>(makeCli, makeApi, { from: CLI_LABEL, to: API_LABEL })
-    : autoFallbackBackend<O, B>(makeApi, makeCli, { from: API_LABEL, to: CLI_LABEL });
+    ? autoFallbackBackend<O, B>(makeCli, makeApi, { from: CLI_LABEL, to: API_LABEL }, { isPermanent })
+    : autoFallbackBackend<O, B>(makeApi, makeCli, { from: API_LABEL, to: CLI_LABEL }, { isPermanent });
 }

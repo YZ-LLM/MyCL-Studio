@@ -242,22 +242,28 @@ export function resolveLlmClient(
  * (2026-06-22): `claude -p` + bu env → z.ai GLM yanıt verdi. NOT: müfettiş (inspector) BİLEREK çapraz-aile
  * (claude) kalır — bu helper'ı oraya UYGULAMA (z.ai-main'de bile bağımsız aile gerek).
  */
+/** claude CLI'yi z.ai endpoint'ine yönlendiren env (BASE_URL + AUTH_TOKEN + API_KEY aynı key). */
+function zaiCliEnv(key: string, base?: string): Record<string, string> {
+  const b = base ?? ZAI_BASE_URL;
+  return { ANTHROPIC_BASE_URL: b, ANTHROPIC_AUTH_TOKEN: key, ANTHROPIC_API_KEY: key };
+}
+
 export function resolveCliProvider(
   config: MyclConfig,
   role: AgentRole,
   model: string,
+  opts?: { accountErrorFallback?: boolean },
 ): { extraEnv?: Record<string, string>; model: string } {
   const prov = resolveProvider(config, role);
+  // Birincil Sağlayıcı=Z.AI seçimi → claude CLI doğrudan z.ai endpoint'ine.
   if (prov.isZai && prov.apiKey) {
-    const base = prov.baseURL ?? ZAI_BASE_URL;
-    return {
-      extraEnv: {
-        ANTHROPIC_BASE_URL: base,
-        ANTHROPIC_AUTH_TOKEN: prov.apiKey,
-        ANTHROPIC_API_KEY: prov.apiKey,
-      },
-      model: glmModelFor(model),
-    };
+    return { extraEnv: zaiCliEnv(prov.apiKey, prov.baseURL), model: glmModelFor(model) };
+  }
+  // Account-error fallback (Claude SEÇİLİ ama kredi/limit bitti): z.ai key varsa AYNI turu z.ai-CLI ile
+  // tekrarla — SDK runTurn'deki account-error→z.ai fallback'inin CLI muadili (evrensel fallback). zaiFallbackKey
+  // resolveProvider'dan gelir (per-rol ?? ortak). Müfettiş bu yolu KULLANMAZ (kendi Claude env'i + claudeKeyForRole).
+  if (opts?.accountErrorFallback && prov.zaiFallbackKey) {
+    return { extraEnv: zaiCliEnv(prov.zaiFallbackKey), model: glmModelFor(model) };
   }
   return { model };
 }

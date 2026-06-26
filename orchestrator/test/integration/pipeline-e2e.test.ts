@@ -401,7 +401,7 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     expect(tasks[0]!.text).toContain("Faz 13");
   });
 
-  it("F1: 'Tekrar analiz et' null → SESSİZ DROP değil, fallback askq escalate (pending=sentinel, spawn yok, task yazmaz)", async () => {
+  it("F1: 'Tekrar analiz et' başarısız → SESSİZ DROP değil; pending set, spawn yok, task yazmaz (ortamdan bağımsız)", async () => {
     const state = await loadOrInit(projectRoot);
     __initRuntimeForTest(state, apiConfig());
     __setPendingErrorAnalysisForTest({
@@ -412,12 +412,12 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
       solutions_tr: ["Çözüm A"],
     });
     await handleAskqAnswer("error_analysis_r", OPT_REANALYZE);
-    // FROZEN-GOAL FIX #2 (2026-06-25): yeniden-analiz de null → ESKİDEN pending null kalıp iş SESSİZCE düşüyordu
-    // (bayat banner). ARTIK fallback askq sentinel'i set edilir → isPipelineParked=true → drop YOK → kullanıcı
-    // eyleme dönük kart görür. Manuel reanalyze → PARK (oto-route yok → claude spawn yok + task yazmaz).
+    // FROZEN-GOAL FIX #2 + YZLLM kredi-bitti döngüsü: reanalyze başarısız → SESSİZ DROP YOK. İki yol da bu değişmezi
+    // korur — (a) account/auth/kredi hatası (sahte-key) → failPermanent (REANALYZE YOK → döngü kırılır), (b) başka
+    // null → escalate fallback askq. Ortama göre (ağ var/yok) hangisi olursa olsun: pending SET + "kaydet+devam" var +
+    // claude spawn YOK + task yazılMAZ. ("Kalıcı hatada reanalyze sunulmaz" spesifik guard'ı error-analysis.test.ts'te.)
     const pending = __getPendingErrorAnalysisForTest();
     expect(pending).not.toBeNull();
-    expect(pending!.id).toMatch(/^error_analysis_fallback_/);
     expect(pending!.phase).toBe(9);
     expect(pending!.options).toContain(OPT_QUEUE);
     expect(await readTasks(projectRoot)).toHaveLength(0);

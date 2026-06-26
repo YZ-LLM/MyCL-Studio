@@ -260,3 +260,30 @@ describe("buildErrorAnalysisPrompt — kör-teşhis + yıkıcı-fix önlemi", ()
     expect(p.toLowerCase()).toContain("reversible");
   });
 });
+
+describe("buildErrorAnalysisAskq — kalıcı sağlayıcı-yok (permanentNoProvider) → döngü kırma", () => {
+  it("permanentNoProvider → YALNIZ OPT_QUEUE; OPT_REANALYZE/OPT_SOLVE YOK (sonsuz döngü önlenir)", () => {
+    const { options } = buildErrorAnalysisAskq(["Şunu dene"], false, { permanentNoProvider: true });
+    expect(labels(options)).toEqual([OPT_QUEUE]);
+    expect(labels(options)).not.toContain(OPT_REANALYZE);
+    expect(labels(options)).not.toContain(OPT_SOLVE);
+  });
+
+  it("permanentNoProvider + allowAcceptContinue (blocking gate) → OPT_QUEUE + OPT_ACCEPT_CONTINUE; reanalyze YOK", () => {
+    const { options } = buildErrorAnalysisAskq([], true, {
+      permanentNoProvider: true,
+      allowAcceptContinue: true,
+    });
+    expect(labels(options)).toEqual([OPT_QUEUE, OPT_ACCEPT_CONTINUE]);
+    expect(labels(options)).not.toContain(OPT_REANALYZE);
+  });
+});
+
+describe("buildErrorAnalysisPrompt — z.ai fallback farkındalığı (YZLLM: ajan 'fallback yok' demesin)", () => {
+  const pctx = { phase: 3, message: "Faz 3 hatası", detail: "credit balance too low" };
+  it("prompt z.ai (GLM) fallback'in VAR olduğunu söyler", () => {
+    const p = buildErrorAnalysisPrompt(pctx, true);
+    expect(p).toContain("z.ai");
+    expect(p.toLowerCase()).toContain("fallback");
+  });
+});

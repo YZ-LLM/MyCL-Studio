@@ -17,6 +17,7 @@ import { PURE_REASONING_DISALLOWED_TOOLS } from "../tool-policy.js";
 import { autoAnswerSuggested } from "../auto-answer.js";
 import { selectEffortForTask } from "../model-catalog.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
+import { isApiAccountError } from "../claude-api.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
 import { appendHistory } from "../history-loader.js";
@@ -461,6 +462,7 @@ export function createQaAskqBackend(opts: QaAskqRunOpts): QaAskqBackend {
       backendForRole(opts.config, "main"),
       () => new CliQaAskqBackend(opts),
       () => new QaAskqBaseController(opts),
+      isApiAccountError, // kredi/yetki hatasında CLI↔API boş döngüsünü kır
     );
   }
   const wantCli = backendForRole(opts.config, "main") === "cli";

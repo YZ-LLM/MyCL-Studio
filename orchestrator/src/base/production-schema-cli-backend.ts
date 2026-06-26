@@ -17,8 +17,9 @@ import { join } from "node:path";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
 import { appendAudit } from "../audit.js";
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
-import { runClaudeCliSession } from "../cli-session.js";
+import { runClaudeCliSession, type CliSessionTurnOpts } from "../cli-session.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
+import { isApiAccountError, resolveCliProvider } from "../claude-api.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
 import { localizeOptionLabels, t } from "../i18n.js";
@@ -134,16 +135,20 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
     let userMessage = opts.initialUserMessage;
     let noJsonNudges = 0; // JSON yok → örnekli nudge (≤2), sonra prose'tan sentez
     let writeFieldNudges = 0; // write eksik-alan → örnekli nudge (≤2), sonra coerce + devam
+    // EVRENSEL z.ai fallback: Claude account/kredi/limit hatasında z.ai'ye geç + oturum sonuna kadar
+    // YAPIŞKAN kal (her turda Claude'u tekrar denemek --resume'u yanlış endpoint'e gönderir). undefined → Claude.
+    let zaiFallbackEnv: Record<string, string> | undefined;
+    let zaiFallbackModel: string | undefined;
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.aborted) return { kind: "aborted" };
 
-      const res = await runClaudeCliSession({
+      const baseSessionOpts: CliSessionTurnOpts = {
         sessionId,
         resume,
         userMessage,
         systemPrompt: resume ? undefined : systemPrompt,
-        modelId: opts.modelId,
+        modelId: zaiFallbackModel ?? opts.modelId,
         cwd: opts.state.project_root,
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
         disallowedTools: ["Write", "Edit", "NotebookEdit"],
@@ -151,7 +156,23 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
         onText: (text) => emitClaudeStream({ sub: "text", text }),
         observer: (tu) =>
           emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
-      });
+        extraEnv: zaiFallbackEnv,
+      };
+      let res = await runClaudeCliSession(baseSessionOpts);
+      // Claude account-error + henüz z.ai'ye düşmediysek + z.ai key varsa → AYNI turu z.ai-CLI ile tekrarla
+      // (SDK runTurn:728-745'teki desenin CLI muadili). Müfettiş bu yola girmez. Yapışkan: sonraki turlar z.ai'de.
+      if (!res.ok && !zaiFallbackEnv && isApiAccountError(res.error ?? "")) {
+        const zai = resolveCliProvider(opts.config, "main", opts.modelId, { accountErrorFallback: true });
+        if (zai.extraEnv) {
+          zaiFallbackEnv = zai.extraEnv;
+          zaiFallbackModel = zai.model;
+          emitChatMessage(
+            "system",
+            `⚠️ Claude erişilemedi (kredi/limit) → z.ai (GLM \`${zai.model}\`) ile devam ediliyor.`,
+          );
+          res = await runClaudeCliSession({ ...baseSessionOpts, modelId: zai.model, extraEnv: zai.extraEnv });
+        }
+      }
       if (this.aborted) return { kind: "aborted" };
       if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
       if (!res.ok) {
@@ -358,6 +379,7 @@ export function createProductionSchemaBackend(opts: ProductionRunOpts): Producti
       backendForRole(opts.config, "main"),
       () => new ProductionSchemaCliBackend(opts),
       () => new ProductionSchemaBaseController(opts),
+      isApiAccountError, // kredi/yetki hatasında CLI↔API boş döngüsünü kır
     );
   }
   const wantCli = backendForRole(opts.config, "main") === "cli";

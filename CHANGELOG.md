@@ -1,5 +1,21 @@
 ## 2026-06-26
 
+- **fix(sağlayıcı): Claude tükenince z.ai EVRENSEL devralır + kredi/yetki hatasında boş döngüler kırılır (YZLLM canlı bug):**
+  Canlı koşuda Claude aboneliği limitli + API kredisi bitti ("credit balance too low") → MyCL anlamsız döngüye
+  girdi, z.ai fallback'i devreye girmedi. Dört parça: **(1)** z.ai account-error fallback'i artık CLI/Auto yolunda da
+  var (önce yalnız SDK [claude-api.ts](orchestrator/src/claude-api.ts) `runTurn`'deydi): [cli-session.ts](orchestrator/src/cli-session.ts)
+  `extraEnv` aldı, `resolveCliProvider`'a `accountErrorFallback` opt'u, [production-schema-cli-backend.ts](orchestrator/src/base/production-schema-cli-backend.ts)
+  account-error'da z.ai'ye **yapışkan** geçer (oturum sonuna kadar). **(2)** [cli-rate-limit.ts](orchestrator/src/cli-rate-limit.ts)
+  `autoFallbackBackend`'e enjekte `isPermanent` (caller `isApiAccountError` geçirir; circular import'tan kaçınmak için
+  import değil enjeksiyon) → CLI↔API 6-tur boş döngüsü kredi/yetki hatasında 1'de kırılır; [index.ts](orchestrator/src/index.ts)
+  `failPhase` "tüm sağlayıcılar tükendi" mesajı z.ai-farkında + dürüst (artık "abonelik yok" yanlışı yok). **(3)**
+  [error-analysis.ts](orchestrator/src/error-analysis.ts) `permanentNoProvider` → sağlayıcı yokken "Tekrar analiz et"
+  SUNULMAZ (hep başarısız → sonsuz döngüydü); analiz account-error'da `failPermanent` (yalnız "kaydet+devam"); CLI hata
+  metnine `resultErrorText` eklendi (account-error result-event'te gelir — [cli-run.ts](orchestrator/src/cli-run.ts)+cli-session). **(4)**
+  orkestratör + analiz promptlarına "z.ai fallback MEVCUT" bilgisi (ajan "z.ai geçiş yok" yanlışını vermesin).
+  Müfettiş ETKİLENMEZ (çapraz-aile için hep Claude — doğrulandı). +13 test. Mahkeme (Sonnet 4.6, çapraz aile): PROCEED
+  (6 eksen: müfettiş izolasyonu / yapışkan-oturum / döngü-kırma / circular-import / sınıflandırma / Claude-only regresyon). check yeşil.
+
 - **fix(yönlendirme): yeni iş "Faz N'de kaldığı yerden sürüyor" diye yanlış duyurulmaz (YZLLM: "söylediği halde 8'e geçmedi"):**
   Tamamlanmış önceki koşudan kalan `current_phase=8`'i orkestratör ajanı bayat görmeyip yeni özelliği (tema + responsive)
   "TDD aşamasında, kaldığı yerden sürüyor" diye duyurdu — kullanıcı Faz 8 bekledi ama pipeline Faz 1'den başladı (yeni

@@ -607,11 +607,19 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
       }
       return;
     }
+    // Buraya geldiyse z.ai fallback'i de (Parça 1, CLI/SDK yollarında) bu turu kurtaramadı → dürüst söyle.
+    const hasZai = !!zaiKeyForRole(runtime.config.api_keys, "main");
     emitChatMessage(
       "system",
-      "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** + abonelik (`claude`) yok — bu bir ortam sorunu, proje hatası " +
-        "DEĞİL. Plans & Billing'den kredi yükleyin (ya da `claude` kurup CLI moduna geçin), sonra **'Çalıştır'** ile " +
-        "devam edin. Otomatik tırmanma/analiz YAPMADIM — hepsi API gerektirir, aynı hatayı verirdi.",
+      hasZai
+        ? "⛔ **Tüm sağlayıcılar şu an kullanılamıyor:** Anthropic API krediniz/bakiyeniz yetersiz, abonelik (CLI) " +
+            "limitli ya da yok, ve z.ai (GLM) yedeği de bu turu tamamlayamadı. Plans & Billing'den kredi yükleyin VEYA " +
+            "z.ai anahtarınızı/bakiyenizi kontrol edin, sonra **'Çalıştır'** ile devam edin. Otomatik tırmanma/analiz " +
+            "YAPMADIM — hepsi bir sağlayıcı gerektirir, aynı hatayı verirdi."
+        : "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** + çalışan abonelik (`claude`) ya da z.ai anahtarı yok — bu " +
+            "bir ortam sorunu, proje hatası DEĞİL. Plans & Billing'den kredi yükleyin, `claude` kurun, VEYA Ayarlar → API " +
+            "Anahtarları'ndan bir **z.ai (GLM) anahtarı** girin; sonra **'Çalıştır'** ile devam edin. Otomatik tırmanma/" +
+            "analiz YAPMADIM — hepsi bir sağlayıcı gerektirir, aynı hatayı verirdi.",
     );
     return; // STOP — escalation YOK, analiz YOK, fix YOK.
   }
