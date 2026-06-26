@@ -9,6 +9,16 @@ import { UpdateButton } from "./UpdateButton";
 /** Sağ panelde aynı anda yalnız biri açık olabilen üç ajan görünümü. */
 export type RightPanel = "main" | "translator" | "orchestrator";
 
+/** Main Ajan (Claude Code) için ciddi AI ikonu — inline SVG (currentColor → dark/light uyumlu). 4-köşeli
+ *  sparkle, modern AI işareti (robot emoji değil; YZLLM: "ciddi iş yapıyoruz"). */
+function AiIcon() {
+  return (
+    <svg className="rab-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M12 1.7c.33 3.7 1.5 6.2 3.5 7.7 1.45 1.05 3.3 1.7 6.1 1.9-2.8.2-4.65.85-6.1 1.9-2 1.5-3.17 4-3.5 7.7-.33-3.7-1.5-6.2-3.5-7.7-1.45-1.05-3.3-1.7-6.1-1.9 2.8-.2 4.65-.85 6.1-1.9 2-1.5 3.17-4 3.5-7.7z" />
+    </svg>
+  );
+}
+
 interface Props {
   onExecuteClick?: () => void;
   executeDisabled?: boolean;
@@ -18,8 +28,6 @@ interface Props {
   activeRightPanel?: RightPanel | null;
   /** Bir ajan butonuna basıldı — App toggle eder (aynıysa kapat, farklıysa o panele geç). */
   onRightPanelToggle?: (panel: RightPanel) => void;
-  /** Orkestra Ajanı butonundaki karar sayısı rozeti. */
-  orchestratorDecisionCount?: number;
   onToggleLeftClick?: () => void;
   leftPanelsOpen?: boolean;
   onToggleTaskQueueClick?: () => void;
@@ -43,7 +51,6 @@ export function RightActionBar({
   paused,
   activeRightPanel,
   onRightPanelToggle,
-  orchestratorDecisionCount,
   onToggleLeftClick,
   leftPanelsOpen,
   onToggleTaskQueueClick,
@@ -108,7 +115,7 @@ export function RightActionBar({
             title="Main Ajanı (Claude Code — kod yazan ajan) panelini aç/kapat"
             aria-label="Main Ajan paneli"
           >
-            🤖 Main Ajan
+            <AiIcon /> Main Ajan
           </button>
           <button
             type="button"
@@ -129,9 +136,6 @@ export function RightActionBar({
             aria-label="Orkestra Ajanı paneli"
           >
             🧠 Orkestra Ajanı
-            {orchestratorDecisionCount !== undefined && orchestratorDecisionCount > 0 && (
-              <span className="rab-badge">{orchestratorDecisionCount}</span>
-            )}
           </button>
         </>
       )}

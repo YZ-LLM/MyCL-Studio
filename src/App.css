@@ -797,6 +797,14 @@ select:focus {
   background: var(--accent-strong);
   color: #fff;
 }
+
+/* Main Ajan butonundaki inline AI ikonu (currentColor → buton metniyle aynı renk, dark/light uyumlu). */
+.rab-icon {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
+  margin-right: 1px;
+}
 .rab-badge {
   margin-left: 6px;
   font-size: 10px;

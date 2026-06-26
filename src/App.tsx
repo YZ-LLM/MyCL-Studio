@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { Splash } from "./components/Splash";
 import { Settings } from "./components/Settings";
-import { AgentThinkingModal } from "./components/AgentThinkingModal";
 import { GuideModal } from "./components/GuideModal";
 import { QualityAuditModal } from "./components/QualityAuditModal";
 import { AppHeader } from "./components/AppHeader";
@@ -603,17 +602,6 @@ function App() {
     void orch.send({ kind: "set_auto_answer", data: { enabled } });
   };
 
-  // YZLLM 2026-06-16: SORU modu toggle. Açıkken composer mesajı `ask_question` IPC'sinden gider
-  // (`user_message` değil) → salt-okunur danışma, pipeline tetiklenmez.
-  // YZLLM 2026-06-19: backend SORU-modu OTURUM GEÇMİŞİ tutar (follow-up'lar bağlansın). Toggle değişince
-  // backend'e bildir: aç → chat'e hatırlatma + temiz geçmiş; kapa → geçmiş tamamen silinir.
-  // YZLLM: soru modu İLK AÇILIŞTA KAPALI olsun → her açılışta false başlar (önceki on-durumu hatırlanmaz;
-  // persistans kaldırıldı). Kullanıcı oturum içinde açabilir; sonraki açılışta yine kapalı gelir.
-  const [questionMode, setQuestionMode] = useState<boolean>(false);
-  const handleQuestionModeToggle = (enabled: boolean): void => {
-    setQuestionMode(enabled);
-    void orch.send({ kind: "set_question_mode", data: { enabled } });
-  };
 
   // v15.13 (saha 5/5): kullanıcı aksiyonu beklenirken (askq) OS bildirimi.
   // Açılışta izin iste (sessiz başarısız — bildirim plugin'i yoksa akışı bozma).
@@ -656,8 +644,6 @@ function App() {
   const [savingKeys, setSavingKeys] = useState(false);
   const [savingModels, setSavingModels] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // v15.6: Orkestrator ajan düşünceler modalı.
-  const [orchestratorModalOpen, setOrchestratorModalOpen] = useState(false);
   // YZLLM 2026-06-15: Proje teknik dökümanı ("Proje Dökümanı" butonu) — içerik
   // tech_doc event'inden (.mycl/tech-doc.md). Kullanım kılavuzu artık projenin
   // İÇİNDE (Faz 17 in-app kılavuz sayfaları), MyCL'de Kılavuz butonu kaldırıldı.
@@ -1094,13 +1080,9 @@ function App() {
         { id: s.messages.length + 1, role: "user", text, ts: Date.now() },
       ],
     }));
-    // YZLLM 2026-06-16: SORU modu açıksa mesaj `ask_question` yolundan gider (salt-okunur danışma,
-    // pipeline tetiklenmez); kapalıysa normal `user_message` (orkestratör kapı bekçisi → iş/sohbet).
-    void orch.send(
-      questionMode
-        ? { kind: "ask_question", data: { text } }
-        : { kind: "user_message", data: { text } },
-    );
+    // Ana composer her zaman normal `user_message` (orkestratör kapı bekçisi → iş/sohbet kararını verir).
+    // (Soru modu toggle kaldırıldı; orkestratöre kalıcı yönerge artık Orkestra panelindeki direktif composer'ından.)
+    void orch.send({ kind: "user_message", data: { text } });
   };
 
   // v15.7: handleIntentClick kaldırıldı — intent button'ları yok artık.
@@ -1364,15 +1346,11 @@ function App() {
           olderAvailable={mainState.olderAvailable}
           loadingOlder={mainState.loadingOlder}
           onLoadOlder={handleLoadOlder}
-          onOrchestratorClick={() => setOrchestratorModalOpen(true)}
-          agentEventsCount={mainState.agentEvents.length}
           agentBusy={mainState.agentBusyCount > 0}
           onAddTaskToQueue={handleAddTaskToQueue}
           autoAnswer={autoAnswer}
           onAutoAnswerToggle={handleAutoAnswerToggle}
           autoAnswerDisabled={mainState.autoAnswerSuppressed}
-          questionMode={questionMode}
-          onQuestionModeToggle={handleQuestionModeToggle}
           onDocClick={() => setProjectDocOpen(true)}
           docAvailable={projectDoc.trim().length > 0}
           onQualityAuditClick={() => setQualityAuditOpen(true)}
@@ -1413,7 +1391,6 @@ function App() {
           onRightPanelToggle={(panel) =>
             setActiveRightPanel((cur) => (cur === panel ? null : panel))
           }
-          orchestratorDecisionCount={mainState.orchestratorDecisions.length}
           onToggleLeftClick={() => setLeftPanelsOpen((p) => !p)}
           leftPanelsOpen={leftPanelsOpen}
           onToggleTaskQueueClick={() => setTaskQueueOpen((o) => !o)}
@@ -1425,11 +1402,6 @@ function App() {
         />
       </div>
       {settingsView}
-      <AgentThinkingModal
-        open={orchestratorModalOpen}
-        events={mainState.agentEvents}
-        onClose={() => setOrchestratorModalOpen(false)}
-      />
       <GuideModal
         open={projectDocOpen}
         content={projectDoc}

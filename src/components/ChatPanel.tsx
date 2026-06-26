@@ -157,12 +157,7 @@ interface Props {
   olderAvailable: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
-  /** v15.6: 🧠 Orkestrator butonu — modal trigger (intent DEĞİL).
-   *  Tıklanınca agent'ın son tool call + decision listesi açılır.
-   *  agentEventsCount badge için sayı gösterilebilir. */
-  onOrchestratorClick?: () => void;
-  agentEventsCount?: number;
-  /** v15.6: Agent çalışıyor mu — Orkestrator butonu yanında spinner gösterir. */
+  /** Agent çalışıyor mu — Orkestratör durum etiketinde spinner gösterir (YALNIZ loading; tıklanmaz). */
   agentBusy?: boolean;
   /** v15.7 (2026-05-24): Composer'daki metni iş kuyruğuna ekle. */
   onAddTaskToQueue?: (text: string) => void;
@@ -171,10 +166,6 @@ interface Props {
   onAutoAnswerToggle?: (enabled: boolean) => void;
   /** YZLLM (cave5): entegre (foreign-origin) projede oto-cevap kullanılamaz → checkbox devre-dışı + kapalı görünür. */
   autoAnswerDisabled?: boolean;
-  /** YZLLM 2026-06-16: SORU modu — açıkken composer mesajı pipeline'ı tetiklemez, salt-okunur
-   *  danışma (orkestratör devs/ + .mycl + kodu okuyup Türkçe cevaplar). */
-  questionMode?: boolean;
-  onQuestionModeToggle?: (enabled: boolean) => void;
   /** YZLLM 2026-06-15: 📄 Proje Dökümanı butonu — tech-doc modalını açar. */
   onDocClick?: () => void;
   /** Proje dökümanı içeriği mevcut mu (buton aktif/pasif görünümü). */
@@ -203,15 +194,11 @@ export function ChatPanel({
   olderAvailable,
   loadingOlder,
   onLoadOlder,
-  onOrchestratorClick,
-  agentEventsCount,
   agentBusy,
   onAddTaskToQueue,
   autoAnswer,
   onAutoAnswerToggle,
   autoAnswerDisabled,
-  questionMode,
-  onQuestionModeToggle,
   onDocClick,
   docAvailable,
   onDastClick,
@@ -437,21 +424,12 @@ export function ChatPanel({
         <div
           className="running-banner"
           data-testid="running-banner"
-          title={
-            onOrchestratorClick
-              ? "Düşünceleri görmek için tıkla"
-              : (runningBanner.detail ?? "")
-          }
-          onClick={onOrchestratorClick}
-          style={onOrchestratorClick ? { cursor: "pointer" } : undefined}
+          title={runningBanner.detail ?? ""}
         >
           <span className="running-spinner" aria-hidden>⏳</span>
           <span className="running-label">{runningBanner.label}</span>
           {runningBanner.detail && (
             <span className="running-detail">{runningBanner.detail}</span>
-          )}
-          {onOrchestratorClick && (
-            <span className="running-detail">· 💭 düşünceler</span>
           )}
         </div>
       )}
@@ -484,10 +462,7 @@ export function ChatPanel({
           className="composer-input"
           data-testid="composer-input"
           placeholder={
-            questionMode
-              ? "🔎 Soru modu açık — geçmiş çalışma hakkında soru sor (iş başlatmaz, salt-okunur cevap)"
-              : composerPlaceholder ??
-                "MyCL'e yaz... (Enter gönderir, Shift+Enter alt satır)"
+            composerPlaceholder ?? "MyCL'e yaz... (Enter gönderir, Shift+Enter alt satır)"
           }
           value={draft}
           disabled={disabled}
@@ -510,60 +485,40 @@ export function ChatPanel({
             kaldırıldı — orchestrator ajan composer'daki metni otomatik
             classify ediyor. Sadece Orkestrator (ve ileride iş kuyruğu)
             butonları kaldı. */}
-        {/* v15.6: 🧠 Orkestrator — modal trigger (intent button DEĞİL).
-            Agent thinking event'leri açılır. agentEventsCount badge gösterir. */}
-        {onOrchestratorClick && (
-          <button
-            type="button"
-            className="intent-pill"
-            data-testid="intent-orchestrator"
-            onClick={onOrchestratorClick}
-            title={
-              agentBusy
-                ? "Orkestrator ajan düşünüyor..."
-                : "Orkestrator ajanın son düşüncelerini gör"
-            }
-            style={{ marginLeft: "auto" }}
-          >
-            <span className="intent-pill-emoji" aria-hidden>🧠</span>
-            <span className="intent-pill-label">
-              Orkestrator
-              {agentBusy && (
-                <span
-                  className="agent-busy-spinner"
-                  aria-label="ajan çalışıyor"
-                  style={{
-                    display: "inline-block",
-                    marginLeft: 6,
-                    width: 10,
-                    height: 10,
-                    border: "2px solid var(--fg-dim)",
-                    borderTopColor: "transparent",
-                    borderRadius: "50%",
-                    verticalAlign: "middle",
-                    animation: "mycl-spin 0.8s linear infinite",
-                  }}
-                />
-              )}
-              {!agentBusy &&
-                agentEventsCount !== undefined &&
-                agentEventsCount > 0 && (
-                  <span
-                    style={{
-                      marginLeft: 6,
-                      fontSize: 10,
-                      padding: "1px 5px",
-                      background: "var(--accent)",
-                      color: "white",
-                      borderRadius: 8,
-                    }}
-                  >
-                    {agentEventsCount}
-                  </span>
-                )}
-            </span>
-          </button>
-        )}
+        {/* 🧠 Orkestratör — YALNIZ loading göstergesi (YZLLM: tıklayınca popup AÇMAZ; kararlar sağdaki
+            Orkestra Ajanı panelinde). Buton değil, durum etiketi: ajan çalışırken spinner döner. */}
+        <span
+          className="intent-pill intent-orchestrator-status"
+          data-testid="intent-orchestrator"
+          title={
+            agentBusy
+              ? "Orkestratör ajan düşünüyor..."
+              : "Orkestratör ajan — kararları sağdaki Orkestra Ajanı panelinde görünür"
+          }
+          style={{ marginLeft: "auto", cursor: "default" }}
+        >
+          <span className="intent-pill-emoji" aria-hidden>🧠</span>
+          <span className="intent-pill-label">
+            Orkestratör
+            {agentBusy && (
+              <span
+                className="agent-busy-spinner"
+                aria-label="ajan çalışıyor"
+                style={{
+                  display: "inline-block",
+                  marginLeft: 6,
+                  width: 10,
+                  height: 10,
+                  border: "2px solid var(--fg-dim)",
+                  borderTopColor: "transparent",
+                  borderRadius: "50%",
+                  verticalAlign: "middle",
+                  animation: "mycl-spin 0.8s linear infinite",
+                }}
+              />
+            )}
+          </span>
+        </span>
         {/* v15.13 (saha 3/5): Oto-cevap checkbox — Orkestrator'ın yanında. Açıkken
             önerili netleştirme soruları otomatik (orkestratör önerisiyle) yanıtlanır. */}
         {onAutoAnswerToggle && (
@@ -593,24 +548,6 @@ export function ChatPanel({
             <span className="intent-pill-label">
               Oto-cevap{autoAnswerDisabled ? " (entegre modunda kapalı)" : ""}
             </span>
-          </label>
-        )}
-        {/* YZLLM 2026-06-16: SORU modu — açıkken composer mesajı pipeline'ı TETİKLEMEZ; MyCL geçmiş
-            çalışmayı (devs/ iter-spec/page-spec + .mycl + kod) okuyup salt-okunur cevap verir. */}
-        {onQuestionModeToggle && (
-          <label
-            className="intent-pill"
-            title="Açıkken: composer'a yazdığın SORU iş/geliştirme başlatmaz — MyCL geçmiş çalışmayı (devs/ + .mycl + kod) okuyup salt-okunur cevaplar (ders/bilgi çıkarmak için). Kapat → normal geliştirme modu."
-            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
-          >
-            <input
-              type="checkbox"
-              data-testid="question-mode-toggle"
-              checked={!!questionMode}
-              onChange={(e) => onQuestionModeToggle(e.target.checked)}
-              style={{ margin: 0 }}
-            />
-            <span className="intent-pill-label">Soru modu</span>
           </label>
         )}
         {/* YZLLM 2026-06-15: 📄 Proje Dökümanı — proje teknik dökümanını (tech-doc) gösterir.
