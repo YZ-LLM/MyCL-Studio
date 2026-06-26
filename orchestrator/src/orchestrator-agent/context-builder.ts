@@ -17,6 +17,7 @@ import { peekProjectMap, formatProjectMap } from "../onboarding/project-map.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
 import { buildProjectFacts } from "../project-facts.js";
+import { readUserDirectives } from "../user-directives.js";
 import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
 import {
   readProjectMemory,
@@ -434,7 +435,7 @@ export async function buildAgentSystemPrompt(
   const staticPart = await loadStaticSystemPrompt();
   // Doğru-karar/recall: userMessage varsa relevance-tabanlı geri-çağırmayı da paralel
   // çek (ekstra gecikme gizlenir). Boş/triviyal → "" (bölüm eklenmez). Fail-safe.
-  const [ctx, conv, relevantRecall, facts] = await Promise.all([
+  const [ctx, conv, relevantRecall, facts, directives] = await Promise.all([
     buildAgentContext(state),
     buildConversationContext(config, state),
     userMessage
@@ -446,9 +447,15 @@ export async function buildAgentSystemPrompt(
       log.error("context-builder", "proje-gerçekleri (dil/framework/paket) kurulamadı — bağlam EKSİK", { error: String(e) });
       return null;
     }),
+    // YZLLM 2026-06-26 (req 4): kullanıcının orkestra panelinden benimsettiği KALICI YÖNERGELER (~/.mycl/directives.md).
+    readUserDirectives().catch(() => ""),
   ]);
   const askqSection = renderActiveAskqSection(getActiveAskq());
   const convSection = renderConversationSection(conv);
   const factsSection = facts?.summary ? `\n\n### Proje gerçekleri\n${facts.summary}` : "";
-  return `${staticPart}\n${renderContextSection(ctx)}${factsSection}${convSection}${relevantRecall}${askqSection}`;
+  // Kalıcı yönergeler BELİRGİN olmalı (kullanıcının çapası) → staticPart'ın hemen ardında, her işte uyulur.
+  const directivesSection = directives.trim()
+    ? `\n\n---\n\n## KULLANICI KALICI YÖNERGELERİ (kullanıcının benimsettiği çapalar — her işte UY)\n${directives.trim()}`
+    : "";
+  return `${staticPart}${directivesSection}\n${renderContextSection(ctx)}${factsSection}${convSection}${relevantRecall}${askqSection}`;
 }

@@ -80,6 +80,7 @@ import {
   emitNeededPhases,
   emitPhaseRunning,
   emitPhaseIdle,
+  isPhaseIndicatorActive,
   emitTechDoc,
   getActiveAskq,
   setHistoryRoot,
@@ -149,6 +150,7 @@ import { setCacheTtl } from "./codegen/cli-backend.js";
 import { autoAnswerSuggested, setAutoAnswerSuggested, setIntegrateModeSuppression } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
+import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } from "./user-directives.js";
 import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
@@ -2108,6 +2110,58 @@ async function handleAskQuestion(text: string): Promise<void> {
     emitChatMessage("system", "⚠️ Soru cevaplanamadı (orkestratör hatası) — tekrar dener misin?");
   } finally {
     emitPhaseIdle();
+  }
+}
+
+/**
+ * YZLLM 2026-06-26 (req 4): Orkestra panelinin altındaki composer "iş" değil, işin NASIL yapılacağına dair KALICI
+ * YÖNERGE verir (örn. "projelerde her zaman versiyonlama yapalım"). Orkestratör değerlendirir: itirazı varsa söyler
+ * (kaydetmez), yoksa benimser → ~/.mycl/directives.md'ye ekler → sonraki TÜM orkestratör prompt'larına enjekte edilir
+ * (context-builder) → çapraz-proje uygulanır. Salt-okunur değerlendirme (questionMode) → pipeline/faz TETİKLENMEZ.
+ */
+async function handleOrchestratorDirective(text: string): Promise<void> {
+  if (!runtime.state || !runtime.config) {
+    emitError("no active project", null);
+    return;
+  }
+  const d = text.trim();
+  if (!d) return;
+  // Mahkeme M2/M3: faz banner'ı/askq AKTİFSE göstergeye DOKUNMA — çalışan fazı sahte-IDLE göstermesin / parked
+  // askq'nin "yanıtını bekliyorum" sessizliğini bozmasın. Boşken spinner feedback'i ver, doluyken sessiz değerlendir.
+  const useBanner = !isPhaseIndicatorActive();
+  try {
+    if (useBanner) emitPhaseRunning("🧭 Kalıcı yönerge değerlendiriliyor (orkestratör)…");
+    const decision = await respondAsOrchestrator(runtime.config, runtime.state, buildDirectiveEvalPrompt(d), {
+      questionMode: true, // salt-okunur değerlendirme → executeAgentDecision çağrılmaz, faz/iş tetiklenmez
+    });
+    // Mahkeme #4: KARAR işaretçisi message_to_user'da değil reason'da olabilir → ikisini birleştir (fail-closed korunur).
+    const raw = [decision.message_to_user, decision.reason].filter(Boolean).join("\n").trim();
+    const { verdict, message } = parseDirectiveVerdict(raw);
+    if (verdict === "adopt") {
+      const added = await appendUserDirective(d);
+      emitChatMessage(
+        "assistant",
+        added
+          ? `✅ Yönergeyi benimsedim${message ? ` — ${message}` : ""}\n\nBundan sonra tüm işlerde buna uyacağım (kalıcı kaydettim).`
+          : `✅ Bu yönerge zaten kayıtlı${message ? ` — ${message}` : ""}\n\nUygulamaya devam ediyorum (tekrar eklemedim).`,
+      );
+    } else if (verdict === "object") {
+      emitChatMessage(
+        "assistant",
+        `⚠️ Bu yönergeye itirazım var: ${message || "uygulanması sakıncalı."}\n\nBu yüzden kalıcı olarak kaydetmedim — yine de uygulamamı istersen söyle.`,
+      );
+    } else {
+      // İşaretçi parse edilemedi → fail-closed: kaydetme, dürüst söyle (sessiz yanlış-kayıt YOK).
+      emitChatMessage(
+        "assistant",
+        `Yönergeyi net bir karara bağlayamadım${message ? `:\n\n${message}` : ""}\n\nDaha açık yazarsan kalıcı yönerge olarak değerlendiririm (henüz kaydetmedim).`,
+      );
+    }
+  } catch (err) {
+    log.warn("orchestrator", "kalıcı yönerge değerlendirilemedi", err);
+    emitChatMessage("system", "⚠️ Yönerge değerlendirilemedi (orkestratör hatası) — tekrar dener misin?");
+  } finally {
+    if (useBanner) emitPhaseIdle();
   }
 }
 
@@ -6355,6 +6409,11 @@ ipcRouter.register("user_message", async (data: unknown) => {
 ipcRouter.register("ask_question", async (data: unknown) => {
   const d = data as { text?: string } | undefined;
   await handleAskQuestion(String(d?.text ?? ""));
+});
+// YZLLM 2026-06-26 (req 4): Orkestra paneli composer'ı → KALICI YÖNERGE (görev değil). Orkestratör benimser/itiraz eder.
+ipcRouter.register("orchestrator_directive", async (data: unknown) => {
+  const d = data as { text?: string } | undefined;
+  await handleOrchestratorDirective(String(d?.text ?? ""));
 });
 // SORU modu aç/kapa (YZLLM 2026-06-19): her geçişte oturum geçmişini SİL ("kapatınca tamamen silinir").
 // Açılışta chat'e hatırlatma bas. (Frontend toggle bu eventi gönderir.)

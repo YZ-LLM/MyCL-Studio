@@ -3,12 +3,14 @@
 // farklı/vurgulu renkte. YZLLM: "yaptığı herşeyi yazsın; o iterasyonda neler yapıldı hepsini anlayabileyim;
 // sade Türkçe; kısa öz, her iş için en fazla 1-2 cümle." reason/message_to_user zaten Türkçe (orkestratör kuralı).
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentThinkingEvent } from "../App";
 
 interface Props {
   /** App reducer'ın biriktirdiği orkestratör aktivitesi (tool_use + decision + error; cap 500). */
   events: AgentThinkingEvent[];
+  /** YZLLM 2026-06-26 (req 4): alt composer'dan KALICI YÖNERGE — orkestratör değerlendirir (benimse/itiraz). */
+  onDirective?: (text: string) => void;
 }
 
 /** Karar action enum'u → sade Türkçe etiket (orkestratörün NE yaptığı). */
@@ -87,14 +89,22 @@ function ActivityRow({ ev }: { ev: AgentThinkingEvent }) {
   return null;
 }
 
-export function OrchestratorPanel({ events }: Props) {
+export function OrchestratorPanel({ events, onDirective }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState("");
 
   // Yeni aktivite gelince en alta kaydır (kronolojik — en yeni altta, chat ile tutarlı).
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [events.length]);
+
+  const submitDirective = (): void => {
+    const t = draft.trim();
+    if (!t || !onDirective) return;
+    onDirective(t);
+    setDraft("");
+  };
 
   return (
     <section className="panel-vsection">
@@ -109,6 +119,36 @@ export function OrchestratorPanel({ events }: Props) {
           events.map((ev) => <ActivityRow key={ev.ts} ev={ev} />)
         )}
       </div>
+      {/* Alt composer (YZLLM req 4): görev değil, KALICI YÖNERGE (işin nasıl yapılacağı çapası). Orkestratör
+          değerlendirir — itirazı varsa söyler, yoksa benimser (~/.mycl/directives.md → sonraki işlere enjekte). */}
+      {onDirective && (
+        <div className="orch-directive-composer">
+          <textarea
+            className="orch-directive-input"
+            data-testid="orch-directive-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submitDirective();
+              }
+            }}
+            placeholder="Kalıcı yönerge ver (görev değil) — örn. 'projelerde her zaman versiyonlama yapalım'. Orkestratör itirazı varsa söyler, yoksa benimser ve bundan sonra uyar."
+            rows={2}
+          />
+          <button
+            type="button"
+            className="orch-directive-send"
+            data-testid="orch-directive-send"
+            onClick={submitDirective}
+            disabled={!draft.trim()}
+            title="Bu kalıcı yönergeyi orkestra ajanına ilet (Enter)"
+          >
+            Yönerge ver
+          </button>
+        </div>
+      )}
     </section>
   );
 }

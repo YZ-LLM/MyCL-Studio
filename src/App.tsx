@@ -1408,7 +1408,12 @@ function App() {
                 />
               )}
               {activeRightPanel === "orchestrator" && (
-                <OrchestratorPanel events={mainState.orchestratorActivity} />
+                <OrchestratorPanel
+                  events={mainState.orchestratorActivity}
+                  onDirective={(text) => {
+                    void orch.send({ kind: "orchestrator_directive", data: { text } });
+                  }}
+                />
               )}
             </div>
           </>

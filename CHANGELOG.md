@@ -1,5 +1,18 @@
 ## 2026-06-26
 
+- **feat(orkestra): panel altına KALICI YÖNERGE composer'ı — orkestratör benimser/itiraz eder + sonraki tüm işlere uyar (YZLLM req 4):**
+  Orkestra panelinin altındaki yeni composer "iş" değil, işin NASIL yapılacağına dair KALICI bir ÇAPA verir (örn.
+  "projelerde her zaman versiyonlama yapalım"). Orkestratör salt-okunur değerlendirir ([user-directives.ts](orchestrator/src/user-directives.ts)
+  `buildDirectiveEvalPrompt`/`parseDirectiveVerdict`): **itirazı varsa söyler** (kaydetmez), **yoksa benimser** →
+  `~/.mycl/directives.md`'ye ekler ([index.ts](orchestrator/src/index.ts) `handleOrchestratorDirective`); benimsenen
+  yönerge sonraki TÜM orkestratör prompt'larına "## KULLANICI KALICI YÖNERGELERİ" olarak enjekte edilir
+  ([context-builder.ts](orchestrator/src/orchestrator-agent/context-builder.ts)) → çapraz-proje uygulanır (CLI+SDK+Auto
+  pariteli). Pipeline/faz TETİKLENMEZ (questionMode). İşaretçi parse edilemezse fail-closed (kaydetmez, dürüst söyler).
+  **Çok-eksenli mahkeme (Sonnet 4.6, 4 eksen + düşman-doğrulama) 8 bulgu** (2 olumlu-doğrulama + 6 kusur) buldu+düzeltildi:
+  faz-banner/askq heartbeat singleton'ını ezme (çalışan fazı sahte-IDLE / askq sessizliğini bozma → `isPhaseIndicatorActive`
+  guard), KARAR işaretçisi reason'da olabilir (message+reason birleştir), dedup normalleştirme, sahte "kaydettim" iddiası
+  (appendUserDirective→boolean). Saf seam'lere 14 birim test. HÜKÜM: PROCEED.
+
 - **feat(UI): kapsam onaylanınca çalışacak fazlar belirgin, kapsam-dışı opsiyoneller SOLUK (YZLLM req 11):**
   Kapsam onaylanınca ("Kapsam onaylandı: ...") PhaseSidebar artık çalışacağı belli fazları normal/belirgin,
   GERÇEKTEN atlanacak opsiyonelleri SOLUK (opacity 0.4) gösterir ("Diğerleri pasif görünsün"). Backend

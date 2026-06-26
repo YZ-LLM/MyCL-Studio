@@ -401,6 +401,15 @@ let _lastStepTs = 0; // _lastStep ne zaman güncellendi → heartbeat "şu an" m
 // model-aktivitesi (emitClaudeStream tool_use) veya faz-geçişi (running/idle) temizler → heartbeat dürüst durum gösterir.
 let _askqPending = false;
 
+/**
+ * YZLLM 2026-06-26 (mahkeme M2/M3): faz göstergesi (heartbeat banner VEYA parked askq) ŞU AN kullanımda mı?
+ * Kalıcı yönerge değerlendirmesi (handleOrchestratorDirective) bu göstergeye DOKUNMAMALI eğer aktifse — yoksa
+ * çalışan fazı sahte-IDLE gösterir ya da askq'nin "yanıtını bekliyorum" sessizliğini bozar. true → banner'a dokunma.
+ */
+export function isPhaseIndicatorActive(): boolean {
+  return _hbTimer !== null || _askqPending;
+}
+
 /** Yol → yalnız DOSYA ADI (son segment). YZLLM 2026-06-21: heartbeat ham komut/yol değil, çalışılan dosya adını gösterir. */
 function baseName(p: unknown): string {
   const segs = String(p ?? "").split(/[/\\]/).filter(Boolean);

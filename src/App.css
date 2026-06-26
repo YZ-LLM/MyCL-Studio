@@ -1474,6 +1474,48 @@ select:focus {
   line-height: 1.5;
   background: var(--bg);
 }
+/* Orkestra paneli alt composer (YZLLM req 4): KALICI YÖNERGE girişi — panelin en altında, log'dan ayrık. */
+.orch-directive-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated, var(--bg));
+}
+.orch-directive-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.orch-directive-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.orch-directive-send {
+  align-self: flex-end;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-fg, #fff);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.orch-directive-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .orch-row {
   padding: 5px 4px;
   border-bottom: 1px solid rgba(127, 127, 127, 0.12);

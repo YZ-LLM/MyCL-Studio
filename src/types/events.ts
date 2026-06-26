@@ -460,6 +460,9 @@ export type OrchestratorCommand =
   /** YZLLM 2026-06-16: SORU modu — composer toggle açıkken mesaj buradan gider (user_message yerine).
    * Salt-okunur danışma: orkestratör-ajan devs/ + .mycl + kodu okuyup Türkçe cevaplar; pipeline TETİKLENMEZ. */
   | { kind: "ask_question"; data: { text: string } }
+  /** YZLLM 2026-06-26 (req 4): Orkestra paneli composer'ı — KALICI YÖNERGE (görev değil, "işin nasıl yapılacağı"
+   *  çapası). Orkestratör değerlendirir: itirazı varsa söyler (kaydetmez), yoksa benimser → ~/.mycl/directives.md. */
+  | { kind: "orchestrator_directive"; data: { text: string } }
   /** YZLLM 2026-06-19: SORU modu aç/kapa. Backend oturum geçmişini siler (aç→hatırlatma+temiz; kapa→sil). */
   | { kind: "set_question_mode"; data: { enabled: boolean } }
   /** ▶ Çalıştır butonu gibi deterministic intent — classifier bypass.
