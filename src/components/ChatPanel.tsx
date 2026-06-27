@@ -294,13 +294,17 @@ export function ChatPanel({
       headTsRef.current !== null &&
       newHeadTs !== null &&
       newHeadTs < headTsRef.current;
-    headTsRef.current = newHeadTs;
+    headTsRef.current = newHeadTs; // prepend takibi her zaman güncel kalsın (autoAnswer toggle'ında tutarlı)
     if (isPrepend) return; // lazy-load sonrası scroll position'u koru
+    // YZLLM 2026-06-27: yeni içerikte (mesaj/askq/banner-heartbeat) otomatik aşağı kaydırma YALNIZ oto-cevap
+    // AÇIKKEN. Oto-cevap KAPALIYKEN kullanıcı içeriği okur/karar verir → yeni mesaj ya da 60s'lik banner-heartbeat
+    // onu aşağı YANKILAMASIN. (İlk-açılış scroll'u + faza-tıkla-git ayrı efektler; onlar etkilenmez.)
+    if (!autoAnswer) return;
     if (Date.now() - lastFocusTs.current < 2000) return;
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [messages, pendingAskq, runningBanner]);
+  }, [messages, pendingAskq, runningBanner, autoAnswer]);
 
   const handleScroll = () => {
     const el = scrollRef.current;

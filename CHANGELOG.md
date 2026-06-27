@@ -1,5 +1,11 @@
 ## 2026-06-27
 
+- **fix(UX): chat otomatik aşağı kaydırma YALNIZ oto-cevap açıkken (YZLLM):**
+  Yeni içerikte (mesaj/askq/banner-heartbeat) chat panelini otomatik en alta kaydırma artık yalnız **oto-cevap modu
+  açıkken** yapılır ([ChatPanel.tsx](src/components/ChatPanel.tsx)). Oto-cevap kapalıyken kullanıcı içeriği okuyup
+  karar verir → yeni mesaj ya da 60 sn'lik banner-heartbeat onu aşağı yankılamaz. İlk-açılış scroll'u ve faza
+  tıklayınca o mesaja gitme ayrı/korunur. check yeşil.
+
 - **feat(yedek): ~/.mycl/backups proje başına son 3 yedeği tutar + test artık gerçek ~/.mycl'i kirletmez (YZLLM):**
   Oto-düzeltme öncesi kopya-yedekleri ([fix-snapshot.ts](orchestrator/src/fix-snapshot.ts)) sınırsız birikiyordu
   (adminpanel 111, Vestel_BO 25…). Artık her yeni yedekten sonra o projenin EN YENİ 3 yedeği tutulur, eskiler budanır
