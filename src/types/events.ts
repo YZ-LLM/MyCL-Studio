@@ -76,6 +76,7 @@ export type OrchestratorEvent =
   | SpecReviewEvent
   | OpenProjectRequestEvent
   | AutoAnswerModeEvent
+  | DirectiveReplyEvent
   | ErrorEvent;
 
 /** Orkestratör → frontend: bu projeyi aç (ör. okunamayan proje erişilebilir konuma kopyalandı → kopyayı aç). */
@@ -88,6 +89,13 @@ export interface OpenProjectRequestEvent {
 export interface AutoAnswerModeEvent {
   kind: "auto_answer_mode";
   data: { suppressed: boolean };
+}
+
+/** YZLLM 2026-06-27: kalıcı yönerge konuşması — ana chat'e DEĞİL, orkestratör panelinin yönerge dizisine gider.
+ *  role="user" kullanıcının verdiği yönergenin yankısı, "assistant"/"system" orkestratörün cevabı (benimse/itiraz). */
+export interface DirectiveReplyEvent {
+  kind: "directive_reply";
+  data: { role: "user" | "assistant" | "system"; text: string; ts: number };
 }
 
 /**

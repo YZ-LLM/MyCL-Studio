@@ -52,6 +52,7 @@
       "../assets/security-rules/**/*",
       "../assets/quality-rules/**/*",
       "../assets/mycl-schema.md",
+      "../müfettiş.md",
       "../prototypes/**/*"
     ]
   }

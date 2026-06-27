@@ -18,6 +18,7 @@ import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
 import { buildProjectFacts } from "../project-facts.js";
 import { readUserDirectives } from "../user-directives.js";
+import { loadCommunicationGuide } from "../communication-guide.js";
 import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
 import {
   readProjectMemory,
@@ -435,7 +436,7 @@ export async function buildAgentSystemPrompt(
   const staticPart = await loadStaticSystemPrompt();
   // Doğru-karar/recall: userMessage varsa relevance-tabanlı geri-çağırmayı da paralel
   // çek (ekstra gecikme gizlenir). Boş/triviyal → "" (bölüm eklenmez). Fail-safe.
-  const [ctx, conv, relevantRecall, facts, directives] = await Promise.all([
+  const [ctx, conv, relevantRecall, facts, directives, commGuide] = await Promise.all([
     buildAgentContext(state),
     buildConversationContext(config, state),
     userMessage
@@ -449,6 +450,9 @@ export async function buildAgentSystemPrompt(
     }),
     // YZLLM 2026-06-26 (req 4): kullanıcının orkestra panelinden benimsettiği KALICI YÖNERGELER (~/.mycl/directives.md).
     readUserDirectives().catch(() => ""),
+    // YZLLM 2026-06-27: kullanıcının iletişim rehberi (müfettiş.md) — orkestratör kullanıcıyla KONUŞAN ajan,
+    // bu ilkelere TAM uyar (sade Türkçe, varsayım tuzağı, görünür filtre, anti-sycophancy, tek soru/tur...).
+    loadCommunicationGuide(),
   ]);
   const askqSection = renderActiveAskqSection(getActiveAskq());
   const convSection = renderConversationSection(conv);
@@ -457,5 +461,9 @@ export async function buildAgentSystemPrompt(
   const directivesSection = directives.trim()
     ? `\n\n---\n\n## KULLANICI KALICI YÖNERGELERİ (kullanıcının benimsettiği çapalar — her işte UY)\n${directives.trim()}`
     : "";
-  return `${staticPart}${directivesSection}\n${renderContextSection(ctx)}${factsSection}${convSection}${relevantRecall}${askqSection}`;
+  // İletişim rehberi BELİRGİN olmalı → staticPart'ın hemen ardından (en-statik içerik; kullanıcıyla her konuşmada uy).
+  const commGuideSection = commGuide.trim()
+    ? `\n\n---\n\n## KULLANICI İLETİŞİM REHBERİ (müfettiş.md — kullanıcıyla konuşurken bu ilkelere UY)\n${commGuide.trim()}`
+    : "";
+  return `${staticPart}${commGuideSection}${directivesSection}\n${renderContextSection(ctx)}${factsSection}${convSection}${relevantRecall}${askqSection}`;
 }

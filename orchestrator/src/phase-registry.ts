@@ -17,6 +17,15 @@ export function templatePath(name: string): string {
   return join(ASSETS_ROOT, "templates", name);
 }
 
+/**
+ * YZLLM 2026-06-27: REPO KÖKÜNDEKİ dosya (assets DIŞI) — örn. müfettiş.md iletişim rehberi.
+ * ASSETS_ROOT = <repo>/assets; bir üst = <repo>. Bundle'da da tutarlı (assets ../assets → _up_/assets,
+ * repo-kökü dosyası ../<name> → _up_/<name>; resolve(ASSETS_ROOT,"..") ikisinde de _up_/ kökünü verir).
+ */
+export function repoRootFile(name: string): string {
+  return resolve(ASSETS_ROOT, "..", name);
+}
+
 function gatePath(name: string): string {
   return join(ASSETS_ROOT, "gates", name);
 }

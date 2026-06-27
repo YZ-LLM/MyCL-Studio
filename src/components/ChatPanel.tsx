@@ -176,8 +176,6 @@ interface Props {
   olderAvailable: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
-  /** Agent çalışıyor mu — Orkestratör durum etiketinde spinner gösterir (YALNIZ loading; tıklanmaz). */
-  agentBusy?: boolean;
   /** v15.7 (2026-05-24): Composer'daki metni iş kuyruğuna ekle. */
   onAddTaskToQueue?: (text: string) => void;
   /** v15.13 (saha 3/5): Oto-cevap — önerili netleştirme soruları otomatik yanıtlansın mı. */
@@ -185,10 +183,6 @@ interface Props {
   onAutoAnswerToggle?: (enabled: boolean) => void;
   /** YZLLM (cave5): entegre (foreign-origin) projede oto-cevap kullanılamaz → checkbox devre-dışı + kapalı görünür. */
   autoAnswerDisabled?: boolean;
-  /** YZLLM 2026-06-15: 📄 Proje Dökümanı butonu — tech-doc modalını açar. */
-  onDocClick?: () => void;
-  /** Proje dökümanı içeriği mevcut mu (buton aktif/pasif görünümü). */
-  docAvailable?: boolean;
   /** WP4 DAST: 🛡️ Güvenlik Taraması butonu — backend açıklama+onay askq'ı açar
    *  (buton DOĞRUDAN taramaz). Yalnız çalışan localhost app'ine. */
   onDastClick?: () => void;
@@ -214,13 +208,10 @@ export function ChatPanel({
   olderAvailable,
   loadingOlder,
   onLoadOlder,
-  agentBusy,
   onAddTaskToQueue,
   autoAnswer,
   onAutoAnswerToggle,
   autoAnswerDisabled,
-  onDocClick,
-  docAvailable,
   onDastClick,
   onQualityAuditClick,
   dastRunning,
@@ -540,46 +531,12 @@ export function ChatPanel({
         />
       </form>
       <div className="intent-row" role="toolbar" aria-label="Araç Çubuğu">
-        {/* v15.7 (2026-05-24): "Soru Sor" / "Hata Ayıkla" intent button'ları
-            kaldırıldı — orchestrator ajan composer'daki metni otomatik
-            classify ediyor. Sadece Orkestrator (ve ileride iş kuyruğu)
-            butonları kaldı. */}
-        {/* 🧠 Orkestratör — YALNIZ loading göstergesi (YZLLM: tıklayınca popup AÇMAZ; kararlar sağdaki
-            Orkestra Ajanı panelinde). Buton değil, durum etiketi: ajan çalışırken spinner döner. */}
-        <span
-          className="intent-pill intent-orchestrator-status"
-          data-testid="intent-orchestrator"
-          title={
-            agentBusy
-              ? "Orkestratör ajan düşünüyor..."
-              : "Orkestratör ajan — kararları sağdaki Orkestra Ajanı panelinde görünür"
-          }
-          style={{ marginLeft: "auto", cursor: "default" }}
-        >
-          <span className="intent-pill-emoji" aria-hidden>🧠</span>
-          <span className="intent-pill-label">
-            Orkestratör
-            {agentBusy && (
-              <span
-                className="agent-busy-spinner"
-                aria-label="ajan çalışıyor"
-                style={{
-                  display: "inline-block",
-                  marginLeft: 6,
-                  width: 10,
-                  height: 10,
-                  border: "2px solid var(--fg-dim)",
-                  borderTopColor: "transparent",
-                  borderRadius: "50%",
-                  verticalAlign: "middle",
-                  animation: "mycl-spin 0.8s linear infinite",
-                }}
-              />
-            )}
-          </span>
-        </span>
-        {/* v15.13 (saha 3/5): Oto-cevap checkbox — Orkestrator'ın yanında. Açıkken
-            önerili netleştirme soruları otomatik (orkestratör önerisiyle) yanıtlanır. */}
+        {/* v15.7 (2026-05-24): "Soru Sor" / "Hata Ayıkla" intent button'ları kaldırıldı — orchestrator ajan
+            composer'daki metni otomatik classify ediyor.
+            YZLLM 2026-06-27: "🧠 Orkestratör" loading göstergesi + "📄 Proje Dökümanı" butonu BURADAN ALINIP
+            sağdaki Orkestra Ajanı paneline taşındı (ait olduğu yer orası). marginLeft:auto artık ilk kalan
+            öğede (Oto-cevap) → araç çubuğu sağa hizalı kalır. */}
+        {/* v15.13 (saha 3/5): Oto-cevap checkbox. Açıkken önerili netleştirme soruları otomatik yanıtlanır. */}
         {onAutoAnswerToggle && (
           <label
             className="intent-pill"
@@ -589,6 +546,7 @@ export function ChatPanel({
                 : "Açıkken: bir önerisi olan netleştirme soruları otomatik o öneriyle yanıtlanır (daha hızlı iterasyon). Onaylar + önerisi olmayan sorular yine size sorulur."
             }
             style={{
+              marginLeft: "auto",
               cursor: autoAnswerDisabled ? "not-allowed" : "pointer",
               display: "inline-flex",
               alignItems: "center",
@@ -609,25 +567,7 @@ export function ChatPanel({
             </span>
           </label>
         )}
-        {/* YZLLM 2026-06-15: 📄 Proje Dökümanı — proje teknik dökümanını (tech-doc) gösterir.
-            (Kullanım kılavuzu artık projenin İÇİNDE → MyCL'de Kılavuz butonu kaldırıldı.) */}
-        {onDocClick && (
-          <button
-            type="button"
-            className="intent-pill"
-            data-testid="intent-doc"
-            onClick={onDocClick}
-            title={
-              docAvailable
-                ? "Proje teknik dökümanını gör"
-                : "Proje dökümanı henüz üretilmedi (MyCL projeye dokundukça oluşturur)"
-            }
-            style={{ opacity: docAvailable ? 1 : 0.6 }}
-          >
-            <span className="intent-pill-emoji" aria-hidden>📄</span>
-            <span className="intent-pill-label">Proje Dökümanı</span>
-          </button>
-        )}
+        {/* YZLLM 2026-06-27: 📄 Proje Dökümanı butonu sağdaki Orkestra Ajanı paneline taşındı. */}
         {/* 2026-06-11 (YZLLM): 🕵️ Kalite Kontrol — denetim ajanı orkestratörü kalite sorularına göre denetler. */}
         {onQualityAuditClick && (
           <button

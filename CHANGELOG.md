@@ -1,5 +1,24 @@
 ## 2026-06-27
 
+- **feat(UI): kalıcı yönerge konuşması ana chat yerine orkestratör panelinde + iki buton panele taşındı + müfettiş.md ajanlara öğretildi (YZLLM, 3 istek):**
+  **(1) Yönerge → orkestratör paneli:** Kullanıcı "yönerge için konuşurken orkestratör paneli cevap versin; o
+  konuştuklarımız ana chat'te olmasın." [handleOrchestratorDirective](orchestrator/src/index.ts) artık cevabı
+  (benimse/itiraz/parse-error/hata) `emitChatMessage` yerine yeni `emitDirectiveReply` ile gönderir; kullanıcının
+  yönergesi de panele yankılanır → konuşma orkestratör panelinde, aktivite log'una zaman sırasıyla karışır
+  ([OrchestratorPanel.tsx](src/components/OrchestratorPanel.tsx) `DirectiveRow` + merge; yeni `directive_reply`
+  event + `MainState.directiveMessages`). Ana chat artık yönerge artığı taşımaz.
+  **(2) İki buton panele taşındı:** "🧠 Orkestratör" loading göstergesi + "📄 Proje Dökümanı" butonu ChatPanel
+  composer-altından ([ChatPanel.tsx](src/components/ChatPanel.tsx)) ait olduğu yere — sağdaki Orkestra Ajanı
+  panelinin başlığına — taşındı (`agentBusy`/`onDocClick`/`docAvailable` prop'ları ChatPanel'den kaldırıldı).
+  **(3) müfettiş.md ajanlara öğretildi:** Kullanıcının iletişim rehberi (müfettiş.md, repo kökü) runtime okunup
+  ([communication-guide.ts](orchestrator/src/communication-guide.ts), her seferinde taze) çevirmen (yalnız
+  en-to-tr; YALNIZ Türkçe çıktının biçim disiplini için — mekanik çevirmen kimliği korunur, konuşma davranışı
+  benimsetilmez) + orkestratör (tam — kullanıcıyla konuşan ajan) prompt'larına enjekte edilir; bundle resources'a
+  eklendi. Rehber okunamazsa görünür sistem mesajı + log.error (iş durmaz; güvenlik aracı değil).
+  **Çapraz-aile mahkemesi** (Sonnet 4.6, 3 mercek × düşman doğrulama): 5 LOW bulgu — panel sayacı `items.length`,
+  başlık `justify-content` ezme, fail-soft görünürlüğü (log.warn→görünür mesaj), kalıcı oturum guide-tazelik notu
+  düzeltildi. check yeşil (1564 test).
+
 - **feat(UI): "Ajan Takımı" popup'ı — çoklu-ajan takımlarını canlı görünür kılar (YZLLM):**
   Sağ kenar çubuğuna **👥 Ajan Takımı** butonu + drawer. O iterasyonda koşan TÜM alt-ajan takımlarını gruplar:
   **Tasarım Paneli** (4 perspektif + Sentezleyici + müzakere, Faz 5), **Kök-neden Mercekleri** (Faz 0),

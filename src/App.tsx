@@ -206,6 +206,9 @@ interface MainState {
   /** Orkestratörün TÜM önemli aktivitesi (tool_use + decision + error) — Orkestra panelini besler;
    *  agentEvents'ten ayrı, daha yüksek cap (500) → uzun oturumda aktivite yutulmaz ("yaptığı herşey"). */
   orchestratorActivity: AgentThinkingEvent[];
+  /** YZLLM 2026-06-27: kalıcı yönerge konuşması (kullanıcı yönergesi + orkestratör cevabı) — ANA CHAT'E DEĞİL,
+   *  orkestratör panelinde gösterilir ("yönerge için konuşurken panel cevap versin"). Cap 50; iterasyon-bağımsız. */
+  directiveMessages: { role: "user" | "assistant" | "system"; text: string; ts: number }[];
   /** Monoton aktivite sayacı (mahkeme #10): her kabul edilen agent_event'e benzersiz seq verir → React key
    *  çakışması/olay-düşmesi olmaz (aynı-ms olaylar korunur). */
   agentEventSeq: number;
@@ -264,6 +267,7 @@ const INITIAL_STATE: MainState = {
   agentRuns: [],
   lastAgentEvId: 0,
   orchestratorActivity: [],
+  directiveMessages: [],
   phaseMarkers: [],
   agentBusyCount: 0,
   taskQueue: [],
@@ -726,6 +730,12 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       agentEventSeq: state.agentEventSeq + 1, // kabul edilen olay → sayacı ilerlet (benzersiz seq)
       agentRuns,
     };
+  }
+  // YZLLM 2026-06-27: kalıcı yönerge konuşması → orkestratör paneli (ANA CHAT'E DEĞİL). Kullanıcı yönergesi +
+  // orkestratör cevabı bu dizide birikir; OrchestratorPanel aktivite log'una ts'e göre karışır. Cap 50.
+  if (ev.kind === "directive_reply") {
+    const next = [...state.directiveMessages, ev.data];
+    return { ...state, directiveMessages: next.length > 50 ? next.slice(next.length - 50) : next };
   }
   // v15.7 (2026-05-24): İş kuyruğu — backend her değişiklikte tam listeyi yollar
   if (ev.kind === "task_queue_loaded" || ev.kind === "task_queue_changed") {
@@ -1512,13 +1522,10 @@ function App() {
           olderAvailable={mainState.olderAvailable}
           loadingOlder={mainState.loadingOlder}
           onLoadOlder={handleLoadOlder}
-          agentBusy={mainState.agentBusyCount > 0}
           onAddTaskToQueue={handleAddTaskToQueue}
           autoAnswer={autoAnswer}
           onAutoAnswerToggle={handleAutoAnswerToggle}
           autoAnswerDisabled={mainState.autoAnswerSuppressed}
-          onDocClick={() => setProjectDocOpen(true)}
-          docAvailable={projectDoc.trim().length > 0}
           onQualityAuditClick={() => setQualityAuditOpen(true)}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
@@ -1545,9 +1552,13 @@ function App() {
               {activeRightPanel === "orchestrator" && (
                 <OrchestratorPanel
                   events={mainState.orchestratorActivity}
+                  directiveMessages={mainState.directiveMessages}
                   onDirective={(text) => {
                     void orch.send({ kind: "orchestrator_directive", data: { text } });
                   }}
+                  agentBusy={mainState.agentBusyCount > 0}
+                  onDocClick={() => setProjectDocOpen(true)}
+                  docAvailable={projectDoc.trim().length > 0}
                 />
               )}
             </div>

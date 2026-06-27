@@ -2,15 +2,34 @@
 // (tool_use + decision + error; started/completed yaşam-döngüsü gürültüsü reducer'da elenir.) Önemli KARARLAR
 // farklı/vurgulu renkte. YZLLM: "yaptığı herşeyi yazsın; o iterasyonda neler yapıldı hepsini anlayabileyim;
 // sade Türkçe; kısa öz, her iş için en fazla 1-2 cümle." reason/message_to_user zaten Türkçe (orkestratör kuralı).
+//
+// YZLLM 2026-06-27: (1) KALICI YÖNERGE konuşması (kullanıcı yönergesi + orkestratör cevabı) artık ANA CHAT'TE
+// DEĞİL bu panelde — aktivite log'una zaman sırasıyla karışır ("yönerge için konuşurken panel cevap versin").
+// (2) "🧠 Orkestratör" loading göstergesi + "📄 Proje Dökümanı" butonu ChatPanel composer-altından buraya taşındı.
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentThinkingEvent } from "../App";
 
+/** Kalıcı yönerge konuşması satırı (kullanıcı yönergesi / orkestratör cevabı). */
+interface DirectiveMsg {
+  role: "user" | "assistant" | "system";
+  text: string;
+  ts: number;
+}
+
 interface Props {
   /** App reducer'ın biriktirdiği orkestratör aktivitesi (tool_use + decision + error; cap 500). */
   events: AgentThinkingEvent[];
+  /** YZLLM 2026-06-27: kalıcı yönerge konuşması (kullanıcı + orkestratör) — aktivite log'una ts'e göre karışır. */
+  directiveMessages?: DirectiveMsg[];
   /** YZLLM 2026-06-26 (req 4): alt composer'dan KALICI YÖNERGE — orkestratör değerlendirir (benimse/itiraz). */
   onDirective?: (text: string) => void;
+  /** YZLLM 2026-06-27: orkestratör ajan çalışıyor mu — panel başlığında spinner (ChatPanel'den taşındı). */
+  agentBusy?: boolean;
+  /** YZLLM 2026-06-27: 📄 Proje Dökümanı butonu — tech-doc modalını açar (ChatPanel'den taşındı). */
+  onDocClick?: () => void;
+  /** Proje dökümanı içeriği mevcut mu (buton aktif/pasif görünümü). */
+  docAvailable?: boolean;
 }
 
 /** Karar action enum'u → sade Türkçe etiket (orkestratörün NE yaptığı). */
@@ -89,15 +108,53 @@ function ActivityRow({ ev }: { ev: AgentThinkingEvent }) {
   return null;
 }
 
-export function OrchestratorPanel({ events, onDirective }: Props) {
+/** Kalıcı yönerge konuşması satırı — kullanıcı yönergesi (sağa yaslı, vurgulu) / orkestratör cevabı (sola). */
+function DirectiveRow({ msg }: { msg: DirectiveMsg }) {
+  const isUser = msg.role === "user";
+  return (
+    <div
+      className={`orch-row orch-row-directive ${isUser ? "orch-row-directive-user" : "orch-row-directive-reply"}`}
+      style={{
+        borderLeft: `3px solid ${isUser ? "var(--accent, #4a9eff)" : "var(--fg-dim, #888)"}`,
+        paddingLeft: 8,
+        margin: "4px 0",
+        whiteSpace: "pre-wrap",
+      }}
+    >
+      <span className="orch-row-label">{isUser ? "🧭 Yönergen" : "🧭 Orkestratör"}</span>
+      <span className="orch-row-text">{msg.text}</span>
+    </div>
+  );
+}
+
+/** Aktivite olayları + yönerge mesajlarını zaman sırasıyla tek log'a birleştir (kronolojik tek görünüm). */
+type LogItem =
+  | { ts: number; key: string; kind: "activity"; ev: AgentThinkingEvent }
+  | { ts: number; key: string; kind: "directive"; msg: DirectiveMsg };
+
+export function OrchestratorPanel({
+  events,
+  directiveMessages = [],
+  onDirective,
+  agentBusy,
+  onDocClick,
+  docAvailable,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
 
-  // Yeni aktivite gelince en alta kaydır (kronolojik — en yeni altta, chat ile tutarlı).
+  const items: LogItem[] = [
+    ...events.map((ev): LogItem => ({ ts: ev.ts, key: `a-${ev.seq ?? ev.ts}`, kind: "activity", ev })),
+    ...directiveMessages.map(
+      (msg, i): LogItem => ({ ts: msg.ts, key: `d-${msg.ts}-${i}`, kind: "directive", msg }),
+    ),
+  ].sort((a, b) => a.ts - b.ts);
+
+  // Yeni aktivite/yönerge gelince en alta kaydır (kronolojik — en yeni altta, chat ile tutarlı).
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length]);
+  }, [items.length]);
 
   const submitDirective = (): void => {
     const t = draft.trim();
@@ -108,19 +165,68 @@ export function OrchestratorPanel({ events, onDirective }: Props) {
 
   return (
     <section className="panel-vsection">
-      <div className="panel-label">Orkestra Ajanı — Yapılanlar ({events.length})</div>
+      <div
+        className="panel-label"
+        // justifyContent:flex-start → .panel-label CSS'indeki space-between'i ezer (mahkeme LOW): başlık+spinner
+        // solda bitişik kalsın, Proje Dökümanı butonu marginLeft:auto ile sağa yapışsın.
+        style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-start" }}
+      >
+        {/* Sayaç görünen TÜM satırları yansıtır (aktivite + yönerge konuşması) → items.length (mahkeme LOW). */}
+        <span>Orkestra Ajanı — Yapılanlar ({items.length})</span>
+        {agentBusy && (
+          <span
+            className="agent-busy-spinner"
+            aria-label="orkestratör çalışıyor"
+            title="Orkestratör ajan düşünüyor…"
+            style={{
+              display: "inline-block",
+              width: 10,
+              height: 10,
+              border: "2px solid var(--fg-dim)",
+              borderTopColor: "transparent",
+              borderRadius: "50%",
+              animation: "mycl-spin 0.8s linear infinite",
+            }}
+          />
+        )}
+        {onDocClick && (
+          <button
+            type="button"
+            className="intent-pill"
+            data-testid="orch-doc-btn"
+            onClick={onDocClick}
+            title={
+              docAvailable
+                ? "Proje teknik dökümanını gör"
+                : "Proje dökümanı henüz üretilmedi (MyCL projeye dokundukça oluşturur)"
+            }
+            style={{ marginLeft: "auto", opacity: docAvailable ? 1 : 0.6 }}
+          >
+            <span className="intent-pill-emoji" aria-hidden>📄</span>
+            <span className="intent-pill-label">Proje Dökümanı</span>
+          </button>
+        )}
+      </div>
       <div className="orchestrator-log" ref={scrollRef}>
-        {events.length === 0 ? (
+        {items.length === 0 ? (
           <p style={{ color: "var(--fg-dim)", fontSize: 12, padding: 12, lineHeight: 1.5 }}>
             Henüz orkestratör aktivitesi yok. Mesaj yazdıkça orkestratörün yaptığı her önemli iş — ne
-            yaptığı ve nedeni — burada sade Türkçe görünür; önemli kararlar belirgin renktedir.
+            yaptığı ve nedeni — burada sade Türkçe görünür; önemli kararlar belirgin renktedir. Aşağıdaki
+            kutudan verdiğin kalıcı yönergeler ve orkestratörün cevabı da burada görünür.
           </p>
         ) : (
-          events.map((ev) => <ActivityRow key={ev.seq ?? ev.ts} ev={ev} />)
+          items.map((it) =>
+            it.kind === "activity" ? (
+              <ActivityRow key={it.key} ev={it.ev} />
+            ) : (
+              <DirectiveRow key={it.key} msg={it.msg} />
+            ),
+          )
         )}
       </div>
       {/* Alt composer (YZLLM req 4): görev değil, KALICI YÖNERGE (işin nasıl yapılacağı çapası). Orkestratör
-          değerlendirir — itirazı varsa söyler, yoksa benimser (~/.mycl/directives.md → sonraki işlere enjekte). */}
+          değerlendirir — itirazı varsa söyler, yoksa benimser (~/.mycl/directives.md → sonraki işlere enjekte).
+          Cevap ana chat'e değil yukarıdaki log'a yazılır (YZLLM 2026-06-27). */}
       {onDirective && (
         <div className="orch-directive-composer">
           <textarea

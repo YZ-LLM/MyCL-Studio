@@ -73,6 +73,7 @@ import {
   emitAskq,
   emitAskqResolved,
   emitChatMessage,
+  emitDirectiveReply,
   emitError,
   emitIterationIntent,
   emitPhaseChanged,
@@ -2127,6 +2128,9 @@ async function handleOrchestratorDirective(text: string): Promise<void> {
   // Mahkeme M2/M3: faz banner'ı/askq AKTİFSE göstergeye DOKUNMA — çalışan fazı sahte-IDLE göstermesin / parked
   // askq'nin "yanıtını bekliyorum" sessizliğini bozmasın. Boşken spinner feedback'i ver, doluyken sessiz değerlendir.
   const useBanner = !isPhaseIndicatorActive();
+  // YZLLM 2026-06-27: yönerge konuşması ANA CHAT'E DEĞİL orkestratör paneline gider (emitDirectiveReply).
+  // Önce kullanıcının yönergesini panele yankıla → panelde gerçek bir konuşma görünsün ("o konuştuklarımız").
+  emitDirectiveReply("user", d);
   try {
     if (useBanner) emitPhaseRunning("🧭 Kalıcı yönerge değerlendiriliyor (orkestratör)…");
     const decision = await respondAsOrchestrator(runtime.config, runtime.state, buildDirectiveEvalPrompt(d), {
@@ -2137,27 +2141,27 @@ async function handleOrchestratorDirective(text: string): Promise<void> {
     const { verdict, message } = parseDirectiveVerdict(raw);
     if (verdict === "adopt") {
       const added = await appendUserDirective(d);
-      emitChatMessage(
+      emitDirectiveReply(
         "assistant",
         added
           ? `✅ Yönergeyi benimsedim${message ? ` — ${message}` : ""}\n\nBundan sonra tüm işlerde buna uyacağım (kalıcı kaydettim).`
           : `✅ Bu yönerge zaten kayıtlı${message ? ` — ${message}` : ""}\n\nUygulamaya devam ediyorum (tekrar eklemedim).`,
       );
     } else if (verdict === "object") {
-      emitChatMessage(
+      emitDirectiveReply(
         "assistant",
         `⚠️ Bu yönergeye itirazım var: ${message || "uygulanması sakıncalı."}\n\nBu yüzden kalıcı olarak kaydetmedim — yine de uygulamamı istersen söyle.`,
       );
     } else {
       // İşaretçi parse edilemedi → fail-closed: kaydetme, dürüst söyle (sessiz yanlış-kayıt YOK).
-      emitChatMessage(
+      emitDirectiveReply(
         "assistant",
         `Yönergeyi net bir karara bağlayamadım${message ? `:\n\n${message}` : ""}\n\nDaha açık yazarsan kalıcı yönerge olarak değerlendiririm (henüz kaydetmedim).`,
       );
     }
   } catch (err) {
     log.warn("orchestrator", "kalıcı yönerge değerlendirilemedi", err);
-    emitChatMessage("system", "⚠️ Yönerge değerlendirilemedi (orkestratör hatası) — tekrar dener misin?");
+    emitDirectiveReply("system", "⚠️ Yönerge değerlendirilemedi (orkestratör hatası) — tekrar dener misin?");
   } finally {
     if (useBanner) emitPhaseIdle();
   }

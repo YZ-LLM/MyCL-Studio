@@ -20,6 +20,7 @@ import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { getPersistentSession } from "./persistent-cli-session.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { emitChatMessage, emitError, emitTranslation } from "./ipc.js";
+import { loadCommunicationGuide } from "./communication-guide.js";
 import { log } from "./logger.js";
 import type { TranslationDir } from "./types.js";
 
@@ -28,10 +29,26 @@ import type { TranslationDir } from "./types.js";
 // LLM zaten TR üretirken bunu EN'e çevirmek askq UI'da EN gözükmesine sebep
 // oldu. Şimdi dir zorlayıcı: "en-to-tr" verilirse hedef her zaman TR;
 // input zaten TR ise verbatim döner.
-function buildSystemPrompt(dir: TranslationDir): string {
+function buildSystemPrompt(dir: TranslationDir, guide = ""): string {
   const isEnToTr = dir === "en-to-tr";
   const targetLanguage = isEnToTr ? "Turkish" : "English";
   const sourceLanguage = isEnToTr ? "English" : "Turkish";
+  // YZLLM 2026-06-27: kullanıcının iletişim rehberi (müfettiş.md) — YALNIZ Türkçe ÜRETTİĞİNDE (en-to-tr) ekle;
+  // İngilizceye çeviride (output İngilizce) Türkçe-biçim ilkeleri konu-dışı. Çevirmen rehberi yalnız BİÇİM için
+  // uygular; rehberdeki KONUŞMA davranışlarını (görüş/soru/itiraz/içerik ekleme) BENİMSEMEZ (mekanik çevirmen kalır).
+  const guideSection =
+    isEnToTr && guide.trim()
+      ? `
+
+---
+
+Kullanıcının iletişim ilkeleri (müfettiş.md) aşağıdadır. Sen bir ÇEVİRMENsin: bu ilkeleri YALNIZCA ürettiğin
+Türkçe metnin DOĞAL, SADE ve ANLAŞILIR olması için uygula (İngilizce/jargon sızdırma yok, kelime-kelime çeviri yok,
+uydurma tireli bileşik yok, anlam kaybı yok, doğal cümle). Bu ilkelerdeki KONUŞMA davranışlarını (görüş bildirme,
+soru sorma, itiraz, yorum/içerik ekleme) ASLA benimseme — yalnız kaynağın anlamını çevirirsin, İÇERİK EKLEMEZSİN.
+
+${guide.trim()}`
+      : "";
   return `You are a translator: ${sourceLanguage} → ${targetLanguage}. Your goal is a translation the
 reader FULLY UNDERSTANDS — faithful in MEANING, fluent and natural, NEVER word-by-word.
 
@@ -87,7 +104,7 @@ Rules:
    strings). This is faithful translation, not rephrasing — the compound is
    broken Turkish.`
        : ""
-   }`;
+   }${guideSection}`;
 }
 
 const MAX_TOKENS = 4096;
@@ -157,12 +174,13 @@ async function callApi(
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const guide = await loadCommunicationGuide(); // YZLLM 2026-06-27: müfettiş.md → Türkçe çıktının biçim disiplini
   try {
     const response = await client.messages.create(
       {
         model,
         max_tokens: MAX_TOKENS,
-        system: buildSystemPrompt(dir),
+        system: buildSystemPrompt(dir, guide),
         // Input'u <text_to_translate> tag içine sar — Haiku küçük model,
         // imperative cümleleri ("Clarify X within scope") emir sanıp çeviri
         // yerine assistant cevabı üretebiliyor. Tag + system prompt Rule 8
@@ -212,13 +230,18 @@ async function callCli(
 ): Promise<string> {
   const userMessage = `<text_to_translate>\n${text}\n</text_to_translate>`;
   const to = Math.max(timeoutMs, 60_000);
+  // YZLLM 2026-06-27: müfettiş.md → Türkçe çıktının biçim disiplini. NOT: KALICI oturum systemPrompt'u İLK spawn'da
+  // sabitler (sonraki çağrılar yeni guide'ı yok sayar — getPersistentSession mevcut oturumu döndürür). müfettiş.md
+  // nadiren değişen statik rehber + 20dk idle sonrası oturum kapanıp taze guide ile yeniden açılır → düşük risk
+  // (bilinçli tradeoff). API yolu (callApi) her çağrıda taze okur. Anlık tazelik şartsa oturum dispose edilmeli.
+  const guide = await loadCommunicationGuide();
   // YZLLM 2026-06-11: KALICI oturum (rol+yön başına tek süreç, respawn yok → ısı↓; biriken bağlam tutarlı çeviri).
   // Doğrulandı: katı promptla turlar boyunca sağlam çevirir. BAŞARISIZSA eski cold-start'a düş (fail-safe, regresyon yok).
   try {
     const session = getPersistentSession({
       id: `translator-${dir}`,
       modelId: model,
-      systemPrompt: buildSystemPrompt(dir),
+      systemPrompt: buildSystemPrompt(dir, guide),
       cwd: process.cwd(),
       disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf çeviri — araç + alt-ajan yok
     });
@@ -229,7 +252,7 @@ async function callCli(
     log.warn("translator", "kalıcı oturum hata → cold-start fallback", { dir, error: String(e) });
   }
   const res = await runClaudeCli({
-    systemPrompt: buildSystemPrompt(dir),
+    systemPrompt: buildSystemPrompt(dir, guide),
     userMessage,
     modelId: model,
     cwd: process.cwd(),

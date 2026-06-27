@@ -87,6 +87,17 @@ export function emitChatMessage(
 }
 
 /**
+ * YZLLM 2026-06-27: KALICI YÖNERGE konuşması — ANA CHAT'E DEĞİL, orkestratör panelinin yönerge dizisine.
+ * Kullanıcı "yönerge için konuşurken orkestratör paneli cevap versin; o konuştuklarımız ana chat'te olmasın".
+ * role="user" verilen yönergenin yankısı (panelde konuşma görünsün), "assistant"/"system" orkestratörün cevabı.
+ * assistant cevabına chat ile aynı cümle-bölme uygulanır (okunur kalsın). History'ye yazılmaz (panel-içi, ephemeral).
+ */
+export function emitDirectiveReply(role: "user" | "assistant" | "system", text: string): void {
+  const processed = role === "assistant" ? splitSentences(text) : text;
+  emit("directive_reply", { role, text: processed, ts: Date.now() });
+}
+
+/**
  * Cümle sonu (. ? !) + boşluk + büyük harf pattern'ini `\n` ile değiştirir.
  * Code block (```), inline code (`), URL ve markdown liste item içeriği
  * korunur (regex doğrudan satırda uygulansa da, kod bloğu BLOK olarak
