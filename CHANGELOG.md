@@ -1,5 +1,13 @@
 ## 2026-06-27
 
+- **fix(orkestratör): tool-turn limiti "karar veremedi" düşüşünü bitirir — tavan yükseltildi + son turda karar ZORLANIR (YZLLM):**
+  SDK orkestratör ajanı 8 tool-turn'de karar (decide_action) veremeyince "MAX_TOOL_TURNS (8) aşıldı" ile DÜŞÜYORDU
+  (kompleks çok-dosyalı analizde 8 yetmiyor — canlı: parmak-izi/step-up). [agent.ts](orchestrator/src/orchestrator-agent/agent.ts):
+  tavan 8→30 (cömert araştırma alanı) + SON TURDA `tool_choice` forced `decide_action` → ajan MUTLAKA karar verir,
+  "decide_action eksik" ile ASLA düşmez. Tavan tamamen kaldırılmadı (sonsuz tool-döngüsü/runaway-maliyet emniyeti);
+  son-tur-zorlaması onu hata değil "şimdi karar ver" dürtüsüne çevirir. CLI orkestratör etkilenmez (kendi tool-loop'u).
+  check yeşil.
+
 - **chore(temizlik): Linear aynası + İkili Soru Bankası özellikleri TAMAMEN kaldırıldı (YZLLM kararı):**
   Kullanıcı kararı: Linear kullanılmayacak; Soru Bankası'nın değeri ölçüldü (son ~30 gerçek bug'ın yalnız ~%13'ü
   deterministik-yakalanabilir + o da mevcut kapılarca zaten kapanıyor → benzersiz değer ≈ 0). İkisi de söküldü:

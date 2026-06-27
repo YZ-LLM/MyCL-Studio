@@ -40,7 +40,12 @@ import { detectRecurringTopic } from "../agent-memory/dedup.js";
 import { realpathWithinRoot, validatePathForAgent } from "./path-sandbox.js";
 
 const execAsync = promisify(exec);
-const MAX_TOOL_TURNS = 8;
+// YZLLM 2026-06-27 "tool limitini kaldır": eski 8 tur kompleks araştırmalarda (örn. parmak-izi/step-up çok
+// dosyalı analiz) yetmiyor → "decide_action eksik" ile DÜŞÜYORDU. Çözüm: tavan cömertçe yükseltildi + SON TURDA
+// karar ZORLANIR (forced decide_action) → ajan asla "karar veremedi" diye düşmez. Tavan tamamen kaldırılmadı:
+// sonsuz tool-döngüsü/runaway-maliyet emniyeti (her tur bir API çağrısı); son-tur-zorlaması onu hata değil
+// "şimdi karar ver" dürtüsüne çevirir.
+const MAX_TOOL_TURNS = 30;
 const BASH_TIMEOUT_MS = 5_000;
 
 export class OrchestratorAgentError extends Error {
@@ -171,6 +176,9 @@ export class OrchestratorAgent {
     ];
 
     for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+      // Son turda KARARI ZORLA (forced decide_action) → araştırma turları bittiyse ajan MUTLAKA karar verir,
+      // "decide_action eksik" ile düşmez (YZLLM 2026-06-27). Önceki turlarda serbest (any) → istediği kadar araştırır.
+      const forceDecide = turn === MAX_TOOL_TURNS - 1;
       const result = await runTurn(
         this.deps.config,
         apiKey,
@@ -181,7 +189,7 @@ export class OrchestratorAgent {
 
           model: modelId,
           tools: AGENT_TOOLS,
-          tool_choice: { type: "any" },
+          tool_choice: forceDecide ? { type: "tool", name: "decide_action" } : { type: "any" },
           max_tokens: 4096,
           betas: this.deps.config.claude_code_flags.betas,
         },
