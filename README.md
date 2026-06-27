@@ -168,23 +168,6 @@ entegre eder.
   koddan türetilir, numara/tarih içerik değişmedikçe korunur, tarihsel olduğu için
   silinmez. Kararlar Faz 2 hassasiyet denetimine geri beslenir → ajan önceki kararla
   çelişmez / gereksiz yeniden-karar vermez.
-- **Linear aynası (opt-in, varsayılan KAPALI)** — istenirse pipeline sonu hükmü
-  (PASS/PARTIAL/FAIL + başarısız kapılar) Linear'a **tek yönlü** yansıtılabilir.
-  Kaynak her zaman yereldir (`.mycl/audit.jsonl`); Linear yalnız aynadır. **Fail-open
-  ve görünür**: Linear hatası pipeline'ı asla durdurmaz, görünür uyarı verip devam eder.
-  `linear_sync_enabled` + `linear_team_id` ayarı ve `LINEAR_API_KEY` ortam değişkeniyle
-  açılır; anahtar yalnız ortamdan okunur (config dosyasına yazılmaz).
-- **İkili Soru Bankası — deterministik tripwire (opt-in, varsayılan KAPALI)** — kontrol
-  noktalarında kod-kararlı değişmezleri "Evet=geçer" biçiminde ikili sorulara indirger;
-  yanıtı bir **LLM değil, çalıştırılan komut** verir (deterministik). Soru–check çiftleri bir
-  KEY ile (kontrol-noktası × stack × dokunulan artefakt — `detectStack` + profil-glob'larından,
-  asla LLM sınıflandırmasından) bankalarda saklanır. Bir check ancak ayırt-ediciliği
-  **kanıtlanırsa** kilitlenir: bilinen-iyi ve bilinen-kötü örneklerde doğru sonucu vermeli,
-  ve **her yüklemede yeniden doğrulanır** → çürüyen/araç-eksik check sessizce yeşil veremez
-  (üç-değerli: geçti / kaldı / değerlendirilemedi). Bir **kapı değildir**, doğruluk kanıtı da
-  değildir: "hepsi yeşil" yalnızca *mekanik değişmezler tutuyor* demektir, "iş doğru" demek
-  değil. `features.question_bank_enabled` ile açılır; kapalıyken (varsayılan) canlı pipeline
-  hiç etkilenmez. DENEYSEL.
 
 ## Golden prototip
 

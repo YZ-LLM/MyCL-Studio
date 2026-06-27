@@ -32,11 +32,5 @@
   },
   "default_port": 5173,
   "manifest_files": ["package.json"],
-  "build_tool": "vite",
-  "artifact_globs": {
-    "route": ["app/**/route.ts", "app/**/route.js", "pages/api/**/*.ts", "pages/api/**/*.js", "src/routes/**/*"],
-    "migration": ["**/migrations/**", "prisma/migrations/**"],
-    "component": ["**/*.tsx", "**/*.jsx", "**/*.vue", "**/*.svelte"],
-    "pure": ["src/lib/**/*.ts", "src/utils/**/*.ts"]
-  }
+  "build_tool": "vite"
 }

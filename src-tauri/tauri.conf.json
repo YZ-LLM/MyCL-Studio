@@ -51,7 +51,6 @@
       "../assets/schemas/**/*",
       "../assets/security-rules/**/*",
       "../assets/quality-rules/**/*",
-      "../assets/question-banks/**/*",
       "../assets/mycl-schema.md",
       "../prototypes/**/*"
     ]

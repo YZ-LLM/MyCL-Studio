@@ -1,5 +1,14 @@
 ## 2026-06-27
 
+- **chore(temizlik): Linear aynası + İkili Soru Bankası özellikleri TAMAMEN kaldırıldı (YZLLM kararı):**
+  Kullanıcı kararı: Linear kullanılmayacak; Soru Bankası'nın değeri ölçüldü (son ~30 gerçek bug'ın yalnız ~%13'ü
+  deterministik-yakalanabilir + o da mevcut kapılarca zaten kapanıyor → benzersiz değer ≈ 0). İkisi de söküldü:
+  **Linear** — `linear-sync.ts` + testi silindi, `index.ts` import+çağrı, `config.ts` `linear_sync_enabled`/`linear_team_id`
+  flag'leri, README maddesi. **Soru Bankası** — `orchestrator/src/question-bank/` (13 modül + 10 test) + `assets/question-banks/`
+  silindi, `index.ts` tripwire wiring+import, `config.ts` `question_bank_enabled` (interface+DEFAULT), `phase-registry.ts`
+  `questionBanksRoot`, `profile-loader.ts` `artifact_globs` (+ node-npm.json verisi), `tauri.conf.json` bundle resource,
+  README maddesi. Çekirdek pipeline etkilenmez (ikisi de opt-in/default-kapalıydı). check yeşil (1625 test).
+
 - **fix(UX): "konu" (üzerinde çalışılan iş) sola alındı + üst bardaki kopyası kaldırıldı (YZLLM):**
   Konu iki yerde gösteriliyordu: üst bar ([AppHeader.tsx](src/components/AppHeader.tsx)) + chat toolbar
   ([ChatPanel.tsx](src/components/ChatPanel.tsx), `panel-label` space-between ile SAĞA itiliyordu). Kullanıcı isteği:

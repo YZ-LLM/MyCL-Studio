@@ -201,22 +201,6 @@ export interface FeatureFlags {
    * Türkçe rapor chat'e (kullanıcı gereksiz fazı görüp KENDİ budar). Tek runReasoning çağrısı; varsayılan AÇIK.
    */
   phase_contribution_report?: boolean;
-  /**
-   * İkili Soru Bankası (YZLLM 2026-06-24): kontrol-noktası deterministik TRIPWIRE — kod-kararlı
-   * değişmezleri ikili (Evet=yeşil) sorulara indirger, yanıtı KOD verir. `false` (default): hiçbir
-   * kod yolu değişmez (canlı pipeline bugünküyle bit-bit aynı). `true`: mekanik fazlarda bank-gate
-   * koşar (yük-taşıyan; question-bank/). DENEYSEL, flag-arkası geliştirme.
-   */
-  question_bank_enabled?: boolean;
-  /**
-   * Linear gate-kanıt aynası (SAW esinli, opt-in). `false`/undefined (DEFAULT): tamamen kapalı — hiçbir dış çağrı.
-   * `true` + `LINEAR_API_KEY` env + `linear_project_id`: pipeline-end verdict'i Linear'a TEK-YÖNLÜ yansıtılır.
-   * Mahkeme kararı: Linear ASLA "system of record" DEĞİL — yerel `.mycl/audit.jsonl` kaynaktır; Linear yalnız ayna.
-   * Fail-OPEN + LOUD: Linear hatası pipeline'ı ASLA bloklamaz (görünür uyarı + devam). Sır env'den (config
-   * dosyasına yazılmaz → secret-gate temiz). Bkz. linear-sync.ts. */
-  linear_sync_enabled?: boolean;
-  /** Linear hedef takım id'si (yansıtılacak issue'nun bağlamı). linear_sync_enabled true ise gerekli. */
-  linear_team_id?: string;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -229,8 +213,6 @@ const DEFAULT_FEATURES: FeatureFlags = {
   // ayarlar (DEFAULT_FEATURES spread etmeyenler etkilenmez); gate/fix yollarındaki çağrı flag-arkası.
   inspector_enabled: true,
   phase_contribution_report: true,
-  // İkili Soru Bankası varsayılan KAPALI — yük-taşıyan canlı yol flag-arkası; açılınca mekanik gate koşar.
-  question_bank_enabled: false,
 };
 
 /**

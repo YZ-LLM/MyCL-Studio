@@ -42,7 +42,6 @@ import {
   wasPipelineCompleted,
 } from "./audit.js";
 import { computeVerdict, eventsSince, type HarnessVerdict } from "./harness-verdict.js";
-import { mirrorVerdictToLinear } from "./linear-sync.js";
 import { classifyOpenedFolder, hasDeliverable } from "./phase-1-codebase-probe.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import { detectInterruptedPhase2To9Pure } from "./resume-detection.js";
@@ -160,7 +159,6 @@ import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
 import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
-import { runBankGateLive } from "./question-bank/live.js";
 import {
   computeChangedScope,
   shouldComputeScope,
@@ -4434,40 +4432,6 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // Faz GEÇTİ → iyi ilerlemeyi KİLİTLE: rollback noktasını temizle ki sonraki bir hatanın geri-alması
         // bu başarılı fazı UNDO etmesin (YZLLM: "veri kaybına yol açmayanı tercih ederim").
         disarmRollback();
-        // İkili Soru Bankası tripwire (flag-arkası, YZLLM 2026-06-24): mekanik faz normal-gate'i
-        // GEÇİNCE ek deterministik tripwire koşar (kod-kararlı değişmezler). phase-complete YAZILMADAN
-        // ÖNCE çalışır ki halt'ta faz PARKTA kalsın. Hayır → DUR: bulgu mevcut faz-fail makinesine
-        // (failPhase) route edilir — mahkeme/oto-çözüm/askq-park; tüm gate'lerle tutarlı, yeni
-        // kontrol-akışı icat edilmez. Flag KAPALI (default) → blok hiç koşmaz, flag-off yolu bit-bit
-        // aynı; gate'in KENDİ hatası try/catch ile yutulur (tripwire pipeline'ı asla bozmaz).
-        if (cfg.features.question_bank_enabled && outcome.kind === "pass") {
-          let bg: Awaited<ReturnType<typeof runBankGateLive>> = null;
-          try {
-            bg = await runBankGateLive(state, next);
-          } catch (e) {
-            log.warn("orchestrator", "question-bank tripwire failed (yutuldu, flag-arkası)", e);
-          }
-          if (bg && bg.decision !== "skip_no_bank") {
-            emitChatMessage("system", bg.report);
-            if (bg.decision === "halt_defect" || bg.decision === "halt_infra") {
-              // phase-complete YAZILMADI → faz parkta. Bulguyu faz-fail makinesine route et + döngüden çık.
-              await appendAuditModule(state.project_root, {
-                ts: Date.now(),
-                phase: next,
-                event: `question-bank-${bg.decision}`,
-                caller: "mycl-orchestrator",
-                detail: `coverage=${bg.result?.coverage.pass ?? 0}/${bg.result?.coverage.total ?? 0} stale=${bg.stale.length}`,
-              });
-              const qbHolder: FailReasonHolder = {
-                lastFailReason:
-                  `Faz ${next} ikili-soru tripwire DUR (${bg.decision}).` +
-                  `\n\nThe actual finding (diagnose THIS):\n${bg.report}`,
-              };
-              await failPhase(next, qbHolder);
-              return;
-            }
-          }
-        }
         // Skipped (örn. missing command) akışı kırmaz — phase-N-complete
         // yazılır ki ardışık akış devam etsin. Runner zaten skip event'i
         // (phase-N-skipped) + sade Türkçe mesaj yazmış olur.
@@ -6368,11 +6332,6 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
         gateFailures: verdict.gateFailures.map((g) => g.phase),
         securitySkipped: verdict.securitySkipped,
       });
-      // Linear gate-kanıt aynası (opt-in, default KAPALI). Yerel audit kaynaktır; bu yalnız tek-yönlü ayna.
-      // Fail-OPEN + LOUD (mirrorVerdictToLinear asla throw etmez) → pipeline ASLA bloklanmaz.
-      if (runtime.config) {
-        await mirrorVerdictToLinear(state, runtime.config, verdict);
-      }
     } else {
       // FROZEN-GOAL #16: verdict hesaplanamadı (audit okunamadı; üstte görünür uyarı verildi) → pipeline_end
       // emit EDİLMEZSE frontend pipelineVerdict null kalır → sidebar chip yok → SESSİZ FALSE-GREEN izlenimi.

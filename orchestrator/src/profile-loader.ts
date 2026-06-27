@@ -68,14 +68,6 @@ export interface StackProfile {
   manifest_files?: string[];
   /** Frontend build tool tespiti için ipuçları (vite|webpack|next|astro|esbuild). */
   build_tool?: string;
-  /**
-   * İkili Soru Bankası KEY'inin artefakt-tipi ekseni — değişen dosya yolları
-   * bu glob'lara göre tiplenir (örn. route/migration/component/pure). Eşleşmeyen
-   * dosya WIDEST'e ("*") düşer (coarsen → güvenli over-check). Profilde yoksa
-   * TÜM dosyalar WIDEST'e düşer. Tip adları serbest (KEY artefakt-ekseni olur);
-   * stack-yazarı maintain eder. question-bank/key.ts matcher'ı tüketir.
-   */
-  artifact_globs?: Record<string, string[]>;
 }
 
 /**
@@ -152,23 +144,6 @@ export async function _loadProfileFromPath(
       }
       for (const [k, v] of Object.entries(block as Record<string, unknown>)) {
         validateCommandValue(v, `${blockKey}.${k}`, path);
-      }
-    }
-    // İkili Soru Bankası artefakt-glob'ları: varsa obje<string, string[]>.
-    // Bozuk tip → load anında net hata (KEY artefakt-ekseni sessizce çürümesin).
-    const artifactGlobs = (parsed as Record<string, unknown>).artifact_globs;
-    if (artifactGlobs !== undefined) {
-      if (
-        typeof artifactGlobs !== "object" ||
-        artifactGlobs === null ||
-        Array.isArray(artifactGlobs)
-      ) {
-        throw new Error(`${path}: artifact_globs must be an object`);
-      }
-      for (const [k, v] of Object.entries(artifactGlobs as Record<string, unknown>)) {
-        if (!Array.isArray(v) || !v.every((p) => typeof p === "string")) {
-          throw new Error(`${path}: artifact_globs.${k} must be string[]`);
-        }
       }
     }
     const profile = parsed as StackProfile;
