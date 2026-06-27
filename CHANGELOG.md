@@ -1,5 +1,14 @@
 ## 2026-06-27
 
+- **fix(çeviri): çeviri ajanı artık kelime-kelime DEĞİL, ANLAM-odaklı anlaşılır Türkçe üretir (YZLLM):**
+  Eski prompt katı verbatim/kelime-kelimeydi → "device step-up layer" → "cihaz adım yukarı katmanı" gibi anlamsız
+  çıktı veriyor, "compliance/schema drift/fail-closed" gibi İngilizce jargonu ya çevirmeden bırakıyor ya saçmalıyordu.
+  Yeni prompt ([translator.ts](orchestrator/src/translator.ts) `buildSystemPrompt`): anlamı akıcı/doğal Türkçeyle
+  aktar (kullanıcı KONUYU anlasın), İngilizce jargonun anlamını kısa kavram olarak Türkçeye çevir (örnekli); yalnız
+  gerçek kod-jetonları + yerleşik kısaltmalar (API/JWT/PII/SMTP/OTP/DDL/CSP…) verbatim kalır. Sadakat korunur (yeni
+  bilgi/karar EKLEME, içerik düşürme yok); prompt-injection savunması + tire-bileşik kuralı korundu. Çapraz-aile
+  mahkeme (Sonnet 4.6): PROCEED — injection savunması eskisinden güçlü; tek bulgu (uzun örnek→şablon-şişme) düzeltildi.
+
 - **fix(UX): 60 sn'lik "çalışıyor" durumu artık CHAT'i şişirmiyor — alttaki banda yazılıyor (YZLLM):**
   Uzun işlerde dakikada bir gelen heartbeat ("⏳ TDD uygulanıyor — 300s sürüyor · son adım…") chat paneline
   birikiyordu (gürültü). Artık alttaki "çalışıyor" bandına ([ipc.ts](orchestrator/src/ipc.ts) heartbeat tick →
