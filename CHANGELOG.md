@@ -1,5 +1,21 @@
 ## 2026-06-27
 
+- **feat(UI): "Ajan Takımı" popup'ı — çoklu-ajan takımlarını canlı görünür kılar (YZLLM):**
+  Sağ kenar çubuğuna **👥 Ajan Takımı** butonu + drawer. O iterasyonda koşan TÜM alt-ajan takımlarını gruplar:
+  **Tasarım Paneli** (4 perspektif + Sentezleyici + müzakere, Faz 5), **Kök-neden Mercekleri** (Faz 0),
+  **Modül Codegen** (Faz 8), **Faz 9 İncelemesi** (bulucular + çürütücüler). Her ajan için: takım, hangi faz, başlama
+  saati, **canlı süre** (koşarken saniyede bir ilerler), durum (çalışıyor/bitti/hata) ve **token** (girdi/çıktı/cache).
+  Token atfı tek chokepoint'ten ([recordTokenUsage](orchestrator/src/ipc.ts)) yapılır: yeni
+  [agent-cost-context.ts](orchestrator/src/agent-cost-context.ts) `AsyncLocalStorage` ile her ajan kendi bağlamında
+  koşar (`withAgentRun`), paralel takımlarda token'lar karışmaz; CLI kolu (`runClaudeCli`) içte, API/z.ai kolu
+  ([design-fanout.ts](orchestrator/src/design-fanout.ts)) ayrıca `recordTokenUsage` çağırır → hiçbir kolda 0-token
+  kalmaz. Her `agent_event`'e monoton `ev_id` eklendi; frontend reducer
+  ([App.tsx](src/App.tsx)) aynı olayı (StrictMode/effect re-fire) tekrar işlerse atlar → token çift-sayımı yok.
+  Ajan takımları İngilizce çalışır (ana ajan yöneticileri; çevirmen yalnız kullanıcı↔orkestratör). Yeni iterasyonda
+  ([phase_changed](src/App.tsx) freshRun) liste sıfırlanır. **Çapraz-aile mahkemesi** (Sonnet 4.6, 3 mercek × düşman
+  doğrulama) diff'i denetledi: sarılmamış **Sentezleyici** ajanı (Faz 5 sentezi, popup'ta görünmüyor + 0 token) MEDIUM
+  bulgu olarak yakalanıp kapatıldı; negotiate started-emit tutarsızlığı (LOW) düzeltildi. check yeşil (1564 test).
+
 - **fix(orkestratör): tool-turn limiti "karar veremedi" düşüşünü bitirir — tavan yükseltildi + son turda karar ZORLANIR (YZLLM):**
   SDK orkestratör ajanı 8 tool-turn'de karar (decide_action) veremeyince "MAX_TOOL_TURNS (8) aşıldı" ile DÜŞÜYORDU
   (kompleks çok-dosyalı analizde 8 yetmiyor — canlı: parmak-izi/step-up). [agent.ts](orchestrator/src/orchestrator-agent/agent.ts):

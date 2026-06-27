@@ -27,7 +27,8 @@ import { SUBAGENT_SPAWN_TOOLS } from "./tool-policy.js";
 import { extractKindBlock } from "./cli-json.js";
 import { templatePath } from "./phase-registry.js";
 import { log } from "./logger.js";
-import { emitAgentEvent } from "./ipc.js";
+import { emitAgentEvent, recordTokenUsage } from "./ipc.js";
+import { withAgentRun } from "./agent-cost-context.js";
 import { traceAgentEvent } from "./agent-trace.js";
 
 interface PerspectiveDef {
@@ -106,6 +107,15 @@ export async function runReasoningTurn(
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
+  // YZLLM 2026-06-27 (mahkeme H1): API/z.ai kolu da token'ı KAYDET — withAgentRun bağlamı içinde olduğumuz için
+  // recordTokenUsage o ajana atfeder (Ajan Takımı popup'ı token gösterir; eskiden API kolu atlıyordu → 0 token).
+  recordTokenUsage({
+    input_tokens: response.usage.input_tokens,
+    output_tokens: response.usage.output_tokens,
+    cache_read_input_tokens: response.usage.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? 0,
+    model: apiModel,
+  });
   return response.content
     .filter((c): c is Anthropic.TextBlock => c.type === "text")
     .map((c) => c.text)
@@ -166,23 +176,26 @@ export async function runDesignFanout(
   const userMsg = `Project spec:\n\n${specContent}`;
 
   // 4 perspektif PARALEL. Biri düşerse kalanla devam (allSettled).
+  // YZLLM 2026-06-27: her perspektif withAgentRun ile sarılır → token'ı O AJANA atfedilir (Ajan Takımı popup'ı);
+  // started'a grup ("Tasarım Paneli") + faz (5) eklenir.
   const settled = await Promise.allSettled(
-    PERSPECTIVES.map(async (p, i) => {
-      // Agent Teams görünürlüğü: her perspektif-ajanı başla/bit yayını → UI "hangi ajan çalışıyor"ı gösterir.
-      emitAgentEvent({ sub: "started", agent_label: p.label });
-      try {
-        return await runReasoningTurn(
-          config,
-          perspectiveTemplates[i],
-          userMsg,
-          p.role,
-          PERSPECTIVE_MAX_TOKENS,
-          projectRoot,
-        );
-      } finally {
-        emitAgentEvent({ sub: "completed", agent_label: p.label });
-      }
-    }),
+    PERSPECTIVES.map((p, i) =>
+      withAgentRun({ label: p.label, group: "Tasarım Paneli", phase: 5 }, async () => {
+        emitAgentEvent({ sub: "started", agent_label: p.label, agent_group: "Tasarım Paneli", phase: 5 });
+        try {
+          return await runReasoningTurn(
+            config,
+            perspectiveTemplates[i],
+            userMsg,
+            p.role,
+            PERSPECTIVE_MAX_TOKENS,
+            projectRoot,
+          );
+        } finally {
+          emitAgentEvent({ sub: "completed", agent_label: p.label });
+        }
+      }),
+    ),
   );
   const perspectives: Array<{ label: string; text: string }> = [];
   settled.forEach((r, i) => {
@@ -213,9 +226,21 @@ export async function runDesignFanout(
     `Project spec:\n\n${specContent}\n\n---\nPerspectives:\n\n` +
     perspectives.map((p) => `## ${p.label} perspective\n${p.text}`).join("\n\n");
 
+  // Sentezleyici de Tasarım Paneli takımının üyesi (mahkeme MEDIUM): withAgentRun + started/completed ile
+  // popup'ta görünür + token'ı kendi koşusuna atfedilir (eskiden sarılmamıştı → 0 token + görünmez).
   let synthText: string;
   try {
-    synthText = await runReasoningTurn(config, synthTemplate, synthUser, "synthesizer", SYNTH_MAX_TOKENS, projectRoot);
+    synthText = await withAgentRun(
+      { label: "Sentezleyici", group: "Tasarım Paneli", phase: 5 },
+      async () => {
+        emitAgentEvent({ sub: "started", agent_label: "Sentezleyici", agent_group: "Tasarım Paneli", phase: 5 });
+        try {
+          return await runReasoningTurn(config, synthTemplate, synthUser, "synthesizer", SYNTH_MAX_TOKENS, projectRoot);
+        } finally {
+          emitAgentEvent({ sub: "completed", agent_label: "Sentezleyici" });
+        }
+      },
+    );
   } catch (err) {
     return { ok: false, conflicts: [], reason: `sentez başarısız: ${String(err)}` };
   }
@@ -283,44 +308,66 @@ export async function negotiateConflicts(
     `Current design plan:\n\n${designMarkdown}\n\n---\nUnresolved conflicts to resolve:\n${conflictsToText(conflicts)}`;
   const synthModel = subagentModelId(config.selected_models, "synthesizer");
 
+  // Ajan Takımı görünürlüğü (mahkeme #7): müzakere tek takım üyesi → withAgentRun ile token kendi koşusuna
+  // yazılır (CLI→runClaudeCli içeride recordTokenUsage; API→aşağıda recordTokenUsage) + started/completed popup'ta.
+  const NEGOTIATE_LABEL = "Agent Teams müzakere";
   let text: string;
-  if (backend === "cli") {
-    // GERÇEK Agent Teams (abonelik): lead, çelişen-rol savunucularından kısa-ömürlü takım kurar
-    // (env flag'leri extraEnv ile), peer müzakereyle uzlaşır, güncellenmiş design_plan döner.
-    const res = await runClaudeCli({
-      systemPrompt: template,
-      userMessage: userMsg,
-      modelId: synthModel,
-      cwd: projectRoot,
-      disallowedTools: [...SUBAGENT_SPAWN_TOOLS, "Write", "Edit", "Bash(rm *)", "Bash(git push *)"], // salt-okunur akıl-yürütme: alt-ajan + yazma + yıkıcı Bash yasak
-      extraEnv: { CLAUDE_CODE_WORKFLOWS: "1", CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1" },
-      timeoutMs: NEGOTIATE_TIMEOUT_MS,
+  try {
+    text = await withAgentRun({ label: NEGOTIATE_LABEL, group: "Tasarım Müzakeresi", phase: 5 }, async () => {
+      // started/completed callback İÇİNDE (perspektif/hipotez desenleriyle tutarlı; mahkeme LOW).
+      emitAgentEvent({ sub: "started", agent_label: NEGOTIATE_LABEL, agent_group: "Tasarım Müzakeresi", phase: 5 });
+      try {
+        if (backend === "cli") {
+          // GERÇEK Agent Teams (abonelik): lead, çelişen-rol savunucularından kısa-ömürlü takım kurar
+          // (env flag'leri extraEnv ile), peer müzakereyle uzlaşır, güncellenmiş design_plan döner.
+          const res = await runClaudeCli({
+            systemPrompt: template,
+            userMessage: userMsg,
+            modelId: synthModel,
+            cwd: projectRoot,
+            disallowedTools: [...SUBAGENT_SPAWN_TOOLS, "Write", "Edit", "Bash(rm *)", "Bash(git push *)"], // salt-okunur akıl-yürütme: alt-ajan + yazma + yıkıcı Bash yasak
+            extraEnv: { CLAUDE_CODE_WORKFLOWS: "1", CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1" },
+            timeoutMs: NEGOTIATE_TIMEOUT_MS,
+          });
+          if (!res.ok) throw new Error(res.error ?? "takım müzakeresi başarısız");
+          const t = res.text.trim();
+          // Tam iz: gerçek Agent Teams peer-müzakeresi (kör nokta kalmasın) — çelişki sayısı + uzlaşı çıktısı.
+          void traceAgentEvent({
+            ts: Date.now(),
+            agent_label: NEGOTIATE_LABEL,
+            sub: "output",
+            text: `conflicts=${conflicts.length} → ${t.slice(0, 1500)}`,
+          });
+          return t;
+        }
+        // API (gerçek Agent Teams YOK): MyCL-simüle cross-critique — synthesizer çelişkileri tek-tur
+        // muhakemeyle (her iki tarafı steel-man) çözer. Aynı template; "teams yoksa kendin akıl yürüt" der.
+        // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise sentez/müzakere turu GLM'e gider; claude'da AYNEN korunur.
+        const { client, model: apiSynthModel } = resolveLlmClient(config, "main", config.api_keys.main, synthModel);
+        const response = await client.messages.create({
+          model: apiSynthModel,
+          max_tokens: SYNTH_MAX_TOKENS,
+          system: template,
+          messages: [{ role: "user", content: userMsg }],
+        });
+        recordTokenUsage({
+          input_tokens: response.usage.input_tokens,
+          output_tokens: response.usage.output_tokens,
+          cache_read_input_tokens: response.usage.cache_read_input_tokens ?? 0,
+          cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? 0,
+          model: apiSynthModel,
+        });
+        return response.content
+          .filter((c): c is Anthropic.TextBlock => c.type === "text")
+          .map((c) => c.text)
+          .join("")
+          .trim();
+      } finally {
+        emitAgentEvent({ sub: "completed", agent_label: NEGOTIATE_LABEL });
+      }
     });
-    if (!res.ok) return { ok: false, mode, reason: res.error ?? "takım müzakeresi başarısız" };
-    text = res.text.trim();
-    // Tam iz: gerçek Agent Teams peer-müzakeresi (kör nokta kalmasın) — çelişki sayısı + uzlaşı çıktısı.
-    void traceAgentEvent({
-      ts: Date.now(),
-      agent_label: "Agent Teams müzakere",
-      sub: "output",
-      text: `conflicts=${conflicts.length} → ${text.slice(0, 1500)}`,
-    });
-  } else {
-    // API (gerçek Agent Teams YOK): MyCL-simüle cross-critique — synthesizer çelişkileri tek-tur
-    // muhakemeyle (her iki tarafı steel-man) çözer. Aynı template; "teams yoksa kendin akıl yürüt" der.
-    // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise sentez/müzakere turu GLM'e gider; claude'da AYNEN korunur.
-    const { client, model: apiSynthModel } = resolveLlmClient(config, "main", config.api_keys.main, synthModel);
-    const response = await client.messages.create({
-      model: apiSynthModel,
-      max_tokens: SYNTH_MAX_TOKENS,
-      system: template,
-      messages: [{ role: "user", content: userMsg }],
-    });
-    text = response.content
-      .filter((c): c is Anthropic.TextBlock => c.type === "text")
-      .map((c) => c.text)
-      .join("")
-      .trim();
+  } catch (err) {
+    return { ok: false, mode, reason: String((err as Error)?.message ?? err) };
   }
 
   const parsed = parseDesignPlan(text);
@@ -385,16 +432,25 @@ export async function runHypothesisFanout(
   const userMsg =
     `Bug report:\n${bugReport}\n\n---\nDeterministic evidence (error catalog, git blame, dependency graph, UI probe):\n` +
     (evidence && evidence.trim() ? evidence : "(none gathered)");
+  // YZLLM 2026-06-27: her mercek withAgentRun ile sarılır + başla/bit yayını → Ajan Takımı popup'ında "Kök-neden
+  // Mercekleri" takımı görünür (faz 0), token'ı ajan-başına atfedilir.
   const settled = await Promise.allSettled(
     HYPOTHESIS_ANGLES.map((h) =>
-      runReasoningTurn(
-        config,
-        hypothesisSystemPrompt(h.angle),
-        userMsg,
-        "hypothesis",
-        HYPOTHESIS_MAX_TOKENS,
-        projectRoot,
-      ),
+      withAgentRun({ label: h.key, group: "Kök-neden Mercekleri", phase: 0 }, async () => {
+        emitAgentEvent({ sub: "started", agent_label: h.key, agent_group: "Kök-neden Mercekleri", phase: 0 });
+        try {
+          return await runReasoningTurn(
+            config,
+            hypothesisSystemPrompt(h.angle),
+            userMsg,
+            "hypothesis",
+            HYPOTHESIS_MAX_TOKENS,
+            projectRoot,
+          );
+        } finally {
+          emitAgentEvent({ sub: "completed", agent_label: h.key });
+        }
+      }),
     ),
   );
   const out: string[] = [];

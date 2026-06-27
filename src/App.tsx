@@ -20,6 +20,7 @@ import { ClaudeSimulator, type CCEvent } from "./components/ClaudeSimulator";
 import { useOrchestrator } from "./hooks/useOrchestrator";
 import type {
   AgentBackends,
+  AgentEvent,
   ModelTiers,
   DesignWorkflowMode,
   CostRecord,
@@ -33,6 +34,7 @@ import type {
 } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
 import { TokenTimelinePanel } from "./components/TokenTimelinePanel";
+import { AgentTeamPanel } from "./components/AgentTeamPanel";
 import { ErrorDrawer } from "./components/ErrorDrawer";
 import {
   isPermissionGranted,
@@ -76,6 +78,91 @@ export interface AgentThinkingEvent {
   tool_input?: Record<string, unknown>;
   decision?: Record<string, unknown>;
   error?: string;
+}
+
+/** Ajan-koşusu token özeti (Ajan Takımı popup'ı; ajan-başına biriken). */
+export interface AgentRunUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
+/** Bir alt-ajan koşusu (Ajan Takımı popup'ı satırı). started→açılır, token_usage→birikir, completed/error→kapanır. */
+export interface AgentRun {
+  label: string;
+  group: string;
+  phase: number;
+  started_ts: number;
+  completed_ts?: number;
+  status: "running" | "done" | "error";
+  usage: AgentRunUsage;
+}
+
+const AGENT_RUNS_CAP = 200;
+const ZERO_USAGE: AgentRunUsage = {
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_input_tokens: 0,
+  cache_creation_input_tokens: 0,
+};
+
+/** SAF: agent_event'i ajan-koşuları listesine indirger (Ajan Takımı popup'ı). started→yeni koşu (running),
+ *  token_usage→o label'ın EN SON running koşusuna token ekle, completed/error→kapat. agent_label yoksa no-op. */
+export function reduceAgentRuns(
+  runs: AgentRun[],
+  d: AgentEvent["data"],
+  fallbackPhase: number,
+): AgentRun[] {
+  if (!d.agent_label) return runs;
+  const label = d.agent_label;
+  if (d.sub === "started") {
+    const next = [
+      ...runs,
+      {
+        label,
+        group: d.agent_group ?? "Ajan",
+        phase: d.phase ?? fallbackPhase,
+        started_ts: d.ts,
+        status: "running" as const,
+        usage: { ...ZERO_USAGE },
+      },
+    ];
+    return next.length > AGENT_RUNS_CAP ? next.slice(next.length - AGENT_RUNS_CAP) : next;
+  }
+  // started dışı → bu label'ın EN SON "running" koşusunu bul (son→ilk).
+  let idx = -1;
+  for (let i = runs.length - 1; i >= 0; i--) {
+    if (runs[i].label === label && runs[i].status === "running") {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return runs;
+  const cur = runs[idx];
+  let updated: AgentRun;
+  if (d.sub === "token_usage" && d.usage) {
+    const u = d.usage;
+    updated = {
+      ...cur,
+      usage: {
+        input_tokens: cur.usage.input_tokens + u.input_tokens,
+        output_tokens: cur.usage.output_tokens + u.output_tokens,
+        cache_read_input_tokens: cur.usage.cache_read_input_tokens + u.cache_read_input_tokens,
+        cache_creation_input_tokens:
+          cur.usage.cache_creation_input_tokens + u.cache_creation_input_tokens,
+      },
+    };
+  } else if (d.sub === "completed") {
+    updated = { ...cur, status: "done", completed_ts: d.ts };
+  } else if (d.sub === "error") {
+    updated = { ...cur, status: "error", completed_ts: d.ts };
+  } else {
+    return runs; // tool_use/decision koşu-state'ini değiştirmez
+  }
+  const copy = runs.slice();
+  copy[idx] = updated;
+  return copy;
 }
 
 interface MainState {
@@ -122,6 +209,12 @@ interface MainState {
   /** Monoton aktivite sayacı (mahkeme #10): her kabul edilen agent_event'e benzersiz seq verir → React key
    *  çakışması/olay-düşmesi olmaz (aynı-ms olaylar korunur). */
   agentEventSeq: number;
+  /** Ajan Takımı (YZLLM 2026-06-27): o iterasyonda koşan alt-ajanlar (takım/faz/başla/bitiş/süre/token).
+   *  freshRun'da sıfırlanır → iterasyonlar karışmaz. Popup bunu gösterir. */
+  agentRuns: AgentRun[];
+  /** Mahkeme H2: işlenen en yüksek agent_event ev_id'si — aynı olay (StrictMode/re-fire) tekrar işlenirse atlanır
+   *  (token çift-sayımı + ajan-koşusu çift-açılması önlenir). */
+  lastAgentEvId: number;
   /** Faz geçiş işaretçileri (her faz başlangıcı: ts + faz no) — chat'te faz çizgisi + faza tıklayınca jump. */
   phaseMarkers: { ts: number; to: number }[];
   /**
@@ -168,6 +261,8 @@ const INITIAL_STATE: MainState = {
   loadingOlder: false,
   agentEvents: [],
   agentEventSeq: 0,
+  agentRuns: [],
+  lastAgentEvId: 0,
   orchestratorActivity: [],
   phaseMarkers: [],
   agentBusyCount: 0,
@@ -373,6 +468,8 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       pendingAskq: null,
       runningBanner: closeBanner ? null : state.runningBanner,
       pipelineVerdict: freshRun ? null : state.pipelineVerdict,
+      // Ajan Takımı (YZLLM 2026-06-27): yeni iterasyon → önceki iterasyonun ajan-koşuları temizlenir (karışmasın).
+      agentRuns: freshRun ? [] : state.agentRuns,
     };
   }
   if (ev.kind === "pipeline_end") {
@@ -556,6 +653,17 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
   // için modal kendisi reverse() yapar; store kronolojik tutar.
   if (ev.kind === "agent_event") {
     const d = ev.data;
+    // Mahkeme H2 (YZLLM 2026-06-27): aynı agent_event'i (StrictMode çift-invoke / effect re-fire) İKİ KEZ işlersek
+    // token ÇİFT-sayılır + koşu çift-açılır. Backend her olaya monoton ev_id koyar; işlenmiş en yüksek id'den
+    // küçük/eşit gelen = tekrar → atla. ev_id yoksa (eski olay) eski içerik-bazlı guard devrede kalır.
+    if (d.ev_id !== undefined && d.ev_id <= state.lastAgentEvId) return state;
+    // Kabul edilen olay → lastAgentEvId'yi ilerlet (spread ile tüm dönüşlere taşınır).
+    const baseState = d.ev_id !== undefined ? { ...state, lastAgentEvId: d.ev_id } : state;
+    // Ajan Takımı (YZLLM 2026-06-27): koşu-state'ini her agent_event'te güncelle (started→aç, token_usage→token
+    // ekle, completed/error→kapat). Popup bu listeyi gösterir; freshRun'da sıfırlanır.
+    const agentRuns = reduceAgentRuns(state.agentRuns, d, state.phase);
+    // token_usage YALNIZ ajan-koşusu token'ını etkiler (aktivite/busy-sayaç DEĞİL) → erken dön.
+    if (d.sub === "token_usage") return { ...baseState, agentRuns };
     // Busy counter: started/completed sayaca etki eder. ETİKETSİZ (tek orkestratör) → yalnız sayaç.
     // ETİKETLİ (Agent Teams perspektif/modül ajanı) → ayrıca listele ki "hangi ajan başladı/bitti" görünsün.
     if (d.sub === "started" || d.sub === "completed") {
@@ -563,7 +671,7 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
         d.sub === "started"
           ? state.agentBusyCount + 1
           : Math.max(0, state.agentBusyCount - 1);
-      if (!d.agent_label) return { ...state, agentBusyCount };
+      if (!d.agent_label) return { ...baseState, agentBusyCount, agentRuns };
       const teamEvent: AgentThinkingEvent = {
         ts: d.ts,
         sub: d.sub,
@@ -571,9 +679,10 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       };
       const m = [...state.agentEvents, teamEvent];
       return {
-        ...state,
+        ...baseState,
         agentBusyCount,
         agentEvents: m.length > 100 ? m.slice(m.length - 100) : m,
+        agentRuns,
       };
     }
     const newEvent: AgentThinkingEvent = {
@@ -599,7 +708,7 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
         JSON.stringify(e.tool_input) === JSON.stringify(d.tool_input) &&
         JSON.stringify(e.decision) === JSON.stringify(d.decision),
     );
-    if (isReprocessed) return state;
+    if (isReprocessed) return { ...baseState, agentRuns };
     const merged = [...state.agentEvents, newEvent];
     // Max 100 entry — en eskileri drop (slice from end)
     const capped = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
@@ -611,10 +720,11 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     const acts = isActivity ? [...state.orchestratorActivity, newEvent] : state.orchestratorActivity;
     const actCapped = acts.length > 500 ? acts.slice(acts.length - 500) : acts;
     return {
-      ...state,
+      ...baseState,
       agentEvents: capped,
       orchestratorActivity: actCapped,
       agentEventSeq: state.agentEventSeq + 1, // kabul edilen olay → sayacı ilerlet (benzersiz seq)
+      agentRuns,
     };
   }
   // v15.7 (2026-05-24): İş kuyruğu — backend her değişiklikte tam listeyi yollar
@@ -698,6 +808,8 @@ function App() {
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
   const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
+  // Ajan Takımı popup'ı (YZLLM 2026-06-27): çoklu-ajan takımları + faz/süre/token drawer'ı aç/kapat.
+  const [agentTeamOpen, setAgentTeamOpen] = useState(false);
   // v15.7 (2026-05-25): Feature flags (Playwright vb.). Backend read_features → features_value event ile dolur.
   const [features, setFeatures] = useState<{
     playwright_enabled: boolean;
@@ -1455,6 +1567,8 @@ function App() {
           onToggleTaskQueueClick={() => setTaskQueueOpen((o) => !o)}
           taskQueueOpen={taskQueueOpen}
           taskQueueCount={mainState.taskQueue.length}
+          onAgentTeamClick={() => setAgentTeamOpen((o) => !o)}
+          agentTeamOpen={agentTeamOpen}
           tokenTotals={mainState.tokenTotals}
           onTokenBadgeClick={() => setTokenTimelineOpen((o) => !o)}
           onSettingsClick={() => setSettingsOpen(true)}
@@ -1493,6 +1607,11 @@ function App() {
         open={tokenTimelineOpen}
         costs={mainState.costTimeline}
         onClose={() => setTokenTimelineOpen(false)}
+      />
+      <AgentTeamPanel
+        open={agentTeamOpen}
+        runs={mainState.agentRuns}
+        onClose={() => setAgentTeamOpen(false)}
       />
       <ErrorDrawer
         open={errorDrawerOpen}

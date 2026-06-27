@@ -11,6 +11,7 @@
 
 import { appendHistory } from "./history-loader.js";
 import { traceAgentEvent } from "./agent-trace.js";
+import { currentAgentRun } from "./agent-cost-context.js";
 import { log } from "./logger.js";
 import type { ModelTokenUsage, PhaseId, PhaseStatus, TranslationDir } from "./types.js";
 
@@ -320,6 +321,23 @@ export function recordTokenUsage(usage: ClaudeUsage): void {
       e.cache_creation_input_tokens += usage.cache_creation_input_tokens ?? 0;
     }
   }
+  // YZLLM 2026-06-27: bir alt-ajan bağlamında çalışıyorsak (paralel takım üyesi) bu usage'ı O AJANA atfet →
+  // Ajan Takımı popup'ı token'ı ajan-başına biriktirir. Bağlam yoksa (orkestratör/ana akış) yalnız global muhasebe.
+  const ar = currentAgentRun();
+  if (ar) {
+    emit("agent_event", {
+      sub: "token_usage",
+      agent_label: ar.label,
+      usage: {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+      },
+      ts: Date.now(),
+      ev_id: ++_agentEvId, // mahkeme H2: dedup için benzersiz id
+    });
+  }
 }
 
 export function emitAskq(opts: {
@@ -542,10 +560,26 @@ export type AgentEventSub =
   | "decision"    // decide_action tool çağrısı (final karar — AgentDecision payload)
   | "error";      // agent loop fail (timeout, parse error, API error)
 
+/** Ajan-olayı token özeti (Ajan Takımı popup'ı için; agent_event sub="token_usage" recordTokenUsage'dan emit edilir). */
+export interface AgentEventUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
+// YZLLM 2026-06-27 (mahkeme H2): her agent_event'e MONOTON benzersiz id — frontend reducer aynı olayı (StrictMode
+// çift-invoke / effect re-fire) tekrar işlerse atlasın (token ÇİFT-sayımı + ajan-koşusu çift-açılması önlenir).
+let _agentEvId = 0;
+
 export function emitAgentEvent(opts: {
   sub: AgentEventSub;
   /** Agent Teams görünürlüğü: hangi ajan (örn. "Mimari"/"UX"). Tek orkestratörde verilmez. */
   agent_label?: string;
+  /** YZLLM 2026-06-27: takım/grup adı (popup'ta gruplama) — "Tasarım Paneli"/"Modül Codegen" vb. started'da verilir. */
+  agent_group?: string;
+  /** YZLLM 2026-06-27: ajanın çalıştığı pipeline fazı (popup "hangi fazda"). started'da verilir. */
+  phase?: number;
   turn?: number;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -553,7 +587,7 @@ export function emitAgentEvent(opts: {
   error?: string;
   ts?: number;
 }): void {
-  const payload = { ...opts, ts: opts.ts ?? Date.now() };
+  const payload = { ...opts, ts: opts.ts ?? Date.now(), ev_id: ++_agentEvId };
   emit("agent_event", payload);
   // Kalıcı iz (kör nokta kalmasın): UI'ya ephemeral gösterilen her olay .mycl/traces/agents.jsonl'a da yazılır.
   void traceAgentEvent(payload);

@@ -16,6 +16,8 @@ import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { subagentModelId, type MyclConfig } from "./config.js";
 import { HYPOTHESIS_ANGLES } from "./design-fanout.js";
 import { log } from "./logger.js";
+import { emitAgentEvent } from "./ipc.js";
+import { withAgentRun } from "./agent-cost-context.js";
 
 /** Per-inceleme idle-timeout (D1 ile aynı mertebe; Bash'li araştırma yoğun olabilir). */
 const INVESTIGATION_TIMEOUT_MS = 150_000;
@@ -58,17 +60,26 @@ export async function runHypothesisInvestigations(
     (evidence && evidence.trim() ? evidence : "(none gathered)") +
     "\n\nInvestigate from your lens, then emit the hypothesis JSON block.";
 
+  // Ajan Takımı görünürlüğü (mahkeme #5/#6): her mercek ayrı takım üyesi → withAgentRun ile token kendi
+  // koşusuna yazılır (runClaudeCli içeride recordTokenUsage çağırır) + started/completed popup'ta görünür.
   const settled = await Promise.allSettled(
     HYPOTHESIS_ANGLES.map((h) =>
-      runClaudeCli({
-        systemPrompt: investigationSystemPrompt(h.angle),
-        userMessage: userMsg,
-        modelId: model,
-        cwd: projectRoot,
-        allowedTools: ["Read", "Grep", "Glob", "Bash"],
-        disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur hipotez araştırması: yazma + alt-ajan yasak, Bash açık
-        effort: config.claude_code_flags.effort,
-        timeoutMs: INVESTIGATION_TIMEOUT_MS,
+      withAgentRun({ label: h.key, group: "Kök-neden Mercekleri", phase: 0 }, async () => {
+        emitAgentEvent({ sub: "started", agent_label: h.key, agent_group: "Kök-neden Mercekleri", phase: 0 });
+        try {
+          return await runClaudeCli({
+            systemPrompt: investigationSystemPrompt(h.angle),
+            userMessage: userMsg,
+            modelId: model,
+            cwd: projectRoot,
+            allowedTools: ["Read", "Grep", "Glob", "Bash"],
+            disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur hipotez araştırması: yazma + alt-ajan yasak, Bash açık
+            effort: config.claude_code_flags.effort,
+            timeoutMs: INVESTIGATION_TIMEOUT_MS,
+          });
+        } finally {
+          emitAgentEvent({ sub: "completed", agent_label: h.key });
+        }
       }),
     ),
   );

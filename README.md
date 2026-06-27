@@ -151,6 +151,12 @@ entegre eder.
 - **Denetim Ajanı** (**🕵️**) — kullanıcının sorularıyla MyCL kendi çıktısını
   denetler; bir bulgunun MyCL'in kendi sorunu mu yoksa üretilen proje mi
   olduğunu ayırır.
+- **Ajan Takımı** (**👥**) — sağ kenar çubuğundaki butonla açılan popup, o
+  iterasyonda çalışan tüm çoklu-ajan takımlarını gösterir: hangi takım (Tasarım
+  Paneli, Kök-neden Mercekleri, Modül Codegen, Faz 9 İncelemesi…), hangi fazda,
+  ne zaman başladı/bitti, ne kadar sürdü ve kaç token harcadı. Takım üyeleri
+  İngilizce çalışır; ana ajan onların yöneticisidir (çevirmen yalnız kullanıcı ↔
+  orkestratör arasındadır).
 - **Faz-Katkı Raporu** — pipeline bitiminde mahkeme her fazın o koşuya katkı
   yüzdesini değerlendirip Türkçe rapor olarak gösterir; düşük-katkılı fazlar
   işaretlenir, kullanıcı gereksizleri kendisi budamaya karar verir (otomatik

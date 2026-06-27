@@ -16,6 +16,8 @@ import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { log } from "./logger.js";
 import { dedupeFindings } from "./phase-9-debate-dedup.js";
+import { emitAgentEvent } from "./ipc.js";
+import { withAgentRun } from "./agent-cost-context.js";
 
 /** Bir bulucunun ürettiği (doğrulama öncesi) ya da doğrulanmış risk bulgusu. */
 export interface DebateFinding {
@@ -168,19 +170,27 @@ export async function runDebateReview(
   const userMsg =
     "Investigate THIS iteration's changed code from your lens and emit the findings JSON block.\n\n" + ctxText;
 
-  // 1. BULUCULAR — eksen başına paralel (salt-okunur).
+  // 1. BULUCULAR — eksen başına paralel (salt-okunur). Ajan Takımı görünürlüğü (mahkeme #4): her bulucu ayrı
+  // takım üyesi → withAgentRun ile token'ı kendi koşusuna yazılır + started/completed popup'ta görünür.
   const finderSettled = await Promise.allSettled(
     DEBATE_AXES.map((a) =>
-      runClaudeCli({
-        systemPrompt: finderSystemPrompt(a),
-        userMessage: userMsg,
-        modelId,
-        extraEnv, // ⑥ z.ai ise z.ai endpoint'i
-        cwd: projectRoot,
-        allowedTools: ["Read", "Grep", "Glob", "Bash"],
-        disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
-        effort,
-        timeoutMs: FINDER_TIMEOUT_MS,
+      withAgentRun({ label: a.label, group: "Faz 9 İnceleme — Bulucular", phase: 9 }, async () => {
+        emitAgentEvent({ sub: "started", agent_label: a.label, agent_group: "Faz 9 İnceleme — Bulucular", phase: 9 });
+        try {
+          return await runClaudeCli({
+            systemPrompt: finderSystemPrompt(a),
+            userMessage: userMsg,
+            modelId,
+            extraEnv, // ⑥ z.ai ise z.ai endpoint'i
+            cwd: projectRoot,
+            allowedTools: ["Read", "Grep", "Glob", "Bash"],
+            disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
+            effort,
+            timeoutMs: FINDER_TIMEOUT_MS,
+          });
+        } finally {
+          emitAgentEvent({ sub: "completed", agent_label: a.label });
+        }
       }),
     ),
   );
@@ -221,22 +231,30 @@ export async function runDebateReview(
   // 2. DEDUP — saf, test edilebilir.
   const deduped = dedupeFindings(raw);
 
-  // 3. ÇÜRÜTÜCÜLER — bulgu başına paralel; yanlış-pozitifleri ele.
+  // 3. ÇÜRÜTÜCÜLER — bulgu başına paralel; yanlış-pozitifleri ele. Ajan Takımı görünürlüğü (mahkeme #4).
   const valSettled = await Promise.allSettled(
-    deduped.map((f) =>
-      runClaudeCli({
-        systemPrompt: validatorSystemPrompt(f),
-        userMessage:
-          "Re-check the claimed risk against the actual code, then emit the verdict JSON block.",
-        modelId,
-        extraEnv, // ⑥ z.ai ise z.ai endpoint'i
-        cwd: projectRoot,
-        allowedTools: ["Read", "Grep", "Glob", "Bash"],
-        disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
-        effort,
-        timeoutMs: VALIDATOR_TIMEOUT_MS,
-      }),
-    ),
+    deduped.map((f, i) => {
+      const vLabel = `Çürütücü ${i + 1} (${f.axis})`;
+      return withAgentRun({ label: vLabel, group: "Faz 9 İnceleme — Çürütücüler", phase: 9 }, async () => {
+        emitAgentEvent({ sub: "started", agent_label: vLabel, agent_group: "Faz 9 İnceleme — Çürütücüler", phase: 9 });
+        try {
+          return await runClaudeCli({
+            systemPrompt: validatorSystemPrompt(f),
+            userMessage:
+              "Re-check the claimed risk against the actual code, then emit the verdict JSON block.",
+            modelId,
+            extraEnv, // ⑥ z.ai ise z.ai endpoint'i
+            cwd: projectRoot,
+            allowedTools: ["Read", "Grep", "Glob", "Bash"],
+            disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
+            effort,
+            timeoutMs: VALIDATOR_TIMEOUT_MS,
+          });
+        } finally {
+          emitAgentEvent({ sub: "completed", agent_label: vLabel });
+        }
+      });
+    }),
   );
 
   const confirmed: DebateFinding[] = [];

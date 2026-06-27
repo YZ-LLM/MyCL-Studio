@@ -97,10 +97,23 @@ export interface AutoAnswerModeEvent {
 export interface AgentEvent {
   kind: "agent_event";
   data: {
-    sub: "started" | "completed" | "tool_use" | "decision" | "error";
+    sub: "started" | "completed" | "tool_use" | "decision" | "error" | "token_usage";
     ts: number;
+    /** YZLLM 2026-06-27 (mahkeme H2): monoton benzersiz id — reducer aynı olayı tekrar işlerse atlar (çift-sayım yok). */
+    ev_id?: number;
     /** Agent Teams görünürlüğü: hangi ajan (örn. "Mimari"/"UX"/modül id). Tek orkestratörde boş. */
     agent_label?: string;
+    /** YZLLM 2026-06-27 (Ajan Takımı): takım/grup adı ("Tasarım Paneli"/"Modül Codegen"...) — started'da. */
+    agent_group?: string;
+    /** YZLLM 2026-06-27: ajanın çalıştığı pipeline fazı — started'da. */
+    phase?: number;
+    /** YZLLM 2026-06-27: token kullanımı — sub="token_usage" turn-başı (popup ajan-başına biriktirir). */
+    usage?: {
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_input_tokens: number;
+      cache_creation_input_tokens: number;
+    };
     turn?: number;
     tool_name?: string;
     tool_input?: Record<string, unknown>;

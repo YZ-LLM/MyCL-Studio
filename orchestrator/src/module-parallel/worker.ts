@@ -8,6 +8,7 @@
 import { createCodegenBackend } from "../codegen/backend.js";
 import { selectModelForTask } from "../model-catalog.js";
 import { emitAgentEvent } from "../ipc.js";
+import { withAgentRun } from "../agent-cost-context.js";
 import { traceAgentEvent } from "../agent-trace.js";
 import { TOOLS_CODEGEN, type ToolContext } from "../tool-handlers.js";
 import type { ToolDef } from "../claude-api.js";
@@ -36,47 +37,50 @@ function workerSystemPrompt(m: ModuleWork): string {
  * worktree'de scoped codegen koşar (backend-aware: api/cli). outcome.kind!=="done" → {ok:false} → motor seri fallback.
  */
 export function makeScopedCodegenWorker(config: MyclConfig, baseState: State): RunWorker {
-  return async (m: ModuleWork, worktreePath: string): Promise<{ ok: boolean; error?: string }> => {
-    // Görünürlük: bu modül-ajanı başla/bit yayını → UI'da "🤖 <modül>" görünür.
-    emitAgentEvent({ sub: "started", agent_label: m.id });
-    try {
-      const modelId = selectModelForTask("codegen", config.selected_models.model_tiers).modelId;
-      const toolCtx: ToolContext = { project_root: worktreePath };
-      const backend = createCodegenBackend({
-        tag: "parallel-module", // CLI-eligible → CLI modunda CLI; API modunda SDK (backend-aware)
-        phaseId: 8,
-        state: { ...baseState, project_root: worktreePath }, // worktree-scoped
-        config,
-        systemPrompt: workerSystemPrompt(m),
-        modelId,
-        apiKey: config.api_keys.main,
-        initialUserMessage: m.brief,
-        tools: TOOLS_CODEGEN as unknown as ToolDef[],
-        toolContext: toolCtx,
-        allowed_tool_names: WORKER_TOOLS,
-        betas: config.claude_code_flags.betas,
-        // Tam iz (kör nokta yok): her tool çağrısı modül-etiketiyle .mycl/traces'a.
-        observer: async (ctx) => {
-          void traceAgentEvent({
-            ts: Date.now(),
-            agent_label: m.id,
-            sub: "tool_use",
-            tool_name: ctx.tool_use.name,
-            tool_input: ctx.tool_use.input,
-          });
-        },
-      });
-      const outcome = await backend.run();
-      void traceAgentEvent({
-        ts: Date.now(),
-        agent_label: m.id,
-        sub: "output",
-        text: `codegen: ${outcome.kind}${outcome.kind === "failed" ? ` — ${outcome.reason}` : ""}`,
-      });
-      if (outcome.kind === "done") return { ok: true };
-      return { ok: false, error: outcome.kind === "failed" ? outcome.reason : "aborted" };
-    } finally {
-      emitAgentEvent({ sub: "completed", agent_label: m.id });
-    }
-  };
+  // YZLLM 2026-06-27: her modül-ajanı withAgentRun ile sarılır → token'ı O AJANA atfedilir (Ajan Takımı popup'ı);
+  // started'a grup ("Modül Codegen") + faz (8) eklenir.
+  return (m: ModuleWork, worktreePath: string): Promise<{ ok: boolean; error?: string }> =>
+    withAgentRun({ label: m.id, group: "Modül Codegen", phase: 8 }, async () => {
+      // Görünürlük: bu modül-ajanı başla/bit yayını → UI'da "🤖 <modül>" görünür.
+      emitAgentEvent({ sub: "started", agent_label: m.id, agent_group: "Modül Codegen", phase: 8 });
+      try {
+        const modelId = selectModelForTask("codegen", config.selected_models.model_tiers).modelId;
+        const toolCtx: ToolContext = { project_root: worktreePath };
+        const backend = createCodegenBackend({
+          tag: "parallel-module", // CLI-eligible → CLI modunda CLI; API modunda SDK (backend-aware)
+          phaseId: 8,
+          state: { ...baseState, project_root: worktreePath }, // worktree-scoped
+          config,
+          systemPrompt: workerSystemPrompt(m),
+          modelId,
+          apiKey: config.api_keys.main,
+          initialUserMessage: m.brief,
+          tools: TOOLS_CODEGEN as unknown as ToolDef[],
+          toolContext: toolCtx,
+          allowed_tool_names: WORKER_TOOLS,
+          betas: config.claude_code_flags.betas,
+          // Tam iz (kör nokta yok): her tool çağrısı modül-etiketiyle .mycl/traces'a.
+          observer: async (ctx) => {
+            void traceAgentEvent({
+              ts: Date.now(),
+              agent_label: m.id,
+              sub: "tool_use",
+              tool_name: ctx.tool_use.name,
+              tool_input: ctx.tool_use.input,
+            });
+          },
+        });
+        const outcome = await backend.run();
+        void traceAgentEvent({
+          ts: Date.now(),
+          agent_label: m.id,
+          sub: "output",
+          text: `codegen: ${outcome.kind}${outcome.kind === "failed" ? ` — ${outcome.reason}` : ""}`,
+        });
+        if (outcome.kind === "done") return { ok: true };
+        return { ok: false, error: outcome.kind === "failed" ? outcome.reason : "aborted" };
+      } finally {
+        emitAgentEvent({ sub: "completed", agent_label: m.id });
+      }
+    });
 }

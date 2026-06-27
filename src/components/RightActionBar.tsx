@@ -33,6 +33,9 @@ interface Props {
   onToggleTaskQueueClick?: () => void;
   taskQueueOpen?: boolean;
   taskQueueCount?: number;
+  /** YZLLM 2026-06-27: "Ajan Takımı" popup'ını aç/kapat (çoklu-ajan takımları + faz/süre/token). */
+  onAgentTeamClick?: () => void;
+  agentTeamOpen?: boolean;
   tokenTotals?: {
     input_tokens: number;
     output_tokens: number;
@@ -56,6 +59,8 @@ export function RightActionBar({
   onToggleTaskQueueClick,
   taskQueueOpen,
   taskQueueCount,
+  onAgentTeamClick,
+  agentTeamOpen,
   tokenTotals,
   onTokenBadgeClick,
   onSettingsClick,
@@ -138,6 +143,18 @@ export function RightActionBar({
             🧠 Orkestra Ajanı
           </button>
         </>
+      )}
+      {onAgentTeamClick && (
+        <button
+          type="button"
+          onClick={onAgentTeamClick}
+          className={`rab-btn${agentTeamOpen ? " rab-active" : ""}`}
+          data-testid="agent-team-btn"
+          title="Ajan Takımı — o iterasyonda çalışan çoklu-ajan takımları (hangi faz, süre, token) popup'ını aç/kapat"
+          aria-label="Ajan Takımı"
+        >
+          👥 Ajan Takımı
+        </button>
       )}
       {onToggleLeftClick && (
         <button

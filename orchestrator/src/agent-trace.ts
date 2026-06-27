@@ -20,6 +20,9 @@ export interface AgentTraceRecord {
   ts: number;
   /** Hangi ajan (örn. "Mimari"/modül id). Orkestratörün kendi olaylarında boş olabilir. */
   agent_label?: string;
+  /** YZLLM 2026-06-27: takım/grup + faz (Ajan Takımı görünürlüğü; started olayında verilir). */
+  agent_group?: string;
+  phase?: number;
   sub: "started" | "completed" | "tool_use" | "decision" | "output" | "error";
   turn?: number;
   tool_name?: string;
