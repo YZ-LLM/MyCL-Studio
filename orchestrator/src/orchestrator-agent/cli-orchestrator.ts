@@ -168,6 +168,30 @@ export class CliOrchestratorBackend {
       }
       const json = extractDecisionJson(res.text);
       if (json === null) {
+        // YZLLM 2026-06-27: SORU/danışma modunda (questionMode) model JSON yerine DÜZ-METİN yanıt döndürebilir —
+        // hatta direktif değerlendirme prompt'u AÇIKÇA "KARAR: BENİMSE" düz-metnini ister (JSON DEĞİL). SDK forced-tool
+        // ile JSON garantiler; CLI garantileyemez. questionMode salt-okunur (executeAgentDecision çağrılmaz, faz
+        // tetiklenmez) → düz-metin GEÇERLİ bir danışma cevabıdır: chat kararı olarak sar (message_to_user=metin).
+        // İki çağıran da (direktif eval + salt-okunur Q&A) message_to_user/reason okur → parite. CANLI KÖK: bu yol
+        // olmadan CLI orkestratör "KARAR: BENİMSE" verdi ama "decision json not found" deyip düştü → API→z.ai→hata.
+        if (this.questionMode && res.text.trim()) {
+          const prose = res.text.trim();
+          log.info("cli-orchestrator", "questionMode düz-metin yanıt kabul edildi (JSON yok)", {
+            attempt,
+            len: prose.length,
+          });
+          const decision: AgentDecision = {
+            action: "chat",
+            reason: "CLI orkestratör danışma modunda düz-metin yanıt verdi.",
+            message_to_user: prose,
+          };
+          emitAgentEvent({
+            sub: "decision",
+            turn: attempt,
+            decision: decision as unknown as Record<string, unknown>,
+          });
+          return decision;
+        }
         lastErr = "karar JSON bloğu bulunamadı/parse edilemedi";
         log.warn("cli-orchestrator", "decision json not found", {
           attempt,

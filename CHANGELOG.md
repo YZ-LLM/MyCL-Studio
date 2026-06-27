@@ -1,5 +1,22 @@
 ## 2026-06-27
 
+- **fix(fallback): API kredisi bitince CLI aboneliğe geçilir (artık denenmeden z.ai'ye düşmüyor) + orkestratör direktifi değerlendirebilir (YZLLM, canlı log teşhisi):**
+  Canlı koşuda (paketlenmiş .app) kullanıcı "API çökünce Claude aboneliğe geç" direktifi verdi; orkestratör "Yönerge
+  değerlendirilemedi" dedi + API kredisi bitince z.ai'ye düştü. Log incelemesi (`.mycl/trace.log`) + çapraz-aile
+  Sonnet 4.6 mahkemesi iki kök buldu:
+  **Bug 1 (asıl kök):** CLI orkestratör direktifi DEĞERLENDİRDİ ("KARAR: BENİMSE" düz-metni döndürdü, hatta direktifi
+  onayladı) ama [cli-orchestrator.ts](orchestrator/src/orchestrator-agent/cli-orchestrator.ts) ZORUNLU karar-JSON bloğu
+  arayıp düz metni reddetti → "decision json not found" → SDK→z.ai→hata. Direktif değerlendirme prompt'u açıkça
+  düz-metin ister (JSON değil); SDK forced-tool ile garantiler, CLI garantileyemez. Fix: SORU/danışma modunda
+  (questionMode) JSON yoksa düz-metni `chat` kararı olarak kabul et (executeAgentDecision çağrılmaz; faz tetiklenmez).
+  **Bug 2 (fallback merdiveni):** [cli-rate-limit.ts](orchestrator/src/cli-rate-limit.ts) auto-fallback'i "credit balance
+  too low" hatasını CLI+API için de KALICI sayıp döngüyü ilk denemede kesiyordu (yanlış varsayım: "ikisi de aynı ölü
+  hesap"). Ama API kredisi (kullandıkça-öde) ile CLI aboneliği (claude.ai Pro/Max) AYRI faturalanır → biri ölünce
+  diğeri çalışabilir. Fix: kalıcı hatada döngüyü hemen kesme — önce DİĞER kanalı (CLI abonelik) dene; İKİSİ DE ölünce
+  kes. [codegen/backend.ts](orchestrator/src/codegen/backend.ts) `isPermanent`'ı geçmiyordu (qa/production geçiyor) →
+  parite eklendi. Sonuç: kullanıcı tercihi (CLI abonelik önce, z.ai yalnız son çare) artık tüm rollerde geçerli.
+  check yeşil (1564 test; 2 fallback testi yeni doğru davranışa güncellendi). Etki için paketlenmiş .app rebuild gerekir.
+
 - **feat(UI): kalıcı yönerge konuşması ana chat yerine orkestratör panelinde + iki buton panele taşındı + müfettiş.md ajanlara öğretildi (YZLLM, 3 istek):**
   **(1) Yönerge → orkestratör paneli:** Kullanıcı "yönerge için konuşurken orkestratör paneli cevap versin; o
   konuştuklarımız ana chat'te olmasın." [handleOrchestratorDirective](orchestrator/src/index.ts) artık cevabı

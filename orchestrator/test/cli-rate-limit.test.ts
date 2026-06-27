@@ -281,7 +281,10 @@ describe("cli-rate-limit · autoBackendPair (yön seçimi)", () => {
 describe("cli-rate-limit · autoFallbackBackend (kalıcı hata → döngü kırma; YZLLM kredi-bitti bug'ı)", () => {
   const isPermanent = (s: string) => /credit balance/i.test(s);
 
-  it("birinci kanal KALICI hata (throw) → döngü 1 denemede KIRILIR (6 değil); ikinci kanala bile gitmez", async () => {
+  it("her iki kanal KALICI hata (throw) → İKİSİ DE bir kez denenir, sonra döngü kesilir (6 değil)", async () => {
+    // YZLLM 2026-06-27 (mahkeme): API kredisi (kullandıkça-öde) ile CLI aboneliği (claude.ai Pro/Max) AYRI
+    // faturalanır → biri "credit balance" hatası verince diğeri MUTLAKA denenir. İKİSİ DE kalıcı hata verirse
+    // o zaman döngü kesilir (boşuna 6 tur dönmez). Eski davranış "ilk kalıcı hatada kes" YANLIŞTI (aboneliği atlardı).
     let primaryRuns = 0;
     let secondaryRuns = 0;
     const makePrimary = () => ({
@@ -298,7 +301,8 @@ describe("cli-rate-limit · autoFallbackBackend (kalıcı hata → döngü kırm
     });
     const wrapped = autoFallbackBackend(makePrimary, makeSecondary, LBL, { isPermanent, backoffMs: () => 0 });
     await expect(wrapped.run()).rejects.toThrow(/credit balance/);
-    expect(primaryRuns + secondaryRuns).toBe(1); // kalıcı → tek deneme, boş döngü yok
+    expect(primaryRuns).toBe(1); // birincil denendi
+    expect(secondaryRuns).toBe(1); // İKİNCİL (diğer kanal) DA denendi — sonra kesildi (4. tur yok)
   });
 
   it("isPermanent YOK (eski davranış) → aynı throw 6 deneme döner (regresyon guard)", async () => {
@@ -314,7 +318,9 @@ describe("cli-rate-limit · autoFallbackBackend (kalıcı hata → döngü kırm
     expect(runs).toBe(6); // MAX_FALLBACK_ATTEMPTS — kalıcı işaretlenmeyen hata gidip gelir
   });
 
-  it("KALICI 'failed' outcome → döngü kırılır, ikinci kanal denenmez", async () => {
+  it("birincil KALICI 'failed' ama ikincil (abonelik) BAŞARIR → ikincil denenir + sonucu döner (kredi≠abonelik)", async () => {
+    // YZLLM 2026-06-27 (mahkeme): birincil "credit balance" ile 'failed' dönse bile ikincil kanal (CLI abonelik,
+    // ayrı fatura) denenir; başarırsa ONUN sonucu döner. Eski test "ikincil denenmez, failed döner" diyordu — YANLIŞ.
     let primaryRuns = 0;
     let secondaryRuns = 0;
     const makePrimary = () => ({
@@ -326,8 +332,8 @@ describe("cli-rate-limit · autoFallbackBackend (kalıcı hata → döngü kırm
     });
     const wrapped = autoFallbackBackend(makePrimary, makeSecondary, LBL, { isPermanent, backoffMs: () => 0 });
     const r = await wrapped.run();
-    expect(r.kind).toBe("failed");
+    expect(r.kind).toBe("approved"); // ikincil (abonelik) başardı → onun sonucu
     expect(primaryRuns).toBe(1);
-    expect(secondaryRuns).toBe(0);
+    expect(secondaryRuns).toBe(1); // ikincil MUTLAKA denendi
   });
 });

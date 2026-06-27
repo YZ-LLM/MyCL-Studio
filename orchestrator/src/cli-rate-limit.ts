@@ -326,18 +326,22 @@ export function autoFallbackBackend<O extends { kind: string }, B extends Fallba
             backend: turn.name,
             attempt: attempt + 1,
           });
-          // KALICI hata (kredi/yetki): CLI↔API ikisi de aynı ölü Claude hesabı → döndürmek anlamsız, DUR.
-          if (opts?.isPermanent?.(String(err))) {
-            log.info("cli-rate-limit", "auto fallback: kalıcı hata → döngü kesildi", { backend: turn.name });
+          // KALICI hata (kredi/yetki) — ama döngüyü HEMEN kesme: DİĞER kanal ZATEN denendiyse kes (attempt≥1),
+          // değilse önce onu dene. YZLLM 2026-06-27 (mahkeme): API kredisi (kullandıkça-öde) ile CLI aboneliği
+          // (claude.ai Pro/Max) AYRI faturalanır — biri ölünce diğeri ÇALIŞABİLİR. Eski varsayım ("ikisi de aynı
+          // ölü hesap") YANLIŞTI: kredi bitince abonelik denenmeden dururduk. Şimdi: önce öbür kanalı (CLI abonelik)
+          // dene; İKİSİ DE kalıcı hata verirse o zaman kes (boşuna 6 tur dönme). Kullanıcı direktifi: API→abonelik.
+          if (opts?.isPermanent?.(String(err)) && attempt >= 1) {
+            log.info("cli-rate-limit", "auto fallback: her iki kanal da kalıcı hata → döngü kesildi", { backend: turn.name });
             break;
           }
           continue; // diğer kanalı dene
         }
         if (r.kind !== "failed") return r; // başarı ya da aborted → bitti
         last = r;
-        // 'failed' sonucun sebebi de kalıcıysa diğer kanalı boş yere deneme.
-        if (opts?.isPermanent?.(String((r as { reason?: string }).reason ?? ""))) {
-          log.info("cli-rate-limit", "auto fallback: kalıcı 'failed' → döngü kesildi", { backend: turn.name });
+        // 'failed' sonucun sebebi de kalıcıysa: yine DİĞER kanal denendiyse kes (attempt≥1); değilse önce onu dene.
+        if (opts?.isPermanent?.(String((r as { reason?: string }).reason ?? "")) && attempt >= 1) {
+          log.info("cli-rate-limit", "auto fallback: her iki kanal da kalıcı 'failed' → döngü kesildi", { backend: turn.name });
           break;
         }
       }
