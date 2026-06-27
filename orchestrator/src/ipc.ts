@@ -469,7 +469,10 @@ function startHeartbeat(label: string): void {
           ? `son adım (~${ageSec}s önce): ${_lastStep} — o zamandan beri yeni dosya/komut YOK (düşünüyor…)`
           : `şu an: ${_lastStep}`;
     }
-    emitChatMessage("system", `⏳ ${_hbLabel} — ${secs}s sürüyor · ${line}`, { persist: false });
+    // YZLLM 2026-06-27: heartbeat durumu CHAT panelini ŞİŞİRMESİN → alttaki BANDA (runningBanner) yaz. Band detail'i
+    // her 60s'de canlı durumla güncellenir (label sabit _hbLabel); chat temiz kalır. phase_running re-emit yan etkisiz
+    // (frontend reducer yalnız runningBanner'ı set eder); faz-geçişi/idle bandı normalde kapatır.
+    emit("phase_running", { label: _hbLabel, detail: `${secs}s sürüyor · ${line}`, ts: now });
   }, HEARTBEAT_MS);
   // Süreç çıkışını engellememesi için unref (varsa).
   (_hbTimer as unknown as { unref?: () => void })?.unref?.();

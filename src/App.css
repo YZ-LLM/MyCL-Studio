@@ -1231,17 +1231,14 @@ select:focus {
    Ara scan, Phase 0 D1/D3). Spinner emoji CSS rotate ile döner. */
 .running-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* detail sarınca spinner/label üstte hizalı kalsın */
   gap: 10px;
-  padding: 8px 14px;
+  padding: 9px 14px;
   background: rgba(80, 140, 220, 0.12);
   border-top: 1px solid rgba(80, 140, 220, 0.4);
   font-size: 12px;
   color: #5a9be5;
   font-weight: 500;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .running-spinner {
   display: inline-block;
@@ -1249,15 +1246,23 @@ select:focus {
   font-size: 13px;
   flex-shrink: 0;
 }
+.running-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0; /* detail'in sarması için (flex çocuğu daralabilsin) */
+}
 .running-label {
   flex-shrink: 0;
 }
 .running-detail {
-  opacity: 0.65;
+  opacity: 0.7;
   font-weight: 400;
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.45;
+  /* YZLLM 2026-06-27: heartbeat durumu artık burada → tek satıra sıkıştırıp KESME; sarılsın (band kalınlaşır). */
+  white-space: pre-wrap;
+  word-break: break-word;
   min-width: 0;
 }
 @keyframes mycl-spin {

@@ -477,10 +477,12 @@ export function ChatPanel({
           title={runningBanner.detail ?? ""}
         >
           <span className="running-spinner" aria-hidden>⏳</span>
-          <span className="running-label">{runningBanner.label}</span>
-          {runningBanner.detail && (
-            <span className="running-detail">{runningBanner.detail}</span>
-          )}
+          <div className="running-text">
+            <span className="running-label">{runningBanner.label}</span>
+            {runningBanner.detail && (
+              <span className="running-detail">{runningBanner.detail}</span>
+            )}
+          </div>
         </div>
       )}
       {replyingTo && (

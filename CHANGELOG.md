@@ -1,3 +1,11 @@
+## 2026-06-27
+
+- **fix(UX): 60 sn'lik "çalışıyor" durumu artık CHAT'i şişirmiyor — alttaki banda yazılıyor (YZLLM):**
+  Uzun işlerde dakikada bir gelen heartbeat ("⏳ TDD uygulanıyor — 300s sürüyor · son adım…") chat paneline
+  birikiyordu (gürültü). Artık alttaki "çalışıyor" bandına ([ipc.ts](orchestrator/src/ipc.ts) heartbeat tick →
+  `phase_running` detail) yazılır; band detail'i her 60 sn'de canlı durumla güncellenir, chat temiz kalır. Band
+  çok-satır sarar (kalınlaşır, kesilmez — [ChatPanel.tsx](src/components/ChatPanel.tsx)/App.css). check yeşil.
+
 ## 2026-06-26
 
 - **fix(orkestra): aynı-ms olaylar Orkestra panelinden DÜŞMÜYOR — req 3 "yaptığı herşeyi göster" tam karşılandı (YZLLM, bütünsel mahkeme):**
