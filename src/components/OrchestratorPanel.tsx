@@ -116,7 +116,7 @@ export function OrchestratorPanel({ events, onDirective }: Props) {
             yaptığı ve nedeni — burada sade Türkçe görünür; önemli kararlar belirgin renktedir.
           </p>
         ) : (
-          events.map((ev) => <ActivityRow key={ev.ts} ev={ev} />)
+          events.map((ev) => <ActivityRow key={ev.seq ?? ev.ts} ev={ev} />)
         )}
       </div>
       {/* Alt composer (YZLLM req 4): görev değil, KALICI YÖNERGE (işin nasıl yapılacağı çapası). Orkestratör

@@ -65,6 +65,9 @@ const EMPTY_LIST: ModelsList = { models: [], fetched_at: 0, loading: false };
 /** v15.6 — orkestrator ajan event'i (modal'da gösterilir). */
 export interface AgentThinkingEvent {
   ts: number;
+  /** YZLLM 2026-06-26 (mahkeme #10): monoton benzersiz sıra no — aynı-ms olaylar React key çakışmasıyla
+   *  görünümden DÜŞMESİN (req 3 "yaptığı herşeyi göster"). ts tek başına benzersiz değil. */
+  seq?: number;
   sub: "started" | "completed" | "tool_use" | "decision" | "error";
   /** Agent Teams görünürlüğü: hangi ajan (örn. "Mimari"/"UX"). Tek orkestratörde boş. */
   agent_label?: string;
@@ -116,6 +119,9 @@ interface MainState {
   /** Orkestratörün TÜM önemli aktivitesi (tool_use + decision + error) — Orkestra panelini besler;
    *  agentEvents'ten ayrı, daha yüksek cap (500) → uzun oturumda aktivite yutulmaz ("yaptığı herşey"). */
   orchestratorActivity: AgentThinkingEvent[];
+  /** Monoton aktivite sayacı (mahkeme #10): her kabul edilen agent_event'e benzersiz seq verir → React key
+   *  çakışması/olay-düşmesi olmaz (aynı-ms olaylar korunur). */
+  agentEventSeq: number;
   /** Faz geçiş işaretçileri (her faz başlangıcı: ts + faz no) — chat'te faz çizgisi + faza tıklayınca jump. */
   phaseMarkers: { ts: number; to: number }[];
   /**
@@ -161,6 +167,7 @@ const INITIAL_STATE: MainState = {
   olderAvailable: true,
   loadingOlder: false,
   agentEvents: [],
+  agentEventSeq: 0,
   orchestratorActivity: [],
   phaseMarkers: [],
   agentBusyCount: 0,
@@ -571,6 +578,7 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     }
     const newEvent: AgentThinkingEvent = {
       ts: d.ts,
+      seq: state.agentEventSeq, // benzersiz key (mahkeme #10) — aynı-ms olaylar görünümden düşmesin
       sub: d.sub,
       agent_label: d.agent_label,
       turn: d.turn,
@@ -579,8 +587,19 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       decision: d.decision,
       error: d.error,
     };
-    // Dedup by ts
-    if (state.agentEvents.some((e) => e.ts === d.ts)) return state;
+    // Yeniden-işleme guard'ı (mahkeme #10): YALNIZ GERÇEK tekrarı ele (effect re-fire/StrictMode aynı olayı iki kez
+    // verirse) — ts'i AYNI ama içeriği FARKLI distinct olayları (aynı-ms iki tool_use) DÜŞÜRME. Eski "ts === d.ts"
+    // tek başına distinct olayları yutuyordu (req 3 "yaptığı herşeyi göster" ihlali). İçerik-bazlı tam eşleşme:
+    const isReprocessed = state.agentEvents.some(
+      (e) =>
+        e.ts === d.ts &&
+        e.sub === d.sub &&
+        e.tool_name === d.tool_name &&
+        e.error === d.error &&
+        JSON.stringify(e.tool_input) === JSON.stringify(d.tool_input) &&
+        JSON.stringify(e.decision) === JSON.stringify(d.decision),
+    );
+    if (isReprocessed) return state;
     const merged = [...state.agentEvents, newEvent];
     // Max 100 entry — en eskileri drop (slice from end)
     const capped = merged.length > 100 ? merged.slice(merged.length - 100) : merged;
@@ -591,7 +610,12 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     const isActivity = d.sub === "tool_use" || d.sub === "decision" || d.sub === "error";
     const acts = isActivity ? [...state.orchestratorActivity, newEvent] : state.orchestratorActivity;
     const actCapped = acts.length > 500 ? acts.slice(acts.length - 500) : acts;
-    return { ...state, agentEvents: capped, orchestratorActivity: actCapped };
+    return {
+      ...state,
+      agentEvents: capped,
+      orchestratorActivity: actCapped,
+      agentEventSeq: state.agentEventSeq + 1, // kabul edilen olay → sayacı ilerlet (benzersiz seq)
+    };
   }
   // v15.7 (2026-05-24): İş kuyruğu — backend her değişiklikte tam listeyi yollar
   if (ev.kind === "task_queue_loaded" || ev.kind === "task_queue_changed") {

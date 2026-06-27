@@ -1,5 +1,12 @@
 ## 2026-06-26
 
+- **fix(orkestra): aynı-ms olaylar Orkestra panelinden DÜŞMÜYOR — req 3 "yaptığı herşeyi göster" tam karşılandı (YZLLM, bütünsel mahkeme):**
+  Reducer `agent_event`'i `ts === d.ts` ile eliyordu → aynı milisaniyede gelen DISTINCT iki tool_use'dan biri sessizce
+  düşüyordu (req 3 ihlali). Düzeltme: içerik-bazlı yeniden-işleme guard'ı (yalnız GERÇEK tekrarı eler; distinct same-ms
+  olayları korur) + her kabul edilen olaya monoton `seq` → benzersiz React key (key çakışması/olay-düşmesi yok). 11-istek
+  bütünsel mahkemesi (Sonnet 4.6, 4 eksen + düşman-doğrulama, 14 bulgu) tüm istekleri DOĞRULADI; tek gerçek kusur buydu
+  (diğerleri olumlu-doğrulama + opsiyonel ölü-kod). check yeşil.
+
 - **feat(orkestra): panel altına KALICI YÖNERGE composer'ı — orkestratör benimser/itiraz eder + sonraki tüm işlere uyar (YZLLM req 4):**
   Orkestra panelinin altındaki yeni composer "iş" değil, işin NASIL yapılacağına dair KALICI bir ÇAPA verir (örn.
   "projelerde her zaman versiyonlama yapalım"). Orkestratör salt-okunur değerlendirir ([user-directives.ts](orchestrator/src/user-directives.ts)
