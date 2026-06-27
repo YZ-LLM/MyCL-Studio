@@ -33,6 +33,42 @@ export interface FixSnapshot {
   dir?: string;
 }
 
+/** Proje başına tutulacak kopya-yedek sayısı (YZLLM 2026-06-27). Eskiler budanır → ~/.mycl/backups şişmez. */
+export const BACKUP_KEEP = 3;
+
+/**
+ * SAF-yan-etkili: bir projenin ~/.mycl/backups altındaki `<proje>-autofix-<ts>` kopya-yedeklerinden EN YENİ
+ * `keep` taneyi tut, eskileri sil. ts = dizin adındaki epoch son-eki (sayısal sırala, en yeni kalır). Yalnız
+ * BU projenin yedeklerine dokunur (prefix + sayısal son-ek eşleşmesi). Fail-soft: hata budanmayı atlar, snapshot'ı
+ * bozmaz. Test edilebilir (backupsRoot dışarıdan verilir). */
+export async function pruneProjectBackups(
+  backupsRoot: string,
+  projectName: string,
+  keep: number,
+): Promise<string[]> {
+  const removed: string[] = [];
+  try {
+    const prefix = `${projectName}-autofix-`;
+    const entries = await readdir(backupsRoot, { withFileTypes: true }).catch(() => []);
+    const mine = entries
+      .filter(
+        (e) =>
+          e.isDirectory() &&
+          e.name.startsWith(prefix) &&
+          /^\d+$/.test(e.name.slice(prefix.length)),
+      )
+      .map((e) => ({ name: e.name, ts: Number(e.name.slice(prefix.length)) }))
+      .sort((a, b) => b.ts - a.ts); // en yeni önce
+    for (const old of mine.slice(Math.max(0, keep))) {
+      await rm(join(backupsRoot, old.name), { recursive: true, force: true }).catch(() => {});
+      removed.push(old.name);
+    }
+  } catch (e) {
+    log.warn("fix-snapshot", "eski yedekler budanamadı (non-fatal)", { error: String(e) });
+  }
+  return removed;
+}
+
 /**
  * Oto-düzeltme öncesi snapshot. Git temizse git-checkpoint (ref). Değilse kaynak kopyası (.mycl/backups).
  * İkisi de olmazsa görünür uyarı + {none} (düzeltme yine uygulanır ama geri-alma yok — dürüstçe söylenir).
@@ -54,7 +90,9 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
   // 2. Git yok/kirli → kaynak ağacını yedekle. Hedef proje DIŞINDA (~/.mycl/backups) — `fs.cp` bir dizini kendi
   // alt-dizinine kopyalayamaz; ayrıca yedek projeyi kirletmez + proje işlemlerinden etkilenmez.
   try {
-    const dir = join(globalConfigDir(), "backups", `${basename(projectRoot)}-autofix-${nowTs}`);
+    const backupsRoot = join(globalConfigDir(), "backups");
+    const projectName = basename(projectRoot);
+    const dir = join(backupsRoot, `${projectName}-autofix-${nowTs}`);
     await mkdir(dir, { recursive: true });
     await cp(projectRoot, dir, {
       recursive: true,
@@ -71,6 +109,9 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
     );
     const snap: FixSnapshot = { method: "copy", dir };
     armRollback(snap);
+    // YZLLM 2026-06-27: proje başına yalnız son N yedeği tut — eskiler budanır (disk şişmesin). Yeni yedek
+    // oluştuktan SONRA budanır → kept-3 her zaman EN YENİ 3'tür (bu koşunun yedeği dahil). Fail-soft.
+    await pruneProjectBackups(backupsRoot, projectName, BACKUP_KEEP);
     return snap;
   } catch (e) {
     log.warn("fix-snapshot", "snapshot failed (non-fatal)", e);

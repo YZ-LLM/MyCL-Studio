@@ -1,5 +1,13 @@
 ## 2026-06-27
 
+- **feat(yedek): ~/.mycl/backups proje başına son 3 yedeği tutar + test artık gerçek ~/.mycl'i kirletmez (YZLLM):**
+  Oto-düzeltme öncesi kopya-yedekleri ([fix-snapshot.ts](orchestrator/src/fix-snapshot.ts)) sınırsız birikiyordu
+  (adminpanel 111, Vestel_BO 25…). Artık her yeni yedekten sonra o projenin EN YENİ 3 yedeği tutulur, eskiler budanır
+  (`pruneProjectBackups`, yalnız o projeye dokunur, fail-soft; just-created yedek hep en yeni→korunur). Ayrıca KÖK
+  TEMİZLİK: `fix-snapshot.test.ts` `MYCL_HOME`'u izole etmiyordu → her test koşusu gerçek `~/.mycl/backups`'a
+  `mycl-snap-*` artifact'ı bırakıyordu (1835 birikmişti); test artık temp home kullanır (gerçek dizin kirlenmez).
+  3 birim test (son-3 / yalnız-kendi-projesi / ≤3-no-op). check yeşil.
+
 - **fix(çeviri): çeviri ajanı artık kelime-kelime DEĞİL, ANLAM-odaklı anlaşılır Türkçe üretir (YZLLM):**
   Eski prompt katı verbatim/kelime-kelimeydi → "device step-up layer" → "cihaz adım yukarı katmanı" gibi anlamsız
   çıktı veriyor, "compliance/schema drift/fail-closed" gibi İngilizce jargonu ya çevirmeden bırakıyor ya saçmalıyordu.

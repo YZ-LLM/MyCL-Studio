@@ -8,12 +8,27 @@ import {
   restoreSnapshot,
   peekRollback,
   disarmRollback,
+  pruneProjectBackups,
 } from "../src/fix-snapshot.js";
 
 describe("snapshotBeforeAutofix (git yoksa .mycl/backups kopya)", () => {
   let dir: string;
-  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "mycl-snap-")); });
-  afterEach(async () => { disarmRollback(); await rm(dir, { recursive: true, force: true }); });
+  // MYCL_HOME izole (YZLLM 2026-06-27): snapshotBeforeAutofix yedeği globalConfigDir()'e (~/.mycl/backups) yazar.
+  // İzole edilmezse her test koşusu GERÇEK ~/.mycl/backups'a `mycl-snap-*` artifact'ı bırakıyordu (1835 birikmişti).
+  let home: string;
+  const origHome = process.env.MYCL_HOME;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "mycl-snap-"));
+    home = await mkdtemp(join(tmpdir(), "mycl-home-"));
+    process.env.MYCL_HOME = home;
+  });
+  afterEach(async () => {
+    disarmRollback();
+    await rm(dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true }).catch(() => {});
+    if (origHome === undefined) delete process.env.MYCL_HOME;
+    else process.env.MYCL_HOME = origHome;
+  });
 
   it("git olmayan projede kaynağı yedekler, node_modules'ı HARİÇ tutar", async () => {
     await mkdir(join(dir, "src"), { recursive: true });
@@ -83,5 +98,51 @@ describe("snapshotBeforeAutofix (git yoksa .mycl/backups kopya)", () => {
     expect(peeked!.dir).toBe(snap.dir); // aynı snapshot
     // peek temizlemedi → ikinci peek de aynısını döner
     expect(peekRollback()?.dir).toBe(snap.dir);
+  });
+});
+
+describe("pruneProjectBackups — proje başına son N yedek (YZLLM 2026-06-27)", () => {
+  let root: string;
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "mycl-bk-")); });
+  afterEach(async () => { await rm(root, { recursive: true, force: true }).catch(() => {}); });
+
+  async function mk(name: string): Promise<void> {
+    await mkdir(join(root, name), { recursive: true });
+  }
+
+  it("yalnız EN YENİ 3'ü tutar, eskileri siler (ts'e göre)", async () => {
+    for (const ts of [100, 200, 300, 400, 500]) await mk(`projA-autofix-${ts}`);
+    const removed = await pruneProjectBackups(root, "projA", 3);
+    expect(removed.sort()).toEqual(["projA-autofix-100", "projA-autofix-200"]);
+    expect(existsSync(join(root, "projA-autofix-500"))).toBe(true);
+    expect(existsSync(join(root, "projA-autofix-400"))).toBe(true);
+    expect(existsSync(join(root, "projA-autofix-300"))).toBe(true);
+    expect(existsSync(join(root, "projA-autofix-200"))).toBe(false);
+    expect(existsSync(join(root, "projA-autofix-100"))).toBe(false);
+  });
+
+  it("YALNIZ kendi projesine dokunur — başka proje + alakasız dizinler korunur", async () => {
+    for (const ts of [1, 2, 3, 4]) await mk(`projA-autofix-${ts}`);
+    await mk("projB-autofix-9");
+    await mk("projB-autofix-8");
+    await mk("rastgele-dizin");
+    await mk("projA-autofix-abc"); // sayısal-olmayan son-ek → projA yedeği SAYILMAZ
+    await pruneProjectBackups(root, "projA", 3);
+    // projB dokunulmadı
+    expect(existsSync(join(root, "projB-autofix-9"))).toBe(true);
+    expect(existsSync(join(root, "projB-autofix-8"))).toBe(true);
+    expect(existsSync(join(root, "rastgele-dizin"))).toBe(true);
+    expect(existsSync(join(root, "projA-autofix-abc"))).toBe(true); // sayısal değil → eşleşmez
+    // projA: 4 sayısal yedekten en eskisi (1) silindi, 2/3/4 kaldı
+    expect(existsSync(join(root, "projA-autofix-1"))).toBe(false);
+    expect(existsSync(join(root, "projA-autofix-4"))).toBe(true);
+  });
+
+  it("3 veya daha az yedekte hiçbir şey silmez", async () => {
+    await mk("projA-autofix-1");
+    await mk("projA-autofix-2");
+    const removed = await pruneProjectBackups(root, "projA", 3);
+    expect(removed).toEqual([]);
+    expect(existsSync(join(root, "projA-autofix-1"))).toBe(true);
   });
 });
