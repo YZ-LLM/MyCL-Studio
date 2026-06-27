@@ -18,8 +18,6 @@ interface Props {
   errorCount?: number;
   /** Akış sonu DÜRÜST hüküm. PARTIAL/FAIL ise faz göstergesinin yanında çip. */
   pipelineVerdict?: "PASS" | "PARTIAL" | "FAIL" | null;
-  /** YZLLM 2026-06-15: üst barda o anda ÜZERİNDE ÇALIŞILAN iş. null/boş → gösterilmez. */
-  currentJob?: string | null;
 }
 
 /** Hüküm çipi metni — geliştiricinin dilinde (TR). PASS/null → çip yok. */
@@ -40,7 +38,6 @@ export function AppHeader({
   phase,
   status,
   onPhaseIndicatorClick,
-  currentJob,
   errorCount,
   pipelineVerdict,
 }: Props) {
@@ -71,25 +68,8 @@ export function AppHeader({
         <span data-tauri-drag-region>{projectPath}</span>
         <span className="lock" data-tauri-drag-region>🔒</span>
       </span>
-      {currentJob && currentJob.trim() && (
-        <span
-          className="app-current-job"
-          data-testid="current-job"
-          title={currentJob}
-          data-tauri-drag-region
-          style={{
-            marginLeft: 12,
-            maxWidth: 420,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            opacity: 0.85,
-            fontSize: 12,
-          }}
-        >
-          🔧 {currentJob.trim()}
-        </span>
-      )}
+      {/* YZLLM 2026-06-27: üst bardaki KONU (currentJob) kaldırıldı — kullanıcı "üstteki konuyu yazma oraya" dedi;
+          konu artık yalnız chat panelinin solunda (tek yer, ChatPanel.panel-label). */}
       {onPhaseIndicatorClick ? (
         <button
           type="button"

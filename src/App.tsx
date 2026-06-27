@@ -1357,7 +1357,6 @@ function App() {
       <AppHeader
         projectPath={projectPath}
         phase={mainState.phase}
-        currentJob={mainState.iterationIntent}
         // YZLLM 2026-06-12: model GERÇEKTEN çalışırken (runningBanner aktif) header "çalışıyor" göstersin —
         // bayat "yanıt bekleniyor" (askq cevaplandıktan sonra kalan) yanıltmasın. runningBanner canlı gerçek.
         status={mainState.runningBanner ? "running" : mainState.phaseStatus}

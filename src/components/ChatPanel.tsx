@@ -348,34 +348,37 @@ export function ChatPanel({
   return (
     <section className="panel" data-testid="chat-panel">
       <div className="panel-label">
-        {messages.length > 0 && (
-          <button
-            type="button"
-            className="chat-copy-all"
-            title="Tüm sohbeti kopyala"
-            onClick={copyAll}
-          >
-            {copiedId === "__all__" ? "✓ Kopyalandı" : "⧉ Tümünü kopyala"}
-          </button>
-        )}
-        {currentJob && currentJob.trim() && (
-          <span
-            className="chat-current-job"
-            data-testid="chat-current-job"
-            title={currentJob}
-            style={{
-              marginLeft: 10,
-              maxWidth: 360,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              opacity: 0.8,
-              fontSize: 12,
-            }}
-          >
-            🔧 {currentJob.trim()}
-          </span>
-        )}
+        {/* YZLLM 2026-06-27: kopya-butonu + KONU sol grupta (panel-label space-between'i konuyu sağa itiyordu;
+            kullanıcı "konuyu sola al" dedi). Konu artık solda; üstteki (AppHeader) kopyası kaldırıldı (tek yer). */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              className="chat-copy-all"
+              title="Tüm sohbeti kopyala"
+              onClick={copyAll}
+            >
+              {copiedId === "__all__" ? "✓ Kopyalandı" : "⧉ Tümünü kopyala"}
+            </button>
+          )}
+          {currentJob && currentJob.trim() && (
+            <span
+              className="chat-current-job"
+              data-testid="chat-current-job"
+              title={currentJob}
+              style={{
+                maxWidth: 520,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                opacity: 0.8,
+                fontSize: 12,
+              }}
+            >
+              🔧 {currentJob.trim()}
+            </span>
+          )}
+        </div>
       </div>
       <div className="chat-messages" ref={scrollRef} onScroll={handleScroll}>
         {loadingOlder && (

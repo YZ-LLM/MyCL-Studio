@@ -1,5 +1,11 @@
 ## 2026-06-27
 
+- **fix(UX): "konu" (üzerinde çalışılan iş) sola alındı + üst bardaki kopyası kaldırıldı (YZLLM):**
+  Konu iki yerde gösteriliyordu: üst bar ([AppHeader.tsx](src/components/AppHeader.tsx)) + chat toolbar
+  ([ChatPanel.tsx](src/components/ChatPanel.tsx), `panel-label` space-between ile SAĞA itiliyordu). Kullanıcı isteği:
+  konu SOLA + üstte yazılmasın. Üst bardaki konu kaldırıldı (tek yer); chat toolbar'da konu kopya-butonuyla sol
+  grupta (artık solda). check yeşil.
+
 - **fix(UX): chat otomatik aşağı kaydırma YALNIZ oto-cevap açıkken (YZLLM):**
   Yeni içerikte (mesaj/askq/banner-heartbeat) chat panelini otomatik en alta kaydırma artık yalnız **oto-cevap modu
   açıkken** yapılır ([ChatPanel.tsx](src/components/ChatPanel.tsx)). Oto-cevap kapalıyken kullanıcı içeriği okuyup
