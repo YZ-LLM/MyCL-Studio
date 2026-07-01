@@ -13,7 +13,7 @@
 
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
-import { READ_ONLY_DISALLOWED_TOOLS, PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
+import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { log } from "./logger.js";
 import { dedupeFindings } from "./phase-9-debate-dedup.js";
 import { emitAgentEvent, emitChatMessage } from "./ipc.js";
@@ -129,10 +129,8 @@ function validatorSystemPrompt(f: DebateFinding): string {
     "- If you cannot verify either way after reading, default to is_real=false (we drop unprovable findings — better than noise).\n\n" +
     `## Claimed risk\nLens: ${f.axis}\nDecision: ${f.decision} | fix_phase: ${f.fix_phase} | severity: ${f.severity}\n` +
     `Risk: ${f.risk}\nEvidence claimed: ${f.detail ?? "(none)"}\n\n` +
-    "## If the evidence is a MERGED cluster (several bulleted claims), verify EACH claim against the code and set " +
-    "is_real=true if AT LEAST ONE is a genuine issue (state which in reason). Only false if ALL are false positives.\n\n" +
     "## OUTPUT — exactly ONE JSON block, nothing else:\n" +
-    '{"kind":"verdict","is_real":true,"reason":"<what you saw in the code that confirms or refutes (per claim if merged)>"}'
+    '{"kind":"verdict","is_real":true,"reason":"<what you saw in the code that confirms or refutes>"}'
   );
 }
 
@@ -232,115 +230,8 @@ async function runFinderWave(
   return { findings, axisOk };
 }
 
-const SEV_RANK: Record<string, number> = { high: 3, medium: 2, low: 1 };
-
 /**
- * SAF (test edilebilir): LLM cluster gruplarını bulgulara uygular. Her grup → tek temsilci (en yüksek severity;
- * eşitse en zengin detail). GÜVENLİK: geçersiz/kapsam-dışı/tekrar index'ler atlanır; HİÇBİR gruba girmeyen bulgu
- * AYNEN korunur (yanlış-birleştirme dışında bulgu KAYBI olmaz — sahte-yeşil yasağı). Birden çok eksen → "a+b".
- */
-export function applyClusters(findings: DebateFinding[], groups: unknown[]): DebateFinding[] {
-  const out: DebateFinding[] = [];
-  const covered = new Set<number>();
-  for (const g of groups) {
-    if (!Array.isArray(g)) continue;
-    const idxs = g.filter(
-      (x): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0 && x < findings.length && !covered.has(x),
-    );
-    if (idxs.length === 0) continue;
-    idxs.forEach((x) => covered.add(x));
-    let rep = findings[idxs[0]];
-    for (const x of idxs.slice(1)) {
-      const f = findings[x];
-      const higher = (SEV_RANK[f.severity] ?? 0) > (SEV_RANK[rep.severity] ?? 0);
-      const sameSevMoreDetail = f.severity === rep.severity && (f.detail?.length ?? 0) > (rep.detail?.length ?? 0);
-      if (higher || sameSevMoreDetail) rep = f;
-    }
-    if (idxs.length > 1) {
-      // KRİTİK GÜVENLİK (mahkeme HIGH): yanlış birleştirmede DÜŞEN bulgu çürütücüye HİÇ ulaşmasın diye TÜM üye
-      // risk+detail'i temsilcinin detail'inde KORU (bilgi kaybı yok). Çürütücü kümeyi görür → "en az biri gerçek
-      // mi" diye doğrular; gerçek olan(lar) hayatta kalır + düzeltmeye tüm bağlam gider. Sahte-yeşil yasağı korunur.
-      const members = idxs.map((x) => findings[x]);
-      const combinedDetail =
-        "MERGED cluster of related findings — verify EACH claim (is_real=true if AT LEAST ONE is a genuine issue):\n" +
-        members.map((m) => `• [${m.axis}/${m.severity}] ${m.risk}${m.detail ? ` — ${m.detail}` : ""}`).join("\n");
-      out.push({ ...rep, axis: [...new Set(members.map((m) => m.axis))].join("+"), detail: combinedDetail });
-    } else {
-      out.push(rep);
-    }
-  }
-  // Hiçbir gruba girmeyen index → GÜVENLİ tarafta kal, aynen ekle (LLM atlamış olabilir; bulgu kaybı yok).
-  findings.forEach((f, i) => {
-    if (!covered.has(i)) out.push(f);
-  });
-  return out;
-}
-
-/**
- * SEMANTİK dedup (YZLLM 2026-06-30): metin-birebir dedup'tan SONRA, farklı eksenlerin AYNI kök sorunu FARKLI
- * kelimelerle raporladığı bulguları LLM ile MUHAFAZAKÂR birleştirir (yalnız kesin aynı kök+konum; kuşkuda AYRI
- * bırak — yanlış birleştirme gerçek bir bulguyu sessizce düşürür, bu dupe'tan çok daha kötü). Çürütücü maliyetini
- * düşürür. FAIL-SAFE: hata/parse-fail/atlanan-index → o bulgular AYNEN korunur (bulgu kaybı YOK). Kod okumaz
- * (saf metin kümeleme; konum ayrımı için detail'deki file:line'a bakar; kod-seviyesi doğrulamayı çürütücü yapar).
- */
-async function semanticDedupeFindings(
-  findings: DebateFinding[],
-  modelId: string,
-  extraEnv: Record<string, string> | undefined,
-  projectRoot: string,
-  effort: string | undefined,
-): Promise<DebateFinding[]> {
-  if (findings.length < 2) return findings;
-  const list = findings
-    .map((f, i) => `${i}. [${f.axis}/${f.severity}] ${f.risk}${f.detail ? ` — ${f.detail.slice(0, 200)}` : ""}`)
-    .join("\n");
-  const system =
-    "You cluster code-review findings by ROOT ISSUE. Multiple review lenses can report the SAME underlying problem " +
-    "in different words. Group ONLY findings that describe the SAME root issue at the SAME code location.\n" +
-    "BE CONSERVATIVE: when in doubt, keep SEPARATE. A wrong merge silently drops a real distinct risk — far worse " +
-    "than leaving a duplicate. Different files / locations / root-causes = SEPARATE, even if worded similarly.\n\n" +
-    "## OUTPUT — exactly ONE JSON block, nothing else:\n" +
-    '{"kind":"clusters","groups":[[0,3],[1],[2]]}\n' +
-    "Each inner array = indices of findings that are the SAME issue. Include EVERY index exactly once (singletons as 1-element arrays).";
-  const res = await withAgentRun(
-    { label: "Semantik birleştirme", group: "Faz 9 İnceleme — Semantik Dedup", phase: 9 },
-    async () => {
-      emitAgentEvent({ sub: "started", agent_label: "Semantik birleştirme", agent_group: "Faz 9 İnceleme — Semantik Dedup", phase: 9 });
-      try {
-        return await runClaudeCli({
-          systemPrompt: system,
-          userMessage: "Findings:\n" + list,
-          modelId,
-          extraEnv,
-          cwd: projectRoot,
-          disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf metin kümeleme — kod/Bash aracı GEREKMEZ (mahkeme)
-          effort, // pipeline effort'u geçir (bulucu/çürütücü ile parite; mahkeme)
-          timeoutMs: 60_000,
-        });
-      } finally {
-        emitAgentEvent({ sub: "completed", agent_label: "Semantik birleştirme" });
-      }
-    },
-  );
-  if (!res.ok) {
-    log.warn("phase-9-debate", "semantik dedup başarısız → metin-dedup sonucu korunur (bulgu kaybı yok)", { error: res.error });
-    return findings;
-  }
-  const block = extractKindBlock(res.text, ["clusters"]);
-  const groups = block && Array.isArray(block.groups) ? (block.groups as unknown[]) : null;
-  if (!groups) {
-    log.warn("phase-9-debate", "semantik dedup: cluster bloğu yok → metin-dedup sonucu korunur");
-    return findings;
-  }
-  const out = applyClusters(findings, groups);
-  if (out.length < findings.length) {
-    log.info("phase-9-debate", "semantik dedup birleştirdi", { before: findings.length, after: out.length });
-  }
-  return out;
-}
-
-/**
- * Çok-ajanlı risk incelemesi: 2-dalga bulucular → metin-dedup → semantik-dedup → paralel çürütücüler (bulgu başına).
+ * Çok-ajanlı risk incelemesi: 2-dalga bulucular → metin-dedup → paralel çürütücüler (bulgu başına).
  * Yalnız doğrulanan (is_real) bulgular döner. Tüm bulucular patlarsa ok:false (fail-closed).
  */
 export async function runDebateReview(
@@ -400,10 +291,10 @@ export async function runDebateReview(
     return { ok: true, findings: [], axisCount: DEBATE_AXES.length, axisOk, rawCount: 0, confirmedCount: 0 };
   }
 
-  // 2. DEDUP — metin-birebir (saf, test edilebilir) → SONRA semantik (LLM, muhafazakâr; farklı kelimeyle aynı
-  // kök sorunu birleştirir; fail-safe + üye risk+detail korunur → bulgu kaybı yok). Çürütücü maliyetini↓.
-  const textDeduped = dedupeFindings(raw);
-  const deduped = await semanticDedupeFindings(textDeduped, modelId, extraEnv, projectRoot, effort);
+  // 2. DEDUP — metin-birebir (saf, test edilebilir; muhafazakâr → yalnız AYNI riski birleştirir). YZLLM 2026-06-30:
+  // semantik (LLM) dedup KALDIRILDI (over-engineering): 2-dalga örtüşmeyi zaten kaynakta önlüyor; az-dedup güvenli
+  // (kaçan dupe iki kez çürütülür, ucuz), fazla-dedup ise gerçek bulgu düşürme = sahte-yeşil riski taşıyordu.
+  const deduped = dedupeFindings(raw);
 
   // 3. ÇÜRÜTÜCÜLER — bulgu başına paralel; yanlış-pozitifleri ele. Ajan Takımı görünürlüğü (mahkeme #4).
   const valSettled = await Promise.allSettled(

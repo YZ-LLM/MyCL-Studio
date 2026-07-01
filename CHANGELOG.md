@@ -1,19 +1,18 @@
 ## 2026-06-30
 
-- **perf(faz 9): örtüşen inceleme eksenleri 2-dalga sıralı + semantik dedup — mükerrer iş azaldı, bulgu kaybı YOK (YZLLM):**
+- **perf(faz 9): örtüşen inceleme eksenleri 2-dalga sıralı — mükerrer iş azaldı, bulgu kaybı YOK (YZLLM):**
   Kullanıcı canlı Ajan Takımı popup'ında Faz 9 incelemesindeki örtüşen eksenleri fark etti (Security↔STRIDE,
   Correctness↔Error-paths, Maintainability↔Tech-debt aynı sorunu farklı açıdan bulup ayrı çürütücülere gidiyordu).
-  Üç iyileştirme ([phase-9-debate-review.ts](orchestrator/src/phase-9-debate-review.ts)):
-  **(1) 2-DALGA bulucu:** Eksenler KORUNDU (farklı açı değer katıyor). Dalga 1 (temel: correctness/security/
-  maintainability/performance) paralel; Dalga 2 (rafine: error-paths/stride/tech-debt) Dalga-1 bulgularını GÖRÜR +
-  "bunları tekrar etme, senin lensinden KAÇIRILANA odaklan" der → daha hızlı/ucuz/temiz + mükerrer bulgu kaynakta önlenir.
-  **(2) SEMANTİK DEDUP:** Metin-birebir dedup'tan sonra LLM (muhafazakâr) farklı kelimeyle aynı kök sorunu kümeler →
-  çürütücü sayısı düşer. **Bilgi kaybı YOK:** birleşen bulguların TÜM risk+detail'i temsilcide korunur (`applyClusters`,
-  saf+testli); çürütücü kümeyi "en az biri gerçek mi" diye doğrular; fail-safe (hata→bulgular aynen korunur).
-  **(3) Kısmi-kapsam GÖRÜNÜR:** bir eksen koşmazsa görünür uyarı; Dalga-1 tümü patlarsa fail-closed (sahte-yeşil yasağı).
-  **Çapraz-aile Sonnet 4.6 mahkemesi** 6 bulgu buldu, hepsi kapatıldı — en kritik (HIGH): yanlış-birleştirmede düşen
-  bulgunun çürütücüye HİÇ gitmemesi (sahte-yeşil) → birleşik-detail koruması + çürütücü küme-farkındalığı ile çözüldü.
-  check yeşil (yeni 12 test: applyClusters güvenlik + dalga bölünmesi). Etki için paketlenmiş .app rebuild gerekir.
+  Çözüm ([phase-9-debate-review.ts](orchestrator/src/phase-9-debate-review.ts)):
+  **2-DALGA bulucu** (correct-by-construction): Eksenler KORUNDU (farklı açı değer katıyor). Dalga 1 (temel:
+  correctness/security/maintainability/performance) paralel; Dalga 2 (rafine: error-paths/stride/tech-debt) Dalga-1
+  bulgularını GÖRÜR + "bunları tekrar etme, senin lensinden KAÇIRILANA odaklan" der → daha hızlı/ucuz/temiz + mükerrer
+  bulgu KAYNAKTA önlenir. **Kısmi-kapsam GÖRÜNÜR** (bir eksen koşmazsa uyarı; Dalga-1 tümü patlarsa fail-closed —
+  sahte-yeşil yasağı). Mevcut metin-birebir dedup korundu (ucuz + güvenli).
+  **Semantik (LLM) dedup denendi ve KALDIRILDI (over-engineering, YZLLM kararı):** 2-dalga örtüşmeyi zaten kaynakta
+  önlüyor; az-dedup GÜVENLİ (kaçan dupe iki kez çürütülür — ucuz), fazla-dedup ise gerçek bulgu düşürme = sahte-yeşil
+  riski taşıyordu (çapraz-aile mahkemesi tam bu HIGH bug'ı yakalamıştı). Reaktif gate yerine proaktif çözüm yeterli.
+  check yeşil (yeni 2 test: dalga bölünmesi). Etki için paketlenmiş .app rebuild gerekir.
 
 ## 2026-06-27
 
