@@ -287,3 +287,43 @@ describe("buildErrorAnalysisPrompt — z.ai fallback farkındalığı (YZLLM: aj
     expect(p.toLowerCase()).toContain("fallback");
   });
 });
+
+// YZLLM 2026-06-30: "sorular+cevaplar çok teknik, bu kadarı fazla; sade + istenirse Detay".
+describe("buildErrorAnalysisPrompt — sadelik (USER_FACING_CLARITY)", () => {
+  const ctx = { phase: 8 as const, message: "gate fail", detail: "SEED_DEV_CREDENTIAL at line 37" };
+  const p = buildErrorAnalysisPrompt(ctx, true);
+  it("kullanıcı-görünür sadelik kuralını içerir (plain-language, teknik uzman değil)", () => {
+    expect(p).toContain("USER-FACING CLARITY");
+    expect(p.toLowerCase()).toContain("plain");
+  });
+  it("summary_tr SADE (dosya/satır/kod YOK) + solutions_tr KISA YÖN talimatı", () => {
+    expect(p).toContain("NO file paths, line numbers, or code"); // summary_tr sade
+    expect(p).toContain("SHORT plain-language DIRECTION"); // solutions kısa yön, tam yama değil
+  });
+  it("ayrı detail_tr alanı (teknik açıklama 'Detay'da) şemada var", () => {
+    expect(p).toContain("detail_tr");
+  });
+});
+
+describe("parseErrorAnalysisBlock — detail_tr (YZLLM 2026-06-30, opsiyonel + geriye uyumlu)", () => {
+  it("detail_tr varsa parse edilir + trim edilir", () => {
+    const r = parseErrorAnalysisBlock(
+      `{"kind":"error_analysis","blocking":true,"summary_tr":"Sade özet.","detail_tr":"  routes/ui-api.js:37 gömülü parola  ","solutions_tr":["Parolayı ayarlara taşı"]}`,
+    );
+    expect(r).not.toBeNull();
+    expect(r!.summary_tr).toBe("Sade özet.");
+    expect(r!.detail_tr).toBe("routes/ui-api.js:37 gömülü parola");
+  });
+  it("detail_tr YOKSA → undefined (eski blok geriye uyumlu; toggle çıkmaz)", () => {
+    const r = parseErrorAnalysisBlock(
+      `{"kind":"error_analysis","blocking":true,"summary_tr":"Özet.","solutions_tr":["A"]}`,
+    );
+    expect(r!.detail_tr).toBeUndefined();
+  });
+  it("detail_tr BOŞ string → undefined (gereksiz boş 'Detay' toggle'ı önlenir)", () => {
+    const r = parseErrorAnalysisBlock(
+      `{"kind":"error_analysis","blocking":false,"summary_tr":"Özet.","detail_tr":"   ","solutions_tr":["A"]}`,
+    );
+    expect(r!.detail_tr).toBeUndefined();
+  });
+});

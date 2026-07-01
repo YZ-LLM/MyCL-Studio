@@ -80,49 +80,60 @@ function PhaseDivider({ faz }: { faz: number }) {
   );
 }
 
-function ErrorMessage({ msg }: { msg: ChatMessage }) {
+/** Açılır "Detay göster" — mesajın SADE metnini bozmadan ham teknik açıklamayı (dosya/satır/kod) talep üzerine
+ *  gösterir. YZLLM 2026-06-30: hata-analizi özeti sade gelir; teknik detaya buradan erişilir. Hata mesajı stack
+ *  trace'i için de kullanılır. stopPropagation: toggle tıklaması mesaj-seçimini (onMessageSelected) tetiklemesin. */
+function DetailDisclosure({ detail }: { detail: string }) {
   const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
+        style={{
+          fontSize: 10,
+          padding: "2px 6px",
+          marginTop: 4,
+          background: "transparent",
+          border: "1px solid var(--border)",
+          color: "var(--fg-dim)",
+          cursor: "pointer",
+        }}
+      >
+        {open ? "Detayı gizle" : "Detay göster"}
+      </button>
+      {open && (
+        <pre
+          style={{
+            marginTop: 6,
+            padding: 8,
+            background: "var(--bg-panel)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--fg-dim)",
+            maxHeight: 200,
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {detail}
+        </pre>
+      )}
+    </>
+  );
+}
+
+function ErrorMessage({ msg }: { msg: ChatMessage }) {
   return (
     <div className="msg error">
       <div>{linkifyText(msg.text)}</div>
-      {msg.detail && (
-        <>
-          <button
-            type="button"
-            onClick={() => setOpen(!open)}
-            style={{
-              fontSize: 10,
-              padding: "2px 6px",
-              marginTop: 4,
-              background: "transparent",
-              border: "1px solid var(--border)",
-              color: "var(--fg-dim)",
-            }}
-          >
-            {open ? "Detayı gizle" : "Detay"}
-          </button>
-          {open && (
-            <pre
-              style={{
-                marginTop: 6,
-                padding: 8,
-                background: "var(--bg-panel)",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                color: "var(--fg-dim)",
-                maxHeight: 200,
-                overflow: "auto",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-all",
-              }}
-            >
-              {msg.detail}
-            </pre>
-          )}
-        </>
-      )}
+      {msg.detail && <DetailDisclosure detail={msg.detail} />}
     </div>
   );
 }
@@ -437,6 +448,8 @@ export function ChatPanel({
                 >
                   {tsLabel && <span className="msg-ts">{tsLabel}</span>}
                   {linkifyText(splitSentences(m.text))}
+                  {/* YZLLM 2026-06-30: sade mesaj + istenirse "Detay göster" (hata-analizi teknik açıklaması). */}
+                  {m.detail && <DetailDisclosure detail={m.detail} />}
                   {replyBtn}
                   {copyBtn}
                 </div>

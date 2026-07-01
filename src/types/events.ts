@@ -265,6 +265,9 @@ export interface ChatMessageEvent {
     role: "user" | "assistant" | "system" | "error";
     text: string;
     ts: number;
+    /** YZLLM 2026-06-30: opsiyonel ham teknik açıklama (dosya/satır/kod). Mesaj metni SADE kalır; UI altında
+     *  "Detay göster" açılır bunu gösterir. Yoksa toggle çıkmaz (geriye uyumlu). */
+    detail?: string;
   };
 }
 

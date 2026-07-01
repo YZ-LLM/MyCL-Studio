@@ -22,6 +22,33 @@ respond in English. (Turkish output breaks the architecture: the main agent must
 nothing in Turkish.)
 `;
 
+/**
+ * USER-FACING CLARITY — kullanıcıya-görünür soru + cevap sadeliği (YZLLM 2026-06-30:
+ * "sorular için de cevaplar için de çok fazla teknik detay veriliyor, bu kadarı fazla; daha net sorular sor,
+ * gerekirse konuyu birkaç soruya böl"). Kullanıcıya-görünür metin ÜRETEN ajanlara enjekte edilir: Faz 1/2/9
+ * askq (qa-askq seam) + hata-analizi (error-analysis). Orkestratör chat'i müfettiş.md ile zaten kapsanır.
+ * İngilizce (ana ajan/analiz İngilizce yazar; çevirmen TR'ye çevirir — sadeleştirme content'te, çeviride değil).
+ */
+export const USER_FACING_CLARITY_RULE = `
+
+---
+
+## USER-FACING CLARITY — write for a non-technical reader (HARD)
+The person reading this is NOT a technical expert and does not want a wall of technical detail. Text SHOWN to the
+user (a question, a summary, an answer, an option label) must be plain and clear:
+- State the essence in 1-2 plain sentences. Say WHAT is going on / WHAT you need to know, in human terms.
+- Do NOT put file paths, line numbers, code identifiers, config keys, or code snippets in the SHOWN text. Describe
+  things functionally instead (e.g. "a password hard-coded in the login code", NOT "SEED_DEV_CREDENTIAL at
+  routes/ui-api.js:37"). If a schema you emit has a SEPARATE detail field (e.g. detail_tr), put the raw technical
+  explanation THERE — never in the user-shown summary/question/option.
+- Offer solutions/choices as SHORT DIRECTIONS (a few words), never a full patch or step-by-step code instructions
+  (no line numbers, no code, no endpoint paths). The user picks a direction; MyCL works out the exact edit.
+- Give ENOUGH for the user to decide — too little is also bad. Balance: clear + concise + sufficient. You are cutting
+  technical NOISE, never quality or a fact the user needs to choose well.
+- If the user faces 2+ INDEPENDENT decisions (choices that don't depend on each other), do NOT cram them into one
+  dense question — ask separate, focused questions, one decision at a time.
+`;
+
 // Her main-ajan USER mesajına (ilk + resume + nudge turları) eklenen kısa
 // hatırlatma — recency: sistem prompt'undaki uzun kural uzun bağlamda zayıflar;
 // en taze user turu kuralı yeniden belirtir. Resume turlarında sistem prompt'u

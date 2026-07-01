@@ -290,6 +290,8 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       role: data.role,
       text: data.text,
       ts: data.ts,
+      // YZLLM 2026-06-30: opsiyonel ham teknik açıklama → ChatPanel "Detay göster" açılırında (varsa).
+      ...(data.detail ? { detail: data.detail } : {}),
     };
     // Runtime hata mesajları rolling window — chat'e spam etmesin (2026-05-22).
     // Yeni "🔴 Runtime hata yakalandı" mesajı gelince eski runtime mesajlarından
@@ -493,6 +495,8 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
           role: data.role as ChatMessage["role"],
           text: String(data.text ?? ""),
           ts: e.ts,
+          // YZLLM 2026-06-30: geçmişten yüklenen mesajlarda da "Detay" korunur (varsa).
+          ...(typeof data.detail === "string" && data.detail ? { detail: data.detail } : {}),
         });
       } else if (e.kind === "translation") {
         translations.push({

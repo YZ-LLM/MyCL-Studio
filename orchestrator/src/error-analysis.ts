@@ -23,7 +23,7 @@ import { resolveLlmClient, isApiAccountError } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, resolveProvider, zaiKeyForRole, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
-import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES } from "./agent-language.js";
+import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES, USER_FACING_CLARITY_RULE } from "./agent-language.js";
 import { log } from "./logger.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -53,6 +53,9 @@ export interface ErrorContext {
 export interface ErrorAnalysis {
   blocking: boolean;
   summary_tr: string;
+  /** YZLLM 2026-06-30: teknik açıklama (dosya/satır/kod) — kullanıcıya YALNIZ "Detay" açınca gösterilir.
+   *  Boş/yoksa "Detay" toggle'ı çıkmaz (geriye uyumlu). summary_tr sade kalır. */
+  detail_tr?: string;
   solutions_tr: string[];
   /** Ajanın UYGULAYACAĞI çözümün 0-tabanlı index'i (doğruluk önce, sonra en düşük risk). */
   best_index: number;
@@ -177,7 +180,10 @@ export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
     typeof rawBest === "number" && Number.isInteger(rawBest) && rawBest >= 0 && rawBest < solutions_tr.length
       ? rawBest
       : 0;
-  return { blocking, summary_tr: summary.trim(), solutions_tr, best_index };
+  // detail_tr opsiyonel (geriye uyumlu): string + boş-değilse al, aksi undefined (toggle çıkmaz).
+  const rawDetail = (block as Record<string, unknown>).detail_tr;
+  const detail_tr = typeof rawDetail === "string" && rawDetail.trim() !== "" ? rawDetail.trim() : undefined;
+  return { blocking, summary_tr: summary.trim(), detail_tr, solutions_tr, best_index };
 }
 
 /** Pure: orkestratör analiz prompt'unu kur (test edilebilir). canInvestigate=false → API tek-atış (tool yok).
@@ -214,12 +220,13 @@ export function buildErrorAnalysisPrompt(
     "until it is resolved) or NON-BLOCKING (work could continue and the fix queued).",
     "",
     "Emit EXACTLY ONE JSON object as the LAST thing in your reply, no other JSON:",
-    '{"kind":"error_analysis","blocking":<true|false>,"summary_tr":"<1-3 sentence root-cause summary IN TURKISH>","solutions_tr":["<concrete solution option 1 IN TURKISH>","<option 2>","..."],"best_index":<0-based index of the solution YOU would apply>}',
+    '{"kind":"error_analysis","blocking":<true|false>,"summary_tr":"<1-2 SHORT plain-language sentences IN TURKISH: what broke, in human terms — NO file paths, line numbers, or code>","detail_tr":"<the fuller technical explanation IN TURKISH (file/line/code OK) — the user sees this ONLY on demand via Details. PREFER filling it for a code-level failure (the developer may want to verify the exact file/line/code). Use \"\" ONLY when there is genuinely nothing technical to add (e.g. a pure environment error).>","solutions_tr":["<a SHORT plain-language DIRECTION IN TURKISH — a few words, NOT a full patch, no line numbers/code/endpoint paths>","<option 2>","..."],"best_index":<0-based index of the solution YOU would apply>}',
     "",
-    "Rules: summary_tr and every solutions_tr entry MUST be written in Turkish (the",
-    "developer reads Turkish). Each solution must be a distinct, actionable option",
-    "(not a restatement of the error). 2-4 solutions is ideal. Do NOT include a",
-    '"queue it" / "re-analyze" option — MyCL adds those automatically.',
+    "Rules: summary_tr, detail_tr, and every solutions_tr entry MUST be in Turkish (the developer reads Turkish).",
+    "summary_tr = the PLAIN essence for a non-technical reader (no file:line, no code). detail_tr = the technical",
+    "detail (file/line/code allowed — shown only on demand); if none, use \"\". Each solution is a distinct SHORT",
+    "DIRECTION (a few words — not a restatement of the error, not a full patch/step-by-step). 2-4 solutions is ideal.",
+    'Do NOT include a "queue it" / "re-analyze" option — MyCL adds those automatically.',
     "",
     "DIAGNOSE THE ACTUAL ERROR, not generic causes. If a 'Spawn output' / 'actual error'",
     "is provided above, the root cause is IN THAT OUTPUT — read it. Common classes:",
@@ -246,6 +253,7 @@ export function buildErrorAnalysisPrompt(
     VERIFY_BEFORE_CLAIM, // YZLLM 2026-06-12: kök-neden bir HİPOTEZDIR — doğrulamadan fix uygulama (yanlış-fix önle).
     "",
     DECISION_PRINCIPLES, // Parça 3: no-silent-fallback / kuşkuda-fail-closed / correct-by-construction (YZLLM gibi karar).
+    USER_FACING_CLARITY_RULE, // YZLLM 2026-06-30: summary_tr sade/insan-odaklı, detay detail_tr'ye, çözümler kısa yön.
   ].join("\n");
 }
 
@@ -456,6 +464,9 @@ export async function analyzeAndAskError(
           (others.length > 0
             ? `\nDeğerlendirilen alternatifler:\n${others.map((s) => `- ${s}`).join("\n")}`
             : ""),
+        // Sade özet; teknik açıklama "Detay"da. FAIL-SAFE (mahkeme): LLM detail_tr atlarsa ham hata detayına düş →
+        // "Detay" hep içerikli olur (sessiz bilgi kaybı yok; kullanıcı doğrulayabilir). İkisi de boşsa toggle çıkmaz.
+        { detail: analysis.detail_tr ?? errCtx.detail },
       );
       await appendAudit(state.project_root, {
         ts: Date.now(),
@@ -475,12 +486,14 @@ export async function analyzeAndAskError(
       };
     }
 
-    // UI'da özet (orkestratör TR çıktısı). Bloklayıcı durumu ayrıca yüzeye çıkar.
+    // UI'da SADE özet (orkestratör TR çıktısı). Teknik açıklama "Detay göster" ile açılır (detail_tr varsa).
     emitChatMessage(
       "assistant",
       blocking
         ? `${analysis.summary_tr}\nBu hata çözülmeden ilerlemek mümkün değil. Nasıl ilerleyelim?`
         : `${analysis.summary_tr}\nNasıl ilerleyelim?`,
+      // FAIL-SAFE (mahkeme): detail_tr yoksa ham hata detayına düş → "Detay" hep içerikli (sessiz bilgi kaybı yok).
+      { detail: analysis.detail_tr ?? errCtx.detail },
     );
 
     // askq emit → OS bildirimi mevcut askq yolundan OTOMATİK tetiklenir.

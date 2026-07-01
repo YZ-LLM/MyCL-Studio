@@ -72,14 +72,18 @@ function persistHistory(kind: string, data: { ts?: number; [k: string]: unknown 
 export function emitChatMessage(
   role: "user" | "assistant" | "system" | "error",
   text: string,
-  opts?: { persist?: boolean },
+  // YZLLM 2026-06-30: detail → mesajın SADE kalması için ham teknik açıklama (dosya/satır/kod) AYRI taşınır;
+  // UI mesaj altında "Detay göster" açılır (varsa). Sade metin `text`'te, teknik detay burada. splitSentences UYGULANMAZ
+  // (teknik detay olduğu gibi gösterilir). detail yoksa payload'a eklenmez → mevcut mesajlar/UI aynen (geriye uyumlu).
+  opts?: { persist?: boolean; detail?: string },
 ): void {
   // Kullanıcı talebi (2026-05-23): MyCL chat'te assistant cümleleri tek satıra.
   // Bir satırda 2 cümle olmayacak şekilde sentence boundary'lerde newline.
   // Sadece assistant role'üne uygulanır — user/system/error mesajlar dokunulmaz
   // (system mesajları çoğu tek cümle veya yapılandırılmış emoji + label).
   const processed = role === "assistant" ? splitSentences(text) : text;
-  const payload = { role, text: processed, ts: Date.now() };
+  const detail = opts?.detail && opts.detail.trim() ? opts.detail.trim() : undefined;
+  const payload = { role, text: processed, ts: Date.now(), ...(detail ? { detail } : {}) };
   emit("chat_message", payload);
   // `persist: false` → transient boot/welcome mesajları için. Her açılışta
   // emit edilirse history.log'da birikir; UI'da N. açılışta N kez görünür.

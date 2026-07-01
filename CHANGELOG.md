@@ -1,5 +1,21 @@
 ## 2026-06-30
 
+- **feat(UX): kullanıcıya sorular + cevaplar SADE + istenirse "Detay göster" (YZLLM: "çok teknik, bu kadarı fazla"):**
+  Kullanıcı Faz 8 gate hatasında dosya/satır/kod dolu bir özet + tam-yama seçenekler görüyordu (fazla teknik).
+  Karar (AskUserQuestion): mesaj SADE gelsin, ham teknik detaya istenirse açılır "Detay göster" ile erişilsin.
+  **(1)** Yeni ortak sabit `USER_FACING_CLARITY_RULE` ([agent-language.ts](orchestrator/src/agent-language.ts)):
+  kullanıcıya-görünür metin sade/insan-dili, dosya/satır/kod DÖKME (işlevsel anlat), çözüm KISA YÖN (tam yama değil),
+  karar için YETERLİ bilgi (az da kötü), 2+ bağımsız karar → ayrı sor. Tek seam'den Faz 1/2/9 askq'ya
+  ([qa-askq-cli-backend.ts](orchestrator/src/base/qa-askq-cli-backend.ts)) + hata-analizine enjekte.
+  **(2)** [error-analysis.ts](orchestrator/src/error-analysis.ts): `summary_tr` sade + YENİ `detail_tr` (teknik
+  açıklama, "Detay"da) + `solutions_tr` kısa yön. Executor kalitesi düşmez — seçilen çözüm debug fazına yalnız YÖN
+  olarak gider, kodu kendi okur (mahkeme doğruladı). Fail-safe: detail_tr yoksa ham hata detayına düşülür (bilgi kaybı yok).
+  **(3)** [ChatPanel.tsx](src/components/ChatPanel.tsx): mevcut "Detay" toggle'ı `DetailDisclosure` bileşenine
+  çıkarıldı, artık assistant mesajlarında da çalışır ([ipc.ts](orchestrator/src/ipc.ts) emitChatMessage `detail`
+  param + chat_message event). detail yoksa toggle çıkmaz (geriye uyumlu). Çevirmen mekanik kaldı (sadeleştirme
+  content'te). Çapraz-aile Sonnet 4.6 mahkemesi: 0 gerçek bug, executor-koruması + geriye-uyumluluk doğrulandı;
+  detail_tr-opsiyonel kör-noktası fail-safe ile kapatıldı. check yeşil (yeni 6 test).
+
 - **perf(faz 9): örtüşen inceleme eksenleri 2-dalga sıralı — mükerrer iş azaldı, bulgu kaybı YOK (YZLLM):**
   Kullanıcı canlı Ajan Takımı popup'ında Faz 9 incelemesindeki örtüşen eksenleri fark etti (Security↔STRIDE,
   Correctness↔Error-paths, Maintainability↔Tech-debt aynı sorunu farklı açıdan bulup ayrı çürütücülere gidiyordu).

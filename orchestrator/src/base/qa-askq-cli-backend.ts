@@ -10,7 +10,7 @@
 // Abonelik (cli-session API key enjekte etmez).
 
 import { randomUUID } from "node:crypto";
-import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
+import { MAIN_AGENT_LANGUAGE_RULE, USER_FACING_CLARITY_RULE } from "../agent-language.js";
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "../tool-policy.js";
@@ -450,7 +450,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
  */
 export function createQaAskqBackend(opts: QaAskqRunOpts): QaAskqBackend {
   // v15.11: main ajan yalnız İngilizce yazar (genel kural, CLI+SDK). Çevirmen hariç.
-  opts = { ...opts, systemPrompt: opts.systemPrompt + MAIN_AGENT_LANGUAGE_RULE };
+  opts = { ...opts, systemPrompt: opts.systemPrompt + MAIN_AGENT_LANGUAGE_RULE + USER_FACING_CLARITY_RULE };
   // Auto Mode: simetrik çift-yön (limit yokken CLI birincil, limitliyse API birincil);
   // birincil KALICI başarısızsa diğerine kesintisiz geçer. claude yoksa → API.
   if (isAutoMode(opts.config, "main")) {
