@@ -148,6 +148,63 @@ export async function readWtf(projectRoot: string): Promise<WtfRecord[]> {
 }
 
 /**
+ * KALICI KABUL KAYDI (FIX D, YZLLM 2026-07-01: "kabul edilen bulgu bir daha sorulmasın").
+ * Kullanıcı bir gate bulgusunu (tech-debt) KALICI kabul edince buraya yazılır → tech-debt-scanner
+ * o (dosya+kategori+snippet) anahtarını sonraki iterasyonlarda ATLAR → aynı-soru döngüsü kalıcı kırılır.
+ * GÖRÜNÜR + geri-alınabilir: `.mycl/accepted-findings.jsonl` satırını silmek bulguyu yeniden aktive eder.
+ * snippet NORMALİZE saklanır (scanner ile aynı) — FARKLI snippet (yeni gerçek parola) → farklı anahtar → yine işaretlenir.
+ */
+export interface AcceptedFinding {
+  ts: number;
+  /** Bulgu kapsamı — şimdilik yalnız tech-debt gate. */
+  scope: "tech-debt";
+  /** Bulgunun geçtiği dosya (proje-göreli veya scanner'ın verdiği path). */
+  file: string;
+  /** tech-debt kategorisi (todo_comment/mock_in_prod/hardcoded_credential/empty_catch/skipped_test). */
+  category: string;
+  /** NORMALİZE snippet (acceptedFindingKey ile aynı normalizasyon — eşleşme için). */
+  snippet: string;
+  /** Kullanıcının kabul gerekçesi (opsiyonel — "kasıtlı dev-login", vb.). */
+  reason?: string;
+}
+
+const ACCEPTED_FINDINGS_FILE = "accepted-findings.jsonl";
+
+export async function appendAcceptedFinding(projectRoot: string, rec: AcceptedFinding): Promise<void> {
+  const line = JSON.stringify(rec) + "\n";
+  const p = join(projectRoot, MYCL_DIR, ACCEPTED_FINDINGS_FILE);
+  await fs.mkdir(dirname(p), { recursive: true });
+  const fh = await openSync(p, "a");
+  try {
+    await fh.write(line);
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+
+/** accepted-findings.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
+export async function readAcceptedFindings(projectRoot: string): Promise<AcceptedFinding[]> {
+  const p = join(projectRoot, MYCL_DIR, ACCEPTED_FINDINGS_FILE);
+  let raw: string;
+  try {
+    raw = await fs.readFile(p, "utf-8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new AuditError(`accepted-findings read failed: ${String(err)}`);
+  }
+  const out: AcceptedFinding[] = [];
+  for (const line of raw.split("\n").filter((l) => l.trim())) {
+    try {
+      out.push(JSON.parse(line) as AcceptedFinding);
+    } catch (err) {
+      console.error(`[accepted-findings] bad line skipped: ${line.slice(0, 100)} (${err})`);
+    }
+  }
+  return out;
+}
+
+/**
  * Yapılandırılmış faz DEVİR (handoff) kaydı (Missions disiplini): bir faz tamamlanınca / başarısız
  * olunca durum + yapılan-iş özeti + keşfedilen sorunlar. AYRI dosya (`.mycl/handoffs.jsonl`) — audit.log'u
  * KİRLETMEZ (gate'lerin `lastEvent`/event-sayım mantığını bozmaz). Zemin: resume + uzun-koşu recall +

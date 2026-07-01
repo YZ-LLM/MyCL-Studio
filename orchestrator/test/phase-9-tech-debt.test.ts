@@ -50,6 +50,21 @@ describe("phase-9-tech-debt · scanFiles (saf)", () => {
     expect(files).toEqual([]);
     expect(totalFindings).toBe(0);
   });
+
+  // FIX D (mahkeme 2026-07-01): Faz 8'de KALICI kabul edilen bulgu Faz 9'da da atlanır (tutarsızlık yok).
+  it("acceptedKeys ile Faz 8'de kabul edilen bulgu Faz 9'da da atlanır", async () => {
+    const { acceptedFindingKey } = await import("../src/tech-debt-scanner.js");
+    const entries = [
+      { path: "src/seed.ts", content: 'const password = "dev-only-seed12";\n' },
+    ];
+    // acceptedKeys yok → bulgu çıkar
+    expect(scanFiles(entries).totalFindings).toBe(1);
+    // aynı (dosya+kategori+snippet) kabul edildi → Faz 9 da atlar
+    const all = scanFiles(entries);
+    const f = all.files[0].findings[0];
+    const accepted = new Set([acceptedFindingKey("src/seed.ts", f.category, f.excerpt)]);
+    expect(scanFiles(entries, accepted).totalFindings).toBe(0);
+  });
 });
 
 describe("phase-9-tech-debt · renderTechDebtFindings (saf)", () => {

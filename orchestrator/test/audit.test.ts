@@ -12,6 +12,9 @@ import {
   appendWtf,
   readWtf,
   type WtfRecord,
+  appendAcceptedFinding,
+  readAcceptedFindings,
+  type AcceptedFinding,
   AuditError,
   formatDecisions,
   extractSpecSection,
@@ -413,6 +416,35 @@ describe("audit", () => {
       const all = await readWtf(projectRoot);
       expect(all.map((w) => w.note)).toEqual(["tuzak 1", "tuzak 2"]);
       expect(all[0].location).toBeUndefined();
+    });
+  });
+
+  // FIX D (YZLLM 2026-07-01: "kabul edilen bulgu bir daha sorulmasın"): kalıcı kabul deposu roundtrip.
+  describe("accepted-findings (KALICI kabul deposu)", () => {
+    it("appendAcceptedFinding + readAcceptedFindings roundtrip; dosya yoksa []", async () => {
+      expect(await readAcceptedFindings(projectRoot)).toEqual([]);
+      const rec: AcceptedFinding = {
+        ts: 42,
+        scope: "tech-debt",
+        file: "routes/ui.js",
+        category: "hardcoded_credential",
+        snippet: 'password: "devseed12345"',
+        reason: "kasıtlı dev-login seed",
+      };
+      await appendAcceptedFinding(projectRoot, rec);
+      expect(await readAcceptedFindings(projectRoot)).toEqual([rec]);
+    });
+
+    it("append-only sıra + reason opsiyonel", async () => {
+      await appendAcceptedFinding(projectRoot, {
+        ts: 1, scope: "tech-debt", file: "a.js", category: "empty_catch", snippet: "catch {}",
+      });
+      await appendAcceptedFinding(projectRoot, {
+        ts: 2, scope: "tech-debt", file: "b.js", category: "todo_comment", snippet: "// TODO",
+      });
+      const all = await readAcceptedFindings(projectRoot);
+      expect(all.map((a) => a.file)).toEqual(["a.js", "b.js"]);
+      expect(all[0].reason).toBeUndefined();
     });
   });
 

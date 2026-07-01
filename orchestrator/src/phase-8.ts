@@ -9,8 +9,9 @@
 
 import { exec } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
+import { relative, isAbsolute } from "node:path";
 import { promisify } from "node:util";
-import { appendAudit, appendHandoff, readAuditLogTail } from "./audit.js";
+import { appendAudit, appendHandoff, readAuditLogTail, readAcceptedFindings } from "./audit.js";
 import { currentSpecPath, currentSpecRelPath } from "./devs-paths.js";
 import { isMissingCommand, isSpawnEnvFailure, resolveMechanicalCmd } from "./base/mechanical-runner.js";
 import { probeTestValidity } from "./test-validity.js";
@@ -26,10 +27,16 @@ import { emitChatMessage, emitError } from "./ipc.js";
 import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, type FixSnapshot } from "./fix-snapshot.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
 import { escalatedModelEffort } from "./escalation.js";
+import { modelChoiceLineIfChanged } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import type { ToolDef } from "./claude-api.js";
-import { scanTechDebt, type TechDebtFinding } from "./tech-debt-scanner.js";
+import {
+  scanTechDebt,
+  acceptedFindingKey,
+  updateLastTechDebtFindings,
+  type TechDebtFinding,
+} from "./tech-debt-scanner.js";
 import { TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js";
 import type { PhaseDeps } from "./phase-deps.js";
 import type { PhaseSpec, State } from "./types.js";
@@ -476,7 +483,8 @@ export class Phase8Controller {
     // Escalation (YZLLM 2026-06-11): model+efor PER-DOMAIN merdivenden — bu domain'in (tdd-codegen) öğrenilmiş
     // basamağından başlar, sorun çıktıkça failPhase tırmandırır (monotonik). Config kral: tier→model config'ten.
     const me = escalatedModelEffort(this.state, this.config, "tdd-codegen");
-    emitChatMessage("system", `🧠 Codegen: **${me.modelLabel}** · efor ${me.effort}`);
+    const codegenModelLine = modelChoiceLineIfChanged("phase-8", `🧠 Codegen: **${me.modelLabel}** · efor ${me.effort}`);
+    if (codegenModelLine) emitChatMessage("system", codegenModelLine);
     this.base = createCodegenBackend({
       tag: "phase-8",
       phaseId: 8,
@@ -1227,7 +1235,26 @@ export class Phase8Controller {
    * event (Phase 8 ileri sürümünde marker; v15.2.4 minimal).
    */
   private async scanAndAuditTechDebt(path: string, content: string): Promise<void> {
-    const findings: TechDebtFinding[] = scanTechDebt(content, path);
+    // FIX D (YZLLM 2026-07-01): KALICI kabul edilmiş bulguları kapı ARTIK işaretlemez (aynı-soru döngüsü kalıcı
+    // kırılır). Küme her scan'da okunur (accept nadir + dosya küçük); okuma hatası → boş küme (fail-open: normal tara).
+    const accepted = await readAcceptedFindings(this.state.project_root).catch((e) => {
+      // KATI #4 (sessiz fallback yok): fail-open doğru yön (accepted okunamazsa normal tara) ama GÖRÜNÜR olsun.
+      log.warn("phase-8", "accepted-findings okunamadı (normal taramaya devam)", { err: String(e) });
+      return [];
+    });
+    // FIX D (mahkeme 2026-07-01): kabul-anahtarı GÖRELİ path kullanır (Faz 9 getChangedFiles göreli döndürür;
+    // Faz 8'in mutlak Write path'iyle eşleşmezse Faz 9 kabul edileni yeniden işaretler). Audit/gate mutlak path
+    // korunur (gate stat() mutlak yol bekler). relKey yalnız kabul-eşleşmesi + store için.
+    const root = this.state.project_root;
+    const relKey = isAbsolute(path) ? relative(root, path) : path;
+    const acceptedKeys = new Set(
+      accepted
+        .filter((a) => a.scope === "tech-debt")
+        .map((a) => acceptedFindingKey(a.file, a.category, a.snippet)),
+    );
+    const findings: TechDebtFinding[] = scanTechDebt(content, relKey, acceptedKeys);
+    // Accept yazımı excerpt'e buradan erişir (audit event excerpt taşımaz) — GÖRELİ path ile dosya bazlı güncelle.
+    updateLastTechDebtFindings(root, relKey, findings);
     if (findings.length === 0) {
       // Clean snapshot — gate evaluation dosya bazlı son scan'ı temiz sayar.
       await appendAudit(this.state.project_root, {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { scanTechDebt } from "../src/tech-debt-scanner.js";
+import {
+  scanTechDebt,
+  acceptedFindingKey,
+  updateLastTechDebtFindings,
+  getLastTechDebtFindings,
+  resetLastTechDebtFindings,
+} from "../src/tech-debt-scanner.js";
 
 describe("tech-debt-scanner (v15.2.4 sıfır-teknik-borç ilkesi)", () => {
   it("returns empty for clean code", () => {
@@ -132,5 +138,73 @@ describe("tech-debt-scanner (v15.2.4 sıfır-teknik-borç ilkesi)", () => {
     `;
     const findings = scanTechDebt(code);
     expect(findings.filter((f) => f.category === "mock_in_prod")).toHaveLength(0);
+  });
+});
+
+// FIX D (YZLLM 2026-07-01: "kabul edilen bulgu bir daha sorulmasın"): kabul-anahtarı + acceptedKeys ile atlama.
+describe("acceptedFindingKey — normalize + eşleşme", () => {
+  it("path ayracı + boşluk + büyük/küçük harf normalize edilir (idempotent)", () => {
+    const a = acceptedFindingKey("routes\\ui.js", "empty_catch", "  Catch  (E) {}  ");
+    const b = acceptedFindingKey("routes/ui.js", "empty_catch", "catch (e) {}");
+    expect(a).toBe(b);
+  });
+  it("farklı kategori / farklı snippet → farklı anahtar (güvenlik korunur)", () => {
+    const base = acceptedFindingKey("f.js", "hardcoded_credential", "password: \"abc12345\"");
+    expect(base).not.toBe(acceptedFindingKey("f.js", "empty_catch", "password: \"abc12345\""));
+    expect(base).not.toBe(acceptedFindingKey("f.js", "hardcoded_credential", "password: \"yeni99999\""));
+  });
+});
+
+describe("scanTechDebt — acceptedKeys ile KALICI kabul atlaması", () => {
+  const code = `
+    const password = "supersecret123";
+    // TODO: refactor
+  `;
+  it("acceptedKeys yok → tüm bulgular döner (geriye uyumlu)", () => {
+    const findings = scanTechDebt(code, "src/db.js");
+    expect(findings.length).toBeGreaterThanOrEqual(2);
+  });
+  it("kabul edilen (dosya+kategori+snippet) atlanır; diğerleri kalır", () => {
+    const all = scanTechDebt(code, "src/db.js");
+    const cred = all.find((f) => f.category === "hardcoded_credential")!;
+    const accepted = new Set([acceptedFindingKey("src/db.js", cred.category, cred.excerpt)]);
+    const filtered = scanTechDebt(code, "src/db.js", accepted);
+    expect(filtered.find((f) => f.category === "hardcoded_credential")).toBeUndefined();
+    expect(filtered.find((f) => f.category === "todo_comment")).toBeDefined(); // TODO hâlâ işaretli
+  });
+  it("FARKLI dosyada aynı snippet atlanmaz (anahtar dosyaya özgü)", () => {
+    const all = scanTechDebt(code, "src/db.js");
+    const cred = all.find((f) => f.category === "hardcoded_credential")!;
+    const accepted = new Set([acceptedFindingKey("src/db.js", cred.category, cred.excerpt)]);
+    const other = scanTechDebt(code, "src/other.js", accepted);
+    expect(other.find((f) => f.category === "hardcoded_credential")).toBeDefined();
+  });
+});
+
+describe("updateLastTechDebtFindings / getLastTechDebtFindings (accept snippet erişimi)", () => {
+  it("dosya bazlı per-path replace; boş findings dosyayı temizler", () => {
+    const root = "/tmp/mycl-test-proj-fixd";
+    updateLastTechDebtFindings(root, "a.js", [
+      { category: "empty_catch", line: 3, excerpt: "catch {}", reason: "r" },
+    ]);
+    updateLastTechDebtFindings(root, "b.js", [
+      { category: "todo_comment", line: 1, excerpt: "// TODO", reason: "r" },
+    ]);
+    expect(getLastTechDebtFindings(root)).toHaveLength(2);
+    // a.js yeniden temiz taranınca a girdileri düşer, b kalır
+    updateLastTechDebtFindings(root, "a.js", []);
+    const after = getLastTechDebtFindings(root);
+    expect(after).toHaveLength(1);
+    expect(after[0].file).toBe("b.js");
+  });
+
+  it("resetLastTechDebtFindings depoyu tamamen temizler (proje-değişim hijyeni)", () => {
+    const root = "/tmp/mycl-test-proj-reset";
+    updateLastTechDebtFindings(root, "x.js", [
+      { category: "todo_comment", line: 1, excerpt: "// TODO", reason: "r" },
+    ]);
+    expect(getLastTechDebtFindings(root)).toHaveLength(1);
+    resetLastTechDebtFindings(root);
+    expect(getLastTechDebtFindings(root)).toEqual([]);
   });
 });

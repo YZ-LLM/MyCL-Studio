@@ -47,6 +47,17 @@ export interface ErrorContext {
    * allowAcceptContinue=true iken set edilmeli (yoksa accept-continue dalı no-op).
    */
   acceptContinuePhase?: number;
+  /**
+   * YZLLM 2026-07-01 (FIX B): AYNI hata daha önce denendiyse, kullanıcının/otonun seçtiği önceki çözümler.
+   * Prompt'a "bunlar uygulandı ama gate HÂLÂ fail — TEKRARLAMA, daha derin kök / farklı yaklaşım / kasıtlı mı?"
+   * olarak enjekte edilir → aynı-soru döngüsü kırılır (analiz farklı bir çözüme ya da "kabul et"e yönelir).
+   */
+  priorAttempts?: string[];
+  /**
+   * YZLLM 2026-07-01 (FIX A): manuel modda aynı hata MANUAL_LOOP_MAX kez sürdü (döngü tükendi). true ise askq
+   * eski çözüm listesini TEKRAR sunmaz; farklı seçenekler verir (kabul-kalıcı / farklı-yaklaşım / dur).
+   */
+  loopExhausted?: boolean;
 }
 
 /** Ajanın döndüğü analiz bloğu (parse + doğrulama sonrası). */
@@ -69,6 +80,8 @@ export interface PendingErrorAnalysis {
   id: string;
   phase: PhaseId;
   blocking: boolean;
+  /** YZLLM 2026-07-01 (FIX B): bu hatanın imzası — kullanıcı cevap verince seçim bu sig'e kaydedilir (karar hafızası). */
+  sig?: string;
   /** Sıralı askq seçenekleri (UI'daki sırayla — index eşlemesi için). */
   options: string[];
   /** Ajanın önerdiği çözümler (TR). "Çöz" → debug akışına bunlar bağlam olur. */
@@ -101,6 +114,11 @@ export const OPT_REANALYZE = "Tekrar analiz et";
 export const OPT_QUEUE = "İş listesine kaydet, çözmeden devam et";
 // Güvenlik-baseline Unit 2: blocking gate'te kullanıcı override (bulguyu kabul edip devam).
 export const OPT_ACCEPT_CONTINUE = "Kabul et, devam et";
+// FIX D (YZLLM 2026-07-01): aynı gate döngüsü tükendiğinde kullanıcı bulguyu KALICI kabul eder →
+// bir sonraki iterasyonda kapı o bulguyu ARTIK işaretlemez (.mycl/accepted-findings.jsonl). Döngü kalıcı kırılır.
+export const OPT_ACCEPT_PERMANENT = "Kabul et — kalıcı, bir daha sorma";
+// FIX A: loop tükendiğinde "elle inceleyeceğim" — işi park et, aynı soruyu körü körüne tekrarlama.
+export const OPT_STOP_MANUAL = "Dur — elle inceleyeceğim";
 
 /**
  * SAF: analiz çıktısından askq seçeneklerini kur (test edilebilir, yan etki yok).
@@ -116,10 +134,17 @@ export const OPT_ACCEPT_CONTINUE = "Kabul et, devam et";
 export function buildErrorAnalysisAskq(
   solutions_tr: string[],
   blocking: boolean,
-  opts?: { allowAcceptContinue?: boolean; permanentNoProvider?: boolean },
+  opts?: {
+    allowAcceptContinue?: boolean;
+    permanentNoProvider?: boolean;
+    loopExhausted?: boolean;
+    allowPermanentAccept?: boolean;
+  },
 ): { options: AskqOption[] } {
   const allowAcceptContinue = opts?.allowAcceptContinue === true;
   const permanentNoProvider = opts?.permanentNoProvider === true;
+  const loopExhausted = opts?.loopExhausted === true;
+  const allowPermanentAccept = opts?.allowPermanentAccept === true;
   const seen = new Set<string>();
   const solutions: string[] = [];
   for (const s of solutions_tr) {
@@ -136,6 +161,16 @@ export function buildErrorAnalysisAskq(
   if (permanentNoProvider) {
     options.push(OPT_QUEUE);
     if (allowAcceptContinue) options.push(OPT_ACCEPT_CONTINUE);
+    return { options };
+  }
+  // FIX A/D (YZLLM 2026-07-01): aynı gate döngüsü tükendi (MANUAL_LOOP_MAX/AUTO_SOLVE_MAX) → AYNI çözümleri
+  // körü körüne TEKRAR sunma. Kalıcı-kabul (bulgu kasıtlıysa) + memory-aware analizin FARKLI önerileri + park.
+  if (loopExhausted) {
+    if (allowPermanentAccept) options.push(OPT_ACCEPT_PERMANENT);
+    if (allowAcceptContinue) options.push(OPT_ACCEPT_CONTINUE);
+    options.push(...solutions); // buildErrorAnalysisPrompt priorAttempts enjeksiyonu → bunlar öncekilerden farklı
+    options.push(OPT_STOP_MANUAL);
+    options.push(OPT_REANALYZE);
     return { options };
   }
   if (!blocking) {
@@ -214,6 +249,19 @@ export function buildErrorAnalysisPrompt(
     errCtx.message,
     ...(errCtx.detail && errCtx.detail.trim()
       ? ["", "Raw error detail:", errCtx.detail.slice(0, 4000)]
+      : []),
+    // YZLLM 2026-07-01 (FIX B): aynı hata tekrarladıysa önceki denemeleri ENJEKTE et → LLM aynı çözüme dönmesin.
+    ...(errCtx.priorAttempts && errCtx.priorAttempts.length
+      ? [
+          "",
+          "PREVIOUS ATTEMPTS for THIS SAME failure (already applied, but the gate STILL fails — so the root",
+          "cause is NOT what these changed). DO NOT re-propose them:",
+          ...errCtx.priorAttempts.map((s) => `- ${s}`),
+          "Find a DEEPER root cause OR a genuinely DIFFERENT approach. Critically: could this finding be",
+          "INTENTIONAL / by-design (e.g. a dev-only seeded credential a test/review harness needs, a marker the",
+          "spec asked for)? If so, it is a FALSE-POSITIVE — say so and recommend the user ACCEPT it (document it),",
+          "NOT re-fix it. Repeating the same fix that already failed is the wrong move.",
+        ]
       : []),
     "",
     "Decide whether this error is BLOCKING (the pipeline genuinely cannot proceed",
@@ -446,6 +494,10 @@ export async function analyzeAndAskError(
     const blocking = errCtx.allowAcceptContinue ? true : analysis.blocking;
     const { options } = buildErrorAnalysisAskq(analysis.solutions_tr, blocking, {
       allowAcceptContinue: errCtx.allowAcceptContinue,
+      // FIX A/D: döngü tükendiyse (manuel MANUAL_LOOP_MAX / oto AUTO_SOLVE_MAX) aynı çözümleri tekrar sunma;
+      // kalıcı-kabul + park seçenekleri gelsin (failPhase errCtx.loopExhausted set eder).
+      loopExhausted: errCtx.loopExhausted,
+      allowPermanentAccept: errCtx.loopExhausted,
     });
     const optionLabels = options.map((o) => (typeof o === "string" ? o : o.label));
 

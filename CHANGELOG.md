@@ -1,3 +1,28 @@
+## 2026-07-01
+
+- **fix(döngü): aynı soru tekrar tekrar sorulmuyor + önceki karar hatırlanıyor + model gürültüsü kesildi + kalıcı kabul (YZLLM: "aynı konuyu 4 kez sordu, uzun döngüye girdi, önceki kararımı hatırlamıyor"):**
+  Canlı Faz 8'de MyCL aynı tech-debt gate hatasını (dev-login parolası + boş catch) tekrar tekrar sordu; kullanıcı hep
+  aynı çözümü seçti, fix → Faz 8 yeniden → gate yine fail → tekrar sor. 3 Explore + çapraz-aile Sonnet 4.6 mahkemesi
+  kökü doğruladı. 4 düzeltme:
+  **(A) Manuel modda loop-guard** ([index.ts](orchestrator/src/index.ts) failPhase): `autoSolveSig` sayacı artık
+  MOD-BAĞIMSIZ artıyor (eski davranış yalnız oto-çözüm dalında sayıyordu → manuel modda `priorCount` hep 0 →
+  rollback + müfettiş döngü-incelemesi hiç tetiklenmiyordu). Yeni `MANUAL_LOOP_MAX=3`; tükenince aynı çözümler
+  körü körüne tekrar sunulmuyor — "kalıcı kabul / farklı yaklaşım / elle dur" seçenekleri geliyor
+  ([error-analysis.ts](orchestrator/src/error-analysis.ts) `buildErrorAnalysisAskq` loopExhausted).
+  **(B) Karar hafızası**: seçilen çözümler hata-imzası başına birikiyor (`priorSolutions`), `buildErrorAnalysisPrompt`'a
+  "PREVIOUS ATTEMPTS — do NOT repeat; kasıtlı/by-design olabilir → false-positive, kabul et" olarak enjekte ediliyor
+  (dev-login çelişkisini de dolaylı çözer). Bellek-içi (tek oturum), imza kırılmaz.
+  **(C) Model-seçim gürültüsü**: `🧠 ... modeli seçildi` satırı yalnız DEĞİŞİNCE yazılıyor
+  ([model-catalog.ts](orchestrator/src/model-catalog.ts) `modelChoiceLineIfChanged`; phase-0/4/8).
+  **(D) Kalıcı kabul**: kullanıcı bir tech-debt bulgusunu kalıcı kabul edince `.mycl/accepted-findings.jsonl`'e
+  yazılıyor; tech-debt-scanner o (dosya+kategori+snippet) anahtarını sonraki iterasyonlarda ATLIYOR → döngü KALICI
+  kırılıyor. GÖRÜNÜR (kabul edilen bulgular tek tek dökülür) + geri-alınabilir (satır sil) + snippet-hassas (farklı
+  gerçek parola yine işaretlenir). **Çapraz-aile mahkeme 3 Sonnet 4.6 müfettişi** (frozen-goal / güvenlik-false-negative
+  / doğruluk-wiring): 1 yanlış-pozitif elendi (OPT_STOP_MANUAL çıkmaz sanıldı — IPC handler `reconcileAndDrainTasks`
+  çağırıyor, doğrulandı) + 3 gerçek bulgu düzeltildi — Faz 9 da kabul-kümesini okuyor (tutarsızlık giderildi), accept
+  kapsamı görünür sıralanıyor + göreli-path birleştirildi + iterasyon hijyeni, analiz-null kenar durumunda hata-imzası
+  taşınıyor. check yeşil (yeni test: 1592 toplam).
+
 ## 2026-06-30
 
 - **feat(UX): kullanıcıya sorular + cevaplar SADE + istenirse "Detay göster" (YZLLM: "çok teknik, bu kadarı fazla"):**

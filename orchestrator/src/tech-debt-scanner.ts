@@ -82,12 +82,30 @@ const SKIPPED_TEST_PATTERNS: { re: RegExp; reason: string }[] = [
 ];
 
 /**
+ * FIX D (YZLLM 2026-07-01): kabul-anahtarı — (dosya + kategori + normalize snippet). Kullanıcı bir bulguyu
+ * KALICI kabul edince bu anahtar `.mycl/accepted-findings.jsonl`'e yazılır; scanTechDebt eşleşen anahtarı ATLAR.
+ * NORMALİZASYON: path ayraçları `/`, snippet lower-case + boşluk sadeleştirme → ufak biçim farkları eşleşmeyi
+ * bozmaz. İdempotent (tekrar normalize güvenli). FARKLI snippet → farklı anahtar → güvenlik korunur (yeni parola işaretlenir).
+ */
+export function acceptedFindingKey(file: string, category: string, excerpt: string): string {
+  const f = file.replace(/\\/g, "/");
+  const snip = excerpt.trim().toLowerCase().replace(/\s+/g, " ");
+  return `${f}::${category}::${snip}`;
+}
+
+/**
  * Bir dosya içeriğini tarar ve tüm tech debt bulgularını döner. Boş array =
  * temiz. Her finding line number + kısa excerpt + reason içerir.
  *
- * `path`: dosya yolu (sadece reason mesajına dahil edilir; tarama yapmaz).
+ * `path`: dosya yolu (reason mesajına dahil + i18n muafiyeti + kabul-anahtarı için).
+ * `acceptedKeys`: KALICI kabul edilmiş bulguların anahtar kümesi (FIX D) — eşleşen bulgular atlanır
+ * (aynı-soru döngüsü kalıcı kırılır). Verilmezse tüm bulgular döner (geriye uyumlu).
  */
-export function scanTechDebt(content: string, path?: string): TechDebtFinding[] {
+export function scanTechDebt(
+  content: string,
+  path?: string,
+  acceptedKeys?: ReadonlySet<string>,
+): TechDebtFinding[] {
   const findings: TechDebtFinding[] = [];
   const lines = content.split("\n");
   // YZLLM canlı-test 0620: i18n/çeviri dosyaları credential taramasından MUAF — UI etiketleri
@@ -153,6 +171,14 @@ export function scanTechDebt(content: string, path?: string): TechDebtFinding[] 
     }
   }
 
+  // FIX D: KALICI kabul edilmiş bulguları ele (aynı-soru döngüsü kalıcı kırılır). path yoksa anahtar üretilemez
+  // → filtre atlanır (geriye uyumlu). Güvenlik: yalnız TAM anahtar (dosya+kategori+snippet) eşleşince atlanır.
+  if (acceptedKeys && acceptedKeys.size > 0) {
+    return findings.filter(
+      (f) => !acceptedKeys.has(acceptedFindingKey(path ?? "", f.category, f.excerpt)),
+    );
+  }
+
   return findings;
 }
 
@@ -162,6 +188,35 @@ export function scanTechDebt(content: string, path?: string): TechDebtFinding[] 
  */
 export function getTechDebtCount(state: State): number {
   return (state as State & { tdd_tech_debt_count?: number }).tdd_tech_debt_count ?? 0;
+}
+
+/**
+ * FIX D: son (kabul-edilebilir) tech-debt bulguları — projeRoot → dosya bazlı mevcut bulgular. `tdd-tech-debt-detected`
+ * audit event'i excerpt taşımadığından (yalnız path:line kategori — reason), KALICI kabul yazarken snippet'e
+ * buradan erişilir. scanAndAuditTechDebt her Write/Edit'te ilgili dosyanın bulgularını GÜNCELLER (per-path replace).
+ * Bellek-içi (döngü tek-oturum) — kalıcılık `.mycl/accepted-findings.jsonl`'de.
+ */
+const _lastTechDebtFindings = new Map<string, { file: string; category: string; excerpt: string }[]>();
+
+/** Bir dosyanın mevcut bulgularını depoya yaz (o dosyanın eski girdilerini değiştirir). Boş findings → dosya temizlenir. */
+export function updateLastTechDebtFindings(projectRoot: string, file: string, findings: TechDebtFinding[]): void {
+  const kept = (_lastTechDebtFindings.get(projectRoot) ?? []).filter((x) => x.file !== file);
+  for (const f of findings) kept.push({ file, category: f.category, excerpt: f.excerpt });
+  _lastTechDebtFindings.set(projectRoot, kept);
+}
+
+/** Depodaki tüm mevcut bulguları döner (accept yazımı için). */
+export function getLastTechDebtFindings(projectRoot: string): { file: string; category: string; excerpt: string }[] {
+  return _lastTechDebtFindings.get(projectRoot) ?? [];
+}
+
+/**
+ * FIX D (mahkeme 2026-07-01): iterasyon başında depoyu temizle → çapraz-iterasyon BAYATLIĞI önlenir.
+ * Aksi halde önceki iterasyonda taranıp bu iterasyonda dokunulmayan bir dosyanın bulgusu depoda kalır →
+ * kullanıcı FARKLI bir bulgu için "kalıcı kabul" derken istemeden o bayat bulguyu da yazardı (kapsam sızıntısı).
+ */
+export function resetLastTechDebtFindings(projectRoot: string): void {
+  _lastTechDebtFindings.delete(projectRoot);
 }
 
 // Test/spec dosyaları — tech-debt taraması dışı (mock/dummy/skip oralarda meşru).

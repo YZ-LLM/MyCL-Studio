@@ -136,10 +136,15 @@ entegre eder.
   müfettişin bağımsız analizi düzeltmeyi besler.
   Yetki fix-kararları üzerinde evrenseldir (küçük değişiklik de incelenir), ama
   orkestratörün çalışan akışı asla zorla kesilmez. Ayrıca **döngü sınıfı**: aynı hata
-  arka arkaya otomatik düzeltmeye rağmen geçmiyorsa (orkestratörün kendi göremediği
+  arka arkaya düzeltmeye rağmen geçmiyorsa (orkestratörün kendi göremediği
   yapısal kör-nokta), müfettiş döngüyü bağımsız inceler — fantom (false-positive) bir
   döngü kanıtlanırsa çalışan koda dönülüp devam edilir, aksi halde müfettişin bağımsız
-  okuması eklenerek karar insana taşınır. Ve **netleştirme sınıfı**: orkestratör "emin
+  okuması eklenerek karar insana taşınır. Bu koruma **oto-cevap kapalıyken de**
+  çalışır: aynı soru birkaç denemeden sonra körü körüne tekrar sorulmaz — o denemeler
+  analize taşınır (önceki kararı hatırlar, aynı çözümü önermez) ve sana farklı bir yol,
+  elle inceleme ya da **kalıcı kabul** (bulgu kasıtlıysa — dev-login gibi — bir daha
+  sorulmasın; kapı sonraki iterasyonlarda o bulguyu atlar, `.mycl/accepted-findings.jsonl`
+  satırı silinerek geri alınır) seçeneği sunulur. Ve **netleştirme sınıfı**: orkestratör "emin
   değilim, sorayım" derken (oto-cevap açıkken) müfettiş bunu bağımsız tartar — gerçek
   belirsizlik (tercih/zevk/geri-alınamaz) ise sana sorar, gereksiz bir soruysa
   çıkarılabilir cevapla seni bekletmeden ilerler. Varsayılan **açık** (Ayarlar →

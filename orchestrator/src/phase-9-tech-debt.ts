@@ -18,7 +18,13 @@ import { join } from "node:path";
 import { hasSourceExt } from "./fix/evidence.js";
 import { getChangedFiles, isGitRepo } from "./git.js";
 import { log } from "./logger.js";
-import { isTestPath, scanTechDebt, type TechDebtFinding } from "./tech-debt-scanner.js";
+import {
+  isTestPath,
+  scanTechDebt,
+  acceptedFindingKey,
+  type TechDebtFinding,
+} from "./tech-debt-scanner.js";
+import { readAcceptedFindings } from "./audit.js";
 import type { State } from "./types.js";
 
 export interface FileTechDebt {
@@ -50,11 +56,14 @@ export const MAX_SCAN_FILES = 200;
  */
 export function scanFiles(
   entries: { path: string; content: string }[],
+  acceptedKeys?: ReadonlySet<string>,
 ): Pick<IterationTechDebt, "files" | "totalFindings"> {
   const files: FileTechDebt[] = [];
   let totalFindings = 0;
   for (const { path, content } of entries) {
-    const findings = scanTechDebt(content, path);
+    // FIX D (mahkeme 2026-07-01): Faz 8'de KALICI kabul edilmiş bulguları Faz 9 da atlar — yoksa
+    // "Faz 8 kabul etti ama Faz 9 yeniden bulur" tutarsızlığı + Faz 9 ajanı gerçek sırrı yanlış-pozitif sanabilir.
+    const findings = scanTechDebt(content, path, acceptedKeys);
     if (findings.length > 0) {
       files.push({ path, findings });
       totalFindings += findings.length;
@@ -104,7 +113,17 @@ export async function collectIterationTechDebt(state: State): Promise<IterationT
       log.warn("phase-9-tech-debt", "read failed (atlandı)", { rel, err: String(err) });
     }
   }
-  const { files, totalFindings } = scanFiles(entries);
+  // FIX D (mahkeme): Faz 8 ile aynı kabul kümesini kullan (okuma hatası → boş küme, normal tara — fail-open).
+  const accepted = await readAcceptedFindings(root).catch((e) => {
+    log.warn("phase-9-tech-debt", "accepted-findings okunamadı (normal taramaya devam)", String(e));
+    return [];
+  });
+  const acceptedKeys = new Set(
+    accepted
+      .filter((a) => a.scope === "tech-debt")
+      .map((a) => acceptedFindingKey(a.file, a.category, a.snippet)),
+  );
+  const { files, totalFindings } = scanFiles(entries, acceptedKeys);
   return {
     files,
     scannedFiles: entries.map((e) => e.path),

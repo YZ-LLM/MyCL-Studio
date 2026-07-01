@@ -14,6 +14,7 @@ import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
 import { translate } from "./translator.js";
 import { escalatedModelEffort } from "./escalation.js";
+import { modelChoiceLineIfChanged } from "./model-catalog.js";
 import { blindspotLensDecision, specIsConsequential } from "./pre-commit-lens-gate.js";
 import { withDevsPath } from "./devs-paths.js";
 import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
@@ -264,7 +265,8 @@ export class Phase4Controller {
     // Escalation (YZLLM 2026-06-11): spec model+eforu PER-DOMAIN merdivenden — bu domain'in öğrenilmiş basamağından
     // YZLLM 2026-06-16: merdiven kaldırıldı — model+efor iş-türüne göre (escalatedModelEffort, config kral).
     const me = escalatedModelEffort(this.state, this.config, "spec");
-    emitChatMessage("system", `🧠 Spec: **${me.modelLabel}** · efor ${me.effort}`);
+    const specModelLine = modelChoiceLineIfChanged("phase-4", `🧠 Spec: **${me.modelLabel}** · efor ${me.effort}`);
+    if (specModelLine) emitChatMessage("system", specModelLine);
     this.base = createProductionSchemaBackend({
       tag: "phase-4",
       phaseId: 4,

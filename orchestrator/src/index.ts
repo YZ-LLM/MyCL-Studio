@@ -36,6 +36,7 @@ import { appendAbandonedIntent } from "./abandoned-intents.js";
 import {
   appendAudit as appendAuditModule,
   appendCost,
+  appendAcceptedFinding,
   readCosts,
   readAuditLog,
   readAuditLogTail,
@@ -94,12 +95,15 @@ import {
   analyzeAndAskError,
   type ErrorContext,
   OPT_ACCEPT_CONTINUE,
+  OPT_ACCEPT_PERMANENT,
+  OPT_STOP_MANUAL,
   OPT_QUEUE,
   OPT_REANALYZE,
   type PendingErrorAnalysis,
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
-import { computeTiersFromModels } from "./model-catalog.js";
+import { computeTiersFromModels, resetModelChoiceCache } from "./model-catalog.js";
+import { getLastTechDebtFindings, acceptedFindingKey, resetLastTechDebtFindings } from "./tech-debt-scanner.js";
 import { sumSecurityFindings, stepSecurityConvergence } from "./security-convergence.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
 import { runRegressionGuard } from "./regression-guard.js";
@@ -426,7 +430,19 @@ function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): stri
 // hata çıkarsa imza sıfırlanır (ilerleme = sınırsız sürer). Yalnız AYNI hata bu tavanı aşarsa "gerçekten takıldı"
 // deyip kullanıcıya bırakır (sonsuz aynı-fix döngüsü = sahte-yeşil/kaynak israfı backstop).
 const AUTO_SOLVE_MAX = 6;
-const autoSolveSig = new Map<number, { sig: string; count: number }>();
+// YZLLM 2026-07-01 (FIX A): manuel modda (oto-cevap KAPALI) aynı hata bu kadar denemeden sonra ARTIK körü körüne
+// aynı soruyu sorMAZ — loop-review + farklı seçenek (kabul-kalıcı / farklı-yaklaşım / dur). Manuel round-trip pahalı
+// (kullanıcı her seferinde bekleyip cevaplıyor) → oto-taban 6'dan düşük. FIX B: priorSolutions sig-başına önceki
+// kararları tutar → error-analysis "bunlar denendi, tekrarlama" olarak enjekte eder (aynı-soru döngüsü kırılır).
+const MANUAL_LOOP_MAX = 3;
+const autoSolveSig = new Map<number, { sig: string; count: number; priorSolutions: string[] }>();
+
+/** FIX B: kullanıcının/otonun bu hata-imzası için seçtiği çözümü kaydet → sonraki analizde "denendi, tekrarlama". */
+function recordSolutionChoice(phase: PhaseId, sig: string, solution: string): void {
+  const e = autoSolveSig.get(phase);
+  const s = solution.trim();
+  if (e && e.sig === sig && s && !e.priorSolutions.includes(s)) e.priorSolutions.push(s);
+}
 
 // Model yükseltme önerisi (YZLLM 2026-06-11): keşif yeni güçlü model bulunca OTOMATİK uygulamaz, SORAR.
 // _pendingModelUpgrade: açık askq + önerilen model. _declinedModelUpgrades: bu oturumda "hayır" denenler (tekrar sorma).
@@ -535,7 +551,7 @@ async function recordPhaseComplete(n: PhaseId): Promise<void> {
  * izlemiyor → park = sessiz-stall → OPT_QUEUE OTO-route (hata iş listesine + görünür dur; OPT_REANALYZE
  * oto-seçilmediği için reanalyze→null→reanalyze sonsuz döngüsü YOK). Tüm failPhase null-yolları bunu çağırır.
  */
-async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean): Promise<void> {
+async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean, sig?: string): Promise<void> {
   // Savunmacı guard (sentinel-routing finding-e): mevcut gerçek bir bekleme varsa EZME.
   // 3 çağrı sitesinin hepsi bugün null garantili, ama gelecek site için kapıyı kapat.
   if (runtime.pendingErrorAnalysis !== null) {
@@ -553,6 +569,8 @@ async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean): Prom
     blocking: true,
     options: [OPT_REANALYZE, OPT_QUEUE],
     solutions_tr: [],
+    // FIX B (mahkeme): fallback pending'e de sig taşı → sonraki tur PREVIOUS ATTEMPTS hafızası tutarlı kalır.
+    sig,
   };
   emitChatMessage(
     "system",
@@ -734,8 +752,20 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   const prev = autoSolveSig.get(n);
   const sameSig = prev?.sig === sig;
   const priorCount = sameSig ? prev!.count : 0;
+  const priorSolutions = sameSig ? prev!.priorSolutions : []; // FIX B: bu sig için önceki kararlar (aynı hataysa)
+  // FIX A (YZLLM 2026-07-01): sayacı MOD-BAĞIMSIZ artır (manuel modda da). Eski set YALNIZ oto-çözüm dalındaydı
+  // (satır ~899) → manuel modda priorCount hep 0 → loop-guard hiç tetiklenmez → sonsuz aynı-soru. Artık girişte
+  // tek noktadan sayılır (aşağıdaki eski set kaldırıldı; çift-say yok). Farklı sig → priorCount 0'dan (reset).
+  autoSolveSig.set(n, { sig, count: priorCount + 1, priorSolutions });
+  // FIX B: önceki denemeleri analize taşı (aynı hataysa) → LLM aynı çözüme dönmesin.
+  if (priorSolutions.length) errCtx.priorAttempts = priorSolutions;
   let autoResolve = otoCevap && priorCount < AUTO_SOLVE_MAX;
-  const exhausted = otoCevap && priorCount >= AUTO_SOLVE_MAX;
+  // FIX A: exhausted manuel modda DA — MANUAL_LOOP_MAX denemeden sonra körü körüne aynı soruyu sorma; mevcut
+  // exhausted yolu (rollback + mahkeme döngü-incelemesi) manuel modda da çalışır + farklı seçenek askq'sı gelir.
+  const exhausted =
+    (otoCevap && priorCount >= AUTO_SOLVE_MAX) || (!otoCevap && priorCount >= MANUAL_LOOP_MAX);
+  // FIX A: manuel-loop tükendiyse askq eski çözümleri TEKRAR sunmasın (farklı seçenek seti).
+  if (exhausted && !otoCevap) errCtx.loopExhausted = true;
   // ⚖️ MAHKEME (sorun-zamanı / problem-triggered, YZLLM tasarımı): otomatik fix dispatch'inden ÖNCE müfettiş bu
   // faz-hatasını BAĞLAYICI inceler — gerçek kod sorunu mu, false-positive/gereksiz mi. Merkezi yol KUTSAL →
   // force-pass YOK: suppress/escalate (fix gereksiz/riskli/false-positive) → otomatik fix YERİNE İNSANA yönlendir
@@ -877,6 +907,8 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
     autoResolve,
   }).catch(() => null);
+  // FIX B: bu askq'nın hata-imzasını park kaydına taşı → kullanıcı cevap verince (handleAskqAnswer) seçimi bu sig'e kaydedilir.
+  if (runtime.pendingErrorAnalysis) runtime.pendingErrorAnalysis.sig = sig;
   // YZLLM 2026-06-26: hata-analizi Claude account-error gördü ama z.ai (GLM) var → "tükendi" YALANI yerine
   // z.ai'ya geçir + fazı tekrar koş (askq YOK). Sinyali error-analysis verdi (z.ai müsait + z.ai'de değiliz).
   if (runtime.pendingErrorAnalysis?.needsProviderSwitch) {
@@ -885,13 +917,14 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
       await rerunPhaseAfterProviderSwitch(n);
     } else {
       // Beklenmedik: sinyal geldi ama geçilemedi (yarış: bu arada z.ai'ye geçilmiş/anahtar gitmiş) → sessiz-stall yok.
-      await escalateUnanalyzableError(n, autoResolve);
+      await escalateUnanalyzableError(n, autoResolve, sig);
     }
     return;
   }
   const pendingAuto = runtime.pendingErrorAnalysis;
   if (pendingAuto?.auto_selected_solution) {
-    autoSolveSig.set(n, { sig, count: priorCount + 1 });
+    // FIX B: oto-seçilen çözümü de sig-başına kaydet (sayaç girişte artırıldı; burada yalnız kararı biriktir).
+    recordSolutionChoice(n, sig, pendingAuto.auto_selected_solution);
     // Aynı routing'i (askq-cevap dalı) otomatik sür — soru kartı hiç açılmadı.
     const routed = await handleAskqAnswer(pendingAuto.id, pendingAuto.auto_selected_solution)
       .then(() => true)
@@ -900,11 +933,11 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
         return false;
       });
     // FIX #3 (frozen-goal): oto-route throw etti + yeni park açılmadı → sessiz drop olmasın → fallback escalate.
-    if (!routed && !runtime.pendingErrorAnalysis) await escalateUnanalyzableError(n, autoResolve);
+    if (!routed && !runtime.pendingErrorAnalysis) await escalateUnanalyzableError(n, autoResolve, sig);
   } else if (!pendingAuto) {
     // FIX #1 (frozen-goal EVRENSEL kök): hata analizi HİÇ üretilemedi (null) → eski davranış sessiz drop'tu →
     // artık pass-or-escalate (fallback askq + oto-modda OPT_QUEUE oto-route).
-    await escalateUnanalyzableError(n, autoResolve);
+    await escalateUnanalyzableError(n, autoResolve, sig);
   }
 }
 
@@ -956,6 +989,10 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // Netleştirme-mahkemesi sayacı da sıfırlanmalı (Pillar A): yoksa eski projede CLARIFY_INSPECT_MAX'a
   // ulaşan sayaç yeni projeye TAŞINIR → yeni projenin ilk gerçek netleştirme sorusu sessizce bastırılır.
   _clarifyInspectChain = 0;
+  // YZLLM 2026-07-01 (FIX C): model-satırı cache'i sıfırla → yeni projede ilk model-seçim satırı yine görünür.
+  resetModelChoiceCache();
+  // FIX D (mahkeme): tech-debt son-bulgu deposunu da temizle (proje-değişiminde eski bulgular accept'e sızmasın).
+  resetLastTechDebtFindings(path);
   // Aktif controller varsa yeni proje açma — state ortasında değişim yasak.
   if (runtime.controller) {
     emitError("active phase running — close current project first", {
@@ -5210,17 +5247,19 @@ export async function handleAskqAnswer(
         runtime.config,
         errCtx,
       ).catch(() => null);
+      // FIX B (mahkeme): yeniden-analiz pending'ine de aynı sig'i taşı → seçilecek çözüm bu hata-imzasına kaydedilir.
+      if (runtime.pendingErrorAnalysis) runtime.pendingErrorAnalysis.sig = cached.sig;
       // YZLLM 2026-06-26: yeniden-analiz Claude account-error gördü ama z.ai var → z.ai'ya geç + fazı tekrar koş.
       if (runtime.pendingErrorAnalysis?.needsProviderSwitch) {
         runtime.pendingErrorAnalysis = null;
         if (await trySwitchSessionToZai()) await rerunPhaseAfterProviderSwitch(cached.phase);
-        else await escalateUnanalyzableError(cached.phase, false);
+        else await escalateUnanalyzableError(cached.phase, false, cached.sig);
         return;
       }
       // FIX #2 (frozen-goal): yeniden-analiz de HİÇ üretemedi (null) → eski davranış sessiz drop'tu → fallback
       // escalate. OPT_REANALYZE kullanıcının BİLİNÇLİ tıkı (yanıt-bağlamı) → autoResolve=false: PARK et (kullanıcı
       // OPT_QUEUE ile çıkar), oto-route YOK (reanalyze→null→reanalyze döngüsü + istemsiz task yazımı önlenir).
-      if (!runtime.pendingErrorAnalysis) await escalateUnanalyzableError(cached.phase, false);
+      if (!runtime.pendingErrorAnalysis) await escalateUnanalyzableError(cached.phase, false, cached.sig);
       return;
     }
     if (sel === OPT_QUEUE) {
@@ -5273,6 +5312,76 @@ export async function handleAskqAnswer(
       await advanceToNextPhase(p);
       return;
     }
+    // FIX D (YZLLM 2026-07-01: "kabul edilen bulgu bir daha sorulmasın"): KALICI kabul. Bu gate-fail'e neden olan
+    // tech-debt bulgularını (dosya+kategori+snippet) `.mycl/accepted-findings.jsonl`'e yaz → sonraki iterasyonda
+    // kapı ARTIK işaretlemez → aynı-soru döngüsü KALICI kırılır. GÖRÜNÜR + geri-alınabilir (satır sil = yeniden aktif).
+    if (sel === OPT_ACCEPT_PERMANENT) {
+      const p = (cached.acceptContinuePhase ?? cached.phase) as PhaseId;
+      const findings = getLastTechDebtFindings(runtime.state.project_root);
+      // Aynı anahtarı iki kez yazma (idempotent kabul).
+      const writtenKeys = new Set<string>();
+      const acceptedList: { file: string; category: string }[] = [];
+      for (const f of findings) {
+        const key = acceptedFindingKey(f.file, f.category, f.excerpt);
+        if (writtenKeys.has(key)) continue;
+        writtenKeys.add(key);
+        await appendAcceptedFinding(runtime.state.project_root, {
+          ts: Date.now(),
+          scope: "tech-debt",
+          file: f.file,
+          category: f.category,
+          snippet: f.excerpt,
+          reason: `kullanıcı Faz ${cached.phase} döngüsünde kalıcı kabul etti`,
+        }).catch((e) => log.warn("orchestrator", "accepted-finding write fail", e));
+        acceptedList.push({ file: f.file, category: f.category });
+      }
+      const wrote = acceptedList.length;
+      await appendAuditModule(runtime.state.project_root, {
+        ts: Date.now(),
+        phase: p,
+        event: `phase-${p}-complete`,
+        caller: "user",
+        detail: `finding_accepted_permanently count=${wrote}`,
+      }).catch((e) => log.warn("orchestrator", "accept-permanent audit fail", e));
+      // KATI #4 (görünürlük) + mahkeme (bilinçli-onay): TAM OLARAK hangi bulguların kabul edildiğini DÖK — kullanıcı
+      // "1 bulgu kabul ediyorum" sanırken sessizce fazlası gizlenmesin; istemediğini .jsonl'den silebilsin (geri-alınabilir).
+      emitChatMessage(
+        "system",
+        wrote > 0
+          ? `✅ ${wrote} bulgu KALICI kabul edildi — kapı (Faz 8 + Faz 9) bir daha işaretlemeyecek:\n` +
+              acceptedList.map((a) => `  • ${a.file} — ${a.category}`).join("\n") +
+              `\nGeri almak için: .mycl/accepted-findings.jsonl ilgili satırı sil.`
+          : `✅ Bulgu kabul edildi — akış devam ediyor. (Kalıcı işaretlenebilir tech-debt bulgusu bulunamadı; ` +
+              `sonraki iterasyonda aynı gate tekrar çıkarsa gerçek bir sorun olabilir.)`,
+      );
+      await advanceToNextPhase(p);
+      return;
+    }
+    // FIX A: "Dur — elle inceleyeceğim". Döngü tükendi, kullanıcı bilerek park ediyor. Hata iş listesine yazılır
+    // (kaybolmaz) + görünür dur; oto-route YOK (kullanıcı el ile inceleyecek). Sessiz-stall değil (frozen-goal).
+    if (sel === OPT_STOP_MANUAL) {
+      await appendTask(runtime.state.project_root, {
+        id: randomUUID(),
+        ts: Date.now(),
+        text: `Faz ${cached.phase} hatası (kullanıcı elle inceleyecek): ${cached.solutions_tr[0] ?? "—"}`,
+        status: "pending",
+        source: "manual",
+      }).catch((e) => {
+        log.warn("orchestrator", "stop-manual task append fail", e);
+        emitChatMessage(
+          "error",
+          `⚠️ Faz ${cached.phase}: hata iş listesine yazılamadı — lütfen el ile not al: ${cached.solutions_tr[0] ?? "—"}`,
+        );
+      });
+      emitChatMessage(
+        "system",
+        `⏸️ Faz ${cached.phase} elle inceleme için parkta — aynı soru bir daha sorulmayacak. Hazır olunca iş listesinden devam et.`,
+      );
+      return;
+    }
+    // FIX B (YZLLM 2026-07-01): kullanıcının seçtiği çözümü bu hata-imzasına KAYDET → aynı hata tekrar fail
+    // ederse error-analysis "bu denendi, tekrarlama" olarak görür (aynı-soru döngüsü kırılır, farklı yön önerilir).
+    if (cached.sig) recordSolutionChoice(cached.phase, cached.sig, sel);
     // Diğer her seçim ("Çöz" jeneriği veya somut bir çözüm metni) → mevcut debug
     // akışı (Faz 0 / debug_triage). bugReport = hata + seçilen yön + öneriler.
     emitChatMessage(

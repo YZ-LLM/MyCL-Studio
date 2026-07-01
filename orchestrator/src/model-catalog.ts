@@ -243,6 +243,23 @@ export function formatModelChoice(taskKind: TaskKind, choice: ModelChoice): stri
   return `🧠 "${taskKind}" işi için **${choice.label}** seçildi (${choice.tier}: ${choice.reason}).`;
 }
 
+// YZLLM 2026-07-01: model-seçim mesajı gürültüsü. Config deterministik → her faz/debug iterasyonunda AYNI model =
+// aynı satır tekrar tekrar chat'i dolduruyordu (döngüde çok belirgin). Çözüm: YALNIZ-DEĞİŞİNCE yaz. Modül-seviyesi
+// cache (state.json'a dokunmaz; oturum-boyu); handleOpenProject cache'i temizler → yeni projede ilk satır görünür.
+const _lastEmittedModelLine = new Map<string, string>();
+
+/** Aynı emit-noktası (key) için satır DEĞİŞTİYSE döndürür (emit et), aynıysa null (sessiz). İlk çağrı hep döndürür. */
+export function modelChoiceLineIfChanged(key: string, line: string): string | null {
+  if (_lastEmittedModelLine.get(key) === line) return null;
+  _lastEmittedModelLine.set(key, line);
+  return line;
+}
+
+/** Yeni proje açılışında model-satırı cache'ini sıfırla (ilk model satırı yine görünsün). */
+export function resetModelChoiceCache(): void {
+  _lastEmittedModelLine.clear();
+}
+
 // ───────── Otomatik EFOR seçimi (YZLLM 2026-06-10: "efor seçimi de otomatik olsun; kolay işte max
 // gereksiz düşünüyor — ama en küçük hata bile istemiyorum") ─────────
 // Prensip "kaliteli hız"ın efor boyutu: KALİTE-kritik (strong tier) işler config eforunu AYNEN alır

@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildErrorAnalysisAskq,
   OPT_ACCEPT_CONTINUE,
+  OPT_ACCEPT_PERMANENT,
+  OPT_STOP_MANUAL,
   OPT_QUEUE,
   OPT_REANALYZE,
   OPT_SOLVE,
@@ -325,5 +327,62 @@ describe("parseErrorAnalysisBlock — detail_tr (YZLLM 2026-06-30, opsiyonel + g
       `{"kind":"error_analysis","blocking":false,"summary_tr":"Özet.","detail_tr":"   ","solutions_tr":["A"]}`,
     );
     expect(r!.detail_tr).toBeUndefined();
+  });
+});
+
+// FIX A/D (YZLLM 2026-07-01: "aynı soruyu 4 kez sordu, döngüye girdi"): loop tükenince AYNI çözümleri körü
+// körüne tekrar sunma → kalıcı-kabul + park seçenekleri gelsin (döngü kalıcı kırılır).
+describe("buildErrorAnalysisAskq — loopExhausted (döngü kırma)", () => {
+  it("loopExhausted + allowPermanentAccept → 'Kalıcı kabul' EN BAŞTA + çözümler + 'Dur' + 'Tekrar analiz'", () => {
+    const { options } = buildErrorAnalysisAskq(["Farklı yaklaşım A"], true, {
+      loopExhausted: true,
+      allowPermanentAccept: true,
+    });
+    expect(labels(options)).toEqual([
+      OPT_ACCEPT_PERMANENT,
+      "Farklı yaklaşım A",
+      OPT_STOP_MANUAL,
+      OPT_REANALYZE,
+    ]);
+  });
+  it("loopExhausted → OPT_QUEUE körü körüne EKLENMEZ (aynı-çözüm re-offer yok)", () => {
+    const { options } = buildErrorAnalysisAskq(["X"], false, {
+      loopExhausted: true,
+      allowPermanentAccept: true,
+    });
+    expect(labels(options)).not.toContain(OPT_QUEUE);
+    expect(labels(options)).toContain(OPT_STOP_MANUAL);
+  });
+  it("loopExhausted ama allowPermanentAccept=false → 'Kalıcı kabul' YOK (yalnız park+reanaliz+çözüm)", () => {
+    const { options } = buildErrorAnalysisAskq([], true, { loopExhausted: true });
+    expect(labels(options)).not.toContain(OPT_ACCEPT_PERMANENT);
+    expect(labels(options)).toEqual([OPT_STOP_MANUAL, OPT_REANALYZE]);
+  });
+  it("loopExhausted=false (varsayılan) → eski davranış korunur (regresyon yok)", () => {
+    const { options } = buildErrorAnalysisAskq(["Çöz1"], false);
+    expect(labels(options)).toEqual([OPT_QUEUE, "Çöz1", OPT_REANALYZE]);
+    expect(labels(options)).not.toContain(OPT_ACCEPT_PERMANENT);
+  });
+});
+
+// FIX B (YZLLM 2026-07-01: "önceki kararımı ve sebebini hatırlamıyor"): önceki denemeler prompt'a enjekte
+// edilir → LLM aynı çözümü tekrar önermez, daha derin kök / kasıtlı-olabilir hipotezi kurar.
+describe("buildErrorAnalysisPrompt — priorAttempts (karar hafızası)", () => {
+  const base = { phase: 8 as const, message: "tech-debt gate fail", detail: "hardcoded_credential" };
+  it("priorAttempts doluysa 'PREVIOUS ATTEMPTS' + tekrarlama + kasıtlı-hipotez öğütlenir", () => {
+    const p = buildErrorAnalysisPrompt(
+      { ...base, priorAttempts: ["Parolayı env'e taşı", "Parolayı sil"] },
+      true,
+    );
+    expect(p).toContain("PREVIOUS ATTEMPTS");
+    expect(p).toContain("Parolayı env'e taşı");
+    expect(p).toContain("Parolayı sil");
+    expect(p.toUpperCase()).toContain("INTENTIONAL");
+  });
+  it("priorAttempts boş/yok → enjeksiyon YOK (temiz prompt, regresyon yok)", () => {
+    expect(buildErrorAnalysisPrompt(base, true)).not.toContain("PREVIOUS ATTEMPTS");
+    expect(buildErrorAnalysisPrompt({ ...base, priorAttempts: [] }, true)).not.toContain(
+      "PREVIOUS ATTEMPTS",
+    );
   });
 });

@@ -7,6 +7,8 @@ import {
   computeTiersFromModels,
   TRANSLATOR_MODEL,
   selectEffortForTask,
+  modelChoiceLineIfChanged,
+  resetModelChoiceCache,
   type TaskKind,
 } from "../src/model-catalog.js";
 
@@ -138,5 +140,35 @@ describe("selectEffortForTask (oto-efor — kaliteli hız)", () => {
   });
   it("geçersiz config eforu → güvenli max tabanı", () => {
     expect(selectEffortForTask("codegen", "bozuk-değer")).toBe("max");
+  });
+});
+
+// FIX C (YZLLM 2026-07-01: "model seçimi zaman kaybettiriyor"): model-seçim satırı yalnız DEĞİŞİNCE yazılır
+// (config deterministik → aynı satır tekrar tekrar emit edilmez; gürültü yok).
+describe("modelChoiceLineIfChanged — yalnız değişince yaz (gürültü kısma)", () => {
+  it("ilk çağrı satırı döner; aynı key+aynı satır → null (tekrar yazılmaz)", () => {
+    resetModelChoiceCache();
+    expect(modelChoiceLineIfChanged("phase-8", "🧠 Codegen: Opus")).toBe("🧠 Codegen: Opus");
+    expect(modelChoiceLineIfChanged("phase-8", "🧠 Codegen: Opus")).toBeNull();
+    expect(modelChoiceLineIfChanged("phase-8", "🧠 Codegen: Opus")).toBeNull();
+  });
+  it("aynı key farklı satır → yeni satır döner (gerçek değişiklik görünür)", () => {
+    resetModelChoiceCache();
+    expect(modelChoiceLineIfChanged("phase-4", "A")).toBe("A");
+    expect(modelChoiceLineIfChanged("phase-4", "B")).toBe("B");
+    expect(modelChoiceLineIfChanged("phase-4", "B")).toBeNull();
+  });
+  it("farklı key'ler bağımsız (phase-0 ≠ phase-8)", () => {
+    resetModelChoiceCache();
+    expect(modelChoiceLineIfChanged("phase-0", "X")).toBe("X");
+    expect(modelChoiceLineIfChanged("phase-8", "X")).toBe("X"); // farklı key → yine döner
+    expect(modelChoiceLineIfChanged("phase-0", "X")).toBeNull();
+  });
+  it("resetModelChoiceCache sonrası satır yeniden görünür (yeni proje ilk satırı)", () => {
+    resetModelChoiceCache();
+    expect(modelChoiceLineIfChanged("phase-8", "L")).toBe("L");
+    expect(modelChoiceLineIfChanged("phase-8", "L")).toBeNull();
+    resetModelChoiceCache();
+    expect(modelChoiceLineIfChanged("phase-8", "L")).toBe("L");
   });
 });

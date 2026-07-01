@@ -19,7 +19,7 @@ import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
-import { selectModelForTask, formatModelChoice } from "./model-catalog.js";
+import { selectModelForTask, formatModelChoice, modelChoiceLineIfChanged } from "./model-catalog.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
@@ -384,8 +384,10 @@ export class Phase0Controller {
     }
 
     // "Kaliteli hız": debug kök-neden akıl yürütmesi KALİTE-kritik → strong tier seçilir + chat'te gösterilir.
+    // YZLLM 2026-07-01: yalnız-değişince yaz (döngüde her iterasyonda aynı satır gürültüsü önlenir).
     const modelChoice = selectModelForTask("debug", this.config.selected_models.model_tiers);
-    emitChatMessage("system", formatModelChoice("debug", modelChoice));
+    const debugModelLine = modelChoiceLineIfChanged("phase-0", formatModelChoice("debug", modelChoice));
+    if (debugModelLine) emitChatMessage("system", debugModelLine);
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
       extra_denied_paths: this.spec.denied_paths,
