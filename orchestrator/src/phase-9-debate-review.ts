@@ -13,10 +13,10 @@
 
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
-import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
+import { READ_ONLY_DISALLOWED_TOOLS, PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { log } from "./logger.js";
 import { dedupeFindings } from "./phase-9-debate-dedup.js";
-import { emitAgentEvent } from "./ipc.js";
+import { emitAgentEvent, emitChatMessage } from "./ipc.js";
 import { withAgentRun } from "./agent-cost-context.js";
 
 /** Bir bulucunun ürettiği (doğrulama öncesi) ya da doğrulanmış risk bulgusu. */
@@ -38,21 +38,30 @@ export interface DebateAxis {
   key: string;
   label: string;
   focus: string;
+  /** YZLLM 2026-06-30: örtüşen eksenler dalgalara bölünür. Dalga 1 (temel) paralel koşar; Dalga 2 (rafine,
+   *  örtüştüğü Dalga-1 eksenini tamamlar) Dalga-1 bulgularını GÖRÜR + onları TEKRAR ETMEZ → kendi açısına
+   *  odaklanır (daha hızlı/ucuz/temiz). Correctness↔Error-paths, Security↔STRIDE, Maintainability↔Tech-debt. */
+  wave: 1 | 2;
 }
 
 /** phase-09-risk.md'nin eksenleri — her birine bir uzman bulucu. (YZLLM 2026-06-15: STRIDE eklendi → 7 eksen.) */
 export const DEBATE_AXES: DebateAxis[] = [
-  { key: "correctness", label: "Correctness", focus: "Does the code actually satisfy EVERY acceptance criterion (not just run)? Unimplemented/partial ACs, wrong logic, off-by-one, broken edge cases." },
-  { key: "security", label: "Security", focus: "Input validation, authz/authn boundaries, secrets, injection (SQL/cmd/XSS), unsafe deserialize, SSRF, path traversal, missing rate limits." },
+  { key: "correctness", wave: 1, label: "Correctness", focus: "Does the code actually satisfy EVERY acceptance criterion (not just run)? Unimplemented/partial ACs, wrong logic, off-by-one, broken edge cases." },
+  { key: "security", wave: 1, label: "Security", focus: "Input validation, authz/authn boundaries, secrets, injection (SQL/cmd/XSS), unsafe deserialize, SSRF, path traversal, missing rate limits." },
   // YZLLM 2026-06-15 (gstack /cso esinli): yapısal STRIDE tehdit-modeli — düz "security" ekseninden farklı
   // olarak DEĞİŞEN her bileşen/endpoint/veri-akışı için 6 kategoriyi SİSTEMATİK yürür. Hafif: yalnız bu
   // iterasyonun saldırı yüzeyi + yalnız AZALTILMAMIŞ tehditleri bulgu yapar (akademik tam-model değil).
-  { key: "stride", label: "STRIDE threat model", focus: "Walk the 6 STRIDE categories for EACH changed endpoint / data flow / privilege boundary, name the concrete threat, and report ONLY the UNMITIGATED ones: Spoofing (faked identity — weak/missing authn, guessable tokens, no session validation); Tampering (modifiable data/requests — missing integrity/validation, mass-assignment, client-trusted fields); Repudiation (security-relevant actions not logged/auditable — no audit trail on create/delete/permission-change); Information disclosure (response/error/log leaks data the caller shouldn't see — IDOR, verbose stack traces, PII in logs, over-broad SELECT *); Denial of service (attacker-triggerable unbounded work — no pagination/rate-limit, expensive unindexed query, unbounded upload/loop); Elevation of privilege (lower-priv user reaches higher-priv action — missing/!=ownership authz check, insecure direct object reference, role check only in UI)." },
-  { key: "error-paths", label: "Error & edge paths", focus: "Failure handling, empty/null/huge/unicode inputs, partial writes/failures, swallowed errors, unhandled rejections, resource leaks." },
-  { key: "performance", label: "Performance & resources", focus: "N+1 queries, unbounded loops/allocations, missing indexes, memory/handle leaks, blocking I/O on hot paths." },
-  { key: "maintainability", label: "Maintainability", focus: "Duplicated logic, dead code, unclear contracts, leaky/missing abstractions, over-complex flow, shotgun changes." },
-  { key: "tech-debt", label: "Technical debt", focus: "TODO/FIXME/HACK markers, prod-mock, hardcoded credentials/config, empty catch, skipped/disabled tests, loosened assertions, lowered thresholds." },
+  // Dalga 2: Security bulucusunun bulgularını görür → onları tekrar etmez, yalnız sistematik STRIDE açığını arar.
+  { key: "stride", wave: 2, label: "STRIDE threat model", focus: "Walk the 6 STRIDE categories for EACH changed endpoint / data flow / privilege boundary, name the concrete threat, and report ONLY the UNMITIGATED ones: Spoofing (faked identity — weak/missing authn, guessable tokens, no session validation); Tampering (modifiable data/requests — missing integrity/validation, mass-assignment, client-trusted fields); Repudiation (security-relevant actions not logged/auditable — no audit trail on create/delete/permission-change); Information disclosure (response/error/log leaks data the caller shouldn't see — IDOR, verbose stack traces, PII in logs, over-broad SELECT *); Denial of service (attacker-triggerable unbounded work — no pagination/rate-limit, expensive unindexed query, unbounded upload/loop); Elevation of privilege (lower-priv user reaches higher-priv action — missing/!=ownership authz check, insecure direct object reference, role check only in UI)." },
+  { key: "error-paths", wave: 2, label: "Error & edge paths", focus: "Failure handling, empty/null/huge/unicode inputs, partial writes/failures, swallowed errors, unhandled rejections, resource leaks." },
+  { key: "performance", wave: 1, label: "Performance & resources", focus: "N+1 queries, unbounded loops/allocations, missing indexes, memory/handle leaks, blocking I/O on hot paths." },
+  { key: "maintainability", wave: 1, label: "Maintainability", focus: "Duplicated logic, dead code, unclear contracts, leaky/missing abstractions, over-complex flow, shotgun changes." },
+  { key: "tech-debt", wave: 2, label: "Technical debt", focus: "TODO/FIXME/HACK markers, prod-mock, hardcoded credentials/config, empty catch, skipped/disabled tests, loosened assertions, lowered thresholds." },
 ];
+
+/** Dalga 1 = temel eksenler (paralel, bağımsız). Dalga 2 = rafine eksenler (Dalga-1 bulgularını görür). */
+export const WAVE1_AXES = DEBATE_AXES.filter((a) => a.wave === 1);
+export const WAVE2_AXES = DEBATE_AXES.filter((a) => a.wave === 2);
 
 export interface DebateReviewContext {
   specRisks: string;
@@ -120,8 +129,10 @@ function validatorSystemPrompt(f: DebateFinding): string {
     "- If you cannot verify either way after reading, default to is_real=false (we drop unprovable findings — better than noise).\n\n" +
     `## Claimed risk\nLens: ${f.axis}\nDecision: ${f.decision} | fix_phase: ${f.fix_phase} | severity: ${f.severity}\n` +
     `Risk: ${f.risk}\nEvidence claimed: ${f.detail ?? "(none)"}\n\n` +
+    "## If the evidence is a MERGED cluster (several bulleted claims), verify EACH claim against the code and set " +
+    "is_real=true if AT LEAST ONE is a genuine issue (state which in reason). Only false if ALL are false positives.\n\n" +
     "## OUTPUT — exactly ONE JSON block, nothing else:\n" +
-    '{"kind":"verdict","is_real":true,"reason":"<what you saw in the code that confirms or refutes>"}'
+    '{"kind":"verdict","is_real":true,"reason":"<what you saw in the code that confirms or refutes (per claim if merged)>"}'
   );
 }
 
@@ -153,8 +164,183 @@ function parseFindings(text: string, axis: string): DebateFinding[] {
   return out;
 }
 
+/** YZLLM 2026-06-30: Dalga-2 bulucularına Dalga-1 bulgularını "zaten raporlandı, TEKRAR ETME" olarak enjekte et →
+ *  rafine eksen kendi açısına odaklanır (mükerrer iş↓, daha hızlı/ucuz/temiz kafa). Boş → "" (enjeksiyon yok). */
+function priorFindingsBlock(prior: DebateFinding[]): string {
+  if (prior.length === 0) return "";
+  const lines = prior
+    .map((f, i) => `${i + 1}. [${f.axis}] ${f.risk}${f.detail ? ` — ${f.detail.slice(0, 160)}` : ""}`)
+    .join("\n");
+  return (
+    "\n\n## ALREADY REPORTED by earlier review lenses — DO NOT re-report any of these (a duplicate wastes effort " +
+    "and muddies dedup). Focus ONLY on risks from YOUR lens that these MISSED. If your lens finds nothing NEW, " +
+    "return an empty findings array.\n" +
+    "IMPORTANT: a DEEPER, MORE SEVERE, or DIFFERENTLY-LOCATED variant of a listed item is NOT a duplicate — REPORT " +
+    "it. Only skip a finding if it is the IDENTICAL root issue at the IDENTICAL location as one already listed.\n" +
+    lines +
+    "\n"
+  );
+}
+
+/** Bir bulucu dalgasını (eksen kümesi) PARALEL koşar → {bulgular, başarılı-eksen-sayısı}. userMessage dalgaya
+ *  göre değişir (Dalga 2'ye prior-findings bloğu eklenir). Ajan Takımı görünürlüğü korunur (withAgentRun). */
+async function runFinderWave(
+  axes: DebateAxis[],
+  userMessage: string,
+  modelId: string,
+  extraEnv: Record<string, string> | undefined,
+  projectRoot: string,
+  effort: string | undefined,
+): Promise<{ findings: DebateFinding[]; axisOk: number }> {
+  const settled = await Promise.allSettled(
+    axes.map((a) =>
+      withAgentRun({ label: a.label, group: "Faz 9 İnceleme — Bulucular", phase: 9 }, async () => {
+        emitAgentEvent({ sub: "started", agent_label: a.label, agent_group: "Faz 9 İnceleme — Bulucular", phase: 9 });
+        try {
+          return await runClaudeCli({
+            systemPrompt: finderSystemPrompt(a),
+            userMessage,
+            modelId,
+            extraEnv, // ⑥ z.ai ise z.ai endpoint'i
+            cwd: projectRoot,
+            allowedTools: ["Read", "Grep", "Glob", "Bash"],
+            disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
+            effort,
+            timeoutMs: FINDER_TIMEOUT_MS,
+          });
+        } finally {
+          emitAgentEvent({ sub: "completed", agent_label: a.label });
+        }
+      }),
+    ),
+  );
+  const findings: DebateFinding[] = [];
+  let axisOk = 0;
+  settled.forEach((r, i) => {
+    const axis = axes[i].key;
+    if (r.status !== "fulfilled") {
+      log.warn("phase-9-debate", "bulucu reddedildi", { axis, reason: String(r.reason) });
+      return;
+    }
+    if (!r.value.ok) {
+      log.warn("phase-9-debate", "bulucu başarısız", { axis, error: r.value.error });
+      return;
+    }
+    axisOk++;
+    findings.push(...parseFindings(r.value.text, axis));
+  });
+  return { findings, axisOk };
+}
+
+const SEV_RANK: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
 /**
- * Çok-ajanlı risk incelemesi: paralel bulucular (eksen başına) → dedup → paralel çürütücüler (bulgu başına).
+ * SAF (test edilebilir): LLM cluster gruplarını bulgulara uygular. Her grup → tek temsilci (en yüksek severity;
+ * eşitse en zengin detail). GÜVENLİK: geçersiz/kapsam-dışı/tekrar index'ler atlanır; HİÇBİR gruba girmeyen bulgu
+ * AYNEN korunur (yanlış-birleştirme dışında bulgu KAYBI olmaz — sahte-yeşil yasağı). Birden çok eksen → "a+b".
+ */
+export function applyClusters(findings: DebateFinding[], groups: unknown[]): DebateFinding[] {
+  const out: DebateFinding[] = [];
+  const covered = new Set<number>();
+  for (const g of groups) {
+    if (!Array.isArray(g)) continue;
+    const idxs = g.filter(
+      (x): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0 && x < findings.length && !covered.has(x),
+    );
+    if (idxs.length === 0) continue;
+    idxs.forEach((x) => covered.add(x));
+    let rep = findings[idxs[0]];
+    for (const x of idxs.slice(1)) {
+      const f = findings[x];
+      const higher = (SEV_RANK[f.severity] ?? 0) > (SEV_RANK[rep.severity] ?? 0);
+      const sameSevMoreDetail = f.severity === rep.severity && (f.detail?.length ?? 0) > (rep.detail?.length ?? 0);
+      if (higher || sameSevMoreDetail) rep = f;
+    }
+    if (idxs.length > 1) {
+      // KRİTİK GÜVENLİK (mahkeme HIGH): yanlış birleştirmede DÜŞEN bulgu çürütücüye HİÇ ulaşmasın diye TÜM üye
+      // risk+detail'i temsilcinin detail'inde KORU (bilgi kaybı yok). Çürütücü kümeyi görür → "en az biri gerçek
+      // mi" diye doğrular; gerçek olan(lar) hayatta kalır + düzeltmeye tüm bağlam gider. Sahte-yeşil yasağı korunur.
+      const members = idxs.map((x) => findings[x]);
+      const combinedDetail =
+        "MERGED cluster of related findings — verify EACH claim (is_real=true if AT LEAST ONE is a genuine issue):\n" +
+        members.map((m) => `• [${m.axis}/${m.severity}] ${m.risk}${m.detail ? ` — ${m.detail}` : ""}`).join("\n");
+      out.push({ ...rep, axis: [...new Set(members.map((m) => m.axis))].join("+"), detail: combinedDetail });
+    } else {
+      out.push(rep);
+    }
+  }
+  // Hiçbir gruba girmeyen index → GÜVENLİ tarafta kal, aynen ekle (LLM atlamış olabilir; bulgu kaybı yok).
+  findings.forEach((f, i) => {
+    if (!covered.has(i)) out.push(f);
+  });
+  return out;
+}
+
+/**
+ * SEMANTİK dedup (YZLLM 2026-06-30): metin-birebir dedup'tan SONRA, farklı eksenlerin AYNI kök sorunu FARKLI
+ * kelimelerle raporladığı bulguları LLM ile MUHAFAZAKÂR birleştirir (yalnız kesin aynı kök+konum; kuşkuda AYRI
+ * bırak — yanlış birleştirme gerçek bir bulguyu sessizce düşürür, bu dupe'tan çok daha kötü). Çürütücü maliyetini
+ * düşürür. FAIL-SAFE: hata/parse-fail/atlanan-index → o bulgular AYNEN korunur (bulgu kaybı YOK). Kod okumaz
+ * (saf metin kümeleme; konum ayrımı için detail'deki file:line'a bakar; kod-seviyesi doğrulamayı çürütücü yapar).
+ */
+async function semanticDedupeFindings(
+  findings: DebateFinding[],
+  modelId: string,
+  extraEnv: Record<string, string> | undefined,
+  projectRoot: string,
+  effort: string | undefined,
+): Promise<DebateFinding[]> {
+  if (findings.length < 2) return findings;
+  const list = findings
+    .map((f, i) => `${i}. [${f.axis}/${f.severity}] ${f.risk}${f.detail ? ` — ${f.detail.slice(0, 200)}` : ""}`)
+    .join("\n");
+  const system =
+    "You cluster code-review findings by ROOT ISSUE. Multiple review lenses can report the SAME underlying problem " +
+    "in different words. Group ONLY findings that describe the SAME root issue at the SAME code location.\n" +
+    "BE CONSERVATIVE: when in doubt, keep SEPARATE. A wrong merge silently drops a real distinct risk — far worse " +
+    "than leaving a duplicate. Different files / locations / root-causes = SEPARATE, even if worded similarly.\n\n" +
+    "## OUTPUT — exactly ONE JSON block, nothing else:\n" +
+    '{"kind":"clusters","groups":[[0,3],[1],[2]]}\n' +
+    "Each inner array = indices of findings that are the SAME issue. Include EVERY index exactly once (singletons as 1-element arrays).";
+  const res = await withAgentRun(
+    { label: "Semantik birleştirme", group: "Faz 9 İnceleme — Semantik Dedup", phase: 9 },
+    async () => {
+      emitAgentEvent({ sub: "started", agent_label: "Semantik birleştirme", agent_group: "Faz 9 İnceleme — Semantik Dedup", phase: 9 });
+      try {
+        return await runClaudeCli({
+          systemPrompt: system,
+          userMessage: "Findings:\n" + list,
+          modelId,
+          extraEnv,
+          cwd: projectRoot,
+          disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf metin kümeleme — kod/Bash aracı GEREKMEZ (mahkeme)
+          effort, // pipeline effort'u geçir (bulucu/çürütücü ile parite; mahkeme)
+          timeoutMs: 60_000,
+        });
+      } finally {
+        emitAgentEvent({ sub: "completed", agent_label: "Semantik birleştirme" });
+      }
+    },
+  );
+  if (!res.ok) {
+    log.warn("phase-9-debate", "semantik dedup başarısız → metin-dedup sonucu korunur (bulgu kaybı yok)", { error: res.error });
+    return findings;
+  }
+  const block = extractKindBlock(res.text, ["clusters"]);
+  const groups = block && Array.isArray(block.groups) ? (block.groups as unknown[]) : null;
+  if (!groups) {
+    log.warn("phase-9-debate", "semantik dedup: cluster bloğu yok → metin-dedup sonucu korunur");
+    return findings;
+  }
+  const out = applyClusters(findings, groups);
+  if (out.length < findings.length) {
+    log.info("phase-9-debate", "semantik dedup birleştirdi", { before: findings.length, after: out.length });
+  }
+  return out;
+}
+
+/**
+ * Çok-ajanlı risk incelemesi: 2-dalga bulucular → metin-dedup → semantik-dedup → paralel çürütücüler (bulgu başına).
  * Yalnız doğrulanan (is_real) bulgular döner. Tüm bulucular patlarsa ok:false (fail-closed).
  */
 export async function runDebateReview(
@@ -170,66 +356,54 @@ export async function runDebateReview(
   const userMsg =
     "Investigate THIS iteration's changed code from your lens and emit the findings JSON block.\n\n" + ctxText;
 
-  // 1. BULUCULAR — eksen başına paralel (salt-okunur). Ajan Takımı görünürlüğü (mahkeme #4): her bulucu ayrı
-  // takım üyesi → withAgentRun ile token'ı kendi koşusuna yazılır + started/completed popup'ta görünür.
-  const finderSettled = await Promise.allSettled(
-    DEBATE_AXES.map((a) =>
-      withAgentRun({ label: a.label, group: "Faz 9 İnceleme — Bulucular", phase: 9 }, async () => {
-        emitAgentEvent({ sub: "started", agent_label: a.label, agent_group: "Faz 9 İnceleme — Bulucular", phase: 9 });
-        try {
-          return await runClaudeCli({
-            systemPrompt: finderSystemPrompt(a),
-            userMessage: userMsg,
-            modelId,
-            extraEnv, // ⑥ z.ai ise z.ai endpoint'i
-            cwd: projectRoot,
-            allowedTools: ["Read", "Grep", "Glob", "Bash"],
-            disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
-            effort,
-            timeoutMs: FINDER_TIMEOUT_MS,
-          });
-        } finally {
-          emitAgentEvent({ sub: "completed", agent_label: a.label });
-        }
-      }),
-    ),
+  // 1. BULUCULAR — 2 DALGA (YZLLM 2026-06-30, kullanıcı isteği: örtüşen eksenler sıralı çalışsın, önceki bulguları
+  // bilsin, tekrar etmesin → daha hızlı/ucuz/temiz). Dalga 1 (temel: correctness/security/maintainability/
+  // performance) PARALEL. Dalga 2 (rafine: error-paths/stride/tech-debt) Dalga-1 bulgularını GÖRÜR + tekrar ETMEZ,
+  // yalnız kendi açısının kaçırılan riskini arar. Her bulucu Ajan Takımı popup'ında görünür (withAgentRun).
+  const wave1 = await runFinderWave(WAVE1_AXES, userMsg, modelId, extraEnv, projectRoot, effort);
+  const wave2 = await runFinderWave(
+    WAVE2_AXES,
+    userMsg + priorFindingsBlock(wave1.findings),
+    modelId,
+    extraEnv,
+    projectRoot,
+    effort,
   );
+  const raw = [...wave1.findings, ...wave2.findings];
+  const axisOk = wave1.axisOk + wave2.axisOk;
 
-  const raw: DebateFinding[] = [];
-  let axisOk = 0;
-  finderSettled.forEach((r, i) => {
-    const axis = DEBATE_AXES[i].key;
-    if (r.status !== "fulfilled") {
-      log.warn("phase-9-debate", "bulucu reddedildi", { axis, reason: String(r.reason) });
-      return;
-    }
-    if (!r.value.ok) {
-      log.warn("phase-9-debate", "bulucu başarısız", { axis, error: r.value.error });
-      return;
-    }
-    axisOk++;
-    raw.push(...parseFindings(r.value.text, axis));
-  });
-
-  // FAIL-CLOSED: tüm bulucular patladıysa "risk yok" SAYMA — Faz 9 fail etmeli.
-  if (axisOk === 0) {
+  // FAIL-CLOSED (mahkeme, sahte-yeşil yasağı): Dalga 1 (temel eksenler) TÜMÜ patladıysa — ya da hiçbir eksen
+  // koşmadıysa — "risk yok" SAYMA, Faz 9 fail etmeli. Dalga 1 essential (correctness/security temeli); onsuz
+  // "temiz" iddiası anlamsız. (Eski "axisOk===0" 2-dalgada Dalga-2'nin tek blip'te sıfırlanmasını kaçırıyordu.)
+  if (wave1.axisOk === 0) {
     return {
       ok: false,
       findings: [],
       axisCount: DEBATE_AXES.length,
-      axisOk: 0,
+      axisOk,
       rawCount: 0,
       confirmedCount: 0,
-      reason: "tüm bulucu ajanlar başarısız (CLI hatası?) — boş sonuç 'risk yok' sayılmaz (sahte-yeşil yasağı)",
+      reason: "Dalga-1 (temel) bulucular başarısız (CLI hatası?) — boş sonuç 'risk yok' sayılmaz (sahte-yeşil yasağı)",
     };
+  }
+  // GÖRÜNÜR kısmi-kapsam uyarısı (mahkeme, sessiz-atlama yasağı): bir eksen koşmadıysa "temiz" YANILTICI olabilir.
+  if (axisOk < DEBATE_AXES.length) {
+    const failedCount = DEBATE_AXES.length - axisOk;
+    emitChatMessage(
+      "system",
+      `⚠️ Faz 9 incelemesi KISMİ: ${axisOk}/${DEBATE_AXES.length} inceleme merceği koştu (${failedCount} eksen ` +
+        `başarısız — CLI/ağ hatası?). Bu mercek(ler)in kapsamı bu koşuda EKSİK; "risk yok" tam kapsam sayılmamalı.`,
+    );
   }
 
   if (raw.length === 0) {
     return { ok: true, findings: [], axisCount: DEBATE_AXES.length, axisOk, rawCount: 0, confirmedCount: 0 };
   }
 
-  // 2. DEDUP — saf, test edilebilir.
-  const deduped = dedupeFindings(raw);
+  // 2. DEDUP — metin-birebir (saf, test edilebilir) → SONRA semantik (LLM, muhafazakâr; farklı kelimeyle aynı
+  // kök sorunu birleştirir; fail-safe + üye risk+detail korunur → bulgu kaybı yok). Çürütücü maliyetini↓.
+  const textDeduped = dedupeFindings(raw);
+  const deduped = await semanticDedupeFindings(textDeduped, modelId, extraEnv, projectRoot, effort);
 
   // 3. ÇÜRÜTÜCÜLER — bulgu başına paralel; yanlış-pozitifleri ele. Ajan Takımı görünürlüğü (mahkeme #4).
   const valSettled = await Promise.allSettled(
