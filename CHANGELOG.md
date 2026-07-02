@@ -1,5 +1,13 @@
 ## 2026-07-02
 
+- **fix(semgrep): minified KOPYA dosyaları da hariç (`*.min.js` → `*.min*.js`; YZLLM canlı iterasyon incelemesi):**
+  Vendor-exclude fix'inden sonra son iterasyonda `bundles/ckeditor` temizlendi ama `public/assets/js/table.min - Copy.js`
+  (DataTables minified'ının Windows kopyası, `.min` ekten sonra ` - Copy` alıyor) Faz 10 (25 bulgu) + Faz 13'te sarı
+  bırakıyordu. `*.min.js` glob'u `.min.js` ile BİTEN dosyaları yakalıyordu; `*.min*.js`'e genişletildi
+  ([semgrep-excludes.ts](orchestrator/src/semgrep-excludes.ts) + `.semgrepignore`) — ampirik doğrulandı (semgrep
+  `paths.scanned`: dosya artık hariç). Nadir yan etki: `minimal.js`/`minimap.js` kaynak dosyası da elenir (görünür
+  `.semgrepignore`, kullanıcı silebilir). Faz 13/15/16'nın kalan sarısı cave5 projesinin GERÇEK bulguları (kapsam dışı).
+
 - **fix(UX): kullanıcıya gösterilen hata kartları artık Türkçe — ham teknik detay "Detay göster" altında (YZLLM: "kullanıcıya ingilizce yazmasın; gerekirse detay göster butonunun altında gösterir"):**
   Canlı Faz 4'te kullanıcı "dispatch threw" + ham `ENOENT ... iter-spec.md` İngilizce kırmızı kart gördü. `emitError(reason, detail)`
   kartın ANA metni olarak `reason`'ı gösteriyor; 86 çağrının çoğu İngilizce teknik token'dı ("no active project",

@@ -12,7 +12,8 @@ describe("SEMGREP_EXCLUDE_FLAGS (tek kaynak)", () => {
       expect(SEMGREP_EXCLUDE_FLAGS).toContain(`--exclude='${d}'`);
     }
     // YENİ (cave5 false-positive fix): minified + bundle vendor globları.
-    for (const g of ["*.min.js", "*.min.css", "*.bundle.js", "*.chunk.js", "*.vendor.js"]) {
+    // `*.min*.js` (yalnız `.min.js` değil) → minified KOPYALARI da (`table.min - Copy.js`) yakalar.
+    for (const g of ["*.min*.js", "*.min*.css", "*.bundle.js", "*.chunk.js", "*.vendor.js"]) {
       expect(SEMGREP_EXCLUDE_FLAGS).toContain(`--exclude='${g}'`);
     }
   });
@@ -30,7 +31,7 @@ describe("ensureSemgrepIgnore (vendor/bundle false-positive önleme)", () => {
   it("yoksa yazar; minified + bundles/ + gerçek paket dizinleri içerir", async () => {
     expect(await ensureSemgrepIgnore(root)).toBe("written");
     const body = await readFile(join(root, ".semgrepignore"), "utf-8");
-    expect(body).toContain("*.min.js");
+    expect(body).toContain("*.min*.js");
     expect(body).toContain("**/bundles/**");
     expect(body).toContain("**/jspm_packages/**");
     // MAHKEME: riskli genel vendor desenleri (kendi kodu eleyebilir) DAHİL EDİLMEZ.

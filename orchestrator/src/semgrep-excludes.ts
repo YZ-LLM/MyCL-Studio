@@ -12,8 +12,11 @@
 //     ağacındaydı (build-dir değil) → hiçbir exclude eşleşmiyor → 65 false-positive → Faz 10/13 sahte-sarı.
 //     Bu globlar DOSYA-desenli (dizin adı değil) → kendi kaynağını yanlışlıkla elemez (false-green güvenli).
 //     Not: minified-OLMAYAN vendor (ör. CKEditor samples) için `.semgrepignore` path-anchored `**/bundles/**` ekler.
+//     `*.min*.js` (yalnız `*.min.js` değil): canlı-bug (cave5) `table.min - Copy.js` gibi minified KOPYALARI da yakalar
+//     (`.min` ekten sonra ` - Copy`/`(1)` gibi ekler alıyor). Nadir yan etki: `minimal.js`/`minimap.js` kaynak dosyası
+//     da eleniyor — .semgrepignore görünür + kullanıcı satırı silebilir (kabul edilebilir denge, YZLLM onayı).
 export const SEMGREP_EXCLUDE_FLAGS =
   "--exclude='mycl-audit*' --exclude='.next' --exclude='dist' --exclude='build' --exclude='out' " +
   "--exclude='coverage' --exclude='.turbo' --exclude='.svelte-kit' --exclude='.nuxt' --exclude='node_modules' " +
-  "--exclude='vendor' --exclude='target' --exclude='*.min.js' --exclude='*.min.css' --exclude='*.bundle.js' " +
+  "--exclude='vendor' --exclude='target' --exclude='*.min*.js' --exclude='*.min*.css' --exclude='*.bundle.js' " +
   "--exclude='*.chunk.js' --exclude='*.vendor.js'";
