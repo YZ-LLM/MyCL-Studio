@@ -1,3 +1,31 @@
+## 2026-07-02
+
+- **fix: token öngörü kalitesi + sarı fazların sebebi + iterasyon log sorunları (YZLLM: "tahmin çok farklı çıktı, sarı olanların sebebini bul ve düzelt"):**
+  Canlı koşuda (cave5, JS/Express) Token Zaman Çizelgesi "öngörü 536K / 130dk" dedi ama gerçek 347K / 84dk (%54 fazla);
+  Faz 10/11/13 sarı kaldı. 3 Explore + 1 Plan + 3 Sonnet müfettiş kökü doğruladı. 4 MyCL düzeltmesi (cave5 test-hedef
+  projesinin kendi test/db bug'ları — Faz 15/16 kırmızı — KAPSAM DIŞI, KATI #5):
+  **(4) Öngörü yeniden-tasarımı** ([cost-forecast.ts](orchestrator/src/cost-forecast.ts) YENİ + [TokenTimelinePanel.tsx](src/components/TokenTimelinePanel.tsx)):
+  naif `avgTotal×17` (ağır Faz 8/9/15 ortalamayı şişirip tüm fazlara yayıyordu) → HER fazın kendi geçmiş MEDYANI
+  toplamı; eksik faz genel-medyanla; "~X token, N/17 faz gerçek veri" (yetersiz veride uydurma sayı yok). Orkestratör
+  hesaplar (`cost_forecast` event).
+  **(1) Semgrep vendor/minified false-positive** ([semgrep-excludes.ts](orchestrator/src/semgrep-excludes.ts) tek-kaynak
+  `SEMGREP_EXCLUDE_FLAGS` + 15 çağrı yeri + `ensureSemgrepIgnore` [ensure-gate-configs.ts](orchestrator/src/ensure-gate-configs.ts)):
+  vendor bundle (CKEditor/TinyMCE `public/assets/js/bundles/*`) proje-kodu sanılıp 65 false-positive üretiyordu →
+  minified/bundle globları + `.semgrepignore` (`**/bundles/**`). Faz 10 + Faz 13'ün vendor kısmı temizlenir.
+  **(2) İnapplicable-tool skip nötr sunumu** ([mechanical-runner.ts](orchestrator/src/base/mechanical-runner.ts)
+  `isNotApplicableSkip` + [index.ts](orchestrator/src/index.ts) `emitVerificationSummary`): ts-prune JS projesinde
+  (`ts_tool_js_project`) "⚠️ DOĞRULANMADI — geçti sayılmaz" yerine nötr "➖ Uygulanamaz (eksiklik değil)". Yalnız
+  KAVRAMSAL-N/A (TS-tool non-TS'te); araç-eksik/stub/`profile_resolve_null` sarı kalır (false-green önleme).
+  **(3) Katalog-dışı model guard** ([model-catalog.ts](orchestrator/src/model-catalog.ts) `resolveKnownModel` + 4 çağrı):
+  Faz 17 living-docs `claude-fable-5` (katalog-dışı) CLI `exit=1` verip adımı düşürüyordu → tanınmayan model ana
+  modele GÖRÜNÜR fallback (kullanıcı ayarı kral: sessiz ezme yok, note ile uyarır).
+  **Çapraz-aile mahkeme (3 Sonnet 4.6) 4 GERÇEK bulgu yakaladı + düzeltildi:** (a) KRİTİK — Faz 13 semgrep siteleri
+  çift-tırnaklı `${SEMGREP_EXCLUDE_FLAGS}` → interpolasyon YOK → exclude'lar kabukta boşalıyordu (backtick'e çevrildi,
+  derlenmiş kod runtime-doğrulandı); (b) `profile_resolve_null` N/A'dan çıkarıldı (dart/deno `security:null` → güvenlik
+  taranmadı = gap, N/A değil — false-green + harness-verdict PARTIAL çelişkisi); (c) `.semgrepignore`'dan riskli
+  `**/vendor(s)/**` çıkarıldı (kendi `src/vendors/` kodunu eleyebilirdi); (d) `resolveKnownModel` ölü `extraKnown`
+  param kaldırıldı. check yeşil (yeni testlerle 1607 toplam).
+
 ## 2026-07-01
 
 - **fix(döngü): aynı soru tekrar tekrar sorulmuyor + önceki karar hatırlanıyor + model gürültüsü kesildi + kalıcı kabul (YZLLM: "aynı konuyu 4 kez sordu, uzun döngüye girdi, önceki kararımı hatırlamıyor"):**

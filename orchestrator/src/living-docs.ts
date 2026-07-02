@@ -8,7 +8,7 @@
 // JSON bloğu döner; YAZIMI MyCL yapar (forced-tool yok; ajan .mycl dışına yazamaz). Approval YOK.
 // Fail → görünür uyarı + audit, ana akışı BLOKLAMAZ (yan-yarar, sessiz değil).
 
-import { selectEffortForTask } from "./model-catalog.js";
+import { selectEffortForTask, resolveKnownModel } from "./model-catalog.js";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { type AdrDecision, DECISIONS_DIR_REL, parseAdrDecisions, writeAdrs } from "./adr.js";
@@ -355,7 +355,11 @@ export async function updateLivingDocs(
     const includeUserGuide = !(state.skip_ui_phases ?? false);
     // Orkestratör modeli (yoksa main'e fallback — SelectedModels.orchestrator opsiyonel).
     const baseDocsModel = config.selected_models.orchestrator ?? config.selected_models.main;
-    const docsCli = resolveCliProvider(config, "orchestrator", baseDocsModel);
+    // Model guard (YZLLM 2026-07-01): katalog-dışı id (canlı: claude-fable-5) CLI'da exit=1 verip bu adımı
+    // düşürüyordu. Tanınmayan model → ana modele GÖRÜNÜR fallback (kullanıcı ayarı kral: bilineni değiştirmez).
+    const knownDocs = resolveKnownModel(baseDocsModel, config.selected_models.main, "dökümantasyon");
+    if (knownDocs.note) emitChatMessage("system", `ℹ️ ${knownDocs.note}`);
+    const docsCli = resolveCliProvider(config, "orchestrator", knownDocs.model);
     const docsModel = docsCli.model;
 
     const tmpl = await fs.readFile(templatePath("living-docs.md"), "utf-8");

@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { appendAudit } from "../audit.js";
 import { buildProjectFacts } from "../project-facts.js";
-import { ensureTsPruneConfig, isNextJsProject, NEXT_TSPRUNE_IGNORE } from "../ensure-gate-configs.js";
+import { ensureTsPruneConfig, ensureSemgrepIgnore, isNextJsProject, NEXT_TSPRUNE_IGNORE } from "../ensure-gate-configs.js";
 import { emitChatMessage, emitClaudeStream } from "../ipc.js";
 import { log } from "../logger.js";
 import {
@@ -62,6 +62,26 @@ export type MechanicalOutcome =
   | { kind: "pass"; rescans: number }
   | { kind: "fail"; rescans: number; stderr: string }
   | { kind: "skipped"; reason: string };
+
+// Skip reason SINIFLANDIRMASI (YZLLM 2026-07-01, "sarı olanların sebebi"): bir gate atlandığında iki AYRI durum var:
+//   (a) UYGULANAMAZ (N/A) — araç bu proje tipine KAVRAMSAL olarak uygulanamaz (TS aracı JS projesinde).
+//       Bu bir eksiklik DEĞİL → nötr sunulur (sarı "aracı ekle" uyarısı YANLIŞ alarm olurdu).
+//   (b) DOĞRULANMADI — araç kurulabilirdi ama yok / stub / MyCL-aracı bozuk / girdi eksik / profilde komut yok →
+//       GERÇEK boşluk, sarı uyar. Şüpheli reason'ı (a)'ya koyma → false-green (kontrol edilmedi ama "geçerli değil" sanılır).
+// MAHKEME (2026-07-01, çapraz-aile): `profile_resolve_null` BİLEREK N/A'DAN ÇIKARILDI — profilde komut null olması
+// (ör. dart/deno `security: null`) "bu stack güvenli" DEMEK DEĞİL; Faz 13 güvenlik boyutu null iken nötr sunmak
+// false-green + harness-verdict'in securitySkip→PARTIAL kararıyla çelişir. Yalnız KAVRAMSAL-N/A (TS-tool) burada.
+export const GATE_SKIP_NOT_APPLICABLE = new Set<string>([
+  "ts_tool_js_project", // TS aracı (ts-prune/tsc) JS projesinde — .ts kaynağı yok
+  "ts_tool_not_applicable", // TS aracı ama tsconfig yok
+]);
+
+/** Bir skip reason "uygulanamaz (N/A)" mı (nötr sunulmalı) yoksa "doğrulanmadı" mı (sarı uyarı). SAF. */
+export function isNotApplicableSkip(reason: string | undefined | null): boolean {
+  if (!reason) return false;
+  // detail formatı: "<reason> cmd=..." → ilk kelime reason'dır.
+  return GATE_SKIP_NOT_APPLICABLE.has(String(reason).trim().split(/\s+/)[0]);
+}
 
 const DEFAULT_TIMEOUT = 120_000;
 
@@ -249,6 +269,15 @@ export class MechanicalRunnerBase {
       model: "none",
       cwd: opts.state.project_root,
     });
+
+    // Önden-doğru (YZLLM 2026-07-01, "sarı kalmasın"): bu faz semgrep kullanıyorsa (Faz 10 code-quality /
+    // Faz 13 güvenlik seti — hep extra_scans'te) `.semgrepignore` yaz (yoksa) → minified-OLMAYAN vendor
+    // bundle'ları (CKEditor/TinyMCE `bundles/`) taranıp false-positive üretmesin. CLI --exclude minified'ı
+    // eler, bu dizin-anchored vendor'ı. Var olana dokunmaz; fail-soft.
+    if ((opts.mechanical.extra_scans ?? []).some((e) => /\bsemgrep\b/.test(e.cmd))) {
+      const si = await ensureSemgrepIgnore(opts.state.project_root).catch(() => "present" as const);
+      if (si === "written") log.info(opts.tag, "wrote .semgrepignore (vendor/minified false-positive önleme)");
+    }
 
     // Ana scan loop'u (mevcut behavior) — sonuç pass/fail/skipped.
     const mainOutcome = await this.runMainScan(timeout);

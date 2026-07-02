@@ -15,7 +15,7 @@
 
 import { promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
-import { selectEffortForTask } from "./model-catalog.js";
+import { selectEffortForTask, resolveKnownModel } from "./model-catalog.js";
 import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
@@ -127,7 +127,10 @@ export async function refreshDevsSpecs(
       return;
     }
     const baseSpecModel = config.selected_models.orchestrator ?? config.selected_models.main;
-    const specCli = resolveCliProvider(config, "orchestrator", baseSpecModel);
+    // Model guard (YZLLM 2026-07-01): katalog-dışı id CLI'da düşürmesin → ana modele GÖRÜNÜR fallback.
+    const knownSpec = resolveKnownModel(baseSpecModel, config.selected_models.main, "spec tazeleme");
+    if (knownSpec.note) emitChatMessage("system", `ℹ️ ${knownSpec.note}`);
+    const specCli = resolveCliProvider(config, "orchestrator", knownSpec.model);
     const specModel = specCli.model;
 
     // Bu iterasyonun iter-spec'i + dokunulan birimlerin mevcut page-spec'leri.

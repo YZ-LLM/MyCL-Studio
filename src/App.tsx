@@ -30,6 +30,7 @@ import type {
   PhaseStatus,
   PhaseSummary,
   PipelineEndEvent,
+  PipelinePrediction,
   TaskQueueItem,
 } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
@@ -240,6 +241,8 @@ interface MainState {
   /** Token-timeline — faz-bazında token harcaması (cost.jsonl). cost_phase canlı
    *  upsert eder, cost_history (load_costs yanıtı) tümünü değiştirir. */
   costTimeline: CostRecord[];
+  /** Tam-pipeline öngörüsü (cost_forecast) — per-faz medyan tabanlı; null = yetersiz veri. */
+  costForecast: PipelinePrediction | null;
   /** Akış sonu DÜRÜST hüküm (pipeline_end). null = henüz akış bitmedi / yeni akış.
    *  PARTIAL/FAIL ise sidebar başarısız gate'lere ⚠️ basar, header çip gösterir. */
   pipelineVerdict: PipelineEndEvent["data"] | null;
@@ -279,6 +282,7 @@ const INITIAL_STATE: MainState = {
     api_calls: 0,
   },
   costTimeline: [],
+  costForecast: null,
   pipelineVerdict: null,
 };
 
@@ -401,6 +405,10 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
         ? state.costTimeline.map((c, i) => (i === idx ? rec : c))
         : [...state.costTimeline, rec];
     return { ...state, costTimeline };
+  }
+  if (ev.kind === "cost_forecast") {
+    // Tam-pipeline öngörüsü (per-faz medyan; orkestratör hesaplar). null = yetersiz veri.
+    return { ...state, costForecast: ev.data.forecast };
   }
   if (ev.kind === "cost_history") {
     // load_costs yanıtı — geçmiş tüm faz-cost'u (proje açılışı). Tümünü değiştir.
@@ -1621,6 +1629,7 @@ function App() {
       <TokenTimelinePanel
         open={tokenTimelineOpen}
         costs={mainState.costTimeline}
+        forecast={mainState.costForecast}
         onClose={() => setTokenTimelineOpen(false)}
       />
       <AgentTeamPanel

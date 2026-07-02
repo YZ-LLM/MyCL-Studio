@@ -93,6 +93,45 @@ export function findModel(id: string): ModelInfo | undefined {
   return MODEL_CATALOG.find((m) => m.id === id) ?? GLM_CATALOG.find((m) => m.id === id);
 }
 
+export interface ResolvedModel {
+  /** Kullanılacak model id. */
+  model: string;
+  /** Fallback olduysa GÖRÜNÜR mesaj (KATI #4 sessiz-fallback-yok). Yoksa model tanınıyordu. */
+  note?: string;
+}
+
+/**
+ * Model guard (YZLLM 2026-07-01): yardımcı LLM adımları (living-docs / spec-refresh / module-stock /
+ * quality-audit) `selected_models.orchestrator ?? main`'i doğrulamadan CLI'a veriyordu → katalog-DIŞI bir id
+ * (canlı: `claude-fable-5` — MyCL kataloğunda yok, CLI `exit=1 "issue with the selected model"`) adımı DÜŞÜRÜYORDU.
+ *
+ * Bu guard: model MODEL_CATALOG **veya** GLM_CATALOG'da (findModel) ise DOKUNMAZ (kullanıcı ayarı kral). Değilse
+ * `mainModel`'e düşer (o da bilinen ise) + GÖRÜNÜR note. main de bilinmiyorsa modeli DEĞİŞTİRMEZ (yanlış
+ * sağlayıcıya zorlamaktan iyidir) → yalnız uyarır. SAF (config değil, main string alır → test edilebilir).
+ * NOT: katalog bayatsa (gerçek yeni model henüz eklenmemiş) fallback tetiklenir — note kullanıcıyı bilgilendirir;
+ * çözüm katalogu güncellemek. Görünür fallback (KATI #4) "kullanıcı ayarı kral"la uyumlu: sessiz ezme yok, uyarır
+ * (nadir katalog-dışı-ama-geçerli model main'e düşerse note ile görünür — kullanıcı Ayarlar'dan geri alır).
+ */
+export function resolveKnownModel(
+  model: string,
+  mainModel: string,
+  roleLabel: string,
+): ResolvedModel {
+  const known = (id: string): boolean => !!findModel(id);
+  if (known(model)) return { model };
+  if (mainModel !== model && known(mainModel)) {
+    return {
+      model: mainModel,
+      note: `'${model}' modeli MyCL kataloğunda yok (${roleLabel}) — ana model '${mainModel}'e düşüldü. Kalıcıysa Ayarlar'dan modeli düzeltin.`,
+    };
+  }
+  // main de tanınmıyor → değiştirme (sağlayıcı-karışıklığından iyi); yalnız uyar.
+  return {
+    model,
+    note: `'${model}' modeli MyCL kataloğunda yok (${roleLabel}) — çağrı başarısız olabilir; Ayarlar'dan modeli doğrulayın.`,
+  };
+}
+
 /** MyCL'in LLM çağıran iş tipleri. Yeni iş tipi → buraya + TASK_RELEVANCE'a ekle. */
 export type TaskKind =
   | "classification"

@@ -9,6 +9,7 @@ import {
   expandFilesPlaceholder,
   resolveMechanicalCmd,
   shellQuote,
+  isNotApplicableSkip,
 } from "../src/base/mechanical-runner.js";
 import { _clearProfileCache } from "../src/profile-loader.js";
 import type { State } from "../src/types.js";
@@ -599,5 +600,25 @@ describe("shellQuote + expandFilesPlaceholder", () => {
   it("injection denemesi quote içinde kalır (güvenlik)", () => {
     const r = expandFilesPlaceholder("eslint {files}", ["a.ts; rm -rf /"]);
     expect(r).toBe("eslint 'a.ts; rm -rf /'");
+  });
+});
+
+// Fix 2 (YZLLM 2026-07-01, "sarı olanların sebebi"): skip N/A ↔ doğrulanmadı ayrımı.
+describe("isNotApplicableSkip (skip sınıflandırma)", () => {
+  it("KAVRAMSAL-N/A reason'ları true (TS aracı non-TS projesinde)", () => {
+    expect(isNotApplicableSkip("ts_tool_js_project")).toBe(true);
+    expect(isNotApplicableSkip("ts_tool_not_applicable")).toBe(true);
+    // detail formatı "<reason> cmd=..." → ilk kelimeden çözer.
+    expect(isNotApplicableSkip('ts_tool_js_project cmd="npx ts-prune"')).toBe(true);
+  });
+  it("araç-eksik/stub/bozuk/profil-null → false (sarı 'DOĞRULANMADI' kalır — false-green önleme)", () => {
+    // MAHKEME: profile_resolve_null N/A DEĞİL (Faz 13 security:null → güvenlik taranmadı, gap).
+    expect(isNotApplicableSkip("profile_resolve_null")).toBe(false);
+    expect(isNotApplicableSkip("missing_command")).toBe(false);
+    expect(isNotApplicableSkip("stub_script")).toBe(false);
+    expect(isNotApplicableSkip("mycl_tool_broken")).toBe(false);
+    expect(isNotApplicableSkip("missing_file")).toBe(false);
+    expect(isNotApplicableSkip(undefined)).toBe(false);
+    expect(isNotApplicableSkip("")).toBe(false);
   });
 });

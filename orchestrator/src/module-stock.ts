@@ -23,6 +23,7 @@ import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
 import { resolveCliProvider } from "./claude-api.js";
 import { computeVerdict } from "./harness-verdict.js";
 import { emitChatMessage } from "./ipc.js";
+import { resolveKnownModel } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { globalConfigFile } from "./paths.js";
 import { DENY_SEGMENTS } from "./prototype-cache.js";
@@ -251,7 +252,10 @@ export async function extractStockedModules(state: State, config: MyclConfig): P
       return;
     }
     const baseModel = config.selected_models.orchestrator ?? config.selected_models.main;
-    const cli = resolveCliProvider(config, "orchestrator", baseModel);
+    // Model guard (YZLLM 2026-07-01): katalog-dışı id CLI'da düşürmesin → ana modele GÖRÜNÜR fallback.
+    const knownStock = resolveKnownModel(baseModel, config.selected_models.main, "modül stoğu");
+    if (knownStock.note) emitChatMessage("system", `ℹ️ ${knownStock.note}`);
+    const cli = resolveCliProvider(config, "orchestrator", knownStock.model);
     emitChatMessage("system", "📦 Yeniden kullanılabilir modüller aranıyor (orkestratör)…");
     const res = await runClaudeCli({
       systemPrompt: buildModuleExtractPrompt(),

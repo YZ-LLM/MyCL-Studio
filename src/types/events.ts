@@ -56,6 +56,7 @@ export type OrchestratorEvent =
   | TokenTotalsEvent
   | CostPhaseEvent
   | CostHistoryEvent
+  | CostForecastEvent
   | RuntimeErrorEvent
   | PhaseRunningEvent
   | PhaseIdleEvent
@@ -402,6 +403,21 @@ export interface CostPhaseEvent {
 export interface CostHistoryEvent {
   kind: "cost_history";
   data: { costs: CostRecord[] };
+}
+
+/** Tam-pipeline (1..17 faz) token+süre öngörüsü (cost-forecast.ts). Naif avg×17 yerine per-faz medyan. */
+export interface PipelinePrediction {
+  total_tokens: number;
+  total_duration_ms: number;
+  known_phases: number;
+  pipeline_phases: number;
+  reliable: boolean;
+}
+
+/** Öngörü olayı — cost değiştikçe (faz-sonu + panel açılışı) orkestratörden gelir. Yetersiz veri → forecast null. */
+export interface CostForecastEvent {
+  kind: "cost_forecast";
+  data: { forecast: PipelinePrediction | null };
 }
 
 export interface ClaudeUsage {

@@ -10,6 +10,7 @@ import { readSessionTranscript } from "./persistent-cli-session.js";
 import { runReasoning } from "./llm-reasoning.js";
 import { translate } from "./translator.js";
 import { emitChatMessage } from "./ipc.js";
+import { resolveKnownModel } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES } from "./agent-language.js";
 import type { MyclConfig } from "./config.js";
@@ -116,13 +117,19 @@ export async function runQualityAudit(
   // 1. Denetim ajanı TR konuşur → translator → main (EN). (Dil hattı: denetim asla doğrudan main'e gitmez.)
   const questionsEn = await translate(config, questionsTr, "tr-to-en").then((r) => r.text).catch(() => questionsTr);
   const evidence = await gatherEvidence(state);
-  // 2. main (EN) denetimi yapar.
+  // 2. main (EN) denetimi yapar. Model guard (YZLLM 2026-07-01): katalog-dışı id CLI'da düşürmesin.
+  const auditModel = resolveKnownModel(
+    config.selected_models.orchestrator ?? config.selected_models.main,
+    config.selected_models.main,
+    "denetim ajanı",
+  );
+  if (auditModel.note) emitChatMessage("system", `ℹ️ ${auditModel.note}`);
   let en: string;
   try {
     const r = await runReasoning(config, {
       systemPrompt: AUDIT_SYSTEM,
       userMessage: `QUALITY-CONTROL QUESTIONS:\n${questionsEn}\n\nAUDIT-LOG EVIDENCE (most recent run):\n${evidence}`,
-      modelId: config.selected_models.orchestrator ?? config.selected_models.main,
+      modelId: auditModel.model,
       projectRoot: state.project_root,
       maxTokens: 4000,
     });

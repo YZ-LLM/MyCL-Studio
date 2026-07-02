@@ -9,6 +9,8 @@
 
 import { spawn } from "node:child_process";
 import { safeEnv } from "./safe-env.js";
+import { SEMGREP_EXCLUDE_FLAGS } from "./semgrep-excludes.js";
+import { ensureSemgrepIgnore } from "./ensure-gate-configs.js";
 import type { State } from "./types.js";
 
 const SAST_TIMEOUT_MS = 180_000;
@@ -45,7 +47,7 @@ function runOne(config: string, cwd: string): Promise<ScanOutcome> {
       // CANLI-BUG (2026-06-22): semgrep ÜRETİLEN build çıktısını (.next/dist/build vendored) tarayıp
       // false-positive üretiyordu. node_modules/.git semgrep'çe auto-skip ama .next vb. DEĞİL → açıkça ele
       // (stack-bağımsız build-dir listesi; phase-registry.ts kod-kalite/güvenlik taramalarıyla aynı set).
-      child = spawn(`semgrep --config ${config} . --exclude='.next' --exclude='dist' --exclude='build' --exclude='out' --exclude='coverage' --exclude='.turbo' --exclude='.svelte-kit' --exclude='.nuxt' --exclude='node_modules' --exclude='vendor' --exclude='target' --exclude='mycl-audit*' --quiet --error --metrics=off`, {
+      child = spawn(`semgrep --config ${config} . ${SEMGREP_EXCLUDE_FLAGS} --quiet --error --metrics=off`, {
         cwd,
         shell: true,
         env: { ...safeEnv(), LC_ALL: "C" },
@@ -72,6 +74,9 @@ function runOne(config: string, cwd: string): Promise<ScanOutcome> {
 
 /** Birden çok semgrep güvenlik config'ini PARALEL koşar + birleştirir. ASLA throw etmez. */
 export async function runSemgrepScans(state: State): Promise<SastResult> {
+  // Vendor/minified false-positive önleme (Faz 10/13 ile aynı): `.semgrepignore` yaz (yoksa) → bundles/
+  // vendor kodu taranmasın. Var olana dokunmaz; fail-soft.
+  await ensureSemgrepIgnore(state.project_root).catch(() => "present" as const);
   const results = await Promise.all(
     CONFIGS.map((c) => runOne(c.config, state.project_root).then((r) => ({ label: c.label, r }))),
   );

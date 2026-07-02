@@ -5,11 +5,13 @@
 // Kendi-içinde inline-styled (App.css bağımlılığı yok); açılır-kapanır.
 
 import type { ReactNode } from "react";
-import type { CostRecord } from "../types/events";
+import type { CostRecord, PipelinePrediction } from "../types/events";
 
 interface Props {
   open: boolean;
   costs: CostRecord[];
+  /** Tam-pipeline öngörüsü (orkestratör hesaplar: per-faz medyan). null = yetersiz veri. */
+  forecast: PipelinePrediction | null;
   onClose: () => void;
 }
 
@@ -39,7 +41,7 @@ function shortModel(m: string): string {
   return m.replace(/^claude-/, "");
 }
 
-export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
+export function TokenTimelinePanel({ open, costs, forecast, onClose }: Props): ReactNode {
   if (!open) return null;
 
   // Kronolojik (fazların koştuğu sıra). Aynı faz birden çok iterasyonda olabilir.
@@ -50,8 +52,9 @@ export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
   const grandCacheRead = sorted.reduce((s, c) => s + c.cache_read_input_tokens, 0);
   const grandTurns = sorted.reduce((s, c) => s + c.turns, 0);
   const grandDuration = sorted.reduce((s, c) => s + (c.duration_ms ?? 0), 0);
-  // Ortalama/faz + 17-faz öngörü (YZLLM 2026-06-17): kullanıcı tam pipeline'ın (17 faz) tahmini
-  // token+süre maliyetini önceden görsün. avg = koşan fazların ortalaması; ×17 = tüm fazlar koşarsa.
+  // Ortalama/faz (bilgi): koşan fazların ham ortalaması. Tam-pipeline öngörüsü ARTIK `forecast` prop'undan
+  // gelir (orkestratör per-faz medyan hesaplar) — eski naif `avg×17` tekdüze ekstrapolasyonu kaldırıldı
+  // (YZLLM 2026-07-01: ağır fazlar ortalamayı şişirip %54 fazla veriyordu).
   const avgTotal = sorted.length ? Math.round((grandIn + grandOut) / sorted.length) : 0;
   const avgDuration = sorted.length ? Math.round(grandDuration / sorted.length) : 0;
   // YZLLM 2026-06-16: para ($) gösterimi KALDIRILDI — yalnız token + tur + süre.
@@ -125,8 +128,22 @@ export function TokenTimelinePanel({ open, costs, onClose }: Props): ReactNode {
             </div>
             <div style={{ marginTop: 5, paddingTop: 5, borderTop: "1px dashed var(--border, #333)" }}>
               Ortalama/faz: <strong>{fmt(avgTotal)}</strong> token · {fmtDur(avgDuration)}
-              {"   →   "}
-              17 faz öngörü: <strong>{fmt(avgTotal * 17)}</strong> token · {fmtDur(avgDuration * 17)}
+            </div>
+            <div style={{ marginTop: 3 }}>
+              {forecast ? (
+                <>
+                  Tam pipeline öngörü: <strong>~{fmt(forecast.total_tokens)}</strong> token ·{" "}
+                  {fmtDur(forecast.total_duration_ms)}{" "}
+                  <span style={{ color: "var(--fg-dim, #888)" }}>
+                    ({forecast.known_phases}/{forecast.pipeline_phases} faz gerçek veri
+                    {forecast.reliable ? "" : " · kaba"})
+                  </span>
+                </>
+              ) : (
+                <span style={{ color: "var(--fg-dim, #888)" }}>
+                  Tam pipeline öngörü: yeterli veri yok (fazlar koştukça hesaplanır)
+                </span>
+              )}
             </div>
           </div>
           <ul style={{ listStyle: "none", margin: 0, padding: 8, overflowY: "auto", flex: 1 }}>

@@ -103,6 +103,7 @@ import {
 } from "./error-analysis.js";
 import { listModels } from "./models.js";
 import { computeTiersFromModels, resetModelChoiceCache } from "./model-catalog.js";
+import { predictPipelineCost } from "./cost-forecast.js";
 import { getLastTechDebtFindings, acceptedFindingKey, resetLastTechDebtFindings } from "./tech-debt-scanner.js";
 import { sumSecurityFindings, stepSecurityConvergence } from "./security-convergence.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
@@ -163,7 +164,7 @@ import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
-import { MechanicalRunnerBase } from "./base/mechanical-runner.js";
+import { MechanicalRunnerBase, isNotApplicableSkip } from "./base/mechanical-runner.js";
 import {
   computeChangedScope,
   shouldComputeScope,
@@ -494,20 +495,30 @@ async function emitVerificationSummary(state: State): Promise<void> {
   const since = state.iteration_started_at ?? 0;
   const thisIter = audit.filter((e) => (e.ts ?? 0) >= since);
   const passed: string[] = [];
-  const skipped: string[] = [];
+  const skipped: string[] = []; // araç yok/stub/bozuk → GERÇEK boşluk, sarı uyar
+  const notApplicable: string[] = []; // stack bu boyuta genuinely sahip değil → nötr (YZLLM 2026-07-01)
   for (const [nStr, dim] of Object.entries(GATE_DIMS)) {
     const n = Number(nStr);
     const skip = thisIter.find((e) => e.event === `phase-${n}-skipped`);
     const done = thisIter.some((e) => e.event === `phase-${n}-complete`);
-    if (skip) skipped.push(`${dim}${skip.detail ? ` (${String(skip.detail).split(" ")[0]})` : ""}`);
-    else if (done) passed.push(dim);
+    if (skip) {
+      const reason = skip.detail ? String(skip.detail).split(" ")[0] : "";
+      const label = `${dim}${reason ? ` (${reason})` : ""}`;
+      // KESİN-N/A (ts-prune JS'te / profil null) → nötr; şüpheli/araç-eksik → sarı (false-green önleme).
+      if (isNotApplicableSkip(skip.detail)) notApplicable.push(label);
+      else skipped.push(label);
+    } else if (done) passed.push(dim);
   }
   const lines = [`🔎 **Doğrulama özeti**`];
   if (passed.length) lines.push(`✅ Doğrulandı: ${passed.join(", ")}`);
+  if (notApplicable.length) {
+    // Nötr ton — uyarı DEĞİL. Stack bu boyuta sahip değil (ör. JS projesinde ts-prune) → "geçti sayılmaz" korkutması yanlış.
+    lines.push(`➖ Uygulanamaz: ${notApplicable.join(", ")} — bu stack/proje türü için geçerli değil (eksiklik değil).`);
+  }
   if (skipped.length) {
     lines.push(
       `⚠️ **DOĞRULANMADI (atlandı)**: ${skipped.join(", ")}`,
-      `Bu boyutlar bu koşuda kontrol EDİLMEDİ (araç yok/uygulanamaz). "Geçti" anlamına gelmez — bilerek kabul et veya aracı ekle.`,
+      `Bu boyutlar bu koşuda kontrol EDİLMEDİ (araç kurulu değil / stub / bozuk). "Geçti" anlamına gelmez — bilerek kabul et veya aracı ekle.`,
     );
   }
   emitChatMessage("system", lines.join("\n"));
@@ -3721,6 +3732,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       );
       // Token-timeline: faz cost'unu frontend'e CANLI yolla (realtime timeline paneli).
       emit("cost_phase", costRec);
+      // Öngörüyü güncelle (yeni faz verisi geldi → tam-pipeline tahmini tazelensin).
+      void emitCostForecast(state.project_root);
     }
 
     const next = PHASE_TRANSITIONS[cur];
@@ -4869,6 +4882,19 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
  * Her giriş: id, type, name_tr, name_en, has_controller, required_audits,
  * config (askq/production/mechanical).
  */
+/** Tam-pipeline (1..17) token+süre öngörüsünü cost.jsonl geçmişinden hesapla + frontend'e yolla.
+ * Faz 0 (debug) pipeline-dışı. Cost değişiminde (faz-sonu + load_costs) çağrılır. Best-effort (fail → sessiz geç,
+ * öngörü kritik değil). Naif avg×17 yerine per-faz medyan + eksik-faz genel-medyan (cost-forecast.ts). */
+async function emitCostForecast(projectRoot: string): Promise<void> {
+  try {
+    const costs = await readCosts(projectRoot);
+    const pipelineIds = Array.from({ length: 17 }, (_, i) => i + 1); // 1..17 (Faz 0 hariç)
+    emit("cost_forecast", { forecast: predictPipelineCost(costs, pipelineIds) });
+  } catch (e) {
+    log.warn("orchestrator", "cost forecast emit failed (non-blocking)", e);
+  }
+}
+
 function handleListPhases(): void {
   const phases: Array<Record<string, unknown>> = [];
   // v15.3 pipeline 17 faza indirildi (Faz 5/19/20 silindi, 6-18 → 5-17 renumber).
@@ -6653,6 +6679,8 @@ ipcRouter.register("load_costs", async () => {
   try {
     const costs = await readCosts(runtime.state.project_root);
     emit("cost_history", { costs });
+    // Panel açılışında öngörüyü de ver (naif avg×17 yerine per-faz medyan tahmini).
+    emit("cost_forecast", { forecast: predictPipelineCost(costs, Array.from({ length: 17 }, (_, i) => i + 1)) });
   } catch (err) {
     log.warn("orchestrator", "load_costs failed", err);
     emit("cost_history", { costs: [] });

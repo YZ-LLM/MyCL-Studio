@@ -91,3 +91,44 @@ export async function ensureTsPruneConfig(
     return "present"; // fail-soft: yazılamadıysa gate yine koşar (false-positive riski sürer ama çökmez)
   }
 }
+
+/**
+ * `.semgrepignore` — üçüncü-taraf/minified/bundle kodu semgrep taramasından muaf tutar (Faz 10 Lint +
+ * Faz 13 Güvenlik sahte-pozitif vermesin). CANLI-BUG (cave5): `public/assets/js/bundles/ckeditor/*` +
+ * TinyMCE gibi vendor bundle'lar KAYNAK ağacında (build-dir değil) → CLI `--exclude` build-dir'leri elese
+ * de bunlar taranıp 65 false-positive üretti → Faz 10/13 sahte-sarı. Minified globlar CLI'da da var
+ * (semgrep-excludes.ts); buradaki EK katman minified-OLMAYAN vendor'ı (path-anchored bundles/ +
+ * conventional vendor dizinleri) yakalar; tek dosya tüm config'lere + scoped moda uygulanır.
+ *
+ * FALSE-GREEN GÜVENLİĞİ: bundles/ gibi dizin desenleri KENDİ kaynağını yanlışlıkla eleyebilir →
+ * dosya GÖRÜNÜR + kullanıcı-silebilir + başlıkta uyarı. Var olan `.semgrepignore`'a DOKUNMAZ (idempotent).
+ *
+ * @returns "written" | "present" (zaten var, dokunulmadı)
+ */
+export async function ensureSemgrepIgnore(projectRoot: string): Promise<"written" | "present"> {
+  const target = join(projectRoot, ".semgrepignore");
+  if (await exists(target)) return "present";
+  const body = [
+    "# MyCL Studio tarafından üretildi — üçüncü-taraf / minified / bundle kodu semgrep taramasından muaf",
+    "# (Faz 10 Lint + Faz 13 Güvenlik sahte-pozitif vermesin). KENDİ kodunuz yanlışlıkla eleniyorsa ilgili",
+    "# satırı silin; MyCL var olan .semgrepignore'a DOKUNMAZ. Bu bir hariç-tutma listesidir (gitignore söz dizimi).",
+    "*.min.js",
+    "*.min.css",
+    "*.bundle.js",
+    "*.chunk.js",
+    "*.vendor.js",
+    "**/bundles/**",
+    "**/bower_components/**",
+    "**/jspm_packages/**",
+    "",
+  ].join("\n");
+  // MAHKEME (2026-07-01, çapraz-aile): `**/vendor/**` + `**/vendors/**` BİLEREK ÇIKARILDI — `src/vendors/stripe.ts`
+  // gibi KENDİ kaynağını eleyip gerçek bulgu gizleyebilirdi (false-green). Kök `vendor` zaten CLI `--exclude='vendor'`
+  // ile kapsanıyor (semgrep-excludes.ts). bower_components/jspm_packages gerçek paket dizinleri (kendi-kod riski yok).
+  try {
+    await writeFile(target, body, "utf-8");
+    return "written";
+  } catch {
+    return "present"; // fail-soft: yazılamadıysa CLI --exclude minified globları yine minified'ı eler
+  }
+}
