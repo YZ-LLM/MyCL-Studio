@@ -287,7 +287,7 @@ export class Phase8Controller {
     try {
       await stat(specPath);
     } catch {
-      emitError("phase 8 requires spec.md (Phase 4 output)", { specPath });
+      emitError("Faz 8 spec.md gerektiriyor (Faz 4 çıktısı)", { specPath });
       this.lastFailReason = "spec.md missing (Phase 4 incomplete)";
       return "fail";
     }
@@ -419,7 +419,7 @@ export class Phase8Controller {
       });
     } catch (err) {
       log.error("phase-8", "template load failed", err);
-      emitError("template load failed", String(err));
+      emitError("Şablon yüklenemedi", String(err));
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
@@ -433,7 +433,7 @@ export class Phase8Controller {
         "Main 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı — " +
         "Faz 8 (TDD) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da " +
         "Ayarlar → Modeller'den main'i 'API' yap.";
-      emitError("phase-8: claude bulunamadı (CLI)", m);
+      emitError("Faz 8: claude bulunamadı (CLI)", m);
       emitChatMessage("system", `🔴 ${m}`);
       this.lastFailReason = "claude not found (CLI backend)";
       return "fail";

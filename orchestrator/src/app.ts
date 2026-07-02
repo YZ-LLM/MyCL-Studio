@@ -56,7 +56,7 @@ export class App {
     process.on("unhandledRejection", (reason) => {
       log.error("orchestrator", "unhandledRejection (process ayakta tutuldu)", reason);
       try {
-        emitError("unhandledRejection", String(reason));
+        emitError("Beklenmeyen hata (işlenmemiş)", String(reason));
       } catch {
         /* emit bile patlarsa yut — process'i öldürme */
       }
@@ -64,7 +64,7 @@ export class App {
     process.on("uncaughtException", (err) => {
       log.error("orchestrator", "uncaughtException (process ayakta tutuldu)", err);
       try {
-        emitError("uncaughtException", String(err));
+        emitError("Beklenmeyen hata (yakalanmamış)", String(err));
       } catch {
         /* yut */
       }
@@ -80,7 +80,7 @@ export class App {
       log.info("i18n", "bundles loaded");
     } catch (err) {
       log.error("i18n", "load failed", err);
-      emitError("i18n load failed", String(err));
+      emitError("Dil dosyası yüklenemedi", String(err));
       emit("config_status", {
         ready: false,
         reason: "i18n_load_failed",
@@ -121,7 +121,7 @@ export class App {
           raw: trimmed.slice(0, 200),
           err: String(err),
         });
-        emitError("bad json", { raw: trimmed.slice(0, 200), err: String(err) });
+        emitError("Geçersiz JSON", { raw: trimmed.slice(0, 200), err: String(err) });
         return;
       }
       log.debug("ipc-in", parsed.kind, parsed.data);
@@ -129,7 +129,7 @@ export class App {
         await this.deps.dispatch(parsed);
       } catch (err) {
         log.error("orchestrator", "dispatch threw", err);
-        emitError("dispatch threw", String(err));
+        emitError("Bir işlem beklenmedik şekilde durdu", String(err));
       }
     });
 

@@ -389,7 +389,7 @@ export async function translate(
       "(`~/.local/bin/claude`). Abonelik backend'i kullanılamıyor — `claude` kurulu " +
       "değil/PATH'te değil. API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da Ayarlar → " +
       "Modeller'den translator'ı 'API' yap.";
-    emitError("translator: claude bulunamadı (CLI backend)", m);
+    emitError("Çevirmen: claude bulunamadı (CLI arka ucu)", m);
     emitChatMessage("system", `🔴 ${m}`);
     throw new Error("translator CLI backend kullanılamıyor: claude bulunamadı");
   }

@@ -70,7 +70,7 @@ export async function respondAsOrchestrator(
       "Orkestratör 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı " +
       "(`~/.local/bin/claude`). API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da " +
       "Ayarlar → Modeller'den orkestratörü 'API' yap.";
-    emitError("orchestrator: claude bulunamadı (CLI backend)", m);
+    emitError("Orkestratör: claude bulunamadı (CLI arka ucu)", m);
     emitChatMessage("system", `🔴 ${m}`);
     throw new Error("orchestrator CLI backend kullanılamıyor: claude bulunamadı");
   }

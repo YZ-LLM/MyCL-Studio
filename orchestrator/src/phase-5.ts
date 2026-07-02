@@ -97,7 +97,7 @@ export class Phase5Controller {
     try {
       await stat(specPath);
     } catch {
-      emitError("phase-5 requires spec.md", { specPath });
+      emitError("Faz 5 spec.md gerektiriyor", { specPath });
       this.lastFailReason = "spec.md missing (Phase 4 incomplete)";
       return "fail";
     }
@@ -124,7 +124,7 @@ export class Phase5Controller {
       });
     } catch (err) {
       log.error("phase-5", "template load failed", err);
-      emitError("template load failed", String(err));
+      emitError("Şablon yüklenemedi", String(err));
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
@@ -411,7 +411,7 @@ export class Phase5Controller {
           (e.ts > (this.state.updated_at ?? 0)), // sadece bu turun event'leri
       );
       if (tweakWrites.length === 0) {
-        emitError("phase-5 tweak: no ui-tweak-applied events — Claude yazmadı", null);
+        emitError("Faz 5 rötuş: değişiklik uygulanmadı — Claude yazmadı", null);
         this.lastFailReason = "tweak mode: no ui-tweak-applied events";
         // YZLLM 2026-06-13 (trace kökü): "hiç event yok" = ya tweak ZATEN uygulanmış (no-op) ya da
         // ajan yazamadı. İKİSİNDE de model-gücü çözmez — daha güçlü model de aynı dosyaları okuyup
@@ -455,7 +455,7 @@ export class Phase5Controller {
       try {
         await stat(join(this.state.project_root, "package.json"));
       } catch {
-        emitError("phase-5: package.json not present after Claude run", null);
+        emitError("Faz 5: Claude koşusundan sonra package.json yok", null);
         this.lastFailReason = "package.json missing after codegen";
         return "fail";
       }

@@ -176,12 +176,12 @@ export class Phase7Controller {
     log.info("phase-7", "run start");
 
     if (!this.state.intent_summary) {
-      emitError("phase-7: intent_summary missing", null);
+      emitError("Faz 7: niyet özeti eksik", null);
       this.lastFailReason = "intent_summary missing (Phase 1 incomplete)";
       return "fail";
     }
     if (!this.spec.production_config) {
-      emitError("phase-7 production_config missing", null);
+      emitError("Faz 7 üretim yapılandırması eksik", null);
       this.lastFailReason = "production_config missing in spec";
       return "fail";
     }
@@ -206,7 +206,7 @@ export class Phase7Controller {
       });
     } catch (err) {
       log.error("phase-7", "template load failed", err);
-      emitError("template load failed", String(err));
+      emitError("Şablon yüklenemedi", String(err));
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }

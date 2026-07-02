@@ -155,12 +155,12 @@ export class Phase2Controller {
     // "boyutlar/belirtim sağlanmadı, BLOCKED" → saçma onay sorusu. raw = Faz 1'in temiz niyeti (recovery alanı).
     const auditIntent = this.state.intent_summary_raw ?? this.state.intent_summary;
     if (!auditIntent) {
-      emitError("phase-2: intent_summary missing — Phase 1 önce tamamlanmalı", null);
+      emitError("Faz 2: niyet özeti eksik — önce Faz 1 tamamlanmalı", null);
       this.lastFailReason = "intent_summary missing (Phase 1 incomplete)";
       return "fail";
     }
     if (!this.spec.askq_config) {
-      emitError("phase-2 askq_config missing", null);
+      emitError("Faz 2 soru yapılandırması eksik", null);
       this.lastFailReason = "askq_config missing in spec";
       return "fail";
     }
@@ -203,7 +203,7 @@ export class Phase2Controller {
       });
     } catch (err) {
       log.error("phase-2", "template load failed", err);
-      emitError("template load failed", String(err));
+      emitError("Şablon yüklenemedi", String(err));
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }
@@ -263,7 +263,7 @@ export class Phase2Controller {
       emitChatMessage("system", `⚠️ Faz 2: denetim boyutları bozuk şema ile geldi (${typeof rawDims}) — denetim detayı bu tur eksik.`);
     }
     if (!enriched) {
-      emitError("phase-2: enriched_summary missing in completion", null);
+      emitError("Faz 2: zenginleştirilmiş özet tamamlamada eksik", null);
       this.lastFailReason = "enriched_summary missing";
       return "fail";
     }

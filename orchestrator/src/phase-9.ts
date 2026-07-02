@@ -136,13 +136,13 @@ export class Phase9Controller {
     log.info("phase-9", "run start");
 
     if (!this.spec.askq_config) {
-      emitError("phase-10 askq_config missing", null);
+      emitError("Faz 10 soru yapılandırması eksik", null);
       this.lastFailReason = "askq_config missing in spec";
       return "fail";
     }
     // Phase 2 sonrası gelir; defensive guard relevance injection için.
     if (!this.state.intent_summary) {
-      emitError("phase-10: intent_summary missing — Phase 2 önce tamamlanmalı", null);
+      emitError("Faz 10: niyet özeti eksik — önce Faz 2 tamamlanmalı", null);
       this.lastFailReason = "intent_summary missing (Phase 2 incomplete)";
       return "fail";
     }
@@ -200,7 +200,7 @@ export class Phase9Controller {
       );
       if (!review.ok) {
         this.lastFailReason = review.reason ?? "debate review başarısız";
-        emitError("phase-9 debate review failed", review.reason ?? null);
+        emitError("Faz 9 inceleme tartışması başarısız", review.reason ?? null);
         return "fail";
       }
       const decisions: RiskDecision[] = review.findings.map((f) => ({
@@ -262,7 +262,7 @@ export class Phase9Controller {
       });
     } catch (err) {
       log.error("phase-9", "template load failed", err);
-      emitError("template load failed", String(err));
+      emitError("Şablon yüklenemedi", String(err));
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }

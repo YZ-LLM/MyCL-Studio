@@ -133,7 +133,7 @@ export class QaAskqBaseController implements QaAskqBackend {
    */
   submitAskqAnswer(askqId: string, selected_tr: string): void {
     if (!this.pendingAskq || this.currentAskqId !== askqId) {
-      emitError("stale askq answer", { askqId });
+      emitError("Yanıt geçersiz (soru güncelliğini yitirmiş)", { askqId });
       return;
     }
     const resolver = this.pendingResolver;

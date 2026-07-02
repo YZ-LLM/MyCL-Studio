@@ -211,13 +211,13 @@ export class Phase4Controller {
 
     if (!this.state.intent_summary) {
       log.error("phase-4", "intent_summary missing in state");
-      emitError("intent_summary missing — Phase 1 önce tamamlanmalı", null);
+      emitError("Niyet özeti eksik — önce Faz 1 tamamlanmalı", null);
       this.lastFailReason = "intent_summary missing (Phase 1 incomplete)";
       return "fail";
     }
     if (!this.spec.production_config) {
       log.error("phase-4", "production_config missing");
-      emitError("phase-4 production_config missing", null);
+      emitError("Faz 4 üretim yapılandırması eksik", null);
       this.lastFailReason = "production_config missing in spec";
       return "fail";
     }
@@ -246,7 +246,7 @@ export class Phase4Controller {
       });
     } catch (err) {
       log.error("phase-4", "template load failed", err);
-      emitError("template load failed", String(err));
+      emitError("Şablon yüklenemedi", String(err));
       this.lastFailReason = `template load failed: ${String(err)}`;
       return "fail";
     }

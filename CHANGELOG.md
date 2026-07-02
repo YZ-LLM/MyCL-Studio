@@ -1,5 +1,13 @@
 ## 2026-07-02
 
+- **fix(UX): kullanıcıya gösterilen hata kartları artık Türkçe — ham teknik detay "Detay göster" altında (YZLLM: "kullanıcıya ingilizce yazmasın; gerekirse detay göster butonunun altında gösterir"):**
+  Canlı Faz 4'te kullanıcı "dispatch threw" + ham `ENOENT ... iter-spec.md` İngilizce kırmızı kart gördü. `emitError(reason, detail)`
+  kartın ANA metni olarak `reason`'ı gösteriyor; 86 çağrının çoğu İngilizce teknik token'dı ("no active project",
+  "template load failed", "boot resume failed", "dispatch threw", vb.). 81 `emitError` reason'ı sade Türkçeye çevrildi
+  ([index.ts](orchestrator/src/index.ts) + 17 dosya); ham/İngilizce ayrıntı zaten `detail` (Detay göster toggle) + `log.error`
+  (dev, İngilizce KORUNDU) taşıyor. Scope-güvenli (yalnız `emitError` ilk-argümanı; log.* değişmedi), tire-bileşik yok
+  (KATI kullanıcı kuralı), teknik token'lar (spec.md/CLI/JSON) korundu. check yeşil (davranış değişmedi).
+
 - **fix: token öngörü kalitesi + sarı fazların sebebi + iterasyon log sorunları (YZLLM: "tahmin çok farklı çıktı, sarı olanların sebebini bul ve düzelt"):**
   Canlı koşuda (cave5, JS/Express) Token Zaman Çizelgesi "öngörü 536K / 130dk" dedi ama gerçek 347K / 84dk (%54 fazla);
   Faz 10/11/13 sarı kaldı. 3 Explore + 1 Plan + 3 Sonnet müfettiş kökü doğruladı. 4 MyCL düzeltmesi (cave5 test-hedef

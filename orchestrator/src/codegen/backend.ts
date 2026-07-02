@@ -105,7 +105,7 @@ export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
     log.warn("codegen-backend", "CLI seçili ama claude yok — görünür fail", { tag: opts.tag });
     return {
       run: async (): Promise<CodegenOutcome> => {
-        emitError("codegen: claude bulunamadı (CLI backend)", m);
+        emitError("Kod üretimi: claude bulunamadı (CLI arka ucu)", m);
         emitChatMessage("system", `🔴 ${m}`);
         return { kind: "failed", reason: m };
       },

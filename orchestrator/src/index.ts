@@ -1006,7 +1006,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   resetLastTechDebtFindings(path);
   // Aktif controller varsa yeni proje açma — state ortasında değişim yasak.
   if (runtime.controller) {
-    emitError("active phase running — close current project first", {
+    emitError("Bir faz çalışıyor — önce mevcut projeyi kapatın", {
       phase: runtime.state?.current_phase,
     });
     return;
@@ -1176,7 +1176,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
       );
       void restartPhase1WithIntent(interrupted.intentText).catch((e) => {
         log.error("orchestrator", "boot-resume restartPhase1WithIntent failed", e);
-        emitError("boot resume failed", String(e));
+        emitError("Önceki oturum sürdürülemedi", String(e));
       });
       return; // boot check skip — Phase 1 zaten başladı
     }
@@ -1211,7 +1211,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
       );
       void advanceToNextPhase(6 as PhaseId).catch((e) => {
         log.error("orchestrator", "boot integrate Faz6 unpark failed", e);
-        emitError("boot resume failed", String(e));
+        emitError("Önceki oturum sürdürülemedi", String(e));
       });
       return; // boot check skip — pipeline Faz 7'den devam ediyor
     }
@@ -1265,7 +1265,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
       );
       void advanceToNextPhase((phaseId - 1) as PhaseId).catch((e) => {
         log.error("orchestrator", "boot-resume advanceToNextPhase failed", e);
-        emitError("boot resume failed", String(e));
+        emitError("Önceki oturum sürdürülemedi", String(e));
       });
       return; // boot check skip — phase zaten başladı
     }
@@ -1433,7 +1433,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
     }
   } catch (err) {
     log.error("orchestrator", "open_project failed", err);
-    emitError("open_project failed", String(err));
+    emitError("Proje açılamadı", String(err));
   }
 }
 
@@ -1653,12 +1653,12 @@ async function copySchemaDocToProject(projectRoot: string): Promise<void> {
  */
 async function handleTaskQueueAdd({ text }: { text: string }): Promise<void> {
   if (!runtime.state) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   const trimmed = text.trim();
   if (!trimmed) {
-    emitError("task_queue_add: empty text", null);
+    emitError("İş eklenemedi: metin boş", null);
     return;
   }
   const task: TaskQueueItem = {
@@ -1679,13 +1679,13 @@ async function handleTaskQueueAdd({ text }: { text: string }): Promise<void> {
     await kickWorkQueue();
   } catch (err) {
     log.warn("task-queue", "add failed", err);
-    emitError("task_queue_add failed", String(err));
+    emitError("İş eklenemedi", String(err));
   }
 }
 
 async function handleTaskQueueRemove({ id }: { id: string }): Promise<void> {
   if (!runtime.state) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   try {
@@ -1694,7 +1694,7 @@ async function handleTaskQueueRemove({ id }: { id: string }): Promise<void> {
     emit("task_queue_changed", { items });
   } catch (err) {
     log.warn("task-queue", "remove failed", err);
-    emitError("task_queue_remove failed", String(err));
+    emitError("İş kuyruğundan silme başarısız", String(err));
   }
 }
 
@@ -1747,7 +1747,7 @@ async function handleSaveApiKeys(keys: Partial<ApiKeys>): Promise<void> {
   // Merge sonrası (claude translator+main) YA DA (bir z.ai key) varsa geçerli; ikisi de yoksa reddet.
   if (!keys || !(await hasUsableKeysAfterMerge(keys))) {
     emitError(
-      "save_api_keys: en az claude translator+main YA DA bir z.ai key gerekli (kayıt boş bırakılamaz)",
+      "API anahtarları: en az claude çevirmen+ana YA DA bir z.ai anahtarı gerekli (kayıt boş bırakılamaz)",
       null,
     );
     return;
@@ -1758,7 +1758,7 @@ async function handleSaveApiKeys(keys: Partial<ApiKeys>): Promise<void> {
     await emitConfigStatus();
   } catch (err) {
     log.error("orchestrator", "save_api_keys failed", err);
-    emitError("save_api_keys failed", String(err));
+    emitError("API anahtarları kaydedilemedi", String(err));
   }
 }
 
@@ -1774,7 +1774,7 @@ async function handleSaveSelectedModels(
 ): Promise<void> {
   log.info("orchestrator", "save_selected_models", payload);
   if (!payload || !payload.translator || !payload.main) {
-    emitError("save_settings: translator + main model required", null);
+    emitError("Ayarlar kaydedilemedi: çevirmen ve ana model gerekli", null);
     return;
   }
   try {
@@ -1855,7 +1855,7 @@ async function handleSaveSelectedModels(
     }
   } catch (err) {
     log.error("orchestrator", "save_selected_models failed", err);
-    emitError("save_settings failed", String(err));
+    emitError("Ayarlar kaydedilemedi", String(err));
   }
 }
 
@@ -1884,7 +1884,7 @@ async function handleSaveFeatures(
     }
   } catch (err) {
     log.error("orchestrator", "save_features failed", err);
-    emitError("save_features failed", String(err));
+    emitError("Özellikler kaydedilemedi", String(err));
   }
 }
 
@@ -1972,7 +1972,7 @@ async function handleReadSelectedModels(): Promise<void> {
     });
   } catch (err) {
     log.error("orchestrator", "read_selected_models failed", err);
-    emitError("read_selected_models failed", String(err));
+    emitError("Seçili modeller okunamadı", String(err));
   }
 }
 
@@ -1991,7 +1991,7 @@ async function handleCommandDirect(
     intent_kind: intentKind,
   });
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   // History persistence: user mesajını yaz (frontend setMainState ile UI'ya
@@ -2020,7 +2020,7 @@ async function runCommandDirectBody(
   intentKind: "run" | "test" | "build" | "install" | "lint",
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   // Phase 0 D2_WAITING'de yeni komut başlatma — askq cevabı bekleniyor;
@@ -2128,7 +2128,7 @@ function formatQuestionModeHistory(): string {
  */
 async function handleAskQuestion(text: string): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   const q = text.trim();
@@ -2168,7 +2168,7 @@ async function handleAskQuestion(text: string): Promise<void> {
  */
 async function handleOrchestratorDirective(text: string): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   const d = text.trim();
@@ -2261,7 +2261,7 @@ async function handleUserMessage(text: string): Promise<void> {
 async function handleUserMessageInner(text: string): Promise<void> {
   log.info("orchestrator", "user_message", { text_len: text.length });
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   // İzolasyon bayrağını temizle (YZLLM 2026-06-15): yeni kullanıcı turu kuyruk-işi DEĞİL
@@ -2368,7 +2368,7 @@ async function executeAgentDecision(
   text: string,
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   // v15.15: Pre-hoc bağımsız kör-nokta merceği — consequential karar EXECUTE edilmeden ÖNCE, bu
@@ -2804,7 +2804,7 @@ async function executeConfirmedAgentDecision(
   text: string,
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   if (decision.action === "run_phase" && decision.target_phase !== undefined) {
@@ -2848,7 +2848,7 @@ async function executeDispatchedIntent(
   priorAnalysis?: { solutions_tr: string[] },
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   if (outcome.handled) {
@@ -2976,11 +2976,11 @@ async function executeDispatchedIntent(
     });
     const spec = PHASE_SPECS[0];
     if (!spec) {
-      emitError("phase-0 spec not found in registry", null);
+      emitError("Faz 0 kaydı bulunamadı", null);
       return;
     }
     if (!runtime.state || !runtime.config) {
-      emitError("phase 0 cannot start: runtime not initialized", null);
+      emitError("Faz 0 başlayamıyor: çalışma ortamı hazır değil", null);
       return;
     }
     const phase0 = new Phase0Controller({
@@ -3041,7 +3041,7 @@ async function runDevelopIteration(
   opts?: { seedIntent?: string; startPhase?: PhaseId },
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   // İzolasyon (YZLLM 2026-06-15, canlı test #2): bu, iş-listesindeki TEK işi işleyen
@@ -3145,14 +3145,14 @@ async function runDevelopIteration(
   const spec = getSpec(1);
   if (!spec) {
     log.error("orchestrator", "phase 1 spec missing");
-    emitError("phase 1 spec missing", null);
+    emitError("Faz 1 spec eksik", null);
     return;
   }
   log.info("orchestrator", "phase 1 start");
   // QC A-1 (borç): non-null assert yerine explicit guard. Pre-condition
   // handleUserMessage entry'sinde sağlanır ama defansif kontrol kod okunaklığı.
   if (!runtime.state || !runtime.config) {
-    emitError("phase 1 cannot start: runtime not initialized", null);
+    emitError("Faz 1 başlayamıyor: çalışma ortamı hazır değil", null);
     return;
   }
 
@@ -3271,7 +3271,7 @@ async function emitQueueChangedFor(projectRoot: string): Promise<void> {
  */
 async function driveWorkQueue(rawText: string): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   const root = runtime.state.project_root;
@@ -5801,7 +5801,7 @@ export async function handleAskqAnswer(
   }
 
   if (!runtime.controller) {
-    emitError("no active controller", { id });
+    emitError("Aktif denetleyici yok", { id });
     return;
   }
   // submitAskqAnswer'ı olan her controller cevabı kabul eder: qa (P1/P2/P9),
@@ -5809,7 +5809,7 @@ export async function handleAskqAnswer(
   if ("submitAskqAnswer" in runtime.controller) {
     runtime.controller.submitAskqAnswer(id, selectedText);
   } else {
-    emitError("active phase does not accept askq answers", { id });
+    emitError("Aktif faz soru yanıtı kabul etmiyor", { id });
   }
 }
 
@@ -5839,7 +5839,7 @@ function phaseLabelTR(phaseId: number, spec: PhaseSpec): string {
 
 async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   if (phaseId === 0) {
@@ -5876,7 +5876,7 @@ async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<voi
   }
   const spec = PHASE_SPECS[phaseId as PhaseId];
   if (!spec) {
-    emitError(`phase ${phaseId} spec yok`, null);
+    emitError(`Faz ${phaseId} spec yok`, null);
     return;
   }
   // Faz TR etiketi i18n'den (ortak yardımcı)
@@ -5923,12 +5923,12 @@ async function handleRunPhase(
   mode: "only_run" | "advance",
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   const spec = PHASE_SPECS[phaseId];
   if (!spec) {
-    emitError(`phase ${phaseId} spec yok`, null);
+    emitError(`Faz ${phaseId} spec yok`, null);
     return;
   }
 
@@ -6058,7 +6058,7 @@ async function handleRunPhase(
     emitPhaseChanged(phaseId, phaseId, isSuccess ? "complete" : "error");
   } catch (err) {
     log.error("orchestrator", "only-run failed", err);
-    emitError(`phase ${phaseId} only-run failed`, String(err));
+    emitError(`Faz ${phaseId} tek koşumu başarısız`, String(err));
     emitPhaseChanged(phaseId, phaseId, "error");
   }
 }
@@ -6588,7 +6588,7 @@ ipcRouter.register("read_selected_models", async () => {
 // denetle → rapor → MyCL-içi çözülebilirler vs kaynak-kodu-değişikliği gerekenler ayrımı → chat.
 ipcRouter.register("start_quality_audit", async (data: unknown) => {
   if (!runtime.state || !runtime.config) {
-    emitError("no active project", null);
+    emitError("Aktif proje yok", null);
     return;
   }
   // YZLLM 2026-06-12 ("paralel-güvenli işi kaynak varsa başlat"): denetim ajanı faz çalışırken serbest koşar
@@ -6661,7 +6661,7 @@ ipcRouter.register("abort_phase", () => {
       `Abort sinyali gönderildi (Faz ${runtime.state?.current_phase}). Mevcut tur tamamlanınca durur.`,
     );
   } else {
-    emitError("active controller does not support abort", null);
+    emitError("Aktif denetleyici durdurmayı desteklemiyor", null);
   }
 });
 ipcRouter.register("load_messages", async (data: unknown) => {

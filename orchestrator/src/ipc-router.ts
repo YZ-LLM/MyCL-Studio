@@ -36,7 +36,7 @@ export class IpcRouter {
   async dispatch(msg: IncomingCommand): Promise<void> {
     const handler = this.handlers.get(msg.kind);
     if (!handler) {
-      emitError(`unknown command: ${msg.kind}`, null);
+      emitError(`Bilinmeyen komut: ${msg.kind}`, null);
       return;
     }
     await handler(msg.data);

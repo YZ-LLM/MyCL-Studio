@@ -290,7 +290,7 @@ export class Phase0Controller {
       });
     } catch (err) {
       log.error("phase-0", "template load failed", err);
-      emitError("template load failed", String(err));
+      emitError("Şablon yüklenemedi", String(err));
       return "fail";
     }
 
@@ -406,7 +406,7 @@ export class Phase0Controller {
         "Main 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı — " +
         "Faz 0 (Hata Ayıklama) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. " +
         "`claude` kur ya da Ayarlar → Modeller'den main'i 'API' yap.";
-      emitError("phase-0: claude bulunamadı (CLI)", m);
+      emitError("Faz 0: claude bulunamadı (CLI)", m);
       emitChatMessage("system", `🔴 ${m}`);
       this.lastOutcome = { kind: "failed", reason: "claude not found (CLI backend)" };
       return "fail";

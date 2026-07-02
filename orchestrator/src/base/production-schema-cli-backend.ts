@@ -88,7 +88,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
 
   submitAskqAnswer(askqId: string, selected_tr: string): void {
     if (!this.pendingAskq || this.currentAskqId !== askqId) {
-      emitError("stale askq answer", { askqId });
+      emitError("Yanıt geçersiz (soru güncelliğini yitirmiş)", { askqId });
       return;
     }
     const resolver = this.pendingResolver;
@@ -395,7 +395,7 @@ export function createProductionSchemaBackend(opts: ProductionRunOpts): Producti
     log.warn(opts.tag, "CLI seçili ama claude yok — görünür fail");
     return {
       run: async (): Promise<ProductionOutcome> => {
-        emitError(`${opts.tag}: claude bulunamadı (CLI backend)`, m);
+        emitError(`${opts.tag}: claude bulunamadı (CLI arka ucu)`, m);
         emitChatMessage("system", `🔴 ${m}`);
         return { kind: "failed", reason: m };
       },
