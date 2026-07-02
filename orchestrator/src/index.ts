@@ -3225,6 +3225,13 @@ async function runDevelopIteration(
 
 /** Aktif drain oturumu (kullanıcı iş gönderdi → kuyruk boşalana dek). Boot/sohbet'te false. */
 let _drainActive = false;
+/** Bu drain oturumunun işlediği iş id'si. Senaryo (mahkeme-doğrulandı): işin runDevelopIteration'ı DÖNER,
+ *  reconcile onu 'dropped' yapıp currentTaskId=null'lar (pipeline debug'a yönlendi, park değil); AMA pipeline
+ *  sonra debug fazından ilerleyip YEŞİLE ulaşır (ayrı advanceToNextPhase koşusu — startNextPendingTask'tan
+ *  GEÇMEZ, bu yüzden _drainTaskId İLK işin id'sini tutmaya devam eder). Green-end'de (onTaskMaybeComplete)
+ *  currentTaskId null + _drainTaskId hâlâ 'dropped' → o iş 'done'a KURTARILIR (YZLLM 2026-07-02: "iş yeşil
+ *  bitti ama 'Düştü' kaldı"). startNextPendingTask set eder (yeni iş → üzerine yaz), onTaskMaybeComplete temizler. */
+let _drainTaskId: string | null = null;
 /** reconcileAndDrainTasks re-entrancy kilidi (eşzamanlı drain imkânsız). */
 let _draining = false;
 
@@ -3323,6 +3330,7 @@ async function startNextPendingTask(): Promise<boolean> {
   }
   await patchTask(root, next.id, { status: "running" });
   runtime.currentTaskId = next.id;
+  _drainTaskId = next.id; // yeşil-son 'done' kurtarması için (mid-flow drop'a rağmen); yeni iş → üzerine yaz
   await emitQueueChangedFor(root);
   // YZLLM 2026-06-15: üst bar + "İş" kutusu o anki işi göstersin (iş başında set et;
   // eskiden yalnız Faz 1 sonunda doluyordu → işlenirken boş kalıyordu). Metin zaten TR.
@@ -3350,9 +3358,18 @@ async function startNextPendingTask(): Promise<boolean> {
  * currentTaskId yoksa no-op (kuyruk-dışı iterasyon, örn. resume).
  */
 async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
-  if (!runtime.currentTaskId) return;
-  const doneId = runtime.currentTaskId;
+  let doneId = runtime.currentTaskId;
+  // YZLLM 2026-07-02 ("iş yeşil bitti ama 'Düştü' kaldı"): işin ilk koşusu dönüp reconcile onu 'dropped'
+  // yapmış (debug'a yönlendi, currentTaskId=null) olabilir; ama pipeline sonra debug fazından ilerleyip Faz 17
+  // YEŞİLİNE ulaştıysa iş GERÇEKTEN tamamlanmıştır → o drain-işini 'dropped'→'done' KURTAR. Guard: yalnız status'ü
+  // HÂLÂ 'dropped' olan drain-işi kurtarılır (çözülmüş/alakasız işe dokunulmaz; _drainTaskId yeni iş başlayınca üzerine yazılır).
+  if (!doneId && _drainTaskId) {
+    const rescue = (await readTasks(projectRoot).catch(() => [])).find((t) => t.id === _drainTaskId);
+    if (rescue?.status === "dropped") doneId = _drainTaskId;
+  }
   runtime.currentTaskId = null;
+  _drainTaskId = null;
+  if (!doneId) return; // kuyruk-dışı iterasyon (resume/doğrudan develop) → no-op
   await patchTask(projectRoot, doneId, { status: "done", completed_at: Date.now() });
   await emitQueueChangedFor(projectRoot);
 }

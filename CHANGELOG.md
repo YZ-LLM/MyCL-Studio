@@ -1,5 +1,14 @@
 ## 2026-07-02
 
+- **fix(kuyruk): iş yeşil tamamlandığı halde 'Düştü' kalıyordu → yeşil-sonda 'Tamamlandı' kurtarması (YZLLM: "bunu yaptı ama işaretlemedi"):**
+  Canlı: "Faz 5 hatası (ertelendi)" işi, pipeline debug'a yönlenirken reconcile'da 'dropped' damgalanıyordu; ama pipeline
+  sonra debug fazından ilerleyip Faz 17 yeşiline ulaşıyordu → iş "Düştü" kalıyor (kullanıcı işi yapıldı sanıyor, doğru).
+  Kök: MyCL bir işi yalnız `onTaskMaybeComplete`'te (currentTaskId set) 'done' yapıyordu; drop currentTaskId'yi sıfırlayınca
+  yeşil-sonda işaretlenecek iş kalmıyordu. Fix ([index.ts](orchestrator/src/index.ts)): YENİ `_drainTaskId` — drop'a rağmen
+  yaşayan drain-işi id'si; yeşil-sonda (Faz 17) o iş HÂLÂ 'dropped' ise 'done'a kurtarılır. **Çapraz-aile mahkeme (2 Sonnet):
+  EFEKTİF-VE-DOĞRU + GÜVENLİ** — `runDevelopIteration` tek-kaynak (startNextPendingTask) → yanlış-done imkânsız; eski
+  currentTaskId yolu birebir korundu; guard yalnız 'dropped' işi kurtarır; boot/eşzamanlılık güvenli. check yeşil.
+
 - **fix(semgrep): minified KOPYA dosyaları da hariç (`*.min.js` → `*.min*.js`; YZLLM canlı iterasyon incelemesi):**
   Vendor-exclude fix'inden sonra son iterasyonda `bundles/ckeditor` temizlendi ama `public/assets/js/table.min - Copy.js`
   (DataTables minified'ının Windows kopyası, `.min` ekten sonra ` - Copy` alıyor) Faz 10 (25 bulgu) + Faz 13'te sarı
