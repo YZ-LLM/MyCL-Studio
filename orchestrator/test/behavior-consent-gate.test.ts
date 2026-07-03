@@ -15,7 +15,12 @@ vi.mock("../src/translator.js", () => ({ translate: translateMock }));
 // saveState no-op: kapı best-effort persist eder; testte diske state yazmaya gerek yok.
 vi.mock("../src/state.js", () => ({ save: vi.fn().mockResolvedValue(undefined), loadOrInit: vi.fn() }));
 
-import { runBehaviorConsentGate, resolveConsentAnswer } from "../src/behavior-consent-gate.js";
+import {
+  runBehaviorConsentGate,
+  resolveConsentAnswer,
+  detectStaleConsentedArtifacts,
+} from "../src/behavior-consent-gate.js";
+import type { BehaviorConsentRecord } from "../src/behavior-consent.js";
 
 const ITER_TS = new Date("2026-07-03T10:00:00").getTime();
 
@@ -166,5 +171,35 @@ describe("runBehaviorConsentGate — değişen davranış onayı", () => {
     const second = await driveGate(state, YES); // aynı iterasyon → recall
     expect(second.askCount).toBe(0);
     expect(state.pending_behavior_consent_note).toContain("APPROVED"); // not yine üretildi
+  });
+});
+
+describe("detectStaleConsentedArtifacts (Layer C) — SAF", () => {
+  const rec = (iteration: number, decision: "yes" | "no"): BehaviorConsentRecord => ({
+    ts: 1,
+    iteration,
+    sig: `s${iteration}${decision}`,
+    decision,
+    scope: "behavior-consent",
+    priorStatement: `stmt-${decision}`,
+    featureFiles: [],
+    testFiles: [],
+  });
+
+  it("bu iterasyonda YES var + hiç .feature yazılmadı (0) → bayat bayrağı", () => {
+    const out = detectStaleConsentedArtifacts([rec(2, "yes")], 2, 0);
+    expect(out).toEqual(["stmt-yes"]);
+  });
+
+  it(".feature yazıldıysa (>0) → bayrak yok", () => {
+    expect(detectStaleConsentedArtifacts([rec(2, "yes")], 2, 1)).toEqual([]);
+  });
+
+  it("bu iterasyonda YES yok (yalnız NO) → bayrak yok", () => {
+    expect(detectStaleConsentedArtifacts([rec(2, "no")], 2, 0)).toEqual([]);
+  });
+
+  it("başka iterasyonun YES'i bu iterasyonu etkilemez", () => {
+    expect(detectStaleConsentedArtifacts([rec(1, "yes")], 2, 0)).toEqual([]);
   });
 });

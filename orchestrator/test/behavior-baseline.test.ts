@@ -7,6 +7,7 @@ import {
   verifyNoUnconsentedRegression,
   snapshotBehaviorBaseline,
   readBehaviorBaseline,
+  acceptRegressionsIntoBaseline,
   type BehaviorBaseline,
 } from "../src/behavior-baseline.js";
 
@@ -58,5 +59,22 @@ describe("snapshotBehaviorBaseline / readBehaviorBaseline — I/O", () => {
 
   it("baseline dosyası yoksa readBehaviorBaseline → null", async () => {
     expect(await readBehaviorBaseline(await mkTmp())).toBeNull();
+  });
+});
+
+describe("acceptRegressionsIntoBaseline (mahkeme #2 — regresyon kabulü) ", () => {
+  const base: BehaviorBaseline = { ts: 1, testCmd: "npm test", green: false, failures: ["A"] };
+
+  it("regressed'i failures'a ekler (dup elenir), diske yazar", async () => {
+    const root = await mkTmp();
+    await acceptRegressionsIntoBaseline(root, base, ["B", "A"]);
+    const read = await readBehaviorBaseline(root);
+    expect(read?.failures.slice().sort()).toEqual(["A", "B"]);
+  });
+
+  it("regressed boş → no-op (dosya yazılmaz)", async () => {
+    const root = await mkTmp();
+    await acceptRegressionsIntoBaseline(root, base, []);
+    expect(await readBehaviorBaseline(root)).toBeNull();
   });
 });

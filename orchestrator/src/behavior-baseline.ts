@@ -39,7 +39,16 @@ async function runCmd(cmd: string, cwd: string): Promise<{ code: number; stdout:
     });
     return { code: 0, stdout: String(stdout), stderr: String(stderr) };
   } catch (err) {
-    const e = err as NodeJS.ErrnoException & { code?: number; stdout?: string; stderr?: string };
+    const e = err as NodeJS.ErrnoException & {
+      code?: number;
+      stdout?: string;
+      stderr?: string;
+      killed?: boolean;
+    };
+    // Timeout/SIGKILL (mahkeme #1): süreç ZORLA sonlandırıldı → çıktı KISMİ (bazı testler hiç koşmadı).
+    // Kısmi fail setiyle baseline kurmak YANLIŞ-regresyon üretir (koşmayan testler "geçiyordu" sanılır).
+    // Çıktıyı BOŞALT → snapshot'ın "kırmızı ama 0 fail" guard'ı testCmd:null'a düşer (güvenilmez, görünür atla).
+    if (e.killed) return { code: 1, stdout: "", stderr: String(e.stderr ?? e.message ?? "timeout") };
     return {
       code: typeof e.code === "number" ? e.code : 1,
       stdout: String(e.stdout ?? ""),
@@ -75,6 +84,23 @@ export async function snapshotBehaviorBaseline(state: State, ts: number): Promis
   }
   await writeBaseline(state.project_root, baseline);
   return baseline;
+}
+
+/**
+ * Yüzeye çıkarılan regresyonları baseline'a KABUL ET (mahkeme #2): failures'a ekle + yeniden yaz → sonraki
+ * iterasyonlarda AYNI kırık test tekrar tekrar bayrak çekmez; yalnız BİR SONRAKİ iterasyonun YENİ kırdığı
+ * bildirilir. regressed boşsa no-op. Bu, "per-iterasyon delta" anlamı verir (her kırılma bir kez bildirilir).
+ */
+export async function acceptRegressionsIntoBaseline(
+  root: string,
+  baseline: BehaviorBaseline,
+  regressed: string[],
+): Promise<void> {
+  if (regressed.length === 0) return;
+  await writeBaseline(root, {
+    ...baseline,
+    failures: [...new Set([...baseline.failures, ...regressed])],
+  });
 }
 
 export async function readBehaviorBaseline(root: string): Promise<BehaviorBaseline | null> {

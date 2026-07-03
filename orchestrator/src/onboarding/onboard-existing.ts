@@ -384,6 +384,12 @@ export async function runOnboarding(
     //     durumunu (geç/kal kümesi) anlık görüntüle. Sıra KRİTİK (mahkeme #2): kuyruk boşalmadan baseline
     //     diskte olmalı → sonraki iterasyonların Faz 8'i onaysız regresyonu (önceden geçen test düştü) görünür
     //     kılabilsin. Fail-soft + görünür (KATI#4): çalışan test yoksa/anlaşılamazsa atlandığını SÖYLE.
+    // Mesaj await'ten ÖNCE (mahkeme #4): büyük suite'te snapshot 5 dk'ya kadar sürebilir; sessiz beklerse
+    // kullanıcı "entegre edildi" sonrası hiçbir şey olmuyor sanır (hang gibi). Neden beklediğini SÖYLE.
+    emitChatMessage(
+      "system",
+      "📋 Davranış temeli alınıyor — mevcut testler bir kez koşuluyor (büyük bir suite'te biraz sürebilir). Bu bitince gap işleri sırayla başlar.",
+    );
     const baseline = await snapshotBehaviorBaseline(state, Date.now()).catch((e: unknown) => {
       log.warn("onboarding", "behavior-baseline alınamadı", e);
       return null;

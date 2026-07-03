@@ -21,6 +21,7 @@ import { emitAskq, emitChatMessage } from "./ipc.js";
 import { translate } from "./translator.js";
 import { save as saveState } from "./state.js";
 import { currentSpecPath } from "./devs-paths.js";
+import { readAuditLogTail } from "./audit.js";
 import {
   computeBehaviorChangeSet,
   appendBehaviorConsent,
@@ -28,6 +29,7 @@ import {
   latestConsentFor,
   MAX_CONSENT_ASKS,
   type BehaviorChange,
+  type BehaviorConsentRecord,
   type ConsentDecision,
 } from "./behavior-consent.js";
 
@@ -139,6 +141,34 @@ function buildConsentNote(yes: BehaviorChange[], no: BehaviorChange[]): string {
     for (const c of no) s += `- KEEP AS-IS: ${c.priorStatement}\n`;
   }
   return s;
+}
+
+// ── Layer C: onaylı davranış değişikliği ama .feature güncellenmedi mi (bayat artefakt riski) ──
+
+/**
+ * SAF: bu iterasyonda EN AZ BİR davranış değişikliği ONAYLANDI ("yes") ama HİÇ `.feature` yazılmadı/güncellenmedi
+ * (bddWriteCount===0) → onaylı davranışlar için yaşayan dokümantasyon koddan geri kalmış olabilir. Kaba ama
+ * güvenli (yanlış-poz: yes-var/feature-yok nadir + zararsız görünür bayrak). Bloke DEĞİL — Faz 9 sinyali.
+ */
+export function detectStaleConsentedArtifacts(
+  records: BehaviorConsentRecord[],
+  iteration: number,
+  bddWriteCount: number,
+): string[] {
+  if (bddWriteCount > 0) return [];
+  return records.filter((r) => r.iteration === iteration && r.decision === "yes").map((r) => r.priorStatement);
+}
+
+/** I/O: consent.jsonl + bu iterasyonun audit'lerinden bayat-artefakt sinyalini hesapla (Faz 9 çağırır). */
+export async function checkConsentStaleArtifacts(state: State): Promise<string[]> {
+  const iter = state.iteration_count ?? 1;
+  const iterStart = state.iteration_started_at ?? 0;
+  const [records, audit] = await Promise.all([
+    readBehaviorConsent(state.project_root).catch(() => [] as BehaviorConsentRecord[]),
+    readAuditLogTail(state.project_root, 1500).catch(() => []),
+  ]);
+  const bddWriteCount = audit.filter((e) => e.event === "bdd-scenario-write" && e.ts >= iterStart).length;
+  return detectStaleConsentedArtifacts(records, iter, bddWriteCount);
 }
 
 async function recordConsent(

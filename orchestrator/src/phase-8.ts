@@ -26,7 +26,11 @@ const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
 import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, type FixSnapshot } from "./fix-snapshot.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
-import { readBehaviorBaseline, verifyNoUnconsentedRegression } from "./behavior-baseline.js";
+import {
+  readBehaviorBaseline,
+  verifyNoUnconsentedRegression,
+  acceptRegressionsIntoBaseline,
+} from "./behavior-baseline.js";
 import { escalatedModelEffort } from "./escalation.js";
 import { modelChoiceLineIfChanged } from "./model-catalog.js";
 import { log } from "./logger.js";
@@ -1200,20 +1204,27 @@ export class Phase8Controller {
     if (this.state.origin !== "foreign") return;
     const baseline = await readBehaviorBaseline(this.state.project_root).catch(() => null);
     const { reliable, regressed } = verifyNoUnconsentedRegression(baseline, afterOutput);
-    if (!reliable || regressed.length === 0) return;
+    if (!reliable || regressed.length === 0 || !baseline) return;
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 8,
       event: "behavior-baseline-regression",
       caller: "mycl-orchestrator",
-      detail: `${regressed.length} önceden geçen test düştü: ${regressed.slice(0, 5).join(" | ").slice(0, 200)}`,
+      detail: `${regressed.length} test bu iterasyonda düştü: ${regressed.slice(0, 5).join(" | ").slice(0, 200)}`,
     });
+    // İfade (mahkeme #3): "önceden GEÇEN" YANLIŞ olabilir — onboarding sonrası eklenmiş bir test de olabilir.
+    // Doğru ve güvenli: "bu iterasyondan önce başarısız OLMAYAN" (hem geçiyordu hem henüz yoktu durumunu kapsar).
     emitChatMessage(
       "system",
-      `⚠️ **Var olan davranış değişti** — entegrasyon öncesi GEÇEN ${regressed.length} test bu iterasyonda düştü:\n` +
+      `⚠️ **Var olan davranış değişti** — bu iterasyondan önce başarısız OLMAYAN ${regressed.length} test şimdi düşüyor:\n` +
         regressed.slice(0, 8).map((t) => `• ${t}`).join("\n") +
         "\n\nBunu istediysen sorun yok. İstemediysen bu iterasyonun değişikliğini gözden geçir/geri al. " +
         "(Bloke etmedim — yalnız görünür kıldım; yabancı projede sessiz davranış değişimini önlemek için.)",
+    );
+    // Yüzeye çıkan regresyonu baseline'a KABUL ET (mahkeme #2) → aynı kırık sonraki gap görevlerinde
+    // tekrar tekrar bayrak çekmesin; yalnız YENİ kırılmalar bir daha bildirilir.
+    await acceptRegressionsIntoBaseline(this.state.project_root, baseline, regressed).catch((e) =>
+      log.warn("phase-8", "baseline'a regresyon kabulü yazılamadı", e),
     );
   }
 

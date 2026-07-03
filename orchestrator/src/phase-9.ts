@@ -6,6 +6,7 @@
 import { escalatedModelEffort } from "./escalation.js";
 import { readFile } from "node:fs/promises";
 import { appendAudit } from "./audit.js";
+import { checkConsentStaleArtifacts } from "./behavior-consent-gate.js";
 import { currentSpecPath } from "./devs-paths.js";
 import {
   buildRelevantPhase9Audit,
@@ -170,6 +171,27 @@ export class Phase9Controller {
       caller: "mycl-orchestrator",
       detail: `scanned=${techDebt.scannedCount} findings=${techDebt.totalFindings}${techDebt.truncated ? " (truncated)" : ""}`,
     });
+
+    // Layer C (davranış-onayı): bu iterasyonda ONAYLANAN davranış değişikliği var ama HİÇ `.feature`
+    // güncellenmemişse → yaşayan dokümantasyon koddan geri kalmış olabilir. Bloke DEĞİL — görünür risk
+    // bayrağı (eksik `.feature` takılma döngüsü tehlikesi; gate'e eklenmez). MyCL projeleri için (foreign
+    // consent.jsonl'e yazmaz → doğal no-op).
+    const staleConsented = await checkConsentStaleArtifacts(this.state).catch(() => [] as string[]);
+    if (staleConsented.length > 0) {
+      await appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 9,
+        event: "behavior-consent-stale-artifact",
+        caller: "mycl-orchestrator",
+        detail: `${staleConsented.length} onaylı davranış değişikliği ama bu iterasyonda .feature güncellenmedi`,
+      });
+      emitChatMessage(
+        "system",
+        `⚠️ **Bayat artefakt riski** — bu iterasyonda ${staleConsented.length} var olan davranış değişikliğini ` +
+          "ONAYLADIN ama hiç `.feature` senaryosu yazılmamış/güncellenmemiş görünüyor. Onayladığın değişiklikler için " +
+          "yaşayan dokümantasyon (`.feature`) koddan geri kalmış olabilir — göz at. (Bloke etmedim; Faz 9 riski olarak işaretlendi.)",
+      );
+    }
 
     const escMe = escalatedModelEffort(this.state, this.config, "risk-review");
 
