@@ -62,7 +62,7 @@ ortak controller'a dayanır:
 | 5 | UI Yapımı | codegen |
 | 6 | UI İnceleme (+ WCAG erişilebilirlik salt-raporu) | qa-askq |
 | 7 | Veritabanı Tasarımı | production-schema |
-| 8 | TDD Uygulama | codegen |
+| 8 | BDD + TDD Uygulama | codegen |
 | 9 | Risk İncelemesi | qa-askq |
 | 10 | Lint | mechanical |
 | 11 | Sadeleştirme | mechanical |
@@ -72,6 +72,13 @@ ortak controller'a dayanır:
 | 15 | Entegrasyon Testleri | mechanical |
 | 16 | E2E Testler (UI varsa) | mechanical |
 | 17 | Sızma Testi — **otomatik koşmaz**, 🛡️ Güvenlik Taraması butonuyla manuel | — |
+
+**Faz 8 davranış öncelikli (BDD → TDD, çift döngü):** Faz 8, kod yazmadan önce yeni/değişen her
+davranış için proje kökünde görünür `features/*.feature` yaşayan dokümantasyonu yazar (spec'in
+Given/When/Then'inden türetilir; ayrı bir BDD runner/çerçevesi YOK → stack-bağımsız), sonra bu
+davranışı projenin mevcut test çerçevesiyle kabul testi olarak koşup (dış döngü RED→GREEN) TDD
+iç döngüsüne (birim red-green-refactor) iner. `.feature` dosyaları commit'lenir; `.mycl/`
+altındaki yaşayan dökümandan (`features.md`) ayrı, proje seviyesi artefakttır.
 
 ## Var olan projeyi entegre etme ("Proje Aç")
 

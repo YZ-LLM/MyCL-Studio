@@ -33,6 +33,16 @@ If you cannot point to the concrete guard or test that makes something safe, it 
 
 1. From **Spec risks** + **Phase 9 audit** + **Technical debt scan** below,
    enumerate residual risks (the scan's deterministic markers are concrete risks).
+   - **BDD davranış kapsamı (yumuşak — kapsam deliği avı)**: Faz 8, davranışsal AC'ler için
+     önce görünür `features/*.feature` senaryosu yazar; her yazım aşağıdaki **Phase 9 audit**
+     beslemesinde bir `bdd-scenario-write` olayı bırakır. Sinyalin: spec'te Given/When/Then
+     taşıyan AC'ler VARKEN audit'te hiç `bdd-scenario-write` yoksa VE bu iterasyon o davranışı
+     yeni kuruyorsa (yalnızca refactor değil), davranış ya görünür senaryoyla belgelenmemiş ya da
+     test edilmemiş olabilir → bunu AC kapsamı (tdd-green AC etiketleri) ile birlikte değerlendir;
+     doğrulayan test de yoksa kapsam deliğidir → `fix` (`fix_phase: code`) veya en azından `rule`.
+     **Yalnızca refactor veya doküman iterasyonunda `bdd-scenario-write` yokluğu NORMALdir — risk
+     sayma.** Bu bir KAPI DEĞİL; düşman gözü değerlendirmesidir (audit sinyaliyle çalışır —
+     `.feature` dosyaları senin okuma kapsamında olmayabilir).
 2. For each risk surface (input validation, error paths, race conditions,
    resource leaks, dependency surfaces, technical debt, etc.), call
    **ask_risk_decision** with a concrete question and the three options above.

@@ -109,11 +109,11 @@ const TEST_PATH_PATTERNS = [
 ];
 const PROD_EXT = /\.(ts|tsx|js|jsx|py|rs|go|java|cpp|c|rb|swift)$/;
 
-function isTestPath(path: string): boolean {
+export function isTestPath(path: string): boolean {
   if (path.includes("node_modules")) return false;
   return TEST_PATH_PATTERNS.some((re) => re.test(path));
 }
-function isProdPath(path: string): boolean {
+export function isProdPath(path: string): boolean {
   if (path.includes("node_modules") || isTestPath(path)) return false;
   return PROD_EXT.test(path);
 }
@@ -130,6 +130,16 @@ const COSMETIC_EXTS = new Set([
 export function isCosmeticFile(path: string): boolean {
   const dot = path.lastIndexOf(".");
   return dot >= 0 && COSMETIC_EXTS.has(path.slice(dot).toLowerCase());
+}
+
+// BDD dış döngü (YZLLM 2026-07-03): görünür yaşayan dokümantasyon — `features/*.feature`.
+// Gherkin biçimli düz metin; parser/runner YOK (stack-bağımsız, KATI#1). SAF.
+// NOT: `.feature` bilerek isTestPath/isProdPath/isCosmeticFile'ın HİÇBİRİNE uymaz → tech-debt
+// taramasına girmez, tdd-*-write saymaz, repro-gate'i tetiklemez (çift sayım YOK). Bu bir GATE
+// DEĞİL: yalnız görünürlük/telemetri (bdd-scenario-write audit + Faz 9 yumuşak inceleme).
+export function isFeatureFile(path: string): boolean {
+  if (path.includes("node_modules")) return false;
+  return /\.feature$/i.test(path);
 }
 
 // GÖREV-SINIFI #3 (YZLLM 2026-06-21, Vestel canlı + mahkeme tasarımı): build/test-tooling CONFIG
@@ -1175,6 +1185,10 @@ export class Phase8Controller {
           const content = String(input.content ?? "");
           await this.scanAndAuditTechDebt(path, content);
         }
+        // BDD dış döngü görünür artefaktı — GATE DEĞİL, yalnız görünürlük (Faz 9 yumuşak
+        // inceleme + audit izi). required_audits/gate'e eklenmez (yalnızca refactor/doküman
+        // iterasyonunda .feature yokluğu yanlış başarısızlık üretmesin — belgelenmiş #1 stall-loop tehlikesi).
+        else if (isFeatureFile(path)) audits.push({ event: "bdd-scenario-write", detail: path });
       }
     } else if (name === "Edit" || name === "MultiEdit") {
       if (!is_error) {
@@ -1190,6 +1204,9 @@ export class Phase8Controller {
             log.warn("phase-8", "edit tech-debt scan read failed", { path, err });
           }
         }
+        // Mevcut bir `.feature`'ı Edit ile güncelleme de BDD görünürlük izi bırakır
+        // (Write dalıyla simetri — sinyal sessizce kaybolmasın). GATE DEĞİL.
+        if (isFeatureFile(path)) audits.push({ event: "bdd-scenario-write", detail: path });
       }
     } else if (name === "Bash") {
       const cmd = String(input.command ?? "");

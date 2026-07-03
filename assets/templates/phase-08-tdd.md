@@ -1,7 +1,8 @@
-# Task: TDD Implementation — Integration-First (Outside-In)
+# Task: BDD + TDD Implementation — Behavior-First, Outside-In (Double-Loop)
 
-You are implementing the spec from Phase 4 using **integration-first TDD**.
-The spec is located at **{{SPEC_PATH}}** in the project root.
+You are implementing the spec from Phase 4 using a **behavior-first double loop**:
+first BDD (dış döngü — görünür davranış senaryosu), then TDD (iç döngü — birim
+red-green-refactor). The spec is located at **{{SPEC_PATH}}** in the project root.
 
 ## METHODOLOGY — Outside-In (v15.7, 2026-05-25)
 
@@ -31,11 +32,54 @@ BU iterasyonda eklenen/değişen AC'ler için **gerçek, çalışan testler** ya
 göstermek" İŞE YARAMAZ; yalnız gerçekten geçen testler sayılır. Hiçbir audit/
 metadata olayını elle üretme; MyCL kaydı otomatik tutar.
 
-**Strateji**: Her AC için ayrı RED-GREEN-REFACTOR YAPMA. Bunun yerine:
+**Strateji**: Her AC için ayrı RED-GREEN-REFACTOR YAPMA. Bunun yerine, **önce BDD
+(davranışı tanımla, dış döngü), sonra TDD (uygula, iç döngü)**:
 
-### ADIM 0 — SMOKE TEST FIRST (zorunlu ilk adım)
+### ADIM -1 — DAVRANIŞ DOSYASI (BDD, görünür ilk adım — dış döngü)
 
-**EN BAŞTA tek bir smoke test yaz** — uygulamanın happy-path'ini uçtan uca
+Kod/test yazmadan ÖNCE, bu iterasyonda YENİ veya DEĞİŞEN her AC için insanın
+okuyabileceği bir davranış dosyası yaz: `features/<senaryo>.feature`. Bu YAŞAYAN DÖKÜMANTASYONDUR
+(YZLLM tek bakışta okusun) — Gherkin biçimli düz metin, ÇALIŞTIRILMAZ (parser/runner
+YOK; ayrı bir BDD çerçevesi KURMA → stack-bağımsız kalır). Kaynağı spec.md'nin
+Given/When/Then alanlarıdır:
+
+- AC'nin `_Given_/_When_/_Then_` alt maddeleri VARSA → birebir
+  Scenario/Given/When/Then satırlarına taşı.
+- AC yalnız `statement` ise (G/W/T yok — trivial kontrol) → davranışı TÜRET:
+  statement'ı bir `Then` (gözlemlenebilir sonuç) say, makul bir Given/When ekle;
+  gerçekten trivial ise (ör. "`error_folder/` gitignore'da") tek satır `Then` yeter.
+- AYNI `Given`'ı paylaşan AC'ler tek `Feature` altında gruplanır — bu, ADIM 1'deki
+  senaryo grubuyla BİREBİR aynı gruplamadır (davranış testi = o grubun integration testi;
+  ekstra test yok).
+
+Gherkin anahtar kelimeleri (Feature/Scenario/Given/When/Then/And) İNGİLİZCE kalır
+(standart), açıklama metni TÜRKÇE yazılır (parser yok → serbest metin). Dosyayı,
+onu doğrulayan teste yorum satırıyla bağla (ayrı bağlama kodu YOK, sadece konvansiyon):
+başa testin yolunu yaz, örn. `# test: tests/auth.test.ts`. Test tarafında da AC-id ile
+etiketle (aşağıda) ki davranış → test → AC izlenebilir olsun. Örnek:
+
+    # features/giris.feature
+    # test: tests/auth.test.ts   (kaynak: spec.md AC3, AC4)
+    Feature: Kullanıcı girişi
+
+      Scenario: Doğru kimlik bilgisiyle giriş (AC3)
+        Given kayıtlı bir kullanıcı var
+        When doğru e-posta ve parola ile POST /api/login çağrılır
+        Then 200 döner ve oturum çerezi set edilir
+
+`.feature` dosyaları proje kökünde `features/` altında yaşar (`.mycl/`'e DOKUNMA) ve
+COMMIT'lenir (görünürlük = amaç; gitignore'a ekleme).
+
+**İTERASYON-KAPSAMI — ZORLA SOKMA.** Bu görünür dokümantasyon disiplini yalnız YENİ/
+DEĞİŞEN davranış içindir. Yalnızca refactor veya doküman iterasyonunda VEYA bu iterasyonda
+yeni/değişen AC yoksa `.feature` YAZMA; mevcut `.feature` varsa ve davranış değişmediyse
+DOKUNMA. `.feature` bir GATE DEĞİL — eksikliği fazı bloke etmez; amacı görünür yaşayan
+dokümantasyon (parmak izi standardındaki aynı kapsam disiplini).
+
+### ADIM 0 — SMOKE TEST FIRST (ilk TEST adımı — ADIM -1 davranış dosyalarından SONRA)
+
+**İlk TEST olarak tek bir smoke test yaz** (davranış dosyalarını yazdıktan sonra) —
+uygulamanın happy-path'ini uçtan uca
 çağıran 1 (BIR) test. Backend yoksa minimal sunucu/server ayağa kalksın
 mı, ana endpoint cevap veriyor mu, DB query çalışıyor mu? Bu test
 "uygulama temel olarak çalışıyor mu?" sorusunu sorar.
@@ -67,10 +111,15 @@ fixture/setup'ı paylaşır.
    birden fazla AC'yi aynı anda doğrular. **AC'nin _Then_'i = testin assert'i**:
    her davranışsal AC için testin o _Then_ (gözlemlenebilir sonuç) çıktısını
    AÇIKÇA doğruladığından emin ol — "test koştu" değil "then gerçekleşti".
-3. **Production kodu yaz**, integration test'i koş.
-4. **Hata çıkarsa**: hatanın hangi katmandan geldiğini belirle (DB? handler?
-   validation? auth?). SADECE o noktayı izole eden bir unit test yaz, fix,
-   integration'a geri dön.
+   Bu test, ADIM -1'de yazdığın ilgili `.feature` senaryosunun ÇALIŞTIRILABİLİR
+   karşılığıdır (BDD dış döngü) — projenin MEVCUT test çerçevesiyle (vitest/jest/
+   pytest/go test…) yaz, AYRI bir BDD runner KURMA. Önce KIRMIZI gör (davranış henüz
+   yok). Feature ↔ test 1:1 (feature başındaki `# test:` yorumu bağlar); **ekstra
+   test YOK — davranış testi = bu grup testi**.
+3. **Production kodu yaz**, integration test'i koş (BDD dış döngüyü yeşile taşı).
+4. **Hata çıkarsa (TDD iç döngü)**: hatanın hangi katmandan geldiğini belirle (DB?
+   handler? validation? auth?). SADECE o noktayı izole eden bir unit test yaz (RED),
+   fix (GREEN), dış döngüdeki davranış testine geri dön.
 5. **Aynı süreci recursive uygula**: yeni unit test fail ederse, o da bir alt
    katmana ihtiyaç doğurursa, daha küçük test yaz.
 
@@ -406,6 +455,12 @@ backend.
 
 Before declaring done, confirm with evidence you actually observed:
 
+- **Behavior visible (BDD) — KENDİN DOĞRULA**: bu iterasyonda davranışsal AC varsa,
+  `features/` altında en az bir `.feature` senaryosunun GERÇEKTEN yazıldığını kendin
+  doğrula (`find features -name '*.feature'` veya `ls features/` ile — "yazdım" varsayma,
+  BAK) ve her birinin ilgili testle 1:1 bağlı olduğunu (`# test:` yorumu) gör. Yalnızca
+  refactor veya doküman iterasyonunda `.feature` beklenmez — o zaman özete "davranış
+  değişmedi, `.feature` atlandı" yaz.
 - **RED happened**: each new test was seen failing for the right reason before
   you implemented — not green-on-first-write.
 - **Real path tested**: tests exercise real handlers/DB/contract, not mocks of
@@ -482,8 +537,9 @@ The spec is in `{{SPEC_PATH}}`. Start by reading it. The spec contains:
 ```
 For each AC:
   Read spec to refresh.
-  Write failing test exercising AC.
-  Bash: run tests → expect failure containing the new test.
+  Write/refresh features/*.feature scenario (from AC Given/When/Then).  # BDD dış döngü
+  Write failing test exercising AC (= the .feature scenario's runnable form).
+  Bash: run tests → expect failure containing the new test.  # RED
   Write production code (minimal).
   Bash: run tests → expect pass.
   Continue to next AC.

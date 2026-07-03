@@ -4,9 +4,12 @@ import {
   hasReproRedThenGreen,
   isBuildConfigFile,
   isCosmeticFile,
+  isFeatureFile,
+  isProdPath,
   isStaticOnlyChange,
   isStaticSafeAddedLine,
   isTestCommand,
+  isTestPath,
 } from "../src/phase-8.js";
 
 describe("isStaticSafeAddedLine (Faz 8 repro gate-fix #1 — eklenen satır runtime mı)", () => {
@@ -94,6 +97,37 @@ describe("isCosmeticFile (repro-gate kapsamı — v15.10)", () => {
   it("uzantısız → kozmetik değil (güvenli taraf: mantık)", () => {
     expect(isCosmeticFile("Makefile")).toBe(false);
     expect(isCosmeticFile("LICENSE")).toBe(false);
+  });
+});
+
+describe("isFeatureFile (BDD dış döngü görünür artefakt — YZLLM 2026-07-03)", () => {
+  it(".feature dosyaları → true", () => {
+    for (const f of ["features/auth.feature", "features/giris.feature", "a/b/x.FEATURE"]) {
+      expect(isFeatureFile(f)).toBe(true);
+    }
+  });
+  it("kod/test/doküman/node_modules → false", () => {
+    for (const f of ["src/app.ts", "tests/auth.test.ts", "README.md", "node_modules/x/y.feature"]) {
+      expect(isFeatureFile(f)).toBe(false);
+    }
+  });
+  // REGRESYON-KİLİDİ: `.feature` mevcut sınıflandırıcıların HİÇBİRİNE uymaz →
+  // tech-debt taramasına girmez, tdd-*-write saymaz, repro-gate'i tetiklemez
+  // (çift sayım YOK). Bu davranış BDD tasarımının temelidir; kırılmasın.
+  it("konvansiyonel features/ yolu test/prod/kozmetik DEĞİL (çift sayım + repro muafiyeti kilidi)", () => {
+    const f = "features/auth.feature";
+    expect(isTestPath(f)).toBe(false);
+    expect(isProdPath(f)).toBe(false);
+    expect(isCosmeticFile(f)).toBe(false);
+  });
+  // Nüans (mahkeme M2): bir `.feature` tests/ (veya __tests__/) altına yazılırsa isTestPath
+  // ÖNCE kazanır → observeTool else if zincirinde bdd-scenario-write ATLANIR, tdd-test-write
+  // yazılır. Bu bilinçli tasarım; gate etkilenmez (ikisi de required değil). Davranışı sabitle.
+  it("tests/ altındaki .feature'da isTestPath öncelikli (else if bdd-scenario-write'ı atlar)", () => {
+    for (const f of ["src/tests/auth.feature", "a/__tests__/x.feature"]) {
+      expect(isFeatureFile(f)).toBe(true);
+      expect(isTestPath(f)).toBe(true); // else if zincirinde bu önce eşleşir
+    }
   });
 });
 

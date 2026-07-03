@@ -27,7 +27,7 @@
     "5": { "name": "UI Yapımı" },
     "6": { "name": "UI İnceleme" },
     "7": { "name": "Veritabanı Tasarımı" },
-    "8": { "name": "TDD Uygulama" },
+    "8": { "name": "BDD + TDD Uygulama" },
     "9": { "name": "Risk İncelemesi" },
     "10": { "name": "Lint" },
     "11": { "name": "Sadeleştirme" },

@@ -1,5 +1,20 @@
 ## 2026-07-03
 
+- **feat(faz-8): BDD dış döngü — önce davranış dosyası, sonra TDD (çift döngü, outside-in):**
+  Faz 8 artık davranış öncelikli çalışır: yeni/değişen her AC için önce insanın okuyabileceği
+  `features/*.feature` yaşayan dokümantasyonunu yazar (spec'in Given/When/Then'inden türetilir; yalnız
+  `statement` içeren AC'de davranış türetilir) — parser/runner YOK, ayrı BDD çerçevesi KURULMAZ →
+  stack-bağımsız (KATI#1). Sonra bu davranışı projenin MEVCUT test çerçevesiyle kabul testi olarak koşar
+  (dış döngü RED→GREEN, integration testin ta kendisi — ekstra test / çift sayım yok) ve TDD iç döngüsüne
+  (birim red-green-refactor) iner. Yeni `bdd-scenario-write` audit'i YALNIZ görünürlük — **gate DEĞİL**:
+  yalnızca refactor/doküman iterasyonunda `.feature` yokluğu yanlış başarısızlık üretmesin (belgelenmiş #1
+  stall-loop tehlikesi); `.feature` yolu bilerek `isTestPath`/`isProdPath`/`isCosmeticFile`'ın hiçbirine
+  uymaz (tech-debt/repro-gate'e görünmez). Faz 9 yumuşak BDD kapsam deliği incelemesi ekler (kapı değil,
+  düşman gözü). ([phase-08-tdd.md](assets/templates/phase-08-tdd.md),
+  [phase-8.ts](orchestrator/src/phase-8.ts) + `isFeatureFile` birim testler,
+  [phase-09-risk.md](assets/templates/phase-09-risk.md), i18n, README). Çapraz aile mahkemesi (3 Sonnet
+  müfettiş) — 1 YÜKSEK (tire ile uydurma Türkçe bileşikler) + 3 ORTA (Edit dalı audit simetrisi, tests/
+  altı `.feature` önceliği testi, Verification kendi doğrulama) düzeltildi. check yeşil.
 - **feat(hatırlama): tekrarlayan kapı sorusunda cevabı hatırla — 3 kademeli merdiven:**
   Aynı faz-hatası imzası ("Nasıl ilerleyelim?") tekrar geldiğinde MyCL baştan sormaz: (1) ilk kez sorar +
   seçilen çözüm yönünü `.mycl/answer-memory.jsonl`'e kalıcı yazar; (2) yine gelince "geçen sefer X demiştin —

@@ -27,7 +27,7 @@
     "5": { "name": "UI Build" },
     "6": { "name": "UI Review" },
     "7": { "name": "Database Design" },
-    "8": { "name": "TDD Implementation" },
+    "8": { "name": "BDD + TDD Implementation" },
     "9": { "name": "Risk Review" },
     "10": { "name": "Lint" },
     "11": { "name": "Simplification" },
