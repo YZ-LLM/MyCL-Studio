@@ -26,6 +26,7 @@ const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
 import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, type FixSnapshot } from "./fix-snapshot.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
+import { readBehaviorBaseline, verifyNoUnconsentedRegression } from "./behavior-baseline.js";
 import { escalatedModelEffort } from "./escalation.js";
 import { modelChoiceLineIfChanged } from "./model-catalog.js";
 import { log } from "./logger.js";
@@ -1048,6 +1049,10 @@ export class Phase8Controller {
       return;
     }
 
+    // YABANCI proje (Layer B): entegrasyon-baseline'ına göre ONAYSIZ regresyon YÜZEYİ. Bloke ETMEZ (görünür
+    // bayrak): onaylı bir değişiklik de eski testi kırmış olabilir + test→davranış eşlemesi kesin değil.
+    await this.surfaceForeignBaselineRegression(`${res.stdout}\n${res.stderr}`);
+
     let pass = res.code === 0;
     let verdictMsg = pass
       ? "✅ Faz 8 final tam-suite (MyCL doğrulaması): GEÇTİ."
@@ -1186,6 +1191,30 @@ export class Phase8Controller {
         `⚠️ Kullanıcının onaylamadığı bir davranışın dosyasına yazma girişimi: ${path} — bu davranış değiştirilmemeliydi.`,
       );
     }
+  }
+
+  // YABANCI proje (Layer B): entegrasyon-baseline'ına göre onaysız regresyon YÜZEYİ. Bloke DEĞİL — yalnız
+  // görünür kıl (kullanıcı istediyse sorun yok, istemediyse geri alır). Deterministik; baseline güvenilmezse
+  // (testCmd null) sessizce atlar (verifyNoUnconsentedRegression reliable:false döner). MyCL projelerinde no-op.
+  private async surfaceForeignBaselineRegression(afterOutput: string): Promise<void> {
+    if (this.state.origin !== "foreign") return;
+    const baseline = await readBehaviorBaseline(this.state.project_root).catch(() => null);
+    const { reliable, regressed } = verifyNoUnconsentedRegression(baseline, afterOutput);
+    if (!reliable || regressed.length === 0) return;
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 8,
+      event: "behavior-baseline-regression",
+      caller: "mycl-orchestrator",
+      detail: `${regressed.length} önceden geçen test düştü: ${regressed.slice(0, 5).join(" | ").slice(0, 200)}`,
+    });
+    emitChatMessage(
+      "system",
+      `⚠️ **Var olan davranış değişti** — entegrasyon öncesi GEÇEN ${regressed.length} test bu iterasyonda düştü:\n` +
+        regressed.slice(0, 8).map((t) => `• ${t}`).join("\n") +
+        "\n\nBunu istediysen sorun yok. İstemediysen bu iterasyonun değişikliğini gözden geçir/geri al. " +
+        "(Bloke etmedim — yalnız görünür kıldım; yabancı projede sessiz davranış değişimini önlemek için.)",
+    );
   }
 
   private async observeTool(ctx: {

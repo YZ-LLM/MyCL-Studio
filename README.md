@@ -103,6 +103,12 @@ gördüğü — var olan bir projeyi MyCL'e taşır:
 - **Entegre modunda oto-cevap KAPALI:** mock mu gerçek-veritabanı mı gibi kararlar otomatik
   verilmez — sana sorulur. **Faz 6 (UI İncelemesi) de atlanır** (gap-işleri UI-yapımı değil,
   mevcut projede dev-server çoğu zaman yoktur).
+- **Var olan davranış koruması (davranış temeli):** entegrasyon başında MyCL mevcut test durumunu
+  (geç/kal kümesi) bir kez anlık görüntüler; gap-işleri kuyruğa girmeden ÖNCE. Sonraki bir iterasyon
+  önceden GEÇEN bir testi kırarsa MyCL bunu **görünür** kılar ("var olan davranış X değişti — istedin mi?")
+  — bloke etmez, sen gözden geçir/geri al. Yabancı projede kesin bir davranış spec'i olmadığı için
+  MyCL projelerindeki "değiştirmeden önce tek tek sor" yerine bu deterministik "yakala + göster" kullanılır
+  (çalışan test yoksa görünür şekilde atlanır, hiçbir şey uydurulmaz).
 - **Mevcut projeyi BOZMAZ:** yabancı kaynak dosyalarına dokunulmaz; MyCL yabancı bir
   projenin `vite.config`'ini onaysız düzenlemez ve mevcut `.gitignore`'a yalnız varsa
   ekler (yeni oluşturmaz). Okunamayan (sandbox) bir proje, ev-dışı **"MyCL Projeler"**

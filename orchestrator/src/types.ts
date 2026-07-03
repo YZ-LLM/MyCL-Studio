@@ -292,10 +292,11 @@ export interface State {
    */
   origin?: ProjectOrigin;
   /**
-   * Yabancı-köken projede kullanıcı MyCL'in KAYNAK dosyalarını düzenlemesine (build config'e runtime-error
-   * plugin enjeksiyonu vb.) onay verdi mi? false/undefined → kaynak-edit ATLANIR. origin!=="foreign" iken yok
-   * sayılır. Davranış-onay kapısı (behavior-consent-gate, YZLLM 2026-07-03) bir yabancı davranış değişikliği
-   * ONAYLANDIĞINDA bunu true'ya SET eder (o onay, o kapsamda kaynak-düzenleme iznini ima eder).
+   * REZERVE forward-hook: yabancı-köken projede kullanıcı MyCL'in KAYNAK dosyalarını düzenlemesine (build
+   * config'e runtime-error plugin enjeksiyonu vb.) onay verdi mi? false/undefined → kaynak-edit ATLANIR.
+   * origin!=="foreign" iken yok sayılır. Yabancı projede var olan davranış koruması davranış-onay kapısıyla
+   * DEĞİL (fuzzy olurdu) baseline yüzeyiyle sağlanır (behavior-baseline; Faz 8 sonrası regresyon bayrağı) →
+   * bu hook rezerve kalır (set eden üretim kodu yok; ileride açık bir kaynak-edit onayı eklenince set edilir).
    */
   source_edit_approved?: boolean;
   /**

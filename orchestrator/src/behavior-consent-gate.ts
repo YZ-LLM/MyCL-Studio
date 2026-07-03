@@ -169,6 +169,12 @@ export async function runBehaviorConsentGate(state: State, config: MyclConfig): 
   state.pending_behavior_consent_note = undefined;
   state.behavior_consent_no_paths = undefined;
 
+  // YABANCI proje: pre-change spec-diff sorusu YOK (kullanıcı kararı — Layer B). Yabancıda mevcut davranışın
+  // kesin spec'i yoktur; test-adı eşleşmesi "test ekleme"yi "davranış değiştirme"den ayıramaz → yanlış sorular.
+  // Bunun yerine deterministik BASELINE yüzeyi (behavior-baseline): entegrasyon öncesi geçen bir test iterasyon
+  // sonrası düşerse Faz 8 GÖRÜNÜR bayrak verir (bloke etmez). Bkz snapshotBehaviorBaseline + phase-8 surface.
+  if (state.origin === "foreign") return true;
+
   if (!state.iteration_started_at) return true; // iter-1 defansif (scope 0'dan başlar)
   let currentSpecMd: string;
   try {
@@ -215,9 +221,8 @@ export async function runBehaviorConsentGate(state: State, config: MyclConfig): 
   state.pending_behavior_consent_note = buildConsentNote(yes, no);
   const noPaths = no.flatMap((c) => [...c.featureFiles, ...c.testFiles]);
   state.behavior_consent_no_paths = noPaths.length > 0 ? noPaths : undefined;
-
-  // Yabancı davranış onaylandıysa kaynak-düzenleme iznini set et (types.ts rezerve hook).
-  if (state.origin === "foreign" && yes.length > 0) state.source_edit_approved = true;
+  // NOT: foreign köken bu noktaya ULAŞMAZ (yukarıda erken-return) → source_edit_approved burada set EDİLMEZ;
+  // yabancı koruma baseline yüzeyiyle sağlanır, kaynak-edit hook'u rezerve kalır.
 
   // Persist best-effort: not her koşta yeniden üretilir → disk hatası kritik değil (KATI#4 dürüst: yutulmaz, loglanır).
   await saveState(state).catch((e) => {

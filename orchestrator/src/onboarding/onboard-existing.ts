@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { appendTask } from "../task-queue/store.js";
 import type { TaskQueueItem } from "../task-queue/types.js";
 import { copyProjectToAccessible, isUnderMyclProjeler } from "./copy-to-accessible.js";
+import { snapshotBehaviorBaseline } from "../behavior-baseline.js";
 
 const PROJECT_MAP_REL = join(".mycl", "project-map.json");
 const ONBOARD_REPORT_REL = join(".mycl", "onboarding-report.md");
@@ -379,6 +380,22 @@ export async function runOnboarding(
     //    Faz 6 UI-incelemesi korunur; kullanıcı kuyruktan görüp iptal edebilir. source="auto", öncelik 5+
     //    (manuel iş 1-2 öne geçsin). Onboarding'in non-destructive'liği KORUNUR (onboarding kaynağa dokunmaz);
     //    eksik-giderme artık ayrı, GATE'Lİ geliştirme işidir (kullanıcı bunu açıkça istedi: onay bekleme).
+    // 6.5 DAVRANIŞ BASELINE (Layer B, YZLLM 2026-07-03): gap görevleri KUYRUĞA girmeden ÖNCE mevcut test
+    //     durumunu (geç/kal kümesi) anlık görüntüle. Sıra KRİTİK (mahkeme #2): kuyruk boşalmadan baseline
+    //     diskte olmalı → sonraki iterasyonların Faz 8'i onaysız regresyonu (önceden geçen test düştü) görünür
+    //     kılabilsin. Fail-soft + görünür (KATI#4): çalışan test yoksa/anlaşılamazsa atlandığını SÖYLE.
+    const baseline = await snapshotBehaviorBaseline(state, Date.now()).catch((e: unknown) => {
+      log.warn("onboarding", "behavior-baseline alınamadı", e);
+      return null;
+    });
+    emitChatMessage(
+      "system",
+      baseline?.testCmd
+        ? `📋 Davranış temeli alındı (${baseline.green ? "tüm testler yeşil" : baseline.failures.length + " test zaten kırık"}) — ` +
+            "sonraki bir iterasyon önceden GEÇEN bir testi kırarsa görünür uyarı veririm (var olan davranış değişti mi)."
+        : "📋 Davranış temeli alınamadı (çalışan test komutu yok / runner anlaşılamadı) — regresyon yüzeyi bu projede atlandı (görünür, uydurma yok).",
+    );
+
     let queued = 0;
     for (let i = 0; i < gaps.length; i++) {
       const t: TaskQueueItem = {
