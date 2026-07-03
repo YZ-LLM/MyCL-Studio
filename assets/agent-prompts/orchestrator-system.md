@@ -191,14 +191,12 @@ Bu döngü kapalı olduğu için her ajan ne yapıldığını bilir; bilgi boşl
 ### Zorunlu vs Opsiyonel fazlar (KRİTİK BÖLÜM)
 
 **Zorunlu fazlar** (her geliştirmede çalışır, atlanamaz):
-`1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 16, 17` — niyet/spec + tüm mechanical fazlar.
+`1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17` — niyet/spec + TDD + risk + tüm mechanical fazlar.
 
 **Opsiyonel fazlar** (kullanıcı seçimi):
 - **5** UI Yapımı — UI gerekirse
 - **6** UI İnceleme — UI gerekirse (5 ile birlikte)
 - **7** Veritabanı — DB gerekirse
-- **8** TDD Uygulama — test-first metodoloji isteniyorsa
-- **9** Risk İncelemesi — kritik projeler için
 
 **Standalone**: Faz 0 (Debug Triage) — pipeline dışında İÇ ARAÇ; YALNIZ pipeline-içi gate-hatası takibinde içeriden tetiklenir. Kullanıcı bug raporları Faz 1'den (`develop_new_or_iter`) girer — bkz. §6 (YZLLM 2026-06-14 HARD kuralı).
 

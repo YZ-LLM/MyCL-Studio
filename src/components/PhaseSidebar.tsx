@@ -2,7 +2,7 @@
 //
 // Niyetler bölümü (Soru Sor / Hata Ayıkla / Sohbet) buradan kaldırıldı;
 // composer altına taşındı (ChatPanel.intent-row, kullanıcı talebi 2026-05-23).
-// Sidebar artık sadece faz navigasyonu içerir, tüm 1-20 fazları listelenir.
+// Sidebar artık sadece faz navigasyonu içerir, tüm 1-17 fazları listelenir.
 
 import { useRef } from "react";
 import type { PhaseId, PhaseSummary } from "../types/events";

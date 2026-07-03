@@ -371,7 +371,7 @@ export interface State {
    */
   intent_summary_raw?: string;
   /**
-   * Pipeline iterasyon sayacı. İlk run = 1; Faz 20 tamamlandıktan sonra
+   * Pipeline iterasyon sayacı. İlk run = 1; Faz 17 tamamlandıktan sonra
    * kullanıcı yeni mesaj yazınca artırılır. Eski artefact'lar (spec.md, kod)
    * yerinde kalır — Claude yeni iterasyonda Read ile referans alabilir.
    */

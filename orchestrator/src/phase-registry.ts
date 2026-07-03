@@ -500,7 +500,7 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
 };
 
 /**
- * Sonraki faz haritası — ARDIŞIK, atlamasız. N → N+1. MyCL pipeline 20 faz,
+ * Sonraki faz haritası — ARDIŞIK, atlamasız. N → N+1. MyCL pipeline 17 faz,
  * deterministik: her faz mutlaka ziyaret edilir. Controller'ı olmayan fazlar
  * (PHASE_SPECS'te yok) otomatik skip stub ile geçer.
  */
