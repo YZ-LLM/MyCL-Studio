@@ -250,6 +250,9 @@ interface OrchestratorRuntime {
   pendingPhaseScope: {
     askqId: string;
     proposed: number[];
+    // YZLLM 2026-07-03 (cevap-hatırlama): true → kayıtlı kapsam cevabının YENİDEN uygulanması (Kademe 2/3);
+    // cevap dalı bunu answer-memory'ye TEKRAR kaydetmez (reuseApproved'ı sıfırlamasın).
+    fromRecall?: boolean;
   } | null;
   // F1 (2026-06-04): Faz-fail sonrası LLM hata analizi askq'ı bekleniyor.
   // failPhase → analyzeAndAskError askq emit etti; cevap geldiğinde
@@ -786,6 +789,42 @@ async function applyRecalledErrorAnswer(
     fromRecall: true,
   };
   await handleAskqAnswer(pid, rec.answer);
+}
+
+// ── CEVAP-HATIRLAMA — Faz 3 KAPSAM ailesi (YZLLM 2026-07-03) ─────────────────────────────────────────
+// Kararlı anahtar: önerilen-faz-seti (sıralı). Sabit-etiket cevaplar ("onayla"/"tüm fazlar") ama recall'da
+// güncel `proposed` ile pending YENİDEN kurulur → gate-error'daki bağlam-kaybı sorunu YOK (mahkeme dersi).
+
+/** Faz 3 kapsam sorusu kararlı anahtarı — aynı önerilen-faz-seti → aynı soru. */
+function phaseScopeKey(proposed: number[]): string {
+  return `phase-scope:${[...proposed].sort((a, b) => a - b).join(",")}`;
+}
+
+/** Kademe 1 / "Hayır" (fresh): normal faz-kapsam askq'sını emit et (pending kur + soru). */
+function emitPhaseScopeAskq(proposed: number[]): void {
+  const phaseList = proposed.map((p) => `Faz ${p}`).join(", ");
+  const askqId = `phase_scope_${randomUUID()}`;
+  runtime.pendingPhaseScope = { askqId, proposed };
+  emitChatMessage(
+    "assistant",
+    `Bu iterasyon için önerilen fazlar: **${phaseList}**.\n\n` +
+      `Brief'te gerekçesi yazılı. Onaylar mısın?`,
+  );
+  emitAskq({
+    id: askqId,
+    question: "Faz kapsamı nasıl olsun?",
+    options: ["✅ Önerilen seti onayla", "⚙️ Tüm fazları çalıştır", "Vazgeç"],
+    multi_select: false,
+    allow_other: false,
+  });
+}
+
+/** Kademe 2/3: kayıtlı kapsam cevabını YENİDEN uygula. Güncel `proposed` ile sentetik pending → kanonik dispatch
+ *  (handleAskqAnswer). fromRecall=true → cevap dalı answer-memory'ye TEKRAR kaydetmez. */
+async function applyRecalledPhaseScope(proposed: number[], rec: AnswerMemoryRecord): Promise<void> {
+  const askqId = `phase_scope_${randomUUID()}`;
+  runtime.pendingPhaseScope = { askqId, proposed, fromRecall: true };
+  await handleAskqAnswer(askqId, rec.answer);
 }
 
 async function failPhase(
@@ -4239,20 +4278,46 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             syncNeededPhases(); // kapsam onaylandı (oto-cevap) → kapsam-dışı opsiyoneller soluk
             // fall-through → recordPhaseComplete(3) + cur=3 + continue
           } else {
-            const askqId = `phase_scope_${randomUUID()}`;
-            runtime.pendingPhaseScope = { askqId, proposed };
-            emitChatMessage(
-              "assistant",
-              `Bu iterasyon için önerilen fazlar: **${phaseList}**.\n\n` +
-                `Brief'te gerekçesi yazılı. Onaylar mısın?`,
-            );
-            emitAskq({
-              id: askqId,
-              question: "Faz kapsamı nasıl olsun?",
-              options: ["✅ Önerilen seti onayla", "⚙️ Tüm fazları çalıştır", "Vazgeç"],
-              multi_select: false,
-              allow_other: false,
-            });
+            // ── CEVAP-HATIRLAMA MERDİVENİ (Faz 3 kapsam, YZLLM 2026-07-03): aynı önerilen-faz-seti tekrar
+            // gelirse önceki kararı hatırla → Kademe 3 (onaylı) oto-uygula, yoksa Kademe 2 "aynısını kullanayım
+            // mı?" onayı, kayıt yoksa Kademe 1 normal soru. (Oto-cevap dalı yukarıda ayrı ele alındı.)
+            const key = phaseScopeKey(proposed);
+            const recalled = await recallAnswer(state.project_root, key).catch(() => null);
+            if (recalled) {
+              const apply = () => applyRecalledPhaseScope(proposed, recalled);
+              const fresh = async () => emitPhaseScopeAskq(proposed);
+              if (recalled.reuseApproved && !recalled.sensitive) {
+                emitChatMessage(
+                  "system",
+                  `♻️ Faz 3 kapsam sorusu yine geldi — önceki kararını uyguluyorum: **${recalled.answer}**`,
+                );
+                await appendAuditModule(state.project_root, {
+                  ts: Date.now(),
+                  phase: 3,
+                  event: "answer-recall-auto",
+                  caller: "mycl-orchestrator",
+                  detail: recalled.answer.slice(0, 160),
+                }).catch(() => {});
+                await apply();
+                return;
+              }
+              await appendAuditModule(state.project_root, {
+                ts: Date.now(),
+                phase: 3,
+                event: "answer-recall-offer",
+                caller: "mycl-orchestrator",
+                detail: recalled.answer.slice(0, 160),
+              }).catch(() => {});
+              await emitReuseConfirmAskq({
+                key,
+                rec: recalled,
+                intro: "Faz 3 kapsam sorusu yine geldi.",
+                apply,
+                fresh,
+              });
+              return;
+            }
+            emitPhaseScopeAskq(proposed);
             return;
           }
         }
@@ -5346,6 +5411,19 @@ export async function handleAskqAnswer(
         "🛑 Faz kapsamı reddedildi — akış duruyor. Özeti değiştirmek için yeni mesaj yaz.",
       );
       return;
+    }
+    // ── CEVAP-HATIRLAMA (Faz 3 kapsam kaydı, YZLLM 2026-07-03): onay/tüm-fazlar kararını önerilen-faz-seti
+    // anahtarına KALICI yaz → aynı set tekrar gelince "aynı cevabı kullanayım mı?" merdiveni. Vazgeç yukarıda
+    // return etti (kaydedilmez). fromRecall (yeniden-uygulama) reuseApproved'ı sıfırlamasın diye KAYDETMEZ.
+    if (!cached.fromRecall) {
+      await recordAnswer(runtime.state.project_root, {
+        key: phaseScopeKey(cached.proposed),
+        phase: 3,
+        answer: sel,
+        answerKind: "fixed",
+        scope: "phase-scope",
+        sensitive: false,
+      }).catch((e) => log.warn("orchestrator", "answer-memory (phase-scope) record fail (non-fatal)", e));
     }
     let newNeededPhases: number[] | undefined;
     let label: string;

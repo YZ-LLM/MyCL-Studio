@@ -219,8 +219,9 @@ başlarken bu `mycl_errors.db`'yi okuyarak kök nedene daha hızlı ulaşır.
 
 ## Cevap hatırlama (tekrarlayan sorular)
 
-Bir faz kapısı hatası ("Nasıl ilerleyelim?") aynı imzayla tekrar geldiğinde MyCL
-cevabınızı baştan sormaz — üç kademeli bir merdiven işletir:
+Tekrarlayan bir soru — bir faz kapısı hatası ("Nasıl ilerleyelim?") aynı imzayla
+ya da Faz 3 kapsam onayı ("Faz kapsamı nasıl olsun?") aynı önerilen faz setiyle —
+yeniden geldiğinde MyCL cevabınızı baştan sormaz; üç kademeli bir merdiven işletir:
 
 1. **İlk kez** — soruyu sorar; seçtiğiniz **çözüm yönü** `.mycl/answer-memory.jsonl`'e
    kalıcı yazılır (yeniden başlatmada da hatırlanır).
@@ -230,9 +231,10 @@ cevabınızı baştan sormaz — üç kademeli bir merdiven işletir:
    devam eder (♻️ mesajı). Onaylanan cevap hatayı çözmüyorsa (üst üste denendiyse)
    otomatik tekrarı durdurup yeniden değerlendirir.
 
-Yalnızca **çözüm yönü** seçimleri hatırlanır; güvenlik/kabul kararları her seferinde
-yeniden onaylanır (güvenlik otomatik tekrarlanmaz). Manuel modda çalışır (Oto-cevap
-kapalıyken). Sıfırlamak için `.mycl/answer-memory.jsonl` satırlarını silmeniz yeterli.
+Güvenlik/kabul kararları her seferinde yeniden onaylanır (güvenlik otomatik
+tekrarlanmaz); kapı hatalarında yalnızca **çözüm yönü** seçimleri hatırlanır. Manuel
+modda çalışır (Oto-cevap kapalıyken). Sıfırlamak için `.mycl/answer-memory.jsonl`
+satırlarını silmeniz yeterli.
 
 ## Resimli kullanım kılavuzu
 
