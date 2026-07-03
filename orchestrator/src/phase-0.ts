@@ -107,6 +107,11 @@ export const TOOL_REPORT_ROOT_CAUSE: ToolDef = {
         description:
           "0-based index into fix_options of the option YOU would apply: the best balance of correctness (fixes the actual root cause) and lowest risk/blast-radius. The orchestrator auto-applies this option.",
       },
+      user_choice_feasible: {
+        type: "boolean",
+        description:
+          "ONLY when the prompt says the USER ALREADY CHOSE a fix direction. STRICT: true means EXACTLY that recommended_index points to the option implementing the user's chosen direction (orchestrator applies it WITHOUT re-asking). Set false whenever recommended_index is a DIFFERENT option — whether the user's direction was infeasible OR you simply prefer another (orchestrator then re-confirms with the user). NEVER set true with a divergent recommended_index. Omit if the user did not pre-choose.",
+      },
       fix_options: {
         type: "array",
         minItems: 2,
@@ -151,6 +156,24 @@ export type Phase0Outcome =
   | { kind: "failed"; reason: string }
   | { kind: "aborted" };
 
+/**
+ * D2 kararı (SAF, test edilebilir): D1 önerisini kullanıcıya SOR mu yoksa OTO-UYGULA mı.
+ * Çift-soru fix (YZLLM 2026-07-03): `userChoiceHonored` = kullanıcı error-analysis'te bir yön SEÇTİ **ve** D1
+ * recommended_index'i AÇIKÇA o yöne kilitledi (user_choice_feasible === true). Bu + pipeline-restart DEĞİLSE →
+ * "auto" (tekrar sorma). Mahkeme (çapraz-aile) EXPLICIT-TRUE dayattı: undefined/false → honored=false → re-ask
+ * (D1 sessizce farklı/infeasible öneri yaparsa yanlış çözüm oto-uygulanmaz). pipeline-restart (Edge 3b, büyük
+ * karar) her hâlde re-ask. Kullanıcı seçmediyse eski davranış: oto-cevap açık→auto, kapalı→ask.
+ */
+export function decideDebugFixApplication(opts: {
+  restartsPipeline: boolean;
+  otoCevap: boolean;
+  userChoiceHonored: boolean;
+}): "ask" | "auto" {
+  const appliedPriorSelection = opts.userChoiceHonored && !opts.restartsPipeline;
+  if ((opts.restartsPipeline || !opts.otoCevap) && !appliedPriorSelection) return "ask";
+  return "auto";
+}
+
 export class Phase0Controller {
   public statePatch: Partial<State> = {};
   public lastOutcome: Phase0Outcome | null = null;
@@ -162,9 +185,16 @@ export class Phase0Controller {
   private readonly bugReport: string;
   /** Orkestratör derin-çözüm akışının ZATEN bulduğu somut çözüm yönleri (varsa).
    *  Set'liyse D1 sıfırdan araştırmaz; bunları DOĞRULAYIP yapılandırılmış fix_options'a
-   *  çevirir (1-2 tur). Yoksa (doğrudan kullanıcı debug'ı) normal D1 araştırması. */
-  private readonly priorAnalysis?: { solutions_tr: string[] };
-  constructor(deps: PhaseDeps & { bugReport: string; priorAnalysis?: { solutions_tr: string[] } }) {
+   *  çevirir (1-2 tur). Yoksa (doğrudan kullanıcı debug'ı) normal D1 araştırması.
+   *  user_selected: kullanıcının error-analysis'te SEÇTİĞİ çözüm → D1 bu yönü onurladıysa
+   *  D2 tekrar SORMAZ, doğrudan uygular (çift-soru fix'i, YZLLM 2026-07-03). */
+  private readonly priorAnalysis?: { solutions_tr: string[]; user_selected?: string };
+  constructor(
+    deps: PhaseDeps & {
+      bugReport: string;
+      priorAnalysis?: { solutions_tr: string[]; user_selected?: string };
+    },
+  ) {
     this.state = deps.state;
     this.config = deps.config;
     this.spec = deps.spec;
@@ -335,13 +365,26 @@ export class Phase0Controller {
     // 10-18 tur sıfırdan-araştırma + hipotez fan-out'u YAPMAZ (~5dk israf önlenir).
     const hasPrior = (this.priorAnalysis?.solutions_tr.length ?? 0) > 0;
     if (hasPrior) {
+      // user_selected (YZLLM 2026-07-03 "aynı şeyi 2 kere sordu"): kullanıcı error-analysis'te ZATEN bir yön
+      // seçtiyse D1 recommended_index'i onu uygulayan option yapmalı + user_choice_feasible=true dönmeli →
+      // orkestratör D2'yi TEKRAR SORMADAN uygular. Yalnız yön gerçekten infeasible ise farklı öner + feasible=false.
+      const userSel = this.priorAnalysis?.user_selected;
       const priorBlock =
         "## PRIOR ANALYSIS (already diagnosed by orchestrator — CONFIRM, do not re-derive)\n" +
         "A first-pass analysis already produced concrete solution directions for this failure. " +
         "Verify them against the code with at most 1-2 targeted Read/Grep calls, then call " +
         "report_root_cause mapping them into structured fix_options with plan_kind. Do NOT start a " +
         "fresh open-ended investigation.\n" +
-        this.priorAnalysis!.solutions_tr.map((s, i) => `${i + 1}. ${s}`).join("\n");
+        this.priorAnalysis!.solutions_tr.map((s, i) => `${i + 1}. ${s}`).join("\n") +
+        (userSel
+          ? `\n\n### USER ALREADY CHOSE THIS DIRECTION\nThe user has ALREADY selected this fix direction: "${userSel}". ` +
+            "Strict rule: user_choice_feasible=true means EXACTLY 'recommended_index points to the option that " +
+            "implements the user's chosen direction above' — the orchestrator then applies it WITHOUT asking again. " +
+            "So: if the user's direction is sound, make recommended_index that option AND set user_choice_feasible=true. " +
+            "If you would recommend ANY DIFFERENT option (because their direction is infeasible OR you found a better " +
+            "one), you MUST set user_choice_feasible=false (never true with a divergent recommended_index) so the " +
+            "orchestrator re-confirms with the user. Omitting the flag is treated as 'not confirmed' → re-asked."
+          : "");
       contextWithHypotheses = contextSuffix ? `${contextSuffix}\n\n${priorBlock}` : priorBlock;
     }
     if (!hasPrior && this.config.claude_code_flags.agent_teams_optin) {
@@ -562,6 +605,13 @@ export class Phase0Controller {
       String(data.confidence ?? "uncertain") === "high"
         ? ("high" as const)
         : ("uncertain" as const);
+    // Çift-soru fix (YZLLM 2026-07-03): kullanıcı error-analysis'te bir yön seçtiyse (user_selected) ve D1
+    // recommended_index'i AÇIKÇA o yöne kilitlediyse (user_choice_feasible === TRUE) → D2 tekrar sormaz,
+    // doğrudan uygular. Mahkeme (çapraz-aile) EXPLICIT-TRUE dayattı: undefined/eksik → SORMA yerine SOR (D1
+    // sessizce farklı öneri yaparsa yanlış çözüm oto-uygulanmasın). feasible===false → D1 yönü çürüttü → sor.
+    const userPreChose = !!this.priorAnalysis?.user_selected;
+    const userChoiceHonored = userPreChose && data.user_choice_feasible === true;
+    const userDirectionRejected = userPreChose && data.user_choice_feasible === false;
     const fixOptionsRaw = Array.isArray(data.fix_options)
       ? (data.fix_options as FixOptionRaw[])
       : [];
@@ -703,10 +753,21 @@ export class Phase0Controller {
     //  - GUARDRAIL 1: full-stack/new-iteration (tüm pipeline'ı yeniden başlatan) ASLA otomatik değil — büyük karar.
     const restartsPipeline = chosen.planKind === "full-stack" || chosen.planKind === "new-iteration";
     const otoCevap = autoAnswerSuggested();
-    if (restartsPipeline || !otoCevap) {
+    // Çift-soru fix: karar SAF helper'da (test edilebilir). appliedPriorSelection yalnız mesaj-ayrımı için.
+    const appliedPriorSelection = userChoiceHonored && !restartsPipeline;
+    const debugDecision = decideDebugFixApplication({
+      restartsPipeline,
+      otoCevap,
+      userChoiceHonored,
+    });
+    if (debugDecision === "ask") {
+      // Mahkeme K1: 3 ayrı sebep-mesajı. userDirectionRejected → "seçtiğin yön uygulanamaz" (yanıltıcı
+      // "oto-cevap kapalı" DEĞİL); restartsPipeline → büyük-karar; aksi → normal seç.
       const reasonMsg = restartsPipeline
         ? `🤔 Önerilen çözüm tüm pipeline'ı yeniden başlatmayı gerektiriyor (kapsamlı): **${chosen.label}**\nBu büyük bir karar — otomatik uygulamıyorum, onayını istiyorum.`
-        : `🔍 **Tespit + önerilen çözüm:** ${chosen.label}\n${chosen.description}\n\n(Otomatik cevap kapalı — otomatik uygulamıyorum; sen seç.)`;
+        : userDirectionRejected
+          ? `🔍 Araştırma, seçtiğin yönü uygulanamaz buldu — bunun yerine öneriyorum: **${chosen.label}**\n${chosen.description}\n\nOnaylıyor musun, yoksa başka bir seçenek mi?`
+          : `🔍 **Tespit + önerilen çözüm:** ${chosen.label}\n${chosen.description}\n\n(Otomatik cevap kapalı — otomatik uygulamıyorum; sen seç.)`;
       emitChatMessage("system", reasonMsg + (alternatives ? `\n\nDiğer seçenekler:\n${alternatives}` : ""));
       const askqId = randomUUID();
       emitAskq({
@@ -732,9 +793,13 @@ export class Phase0Controller {
     }
     emitChatMessage(
       "system",
-      `🤖 **En iyi çözüm otomatik seçildi:** ${chosen.label}\n${chosen.description}` +
+      (appliedPriorSelection
+        ? `🤖 **Seçtiğin çözüm uygulanıyor:** ${chosen.label}\n${chosen.description}`
+        : `🤖 **En iyi çözüm otomatik seçildi:** ${chosen.label}\n${chosen.description}`) +
         (alternatives ? `\n\nDeğerlendirilen alternatifler:\n${alternatives}` : "") +
-        (confidence === "uncertain" ? "\n\n⚠️ Ajan emin değil — en güvenli doğru seçenek tercih edildi." : ""),
+        (confidence === "uncertain" && !appliedPriorSelection
+          ? "\n\n⚠️ Ajan emin değil — en güvenli doğru seçenek tercih edildi."
+          : ""),
     );
 
     const askqId = randomUUID();

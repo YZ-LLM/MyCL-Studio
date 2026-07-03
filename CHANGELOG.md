@@ -1,3 +1,17 @@
+## 2026-07-03
+
+- **fix(çift-soru): faz-hatasında çözüm iki kez sorulmuyor (YZLLM: "aynı şeyi 2 kere sordu"):**
+  Canlı (Faz 5 CSP): error-analysis "Nasıl ilerleyelim?" → kullanıcı çözüm seçti → debug (Faz 0) "Hangi çözümü
+  uygulayalım?" AYNI seçimi tekrar sordu. Kök: Faz 0 D2 re-ask'i (phase-0.ts:706 `restartsPipeline || !otoCevap`)
+  kullanıcının error-analysis'te ZATEN seçtiğini görmüyordu. Fix ([phase-0.ts](orchestrator/src/phase-0.ts) +
+  [index.ts](orchestrator/src/index.ts)): kullanıcının seçtiği çözüm (`user_selected`) handoff'ta yapısal taşınıyor;
+  D1 recommended_index'i o yöne kilitleyip `user_choice_feasible=true` dönerse D2 SORMADAN uygular (mevcut
+  `auto_selected_label` köprüsü). SAF `decideDebugFixApplication` (7 birim test). **Çapraz-aile mahkeme (2 Sonnet)**
+  3 kusur yakaladı + düzeltildi: (1) EXPLICIT-TRUE dayatıldı (undefined/eksik → SOR, sessiz yanlış-uygulama yok);
+  (2) feasible=true anlamı kesinleştirildi (recommended≠kullanıcının yönü → false zorunlu); (3) infeasible re-ask
+  mesajı "seçtiğin yön uygulanamaz, öneriyorum X" (yanıltıcı "oto-cevap kapalı" yerine). Guardrail'ler korundu
+  (pipeline-restart hep sorar; kontrol-seçenekleri Faz 0'a gitmez). check yeşil.
+
 ## 2026-07-02
 
 - **fix(kuyruk): iş yeşil tamamlandığı halde 'Düştü' kalıyordu → yeşil-sonda 'Tamamlandı' kurtarması (YZLLM: "bunu yaptı ama işaretlemedi"):**

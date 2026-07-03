@@ -2845,7 +2845,9 @@ async function executeDispatchedIntent(
   outcome: DispatchOutcome,
   // Orkestratör derin-çözüm akışı zaten somut çözüm bulduysa debug_triage'a taşı →
   // Faz 0 sıfırdan araştırmaz, doğrular (handoff'ta çözüm kaybını önler).
-  priorAnalysis?: { solutions_tr: string[] },
+  // user_selected (YZLLM 2026-07-03 "aynı şeyi 2 kere sordu"): kullanıcının error-analysis'te SEÇTİĞİ çözüm →
+  // Faz 0 D2 tekrar SORMAZ, D1 bu yönü onurladıysa doğrudan uygular (çift-soru kesilir).
+  priorAnalysis?: { solutions_tr: string[]; user_selected?: string },
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
@@ -5444,10 +5446,11 @@ export async function handleAskqAnswer(
         reasoning: "(error-analysis) kullanıcı çözüm seçti",
       },
     };
-    // Orkestratörün ZATEN bulduğu çözümleri yapılandırılmış olarak taşı → Faz 0 D1
-    // bunları sıfırdan yeniden türetmez, DOĞRULAR (handoff çözüm-kaybı fix'i).
+    // Orkestratörün ZATEN bulduğu çözümleri + kullanıcının SEÇTİĞİNİ yapılandırılmış taşı → Faz 0 D1
+    // yeniden türetmez DOĞRULAR + D2 tekrar SORMAZ (çift-soru fix'i, YZLLM 2026-07-03).
     await executeDispatchedIntent(bugReport, fakeOutcome, {
       solutions_tr: cached.solutions_tr,
+      user_selected: sel,
     });
     return;
   }
