@@ -292,13 +292,27 @@ export interface State {
    */
   origin?: ProjectOrigin;
   /**
-   * REZERVE forward-hook (mahkeme Mercek-A): yabancı-köken projede kullanıcı MyCL'in KAYNAK dosyalarını
-   * düzenlemesine (build config'e runtime-error plugin enjeksiyonu vb.) onay verdi mi? false/undefined →
-   * kaynak-edit ATLANIR. origin!=="foreign" iken yok sayılır. NOT: ONAY AKIŞI HENÜZ YOK — bu alanı SET eden
-   * üretim kodu yoktur; yabancı proje şimdilik HER ZAMAN korunur (kaynak-edit hep atlanır). İleride bir onay
-   * komutu/UI eklenince SET edilecek (yarım-kontrat değil, bilinçli rezerve).
+   * Yabancı-köken projede kullanıcı MyCL'in KAYNAK dosyalarını düzenlemesine (build config'e runtime-error
+   * plugin enjeksiyonu vb.) onay verdi mi? false/undefined → kaynak-edit ATLANIR. origin!=="foreign" iken yok
+   * sayılır. Davranış-onay kapısı (behavior-consent-gate, YZLLM 2026-07-03) bir yabancı davranış değişikliği
+   * ONAYLANDIĞINDA bunu true'ya SET eder (o onay, o kapsamda kaynak-düzenleme iznini ima eder).
    */
   source_edit_approved?: boolean;
+  /**
+   * Davranış-onay kapısı (YZLLM 2026-07-03) → Faz 8 initialMessage enjeksiyonu. Kapı, Faz 8 KURULMADAN
+   * önce koşup değişen var olan davranışları kullanıcıya tek tek sorar; ONAYLANAN ("feature+test+kod
+   * birlikte güncelle") ve REDDEDİLEN ("dokunma") davranışları İngilizce bir talimat bloğu olarak buraya
+   * yazar; Phase8Controller bunu initialMessage'a ekler (pendingMigrationNote deseni). GEÇİCİ: kapı her
+   * kuruluşta consent kayıtlarından yeniden üretir → retry/yeniden-koşta hayatta kalır (kaynak: consent.jsonl).
+   */
+  pending_behavior_consent_note?: string;
+  /**
+   * Davranış-onay kapısı: REDDEDİLEN davranışların DOKUNULMAMASI gereken dosya yolları (proje-relative).
+   * observeTool bu yollara yazma girişimini görünür `behavior-consent-violation` audit'i olarak işaretler
+   * (gözlemci ağı; birincil savunma initialMessage talimatıdır — dosya-yasağı davranış-onayını zorlayamaz,
+   * çünkü bir dosya hem onaylı hem reddedilmiş davranış taşıyabilir). Yol çözülemezse boş (uydurulmaz).
+   */
+  behavior_consent_no_paths?: string[];
   // NOT: onboarding "tamamlandı" işareti artık state alanı DEĞİL, `.mycl/onboarded.json` dosyasıdır
   // (yalnız MyCL projeyi GERÇEKTEN okuyabildiyse yazılır). Eski `onboarded_at` (her denemede damgalanıyordu →
   // başarısız apology koşusu da "yapıldı" sanılıyordu, cave5 bug) KALDIRILDI. Bkz onboarding/onboard-existing.ts.

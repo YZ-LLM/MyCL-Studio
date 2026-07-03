@@ -29,6 +29,11 @@ import {
 } from "./config.js";
 import { loadOrInit, save as saveState } from "./state.js";
 import { ensurePendingIterationDir, currentSpecPath } from "./devs-paths.js";
+import {
+  runBehaviorConsentGate,
+  resolveConsentAnswer,
+  isConsentAskqId,
+} from "./behavior-consent-gate.js";
 import { finalizeDevsArtifacts } from "./devs-finalize.js";
 import { refreshDevsSpecs } from "./devs-spec-refresh.js";
 import { clearHistory } from "./history.js";
@@ -4521,12 +4526,19 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       }
     }
     if (next === 8) {
+      // Davranış-onay kapısı: var olan davranışı değiştirmeden önce kullanıcıya tek tek sor
+      // (Faz 8 codegen BAŞLAMADAN). "Dur" derse pipeline durur (kullanıcı spec'i gözden geçirecek).
+      if (!(await runBehaviorConsentGate(state, cfg))) return;
       emitChatMessage(
         "system",
         "Faz 8 başlıyor — TDD codegen. Bu biraz sürebilir.",
       );
       const p8 = new Phase8Controller({ state, config: cfg, spec });
       const r = await runController(p8, () => p8.run(), "TDD uygulanıyor");
+      // Davranış-onay notu Faz 8'e özgü — tüketildi; sonraki fazlara/diske SIZMASIN (mahkeme #2).
+      // Sonraki spread `{...state, ...statePatch}` bu temizlenmiş (undefined) değeri korur.
+      state.pending_behavior_consent_note = undefined;
+      state.behavior_consent_no_paths = undefined;
       log.info("orchestrator", "phase 8 end", { result: r });
       if (r === "complete") {
         await recordPhaseComplete(8);
@@ -5335,6 +5347,14 @@ export async function handleAskqAnswer(
   // ile programatik cevap verdiyse askq kartı kullanıcı için artık aktif değil.
   emitAskqResolved(id);
   const selectedText = Array.isArray(selected) ? selected.join(", ") : selected;
+
+  // ── DAVRANIŞ-ONAYI (YZLLM 2026-07-03): var olan davranışı değiştirmeden önce "değiştir/dokunma" cevabı.
+  // Kendi id öneki (behavior_consent_*) → en başta işlenir; kapının bellekteki çözücüsünü tetikleyip sıralı
+  // tek-tek döngüyü ilerletir. isConsentAskqId ise diğer dallara DÜŞMEZ (bilinmeyen/eski id de sessizce tüketilir).
+  if (isConsentAskqId(id)) {
+    resolveConsentAnswer(id, selectedText);
+    return;
+  }
 
   // ── CEVAP-HATIRLAMA — Kademe 2 onay cevabı (YZLLM 2026-07-03): "aynı cevabı kullanayım mı?" → Evet/Hayır.
   // Kendi id öneki (answer_reuse_*) → diğer dallarla çakışmaz; en başta işlenir (kayıtlı cevabı uygular / taze döner).
@@ -6365,6 +6385,12 @@ async function handleRunPhase(
       emitPhaseChanged(phaseId, phaseId, "waiting");
       return;
     }
+    if (result === "consent-stopped") {
+      // Davranış-onay devre kesici: kullanıcı "Dur, spec'i gözden geçireceğim" dedi (mahkeme #1).
+      // Kapı zaten "⏸️ Durdum" mesajını verdi → başarı/hata afişi YAZMA, yalnız 'waiting' park statüsü.
+      emitPhaseChanged(phaseId, phaseId, "waiting");
+      return;
+    }
     // v15.7 (2026-05-27): result mapping düzeltildi. LLM controller'lar
     // "complete"/"fail"; mechanical "pass"/"fail"/"skipped". Önceden sadece
     // "complete" başarı sayılıyordu → mechanical pass "error" statüsüne
@@ -6530,12 +6556,21 @@ async function runPhaseOnce(
       break;
     }
     case 8: {
+      // Davranış-onay kapısı (sidebar tek-koş yolu da onay bağlamını korur — mahkeme #5).
+      // Devre kesicide "Dur" → "skipped" (başarı afişi) YANLIŞ olurdu (mahkeme #1); ayrı jeton.
+      if (!(await runBehaviorConsentGate(state, cfg))) {
+        result = "consent-stopped";
+        break;
+      }
       const p = new Phase8Controller({ state, config: cfg, spec });
       runtime.controller = p;
       try {
         result = String(await p.run());
       } finally {
         runtime.controller = null;
+        // Onay notu Faz 8'e özgü — tüketildi; sızmasın (mahkeme #2). Throw'da da temizlensin diye finally.
+        state.pending_behavior_consent_note = undefined;
+        state.behavior_consent_no_paths = undefined;
       }
       break;
     }

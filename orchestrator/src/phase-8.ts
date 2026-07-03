@@ -485,7 +485,10 @@ export class Phase8Controller {
       `sadece refactor/dokümantasyon ise: tek bir smoke test ekle + final suite ` +
       `koş + dur. Faz tamamlanır.` +
       this.pendingMigrationNote +
-      this.pendingFixNote;
+      this.pendingFixNote +
+      // Davranış-onay kapısı (behavior-consent-gate, Faz 8 KURULMADAN önce koştu): ONAYLANAN değişiklikler
+      // "feature+test+kod birlikte güncelle", REDDEDİLEN davranışlar "dokunma" olarak gömülü. Boşsa "" (no-op).
+      (this.state.pending_behavior_consent_note ?? "");
 
     // YZLLM 2026-06-10: "silme kararı → önce yedek." TDD codegen ajanı dosya silebilir/üstüne yazabilir. Fix modu
     // zaten debug-fix yolunda snapshot'landı; normal TDD'de burada snapshot al → silinen geri alınabilir.
@@ -1166,6 +1169,25 @@ export class Phase8Controller {
     }
   }
 
+  // Davranış-onay kapısı gözlemci ağı: kullanıcının REDDETTİĞİ ("dokunma") davranışların dosyalarına yazma
+  // girişimini GÖRÜNÜR `behavior-consent-violation` audit'i olarak işaretle. BİRİNCİL savunma initialMessage
+  // talimatıdır (dosya-yasağı davranış-onayını zorlayamaz — bir dosya hem onaylı hem reddedilmiş davranış
+  // taşıyabilir, mahkeme bulgusu #1); bu yalnız kemer-üstü-kayış tespit. Yol listesi boşsa (çözülemediyse) no-op.
+  private checkConsentViolation(
+    path: string,
+    audits: Array<{ event: string; detail?: string }>,
+  ): void {
+    const noPaths = this.state.behavior_consent_no_paths;
+    if (!noPaths || noPaths.length === 0 || !path) return;
+    if (noPaths.some((p) => path === p || path.endsWith("/" + p) || path.endsWith(p))) {
+      audits.push({ event: "behavior-consent-violation", detail: path });
+      emitChatMessage(
+        "system",
+        `⚠️ Kullanıcının onaylamadığı bir davranışın dosyasına yazma girişimi: ${path} — bu davranış değiştirilmemeliydi.`,
+      );
+    }
+  }
+
   private async observeTool(ctx: {
     tool_use: { name: string; input: Record<string, unknown> };
     result: { is_error: boolean };
@@ -1176,6 +1198,7 @@ export class Phase8Controller {
     if (name === "Write") {
       const path = String(input.file_path ?? input.path ?? "");
       if (!is_error) {
+        this.checkConsentViolation(path, audits);
         if (isTestPath(path)) audits.push({ event: "tdd-test-write", detail: path });
         else if (isProdPath(path)) {
           audits.push({ event: "tdd-prod-write", detail: path });
@@ -1193,6 +1216,7 @@ export class Phase8Controller {
     } else if (name === "Edit" || name === "MultiEdit") {
       if (!is_error) {
         const path = String(input.file_path ?? input.path ?? "");
+        this.checkConsentViolation(path, audits);
         audits.push({ event: "code-edit", detail: path });
         // Edit sonrası dosya içeriği input'ta yok (sadece replacement).
         // Disk'ten oku → tara. Test path'leri skip.

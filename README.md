@@ -80,6 +80,13 @@ davranışı projenin mevcut test çerçevesiyle kabul testi olarak koşup (dı�
 iç döngüsüne (birim red-green-refactor) iner. `.feature` dosyaları commit'lenir; `.mycl/`
 altındaki yaşayan dökümandan (`features.md`) ayrı, proje seviyesi artefakttır.
 
+**Var olan davranışı değiştirmeden önce onay:** Bir iterasyon var olan bir davranışı DEĞİŞTİRDİĞİNDE
+(önceki iterasyonun spec'iyle karşılaştırılarak deterministik tespit edilir), MyCL Faz 8 codegen
+BAŞLAMADAN önce sana kısa/net, **tek tek** sorar. **Evet** → değişiklik + `.feature`+test+kod birlikte
+güncellenir (bayat artefakt kalmaz); **Hayır** → o davranış olduğu gibi bırakılır, iterasyonun gerisi
+sürer. Yeni davranış (ilk iterasyon dahil) asla sorulmaz; yalnız var olan bir davranışın değişimi/silinmesi
+onaya tabidir.
+
 ## Var olan projeyi entegre etme ("Proje Aç")
 
 Açılış ekranında iki yol vardır: **📁 Yeni Klasör Seç** (yeni/boş proje) ve
