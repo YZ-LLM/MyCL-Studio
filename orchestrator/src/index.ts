@@ -737,14 +737,23 @@ async function handleReuseConfirmAnswer(id: string, sel: string): Promise<void> 
   if (!p || p.id !== id) return;
   runtime.pendingAnswerReuse = null;
   if (sel === REUSE_YES) {
+    // Onayın KALICI yazıldığını doğrula: markReuseApproved disk hatasıyla başarısız olursa
+    // reuseApproved=true diske geçmez → Kademe 3'e çıkamaz. O durumda kullanıcıya "otomatik
+    // seçilecek" DEME (yanlış vaat + KATI #4 sessiz state uyumsuzluğu); dürüst mesaj ver.
+    let approvedPersisted = true;
     if (runtime.state) {
-      await markReuseApproved(runtime.state.project_root, p.key).catch((e) =>
-        log.warn("orchestrator", "answer-memory markReuseApproved fail (non-fatal)", e),
-      );
+      approvedPersisted = await markReuseApproved(runtime.state.project_root, p.key)
+        .then(() => true)
+        .catch((e) => {
+          log.warn("orchestrator", "answer-memory markReuseApproved fail (non-fatal)", e);
+          return false;
+        });
     }
     emitChatMessage(
       "system",
-      `♻️ Aynı cevabı uyguluyorum: **${p.rec.answer}** — bundan sonra bu soru için otomatik seçilecek (sana söyleyerek).`,
+      approvedPersisted
+        ? `♻️ Aynı cevabı uyguluyorum: **${p.rec.answer}** — bundan sonra bu soru için otomatik seçilecek (sana söyleyerek).`
+        : `♻️ Aynı cevabı uyguluyorum: **${p.rec.answer}** — ancak onay kalıcı kaydedilemedi; bu soru tekrar gelirse yeniden sorabilirim.`,
     );
     await p.apply();
   } else {
@@ -5084,7 +5093,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
 }
 
 /**
- * Tüm 20 fazın özet bilgisini UI'a yollar — Aşamalar sayfası için.
+ * Tüm 17 fazın özet bilgisini UI'a yollar — Aşamalar sayfası için.
  * Her giriş: id, type, name_tr, name_en, has_controller, required_audits,
  * config (askq/production/mechanical).
  */

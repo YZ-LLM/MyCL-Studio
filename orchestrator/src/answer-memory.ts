@@ -147,7 +147,10 @@ export async function recordAnswer(
     sensitive: boolean;
   },
 ): Promise<void> {
-  const prev = await recallAnswer(projectRoot, args.key).catch(() => null);
+  // Okuma hatası YUTULMAZ (KATI #4): recallAnswer dosya yoksa null döner (throw etmez); yalnız
+  // gerçek disk/izin hatasında throw eder → propagate edip çağıranın logged-catch'ine düşer
+  // (index.ts recordAnswer(...).catch(log.warn)). Sessizce prev=null'a düşüp yanlış occurrences yazmaz.
+  const prev = await recallAnswer(projectRoot, args.key);
   await appendAnswerMemory(projectRoot, {
     ts: Date.now(),
     scope: args.scope,
