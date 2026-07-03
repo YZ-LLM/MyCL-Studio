@@ -1,5 +1,23 @@
 ## 2026-07-03
 
+- **feat(hatırlama): tekrarlayan kapı sorusunda cevabı hatırla — 3 kademeli merdiven:**
+  Aynı faz-hatası imzası ("Nasıl ilerleyelim?") tekrar geldiğinde MyCL baştan sormaz: (1) ilk kez sorar +
+  seçilen çözüm yönünü `.mycl/answer-memory.jsonl`'e kalıcı yazar; (2) yine gelince "geçen sefer X demiştin —
+  aynı cevabı kullanayım mı?" onayı; (3) onaylanınca sonraki tekrarda sormadan oto-uygular + görünür bildirir
+  (♻️). Yalnız "çözüm yönü" cevapları hatırlanır (güvenlik/kabul kararları hep yeniden onaylanır); hassas
+  kapılarda Kademe 3 sessiz-oto YOK; Kademe 3 backstop (RECALL_AUTO_MAX) çözmeyen cevabın sessiz döngüsünü
+  keser (frozen-goal). Manuel modda (Oto-cevap kapalı); açıkken mevcut auto-resolve/loop-guard sahiplenir.
+  Yeni modül [answer-memory.ts](orchestrator/src/answer-memory.ts) + birim testler. Çapraz-aile mahkemesi
+  (Sonnet müfettişler) toplam 6 bulgu → düzeltildi. check yeşil.
+- **fix(hatırlama): 2 düşük-öncelik KATI#4 sağlamlaştırma (ikinci çapraz-aile mahkemesi, 13 ajan):**
+  `recordAnswer` okuma hatasını `.catch(()=>null)` ile sessizce yutmuyor (gerçek disk/izin hatası çağıranın
+  logged-catch'ine propagate eder); `markReuseApproved` disk hatasında kullanıcıya yanlış "otomatik seçilecek"
+  demiyor — kalıcılık doğrulanır, başarısızsa dürüst mesaj verilir.
+- **docs(bayat): kök .md/yorum bayat-denetimi:** [orchestrator-system.md](assets/agent-prompts/orchestrator-system.md)'de
+  Faz 8 (TDD) + Faz 9 (Risk) yanlışlıkla "Opsiyonel fazlar" altında listelenmişti → ikisi de REQUIRED_PHASES'te
+  zorunlu, "Zorunlu fazlar" listesine taşındı; README test sayısı 1300→1600; kaldırılan Faz 18-20 döneminden
+  kalan "20 faz"/"1-20 fazları" kod-yorumları (phase-registry/types/PhaseSidebar/index) gerçek pipeline'a göre 17'ye
+  güncellendi.
 - **fix(çift-soru): faz-hatasında çözüm iki kez sorulmuyor (YZLLM: "aynı şeyi 2 kere sordu"):**
   Canlı (Faz 5 CSP): error-analysis "Nasıl ilerleyelim?" → kullanıcı çözüm seçti → debug (Faz 0) "Hangi çözümü
   uygulayalım?" AYNI seçimi tekrar sordu. Kök: Faz 0 D2 re-ask'i (phase-0.ts:706 `restartsPipeline || !otoCevap`)
