@@ -101,6 +101,15 @@ import {
   OPT_REANALYZE,
   type PendingErrorAnalysis,
 } from "./error-analysis.js";
+import {
+  recallAnswer,
+  recordAnswer,
+  markReuseApproved,
+  classifyAnswer,
+  REUSE_YES,
+  REUSE_NO,
+  type AnswerMemoryRecord,
+} from "./answer-memory.js";
 import { listModels } from "./models.js";
 import { computeTiersFromModels, resetModelChoiceCache } from "./model-catalog.js";
 import { predictPipelineCost } from "./cost-forecast.js";
@@ -152,7 +161,7 @@ import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
-import { autoAnswerSuggested, setAutoAnswerSuggested, setIntegrateModeSuppression } from "./auto-answer.js";
+import { autoAnswerSuggested, autoAnswerPick, setAutoAnswerSuggested, setIntegrateModeSuppression } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } from "./user-directives.js";
@@ -260,6 +269,16 @@ interface OrchestratorRuntime {
   // (detectInterruptedPhase1 null döner) → z.ai'ya geçince Faz 1'i PÜRÜZSÜZ tekrar koşabilmek için canlı niyeti
   // burada tut (taze proje senaryosu = bildirilen bug). null → Faz 1 aktif değil.
   lastPhase1Intent: string | null;
+  // YZLLM 2026-07-03 (cevap-hatırlama merdiveni): Kademe 2 "aynı cevabı kullanayım mı?" onayı bekleniyor.
+  // apply/fresh closure'ları aile-bağımsız yeniden-uygulama/taze-akış yollarını taşır (bellekte; persist YOK).
+  // null → açık reuse-onay askq'ı yok. handleAskqAnswer id ile eşler.
+  pendingAnswerReuse: {
+    id: string;
+    key: string;
+    rec: AnswerMemoryRecord;
+    apply: () => Promise<void>;
+    fresh: () => Promise<void>;
+  } | null;
 }
 
 const runtime: OrchestratorRuntime = {
@@ -274,6 +293,7 @@ const runtime: OrchestratorRuntime = {
   pendingDast: null,
   currentTaskId: null,
   lastPhase1Intent: null,
+  pendingAnswerReuse: null,
 };
 
 // WP4 DAST: onay-askq seçenek etiketi + "çalışıyor" banner etiketi. handleAskqAnswer
@@ -294,6 +314,7 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.pendingPhaseScope = null;
   runtime.pendingErrorAnalysis = null;
   runtime.pendingDast = null;
+  runtime.pendingAnswerReuse = null;
   setHistoryRoot(state.project_root);
   setAgentTraceRoot(state.project_root);
   setRecordContext({ phase: state.current_phase ?? 0 });
@@ -437,6 +458,12 @@ const AUTO_SOLVE_MAX = 6;
 // kararları tutar → error-analysis "bunlar denendi, tekrarlama" olarak enjekte eder (aynı-soru döngüsü kırılır).
 const MANUAL_LOOP_MAX = 3;
 const autoSolveSig = new Map<number, { sig: string; count: number; priorSolutions: string[] }>();
+// Cevap-hatırlama Kademe 3 BACKSTOP (mahkeme YZLLM 2026-07-03): recall erken-return loop-guard'ı (autoSolveSig)
+// atlar → onaylı cevap hatayı ÇÖZMÜYORSA aynı çözüm sessizce sonsuz tekrarlanabilirdi (frozen-goal ihlali). Aynı
+// hata-imzası arka arkaya RECALL_AUTO_MAX kez oto-uygulandıysa sessiz tekrarı DURDUR → görünür dur + taze akışa
+// dön (normal loop-guard/analiz devralır). Bellekte, sig-başına; taze karar (Hook B) sayacı sıfırlar.
+const RECALL_AUTO_MAX = 3;
+const recallAutoCount = new Map<string, number>();
 
 /** FIX B: kullanıcının/otonun bu hata-imzası için seçtiği çözümü kaydet → sonraki analizde "denendi, tekrarlama". */
 function recordSolutionChoice(phase: PhaseId, sig: string, solution: string): void {
@@ -661,7 +688,102 @@ function syncNeededPhases(): void {
   emitNeededPhases(runtime.state?.needed_phases ?? null);
 }
 
-async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
+// ── CEVAP-HATIRLAMA MERDİVENİ (YZLLM 2026-07-03) ─────────────────────────────────────────────────────
+// Kademe 2 "aynı cevabı kullanayım mı?" onay askq'sı + Kademe 2/3 yeniden-uygulama. Aile-bağımsız: apply
+// (kayıtlı cevabı uygula) ve fresh (taze soruya dön) closure'larını çağıran (failPhase / emit-site) taşır.
+
+/**
+ * Kademe 2: hafif onay askq'sı ("geçen sefer X demiştin, aynısını kullanayım mı?"). Oto-cevap AÇIKSA sessizce
+ * TAZE soruya düşmez (merdivenin amacını bozar) → geçen seferki kararı (Evet) GÖRÜNÜR notla uygular.
+ */
+async function emitReuseConfirmAskq(args: {
+  key: string;
+  rec: AnswerMemoryRecord;
+  intro: string;
+  apply: () => Promise<void>;
+  fresh: () => Promise<void>;
+}): Promise<void> {
+  const id = `answer_reuse_${randomUUID()}`;
+  runtime.pendingAnswerReuse = {
+    id,
+    key: args.key,
+    rec: args.rec,
+    apply: args.apply,
+    fresh: args.fresh,
+  };
+  emitChatMessage(
+    "assistant",
+    `${args.intro} Geçen sefer **${args.rec.answer}** demiştin. Aynı cevabı kullanayım mı?`,
+  );
+  const auto = autoAnswerPick([REUSE_YES, REUSE_NO], REUSE_YES);
+  if (auto) {
+    emitChatMessage(
+      "system",
+      `🤖 Oto-cevap açık — geçen seferki kararını (**${args.rec.answer}**) kullanıyorum.`,
+    );
+    await handleReuseConfirmAnswer(id, REUSE_YES);
+    return;
+  }
+  emitAskq({
+    id,
+    question: "Aynı soru — geçen seferki cevabı kullanayım mı?",
+    options: [REUSE_YES, REUSE_NO],
+  });
+}
+
+/** Kademe 2 onay cevabını işle: Evet → onayla (kalıcı) + uygula; Hayır → taze soruya dön. */
+async function handleReuseConfirmAnswer(id: string, sel: string): Promise<void> {
+  const p = runtime.pendingAnswerReuse;
+  if (!p || p.id !== id) return;
+  runtime.pendingAnswerReuse = null;
+  if (sel === REUSE_YES) {
+    if (runtime.state) {
+      await markReuseApproved(runtime.state.project_root, p.key).catch((e) =>
+        log.warn("orchestrator", "answer-memory markReuseApproved fail (non-fatal)", e),
+      );
+    }
+    emitChatMessage(
+      "system",
+      `♻️ Aynı cevabı uyguluyorum: **${p.rec.answer}** — bundan sonra bu soru için otomatik seçilecek (sana söyleyerek).`,
+    );
+    await p.apply();
+  } else {
+    emitChatMessage("system", "👍 Tamam, bu soruyu yeniden değerlendirelim.");
+    await p.fresh();
+  }
+}
+
+/**
+ * Kademe 2/3: kayıtlı hata-analizi cevabını YENİDEN uygula. Sentetik pending kurup kanonik dispatch'i
+ * (handleAskqAnswer) yeniden kullanır → kayıtlı metin doğrudan gönderilir (güncel seçenek listesine bakılmaz,
+ * yeniden-ifadeye dayanıklı). fromRecall=true → handleAskqAnswer bu cevabı answer-memory'ye TEKRAR KAYDETMEZ.
+ * DEĞİŞMEZ (mahkeme): Hook B YALNIZ answerKind="solution" kaydeder → buraya hep bir çözüm yönü gelir; sabit-etiket
+ * (OPT_ACCEPT_CONTINUE/QUEUE/STOP_MANUAL) HİÇ ulaşmaz → blocking:false + acceptContinuePhase yokluğu güvenli
+ * (çözüm yönü executeDispatchedIntent debug akışına gider; güvenlik-kabul dalı gerektirmez).
+ */
+async function applyRecalledErrorAnswer(
+  n: PhaseId,
+  sig: string,
+  rec: AnswerMemoryRecord,
+): Promise<void> {
+  const pid = `error_analysis_${randomUUID()}`;
+  runtime.pendingErrorAnalysis = {
+    id: pid,
+    phase: n,
+    blocking: false,
+    sig,
+    options: [rec.answer],
+    solutions_tr: [rec.answer],
+    fromRecall: true,
+  };
+  await handleAskqAnswer(pid, rec.answer);
+}
+
+async function failPhase(
+  n: PhaseId,
+  ctrl?: FailReasonHolder,
+  opts?: { forceFresh?: boolean },
+): Promise<void> {
   // Kullanıcı çalışan fazı yönlendirmeyle durdurduysa bu bir HATA değil — analiz/oto-çözüm BAŞLATMA.
   // (YZLLM: "beni dinlemedi" — durdurma sonrası MyCL kendi analizine dalmasın, kullanıcının isteğine geçsin.)
   if (isUserInitiatedAbort()) {
@@ -760,6 +882,71 @@ async function failPhase(n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
   // döngü-kıran: AYNI imza AUTO_SOLVE_MAX kez denendiyse yine sor (sahte-yeşil/sonsuz-döngü önleme).
   const otoCevap = autoAnswerSuggested();
   const sig = failSignature(n, ctrl);
+  // ── CEVAP-HATIRLAMA MERDİVENİ (YZLLM 2026-07-03): MANUEL modda (oto-cevap kapalı) aynı hata-imzası yine
+  // geldiyse kullanıcının önceki cevabını hatırla → Kademe 3 (onaylı) oto-uygula, yoksa Kademe 2 "aynısını
+  // kullanayım mı?" onayı. Oto-cevap AÇIKKEN atlanır → mevcut auto-resolve/loop-guard (priorSolutions ile
+  // farklı yaklaşım dener) sahiplenir; recall onu kısa devre yaptırıp aynı çözümü tekrarlatmamalı. forceFresh
+  // (Kademe 2 "Hayır") → recall bir kez atlanır (sonsuz onay döngüsü olmaz).
+  if (!otoCevap && !opts?.forceFresh && runtime.state) {
+    const recalled = await recallAnswer(runtime.state.project_root, sig).catch(() => null);
+    if (recalled) {
+      const apply = () => applyRecalledErrorAnswer(n, sig, recalled);
+      const fresh = () => failPhase(n, ctrl, { forceFresh: true });
+      if (recalled.reuseApproved && !recalled.sensitive) {
+        // Kademe 3 — onaylı + hassas değil → hiç sorma, oto-uygula + GÖRÜNÜR bildir (KATI#4; "bana söyleyerek devam et").
+        // BACKSTOP (mahkeme): recall erken-return loop-guard'ı atlar → onaylı cevap hatayı ÇÖZMÜYORSA sessizce
+        // sonsuz tekrarlanabilir. Aynı sig RECALL_AUTO_MAX kez oto-uygulandıysa DUR → görünür + taze akışa dön.
+        const applied = recallAutoCount.get(sig) ?? 0;
+        if (applied >= RECALL_AUTO_MAX) {
+          recallAutoCount.delete(sig);
+          emitChatMessage(
+            "system",
+            `⚠️ Onayladığın cevap (**${recalled.answer}**) Faz ${n} hatasını ${applied} otomatik denemede çözmedi — ` +
+              `otomatik tekrarı durdurup yeniden değerlendiriyorum.`,
+          );
+          await appendAuditModule(runtime.state.project_root, {
+            ts: Date.now(),
+            phase: n,
+            event: "answer-recall-exhausted",
+            caller: "mycl-orchestrator",
+            detail: recalled.answer.slice(0, 160),
+          }).catch(() => {});
+          await failPhase(n, ctrl, { forceFresh: true });
+          return;
+        }
+        recallAutoCount.set(sig, applied + 1);
+        emitChatMessage(
+          "system",
+          `♻️ Aynı hata yine oluştu (Faz ${n}) — önceki kararını uyguluyorum: **${recalled.answer}**`,
+        );
+        await appendAuditModule(runtime.state.project_root, {
+          ts: Date.now(),
+          phase: n,
+          event: "answer-recall-auto",
+          caller: "mycl-orchestrator",
+          detail: recalled.answer.slice(0, 160),
+        }).catch(() => {});
+        await apply();
+        return;
+      }
+      // Kademe 2 — kayıt var ama onaylı değil (VEYA onaylı-ama-hassas) → hafif "aynı cevabı kullanayım mı?" onayı.
+      await appendAuditModule(runtime.state.project_root, {
+        ts: Date.now(),
+        phase: n,
+        event: "answer-recall-offer",
+        caller: "mycl-orchestrator",
+        detail: recalled.answer.slice(0, 160),
+      }).catch(() => {});
+      await emitReuseConfirmAskq({
+        key: sig,
+        rec: recalled,
+        intro: `Faz ${n}'de aynı hata yine oluştu.`,
+        apply,
+        fresh,
+      });
+      return;
+    }
+  }
   const prev = autoSolveSig.get(n);
   const sameSig = prev?.sig === sig;
   const priorCount = sameSig ? prev!.count : 0;
@@ -5075,6 +5262,13 @@ export async function handleAskqAnswer(
   emitAskqResolved(id);
   const selectedText = Array.isArray(selected) ? selected.join(", ") : selected;
 
+  // ── CEVAP-HATIRLAMA — Kademe 2 onay cevabı (YZLLM 2026-07-03): "aynı cevabı kullanayım mı?" → Evet/Hayır.
+  // Kendi id öneki (answer_reuse_*) → diğer dallarla çakışmaz; en başta işlenir (kayıtlı cevabı uygular / taze döner).
+  if (runtime.pendingAnswerReuse && runtime.pendingAnswerReuse.id === id) {
+    await handleReuseConfirmAnswer(id, selectedText);
+    return;
+  }
+
   // Model yükseltme önerisi cevabı (YZLLM 2026-06-11): "Evet" → main + strong tier config'e yazılır + reload;
   // "Hayır" → bu oturumda tekrar sorma. Ayarlar tek doğruluk kaynağı; kabul edince config'e işlenir.
   if (_pendingModelUpgrade && id === _pendingModelUpgrade.askqId) {
@@ -5306,6 +5500,32 @@ export async function handleAskqAnswer(
       // OPT_QUEUE ile çıkar), oto-route YOK (reanalyze→null→reanalyze döngüsü + istemsiz task yazımı önlenir).
       if (!runtime.pendingErrorAnalysis) await escalateUnanalyzableError(cached.phase, false, cached.sig);
       return;
+    }
+    // ── CEVAP-HATIRLAMA (Kademe 1, YZLLM 2026-07-03; mahkeme-daraltıldı): kullanıcının seçtiği ÇÖZÜM YÖNÜNÜ
+    // (answerKind="solution") hata-imzasına KALICI kaydet → aynı hata yine gelince "aynı cevabı kullanayım mı?"
+    // merdiveni. YALNIZ "solution" — sabit-etiketler (OPT_QUEUE/STOP_MANUAL/ACCEPT_CONTINUE/ACCEPT_PERMANENT) KASITLA
+    // hariç: bunlar kontrol/güvenlik eylemleri; sentetik pending ile yeniden-gönderilince bağlamı (acceptContinuePhase/
+    // gerçek solutions_tr) kaybeder → yanlış dal/faz (mahkeme bulgusu). Güvenlik kabulü her seferinde yeniden onaylanır
+    // (security oto-değil). OPT_REANALYZE terminal değil (yukarıda return etti). Oto-seçilen (LLM best_index) cevap ve
+    // recall'dan gelen yeniden-uygulama (fromRecall) da KAYDEDİLMEZ. sensitive=blocking gate: solution cevabı blocking
+    // (güvenlik) kapıda seçilse bile Kademe 3 sessiz-oto YOK, hep Kademe 2 onayı (blocking↔sensitive bağı: bugün tek
+    // hassas sınıf blocking gate'ler — allowAcceptContinue hep blocking'e zorlanır).
+    if (
+      cached.sig &&
+      !cached.fromRecall &&
+      !cached.auto_selected_solution &&
+      classifyAnswer(sel) === "solution" &&
+      runtime.state
+    ) {
+      recallAutoCount.delete(cached.sig); // taze karar → Kademe 3 oto-uygulama backstop sayacını sıfırla
+      await recordAnswer(runtime.state.project_root, {
+        key: cached.sig,
+        phase: cached.phase,
+        answer: sel,
+        answerKind: "solution",
+        scope: "gate-error",
+        sensitive: cached.blocking === true,
+      }).catch((e) => log.warn("orchestrator", "answer-memory record fail (non-fatal)", e));
     }
     if (sel === OPT_QUEUE) {
       // sentinel-routing finding-f: appendTask throws → eski .catch sadece log yapıyordu

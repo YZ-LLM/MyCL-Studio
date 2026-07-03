@@ -210,6 +210,23 @@ sarmalayıcısı) kod, konum ve Türkçe açıklamayla kaydedilir; proje içinde
 "Hata Kodları" sayfası bunları listeler. Faz 0 (Hata Ayıklama) araştırmaya
 başlarken bu `mycl_errors.db`'yi okuyarak kök nedene daha hızlı ulaşır.
 
+## Cevap hatırlama (tekrarlayan sorular)
+
+Bir faz kapısı hatası ("Nasıl ilerleyelim?") aynı imzayla tekrar geldiğinde MyCL
+cevabınızı baştan sormaz — üç kademeli bir merdiven işletir:
+
+1. **İlk kez** — soruyu sorar; seçtiğiniz **çözüm yönü** `.mycl/answer-memory.jsonl`'e
+   kalıcı yazılır (yeniden başlatmada da hatırlanır).
+2. **Aynı soru yine** — *"Geçen sefer şunu demiştin — aynı cevabı kullanayım mı?"*
+   diye sorar. **Evet** derseniz cevabı hemen uygular ve bundan sonrası için otomatiğe alır.
+3. **Bir sonraki tekrar** — hiç sormadan önceki kararınızı uygular ve **size söyleyerek**
+   devam eder (♻️ mesajı). Onaylanan cevap hatayı çözmüyorsa (üst üste denendiyse)
+   otomatik tekrarı durdurup yeniden değerlendirir.
+
+Yalnızca **çözüm yönü** seçimleri hatırlanır; güvenlik/kabul kararları her seferinde
+yeniden onaylanır (güvenlik otomatik tekrarlanmaz). Manuel modda çalışır (Oto-cevap
+kapalıyken). Sıfırlamak için `.mycl/answer-memory.jsonl` satırlarını silmeniz yeterli.
+
 ## Resimli kullanım kılavuzu
 
 Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü Türkçe bir kullanım
@@ -268,7 +285,7 @@ da çalışır ([.github/workflows/check.yml](.github/workflows/check.yml)).
 npm run check                         # hepsi (önerilen)
 
 # Tek tek:
-npm --prefix orchestrator test        # vitest (1300+ test)
+npm --prefix orchestrator test        # vitest (1600+ test)
 npm --prefix orchestrator run build   # orchestrator tsc, hata yok
 npx tsc --noEmit                      # frontend tip kontrolü
 ```

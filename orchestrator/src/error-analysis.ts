@@ -104,6 +104,12 @@ export interface PendingErrorAnalysis {
    * fazı tekrar koşar (askq AÇILMAZ — sentinel). Diğer alanlar boştur.
    */
   needsProviderSwitch?: boolean;
+  /**
+   * YZLLM 2026-07-03 (cevap-hatırlama merdiveni): bu pending, kullanıcının GERÇEK seçimi değil, kayıtlı bir
+   * cevabın YENİDEN uygulanmasıdır (Kademe 2/3). handleAskqAnswer bunu görünce cevabı answer-memory'ye TEKRAR
+   * kaydetmez (reuseApproved bayrağını sıfırlamasın). Yalnız applyRecalledErrorAnswer set eder.
+   */
+  fromRecall?: boolean;
 }
 
 // Sabit seçenek etiketleri (TR — orkestrator çıktısı UI'da gösterilir).
