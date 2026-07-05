@@ -44,6 +44,10 @@ interface Props {
     api_calls: number;
   };
   onTokenBadgeClick?: () => void;
+  /** YZLLM 2026-07-03: cevap-bekleme sesi açık mı (🔊/🔇 toggle durumu). */
+  soundOn?: boolean;
+  /** Sesi aç/kapat (mute) — MyCL cevap beklerken çalan bip'i kontrol eder. */
+  onSoundToggle?: () => void;
   onSettingsClick?: () => void;
 }
 
@@ -63,6 +67,8 @@ export function RightActionBar({
   agentTeamOpen,
   tokenTotals,
   onTokenBadgeClick,
+  soundOn,
+  onSoundToggle,
   onSettingsClick,
 }: Props) {
   return (
@@ -196,6 +202,23 @@ export function RightActionBar({
           aria-label="Token özeti / zaman çizelgesi"
         >
           Σ {(tokenTotals.input_tokens + tokenTotals.output_tokens).toLocaleString()}t · {tokenTotals.api_calls}c
+        </button>
+      )}
+      {onSoundToggle && (
+        <button
+          type="button"
+          onClick={onSoundToggle}
+          data-testid="sound-toggle-btn"
+          className={`rab-btn${soundOn ? "" : " rab-active"}`}
+          aria-pressed={!soundOn}
+          aria-label={soundOn ? "Sesi kapat" : "Sesi aç"}
+          title={
+            soundOn
+              ? "Ses açık — MyCL cevap beklerken bip çalar. Kapatmak için tıkla."
+              : "Ses kapalı (sessiz). Açmak için tıkla."
+          }
+        >
+          {soundOn ? "🔊 Ses" : "🔇 Ses"}
         </button>
       )}
       {onSettingsClick && (

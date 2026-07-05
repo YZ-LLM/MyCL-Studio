@@ -5,7 +5,6 @@ import "./App.css";
 import { Splash } from "./components/Splash";
 import { Settings } from "./components/Settings";
 import { GuideModal } from "./components/GuideModal";
-import { QualityAuditModal } from "./components/QualityAuditModal";
 import { AppHeader } from "./components/AppHeader";
 import { RightActionBar, type RightPanel } from "./components/RightActionBar";
 import { OrchestratorPanel } from "./components/OrchestratorPanel";
@@ -43,6 +42,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { playAnswerBeep, primeAudio } from "./lib/sound";
 
 type ConfigStatus =
   | { state: "unknown" }
@@ -775,6 +775,20 @@ function App() {
     void orch.send({ kind: "set_auto_answer", data: { enabled } });
   };
 
+  // YZLLM 2026-07-03: Cevap-bekleme sesi (askq geldiğinde bip). DEFAULT AÇIK — yalnız kullanıcı
+  // açıkça kapattıysa ("0") kapalı. Saf ön-yüz tercihi (backend'e bildirilmez); localStorage'da saklanır.
+  const [soundOn, setSoundOn] = useState<boolean>(
+    () => localStorage.getItem("mycl_sound_on") !== "0",
+  );
+  const handleSoundToggle = (): void => {
+    setSoundOn((on) => {
+      const next = !on;
+      localStorage.setItem("mycl_sound_on", next ? "1" : "0");
+      if (next) primeAudio(); // user-gesture içinde AudioContext'i aç (ilk bip autoplay'e takılmasın)
+      return next;
+    });
+  };
+
 
   // v15.13 (saha 5/5): kullanıcı aksiyonu beklenirken (askq) OS bildirimi.
   // Açılışta izin iste (sessiz başarısız — bildirim plugin'i yoksa akışı bozma).
@@ -788,6 +802,19 @@ function App() {
     })();
   }, []);
 
+  // YZLLM 2026-07-03 (KATI #6 önden-çöz): AudioContext'i oturumdaki İLK kullanıcı etkileşiminde
+  // (gerçek user-gesture) aç → ilk askq bip'i webview autoplay politikasına takılıp sessiz kalmasın.
+  // primeAudio idempotent; {once} ile dinleyici kendini kaldırır.
+  useEffect(() => {
+    const prime = (): void => primeAudio();
+    window.addEventListener("pointerdown", prime, { once: true });
+    window.addEventListener("keydown", prime, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", prime);
+      window.removeEventListener("keydown", prime);
+    };
+  }, []);
+
   // Yeni bir askq gelince (id değişince) bildirim — yalnız pencere ODAKTA DEĞİLSE
   // (kullanıcı zaten bakıyorsa spam etme). Tek askq başına bir kez.
   const lastNotifiedAskq = useRef<string | null>(null);
@@ -795,6 +822,9 @@ function App() {
     const askq = mainState.pendingAskq;
     if (!askq || lastNotifiedAskq.current === askq.id) return;
     lastNotifiedAskq.current = askq.id;
+    // YZLLM 2026-07-03: her yeni askq'da bip — odak kontrolünden BAĞIMSIZ (pencere önündeyken de duyulur).
+    // Dedup guard (üstteki id kontrolü) tek-askq-başına-bir-kez garantiler; soundOn kapalıysa sessiz.
+    if (soundOn) playAnswerBeep();
     void (async () => {
       try {
         const focused = await getCurrentWindow()
@@ -825,8 +855,6 @@ function App() {
   // 2026-06-11 (YZLLM, #6): Spec okuma kapısı popup — onaydan önce spec'i biçimli gösterir.
   const [specReviewOpen, setSpecReviewOpen] = useState(false);
   const [specReviewText, setSpecReviewText] = useState("");
-  // 2026-06-11 (YZLLM): Kalite Kontrol (denetim ajanı) popup.
-  const [qualityAuditOpen, setQualityAuditOpen] = useState(false);
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
   const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
@@ -1538,7 +1566,6 @@ function App() {
           autoAnswer={autoAnswer}
           onAutoAnswerToggle={handleAutoAnswerToggle}
           autoAnswerDisabled={mainState.autoAnswerSuppressed}
-          onQualityAuditClick={() => setQualityAuditOpen(true)}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
         />
@@ -1594,6 +1621,8 @@ function App() {
           agentTeamOpen={agentTeamOpen}
           tokenTotals={mainState.tokenTotals}
           onTokenBadgeClick={() => setTokenTimelineOpen((o) => !o)}
+          soundOn={soundOn}
+          onSoundToggle={handleSoundToggle}
           onSettingsClick={() => setSettingsOpen(true)}
         />
       </div>
@@ -1610,12 +1639,6 @@ function App() {
         content={specReviewText}
         onClose={() => setSpecReviewOpen(false)}
         title="📋 Spec İncelemesi"
-      />
-      {/* 2026-06-11 (YZLLM): Kalite Kontrol — denetim ajanı popup (düzenlenebilir sorular + başlat). */}
-      <QualityAuditModal
-        open={qualityAuditOpen}
-        onClose={() => setQualityAuditOpen(false)}
-        onStart={(questions) => void orch.send({ kind: "start_quality_audit", data: { questions } })}
       />
       <TaskQueuePanel
         open={taskQueueOpen}

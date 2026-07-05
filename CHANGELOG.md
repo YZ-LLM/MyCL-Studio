@@ -1,5 +1,16 @@
 ## 2026-07-03
 
+- **feat(ses): MyCL cevap beklerken bip çalar + sesi aç/kapa (mute) butonu (YZLLM):**
+  Kullanıcıdan cevap beklenen her an (clarifying askq, gate-hatası, Faz 2 onay, Faz 6 inceleme —
+  hepsi tek `askq` kanalından) kısa, nazik bir iki-ton bip çalar; pencere önündeyken de duyulur
+  (kaçırma yok). Asset'siz Web Audio oscillator ([src/lib/sound.ts](src/lib/sound.ts)) → CSP
+  değişmedi (media-src yok; "unsafe-* yok" korundu). Sağ kenar çubuğunda **🔊/🔇 Ses** toggle'ı
+  sesi kapatır/açar; tercih `localStorage`'da kalıcı (default açık). AudioContext ilk kullanıcı
+  etkileşiminde önden açılır (webview autoplay'e takılmasın). Çapraz-aile mahkemesi (3 Sonnet 4.6)
+  0 engelleyici bulgu; browser-bridge smoke DOM'da doğruladı (mute butonu var, toggle kalıcı).
+- **remove(ui): "🕵️ Kalite Kontrol" butonu sohbet araç çubuğundan kaldırıldı (YZLLM):**
+  Yalnız UI girişi (buton + `QualityAuditModal`) kaldırıldı; orkestratör Denetim Ajanı akışı
+  (`quality-audit.ts` + `start_quality_audit` handler) ileride yeniden açılabilmek için korundu.
 - **feat(faz-8): BDD dış döngü — önce davranış dosyası, sonra TDD (çift döngü, outside-in):**
   Faz 8 artık davranış öncelikli çalışır: yeni/değişen her AC için önce insanın okuyabileceği
   `features/*.feature` yaşayan dokümantasyonunu yazar (spec'in Given/When/Then'inden türetilir; yalnız

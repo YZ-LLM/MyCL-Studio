@@ -173,9 +173,6 @@ entegre eder.
   aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı
   onaylı; pipeline'da otomatik koşmaz — pentest ağır olduğundan yükü kullanıcı kontrol
   eder). Bulgular önceliklenip otomatik düzeltme iterasyonlarına (Faz 3'ten) dönüşür.
-- **Denetim Ajanı** (**🕵️**) — kullanıcının sorularıyla MyCL kendi çıktısını
-  denetler; bir bulgunun MyCL'in kendi sorunu mu yoksa üretilen proje mi
-  olduğunu ayırır.
 - **Ajan Takımı** (**👥**) — sağ kenar çubuğundaki butonla açılan popup, o
   iterasyonda çalışan tüm çoklu-ajan takımlarını gösterir: hangi takım (Tasarım
   Paneli, Kök-neden Mercekleri, Modül Codegen, Faz 9 İncelemesi…), hangi fazda,
@@ -248,6 +245,10 @@ Güvenlik/kabul kararları her seferinde yeniden onaylanır (güvenlik otomatik
 tekrarlanmaz); kapı hatalarında yalnızca **çözüm yönü** seçimleri hatırlanır. Manuel
 modda çalışır (Oto-cevap kapalıyken). Sıfırlamak için `.mycl/answer-memory.jsonl`
 satırlarını silmeniz yeterli.
+
+**Cevap-bekleme sesi.** MyCL senden bir cevap beklediğinde (soru/onay) kısa bir bip
+çalar — başka bir işle uğraşırken kaçırmazsın. Sağ kenar çubuğundaki **🔊/🔇 Ses**
+butonuyla sesi kapatıp açabilirsin; tercih kalıcıdır (yeniden açılışta da korunur).
 
 ## Resimli kullanım kılavuzu
 

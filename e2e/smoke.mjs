@@ -172,6 +172,24 @@ async function main() {
     await rep.check("Faz göstergesi header'da", async () => {
       await page.waitForSelector('[data-testid="phase-indicator"]', { timeout: 5000 });
     });
+    // YZLLM 2026-07-03: cevap-bekleme sesi + mute toggle + "Kalite Kontrol" butonu kaldırma.
+    await rep.check("Ses (mute) butonu render oldu", async () => {
+      await page.waitForSelector('[data-testid="sound-toggle-btn"]', { timeout: 5000 });
+    });
+    await rep.check("Kalite Kontrol butonu KALDIRILDI (DOM'da yok)", async () => {
+      const n = await page.locator('[data-testid="intent-quality-audit"]').count();
+      assert(n === 0, `Kalite Kontrol butonu hâlâ DOM'da (${n} adet)`);
+    });
+    await rep.check("Ses toggle: tıkla → ikon değişir + localStorage kalıcı", async () => {
+      const btn = page.locator('[data-testid="sound-toggle-btn"]');
+      const before = (await btn.textContent()) ?? "";
+      await btn.click();
+      const after = (await btn.textContent()) ?? "";
+      assert(before !== after, `toggle metni değişmedi (${before})`);
+      const stored = await page.evaluate(() => localStorage.getItem("mycl_sound_on"));
+      assert(stored === "0", `localStorage mycl_sound_on beklenen "0", bulunan ${stored}`);
+      await btn.click(); // eski hale döndür (test yan etkisi bırakma)
+    });
 
     rep.step("4/4 Sağlık: ekran görüntüsü + sayfa-içi hata yok");
     const shot = path.join(ARTIFACTS, "smoke.png");

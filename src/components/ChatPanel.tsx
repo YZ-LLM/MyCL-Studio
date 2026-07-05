@@ -197,8 +197,6 @@ interface Props {
   /** WP4 DAST: 🛡️ Güvenlik Taraması butonu — backend açıklama+onay askq'ı açar
    *  (buton DOĞRUDAN taramaz). Yalnız çalışan localhost app'ine. */
   onDastClick?: () => void;
-  /** 2026-06-11: 🕵️ Kalite Kontrol butonu — denetim ajanı popup'ını açar. */
-  onQualityAuditClick?: () => void;
   /** WP4 DAST: tarama sürüyor mu — buton spinner + disabled (çift-tetik koruması). */
   dastRunning?: boolean;
   /** YZLLM 2026-06-17: o anki iş — ChatPanel başlığında "Tümünü kopyala" yanında gösterilir. */
@@ -224,7 +222,6 @@ export function ChatPanel({
   onAutoAnswerToggle,
   autoAnswerDisabled,
   onDastClick,
-  onQualityAuditClick,
   dastRunning,
   currentJob,
 }: Props) {
@@ -581,19 +578,8 @@ export function ChatPanel({
           </label>
         )}
         {/* YZLLM 2026-06-27: 📄 Proje Dökümanı butonu sağdaki Orkestra Ajanı paneline taşındı. */}
-        {/* 2026-06-11 (YZLLM): 🕵️ Kalite Kontrol — denetim ajanı orkestratörü kalite sorularına göre denetler. */}
-        {onQualityAuditClick && (
-          <button
-            type="button"
-            className="intent-pill"
-            data-testid="intent-quality-audit"
-            onClick={onQualityAuditClick}
-            title="Denetim ajanı: orkestratörün son koşusunu kalite sorularına göre denetler"
-          >
-            <span className="intent-pill-emoji" aria-hidden>🕵️</span>
-            <span className="intent-pill-label">Kalite Kontrol</span>
-          </button>
-        )}
+        {/* YZLLM 2026-07-03: 🕵️ Kalite Kontrol butonu buradan KALDIRILDI (denetim ajanı akışı
+            orkestratörde korunuyor, yalnız UI girişi çıkarıldı). */}
         {/* v15.7 (2026-05-24): "İş Ekle" buton — composer'daki metni proje
             iş kuyruğuna ekler, composer temizlenir. Boş draft'ta disabled. */}
         {onAddTaskToQueue && (
