@@ -50,7 +50,11 @@ import {
 import { computeVerdict, eventsSince, type HarnessVerdict } from "./harness-verdict.js";
 import { classifyOpenedFolder, hasDeliverable } from "./phase-1-codebase-probe.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
-import { detectInterruptedPhase2To9Pure, decideBootQueueAction } from "./resume-detection.js";
+import {
+  detectInterruptedPhase2To9Pure,
+  decideBootQueueAction,
+  shouldRunBootStatusCheck,
+} from "./resume-detection.js";
 import { clearClarifyLog } from "./clarify-log.js";
 import { SerialWorkQueue } from "./serial-queue.js";
 import {
@@ -1700,23 +1704,13 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
     const skipBoot = pendingDiag?.phase === "D2_WAITING";
     if (!skipBoot && runtime.config && runtime.state) {
       const st = runtime.state;
-      // Greenfield/temiz açılış: HİÇ iş başlamamış (yeni proje — niyet bile yok,
-      // ilk iterasyon) → boot karşılaması ATLA (YZLLM 2026-06-17: "yarım kalan iş
-      // yoksa ilk mesajı yazmasın; yarım kalan iterasyon varsa yazsın"). Greenfield
-      // phase=1'de boot agent'ı matriste "intent boş → Niyet bekleniyor" kuralını
-      // seçip gereksiz karşılama üretiyordu — programatik olarak burada kesiyoruz
-      // (agent hiç çağrılmaz → token de tasarruf). iteration_count>1 ya da intent_summary
-      // dolu ya da phase>1 → gerçek devam-eden/biten iş VAR → karşılama korunur.
-      const isCleanStart =
-        (st.current_phase ?? 0) <= 1 &&
-        (st.iteration_count ?? 1) === 1 &&
-        !st.intent_summary;
-      const hasPending =
-        !isCleanStart &&
-        ((st.current_phase > 0 && st.current_phase < 17) ||
-          !!st.pending_ui_tweak ||
-          st.dev_server_pid !== undefined);
-      if (hasPending) {
+      // Boot-check narrator'ı yalnız GERÇEK devam-eden/biten iş varken çalışır (greenfield temiz açılışı ATLA:
+      // YZLLM 2026-06-17 "yarım kalan iş yoksa ilk mesajı yazmasın"). YZLLM 2026-07-06 ("iş kuyruğundan işi aldı,
+      // ne istediğimiz kabak gibi ortada — MyCL akıllı olmalı"): kuyrukta bekleyen/koşan iş VARSA boot-check SUSAR —
+      // kuyruk sürücüsü (emitInitialTaskQueue) "İş başlıyor / 🔄 Yeni iterasyon / 📍 kaldığım yerden devam"ı zaten
+      // anlatır; boot-check kuyruğu bilmediği için `cp=1 + intent boş → "Niyet bekleniyor"` deyip kullanıcıdan İKİNCİ
+      // kez niyet istiyordu. Karar saf shouldRunBootStatusCheck'e taşındı (resume-detection.ts, birim-test'li).
+      if (shouldRunBootStatusCheck(st, hasPendingQueueWork)) {
         void runBootStatusCheck(runtime.config, st);
       }
     }
@@ -2084,7 +2078,14 @@ async function emitInitialTaskQueue(projectRoot: string): Promise<void> {
     // göndermeden — iş-listesi kendiliğinden boşalan sıralı kuyruktur).
     await kickWorkQueue();
   } catch (err) {
+    // YZLLM 2026-07-06 (çapraz-aile mahkemesi bulgusu — sessiz-stall): kuyruk yükleme/sürme zinciri
+    // (readTasks / decideBootQueueAction / kickWorkQueue) bozuk task-queue.jsonl ya da geçici I/O ile
+    // patlarsa ESKİDEN yalnız log.warn'du → kullanıcı boş ekranla kalır, hiçbir watchdog kuyruğu yeniden
+    // tetiklemez. Boot-check narrator'ı kuyruk-işi varken susturulduğundan (shouldRunBootStatusCheck) bu,
+    // tek kalan görünür yolu da keserdi → KATI #4 (sessiz fallback yok) + DONMUŞ HEDEF #1 (asla sessiz-tıkanma)
+    // ihlali. Artık GÖRÜNÜR hata ver — kullanıcı ne olduğunu görür + ne yapacağını bilir.
     log.warn("task-queue", "initial load failed", err);
+    emitError("İş kuyruğu yüklenemedi — projeyi kapatıp yeniden açmayı dene.", String(err));
   }
 }
 

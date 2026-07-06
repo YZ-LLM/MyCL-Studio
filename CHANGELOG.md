@@ -1,3 +1,22 @@
+## 2026-07-06
+
+- **fix(boot): iş kuyruğundan işi alınca "niyet bekliyorum" diye tekrar sorma — kuyruk = tek narrator (YZLLM):**
+  İş kuyruğundan bir iş işlenmeye başladığında (iş metni niyeti zaten belli ediyor) MyCL AYRICA "Faz 1'deyiz,
+  niyet bekliyorum. Ne yapmak istediğini yazman yeterli." diyip kullanıcıdan İKİNCİ kez niyet istiyordu. Kök:
+  `handleOpenProject` iki narrator'ı yarıştırıyordu — `emitInitialTaskQueue` kuyruğu sürüp "▶️ İş başlıyor /
+  🔄 Yeni iterasyon / 📍 kaldığım yerden devam" yazarken, `runBootStatusCheck` (boot-check) kuyruk-işini
+  BİLMEDİĞİ için karar matrisinde `current_phase=1 + intent boş → "Niyet bekleniyor"` kuralını seçiyordu.
+  **Fix:** boot-check kararı saf [`shouldRunBootStatusCheck`](orchestrator/src/resume-detection.ts)'e taşındı —
+  kuyrukta bekleyen/koşan iş VARSA boot-check SUSAR (kuyruk sürücüsü tek narrator). Greenfield/idle/tdd-red-retry
+  gibi kuyruk-işi-yok durumlar birebir korunur (regresyon yok, birim-test'li).
+- **fix(boot): kuyruk yükleme sessizce patlarsa görünür hata (çapraz-aile mahkemesi bulgusu):** `emitInitialTaskQueue`
+  catch'i eskiden yalnız `log.warn`'du → bozuk task-queue.jsonl / geçici I/O ile patlarsa kullanıcı boş ekranla
+  kalırdı (KATI #4 sessiz fallback yok + DONMUŞ HEDEF #1 asla sessiz-tıkanma). Boot-check kuyruk-işi varken
+  susturulduğundan bu tek kalan görünür yolu da keserdi — artık `emitError` ile görünür.
+- **test(boot): `decideBootQueueAction` birim testleri geri dolduruldu:** 2026-07-03 resume işinde iddia edilen ama
+  commit edilmemiş [`resume-detection.test.ts`](orchestrator/src/resume-detection.test.ts) yazıldı (decideBootQueueAction
+  8 senaryo + shouldRunBootStatusCheck 8 senaryo, cave5 kuyruk senaryosu dahil).
+
 ## 2026-07-03
 
 - **fix(resume): yarım iterasyonu kapat-aç'ta kaldığı yerden devam + önceki her şeyi hatırla (YZLLM):**

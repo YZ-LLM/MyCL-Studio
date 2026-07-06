@@ -118,3 +118,32 @@ export function decideBootQueueAction(
   }
   return { kind: "drain" };
 }
+
+/**
+ * SAF: proje açılışında boot-check narrator'ı (runBootStatusCheck) çalışmalı mı?
+ *
+ * runBootStatusCheck, yarıda kalan iş varsa kullanıcıya TEK cümle durum özeti yazar. AMA iş-kuyruğu tek
+ * sürücüdür ve emitInitialTaskQueue kuyruk-işini zaten anlatır ("İş başlıyor / 🔄 Yeni iterasyon / 📍 kaldığım
+ * yerden devam"). Boot-check kuyruk-işini bilmediğinden, kuyruk sürerken `current_phase=1 + intent boş →
+ * "Niyet bekleniyor — ne yapmak istersin?"` matris kuralını seçip kullanıcıdan İKİNCİ kez niyet istiyordu
+ * (redundant + yanıltıcı: iş metni niyeti zaten belli ediyor). Kuyruk = tek sürücü + tek narrator.
+ *
+ * YZLLM 2026-07-06 ("iş kuyruğundan işi aldı, ne istediğimiz kabak gibi ortada — MyCL akıllı olmalı").
+ *
+ * Kurallar: (1) greenfield/temiz açılış (yeni proje, henüz niyet yok) → boot-check YOK. (2) kuyrukta
+ * bekleyen/koşan iş VAR → boot-check YOK (kuyruk sürücüsü anlatır). (3) aksi + yarıda/devam eden iş
+ * göstergesi (mid-pipeline / bekleyen tweak / canlı dev server) → boot-check koşsun.
+ */
+export function shouldRunBootStatusCheck(
+  state: Pick<
+    State,
+    "current_phase" | "iteration_count" | "intent_summary" | "pending_ui_tweak" | "dev_server_pid"
+  >,
+  hasPendingQueueWork: boolean,
+): boolean {
+  const cp = state.current_phase ?? 0;
+  const isCleanStart = cp <= 1 && (state.iteration_count ?? 1) === 1 && !state.intent_summary;
+  if (isCleanStart) return false;
+  if (hasPendingQueueWork) return false;
+  return (cp > 0 && cp < 17) || !!state.pending_ui_tweak || state.dev_server_pid !== undefined;
+}

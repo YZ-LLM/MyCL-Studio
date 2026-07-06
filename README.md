@@ -262,6 +262,11 @@ açarsan MyCL baştan başlamaz — kaldığı **fazdan** (spec/kod/test/güvenl
 o iterasyonun önceki kararlarını hatırlar. Niyet-toplama (Faz 1/2) soruları da bu iterasyon
 için kalıcı tutulur; yeniden açıldığında zaten yanıtladıklarını **tekrar sormaz**.
 
+**İş kuyruğundan iş alınca tekrar niyet sormaz.** İş kuyruğundan bir iş işlenmeye
+başladığında işin metni zaten niyeti belli ettiği için MyCL "niyet bekliyorum, ne yapmak
+istiyorsun?" diye ikinci kez sormaz — işi doğrudan işler. Kuyruk sürerken durum mesajını
+tek kaynak (kuyruk) yazar; ikinci bir karşılama mesajıyla çakışmaz.
+
 ## Resimli kullanım kılavuzu
 
 Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü Türkçe bir kullanım
