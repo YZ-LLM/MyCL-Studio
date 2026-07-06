@@ -5,6 +5,7 @@ import "./App.css";
 import { Splash } from "./components/Splash";
 import { Settings } from "./components/Settings";
 import { GuideModal } from "./components/GuideModal";
+import { CodeModal } from "./components/CodeModal";
 import { AppHeader } from "./components/AppHeader";
 import { RightActionBar, type RightPanel } from "./components/RightActionBar";
 import { OrchestratorPanel } from "./components/OrchestratorPanel";
@@ -296,6 +297,8 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       ts: data.ts,
       // YZLLM 2026-06-30: opsiyonel ham teknik açıklama → ChatPanel "Detay göster" açılırında (varsa).
       ...(data.detail ? { detail: data.detail } : {}),
+      // YZLLM 2026-07-05 (Feature B): kod konumu → ChatPanel "Kodu göster" popup'ında (varsa).
+      ...(data.code_ref ? { code_ref: data.code_ref } : {}),
     };
     // Runtime hata mesajları rolling window — chat'e spam etmesin (2026-05-22).
     // Yeni "🔴 Runtime hata yakalandı" mesajı gelince eski runtime mesajlarından
@@ -505,6 +508,10 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
           ts: e.ts,
           // YZLLM 2026-06-30: geçmişten yüklenen mesajlarda da "Detay" korunur (varsa).
           ...(typeof data.detail === "string" && data.detail ? { detail: data.detail } : {}),
+          // YZLLM 2026-07-05 (Feature B): geçmişten yüklenen mesajlarda da kod konumu korunur (varsa).
+          ...(data.code_ref && typeof data.code_ref === "object"
+            ? { code_ref: data.code_ref as ChatMessage["code_ref"] }
+            : {}),
         });
       } else if (e.kind === "translation") {
         translations.push({
@@ -855,6 +862,12 @@ function App() {
   // 2026-06-11 (YZLLM, #6): Spec okuma kapısı popup — onaydan önce spec'i biçimli gösterir.
   const [specReviewOpen, setSpecReviewOpen] = useState(false);
   const [specReviewText, setSpecReviewText] = useState("");
+  // YZLLM 2026-07-05 (Feature B): MyCL kodla ilgili cevap verdiğinde chat'teki "Kodu göster" butonu bu
+  // salt-okunur kod popup'ını açar (kodun ilgili kısmı).
+  const [codeModal, setCodeModal] = useState<{
+    open: boolean;
+    codeRef: { file: string; startLine: number; endLine: number; snippet: string } | null;
+  }>({ open: false, codeRef: null });
   // v15.7: İş kuyruğu drawer açık/kapalı
   const [taskQueueOpen, setTaskQueueOpen] = useState(false);
   const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
@@ -1568,6 +1581,7 @@ function App() {
           autoAnswerDisabled={mainState.autoAnswerSuppressed}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
+          onShowCode={(ref) => setCodeModal({ open: true, codeRef: ref })}
         />
         {activeRightPanel && (
           <>
@@ -1639,6 +1653,12 @@ function App() {
         content={specReviewText}
         onClose={() => setSpecReviewOpen(false)}
         title="📋 Spec İncelemesi"
+      />
+      {/* YZLLM 2026-07-05 (Feature B): "Kodu göster" → salt-okunur kod popup'ı (kodun ilgili kısmı). */}
+      <CodeModal
+        open={codeModal.open}
+        codeRef={codeModal.codeRef}
+        onClose={() => setCodeModal({ open: false, codeRef: null })}
       />
       <TaskQueuePanel
         open={taskQueueOpen}

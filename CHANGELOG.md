@@ -1,5 +1,17 @@
 ## 2026-07-03
 
+- **feat(hata): gate birden çok DISTINCT sorun bulduğunda TEKER TEKER sor + "Kodu göster" popup (YZLLM):**
+  Canlı (Faz 13 Güvenlik) gate 3 ayrı sorun (SQL injection + test parolaları + 3.taraf takvim) bulup hepsini
+  TEK birleşik soruda soruyordu. Artık triage `findings[]` döner (her DISTINCT sorun ayrı; ilişkili düşük-seviye
+  sonuçlar gruplanır, soft cap 8) ve bir bulgu-kuyruğu ([finding-queue.ts](orchestrator/src/finding-queue.ts))
+  her sorunu **ayrı ayrı** sorar: sor → çöz (Faz 0) → sonrakine geç; kuyruk bitince güvenlik gate'i bir kez
+  yeniden koşar (kullanıcı seçimi "teker teker"). GERİYE UYUMLU: tek sorun = bugünkü tek-soru yolu birebir.
+  Ayrıca kod-konumu olan bir soruda "Detay göster" yanına **"Kodu göster"** butonu → salt-okunur popup
+  ([CodeModal.tsx](src/components/CodeModal.tsx)) ilgili kod kısmını gösterir; snippet orkestratör tarafından
+  proje-kökü **realpath-sınırlı** okunup payload'a gömülür (ön yüz dosyaya dokunmaz; symlink kaçışı engelli).
+  Çapraz-aile mahkemesi (11 ajan) 3 kritik bulgu yakaladı → düzeltildi + doğrulandı: oto-mod güvenlik ağı
+  (headless asılı kalma), kuyruk project_root binding (çapraz-proje gate bypass), realpath (bilgi ifşası).
+  npm run check yeşil + browser-bridge smoke.
 - **feat(ses): MyCL cevap beklerken bip çalar + sesi aç/kapa (mute) butonu (YZLLM):**
   Kullanıcıdan cevap beklenen her an (clarifying askq, gate-hatası, Faz 2 onay, Faz 6 inceleme —
   hepsi tek `askq` kanalından) kısa, nazik bir iki-ton bip çalar; pencere önündeyken de duyulur

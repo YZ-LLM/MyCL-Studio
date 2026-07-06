@@ -269,6 +269,9 @@ export interface ChatMessageEvent {
     /** YZLLM 2026-06-30: opsiyonel ham teknik açıklama (dosya/satır/kod). Mesaj metni SADE kalır; UI altında
      *  "Detay göster" açılır bunu gösterir. Yoksa toggle çıkmaz (geriye uyumlu). */
     detail?: string;
+    /** YZLLM 2026-07-05 (Feature B): detail'in yapısal hali — MyCL kodla ilgili bir cevap verdiğinde
+     *  ilgili kod konumu. Doluysa UI "Kodu göster" butonu çıkarır (salt-okunur popup). Yoksa buton çıkmaz. */
+    code_ref?: { file: string; startLine: number; endLine: number; snippet: string };
   };
 }
 

@@ -75,7 +75,13 @@ export function emitChatMessage(
   // YZLLM 2026-06-30: detail → mesajın SADE kalması için ham teknik açıklama (dosya/satır/kod) AYRI taşınır;
   // UI mesaj altında "Detay göster" açılır (varsa). Sade metin `text`'te, teknik detay burada. splitSentences UYGULANMAZ
   // (teknik detay olduğu gibi gösterilir). detail yoksa payload'a eklenmez → mevcut mesajlar/UI aynen (geriye uyumlu).
-  opts?: { persist?: boolean; detail?: string },
+  // YZLLM 2026-07-03: code_ref → "Kodu göster" salt-okunur popup'ının verisi (dosya + satır aralığı + snippet).
+  // detail gibi opsiyonel + yalnız doluysa payload'a eklenir (geriye uyumlu). Şekil ön yüzle birebir (yapısal).
+  opts?: {
+    persist?: boolean;
+    detail?: string;
+    code_ref?: { file: string; startLine: number; endLine: number; snippet: string };
+  },
 ): void {
   // Kullanıcı talebi (2026-05-23): MyCL chat'te assistant cümleleri tek satıra.
   // Bir satırda 2 cümle olmayacak şekilde sentence boundary'lerde newline.
@@ -83,7 +89,14 @@ export function emitChatMessage(
   // (system mesajları çoğu tek cümle veya yapılandırılmış emoji + label).
   const processed = role === "assistant" ? splitSentences(text) : text;
   const detail = opts?.detail && opts.detail.trim() ? opts.detail.trim() : undefined;
-  const payload = { role, text: processed, ts: Date.now(), ...(detail ? { detail } : {}) };
+  const code_ref = opts?.code_ref;
+  const payload = {
+    role,
+    text: processed,
+    ts: Date.now(),
+    ...(detail ? { detail } : {}),
+    ...(code_ref ? { code_ref } : {}),
+  };
   emit("chat_message", payload);
   // `persist: false` → transient boot/welcome mesajları için. Her açılışta
   // emit edilirse history.log'da birikir; UI'da N. açılışta N kez görünür.

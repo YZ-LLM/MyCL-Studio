@@ -386,3 +386,56 @@ describe("buildErrorAnalysisPrompt — priorAttempts (karar hafızası)", () => 
     );
   });
 });
+
+// YZLLM 2026-07-03 (teker teker sor): findings[] parse — geriye uyumlu + çoklu + soft cap.
+describe("parseErrorAnalysisBlock — findings[] (teker teker)", () => {
+  it("düz (findings YOK) blok → tek elemanlı findings sentezlenir (GERİYE UYUMLU)", () => {
+    const txt = '{"kind":"error_analysis","blocking":true,"summary_tr":"Tek sorun","solutions_tr":["A","B"],"best_index":1}';
+    const r = parseErrorAnalysisBlock(txt);
+    expect(r).not.toBeNull();
+    expect(r!.findings).toHaveLength(1);
+    expect(r!.findings[0].summary_tr).toBe("Tek sorun");
+    expect(r!.summary_tr).toBe("Tek sorun"); // üst-seviye = findings[0]
+    expect(r!.solutions_tr).toEqual(["A", "B"]);
+    expect(r!.best_index).toBe(1);
+  });
+
+  it("findings[] ile 3 distinct sorun → 3 finding; üst-seviye alanlar findings[0]", () => {
+    const txt = JSON.stringify({
+      kind: "error_analysis",
+      blocking: true,
+      findings: [
+        { summary_tr: "SQL injection", solutions_tr: ["Parametreli sorgu"], best_index: 0, code_ref: { file: "src/search.ts", startLine: 42 } },
+        { summary_tr: "Test parolaları", solutions_tr: ["Env'den oku"], best_index: 0 },
+        { summary_tr: "Zafiyetli takvim paketi", solutions_tr: ["Kaldır", "Güncelle"], best_index: 1 },
+      ],
+    });
+    const r = parseErrorAnalysisBlock(txt);
+    expect(r!.findings).toHaveLength(3);
+    expect(r!.findings.map((f) => f.summary_tr)).toEqual(["SQL injection", "Test parolaları", "Zafiyetli takvim paketi"]);
+    expect(r!.findings[0].code_ref).toEqual({ file: "src/search.ts", startLine: 42, endLine: 42, snippet: "" });
+    expect(r!.findings[1].code_ref).toBeUndefined(); // konumsuz finding → code_ref yok
+    expect(r!.summary_tr).toBe("SQL injection");
+    expect(r!.solutions_tr).toEqual(["Parametreli sorgu"]);
+  });
+
+  it("summary_tr'siz finding elenir; hepsi geçersizse + düz-alan yoksa null", () => {
+    const txt = JSON.stringify({ kind: "error_analysis", blocking: true, findings: [{ solutions_tr: ["x"] }, { summary_tr: "" }] });
+    expect(parseErrorAnalysisBlock(txt)).toBeNull();
+  });
+
+  it("soft cap: >8 finding → ilk 7 + tek 'diğer bulgular' entry (sessizce düşmez)", () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ summary_tr: `Sorun ${i}`, solutions_tr: [`Çöz ${i}`], best_index: 0 }));
+    const txt = JSON.stringify({ kind: "error_analysis", blocking: true, findings: many });
+    const r = parseErrorAnalysisBlock(txt);
+    expect(r!.findings).toHaveLength(8); // MAX_FINDINGS
+    expect(r!.findings[7].summary_tr).toContain("Diğer 5 güvenlik bulgusu");
+    expect(r!.findings[7].detail_tr).toContain("Sorun 7"); // kalanlar detayda görünür
+  });
+
+  it("code_ref sadece startLine (endLine yok) → endLine=startLine", () => {
+    const txt = JSON.stringify({ kind: "error_analysis", blocking: true, findings: [{ summary_tr: "x", solutions_tr: ["a"], best_index: 0, code_ref: { file: "a.ts", startLine: 10 } }] });
+    const r = parseErrorAnalysisBlock(txt);
+    expect(r!.findings[0].code_ref).toEqual({ file: "a.ts", startLine: 10, endLine: 10, snippet: "" });
+  });
+});

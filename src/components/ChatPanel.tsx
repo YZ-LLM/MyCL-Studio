@@ -82,30 +82,67 @@ function PhaseDivider({ faz }: { faz: number }) {
 
 /** Açılır "Detay göster" — mesajın SADE metnini bozmadan ham teknik açıklamayı (dosya/satır/kod) talep üzerine
  *  gösterir. YZLLM 2026-06-30: hata-analizi özeti sade gelir; teknik detaya buradan erişilir. Hata mesajı stack
- *  trace'i için de kullanılır. stopPropagation: toggle tıklaması mesaj-seçimini (onMessageSelected) tetiklemesin. */
-function DetailDisclosure({ detail }: { detail: string }) {
+ *  trace'i için de kullanılır. stopPropagation: toggle tıklaması mesaj-seçimini (onMessageSelected) tetiklemesin.
+ *  YZLLM 2026-07-05 (Feature B): detail'in yanında opsiyonel "Kodu göster" butonu — code_ref VARSA salt-okunur
+ *  kod popup'ını açar (onShowCode). detail YOK ama code_ref VAR olabilir → yalnız "Kodu göster" render edilir;
+ *  ikisi de yoksa null döner. */
+function DetailDisclosure({
+  detail,
+  code_ref,
+  onShowCode,
+}: {
+  detail?: string;
+  code_ref?: { file: string; startLine: number; endLine: number; snippet: string };
+  onShowCode?: (ref: { file: string; startLine: number; endLine: number; snippet: string }) => void;
+}) {
   const [open, setOpen] = useState(false);
+  if (!detail && !code_ref) return null;
+  const showCodeBtn = code_ref && onShowCode;
   return (
     <>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(!open);
-        }}
-        style={{
-          fontSize: 10,
-          padding: "2px 6px",
-          marginTop: 4,
-          background: "transparent",
-          border: "1px solid var(--border)",
-          color: "var(--fg-dim)",
-          cursor: "pointer",
-        }}
-      >
-        {open ? "Detayı gizle" : "Detay göster"}
-      </button>
-      {open && (
+      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+        {detail && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(!open);
+            }}
+            style={{
+              fontSize: 10,
+              padding: "2px 6px",
+              background: "transparent",
+              border: "1px solid var(--border)",
+              color: "var(--fg-dim)",
+              cursor: "pointer",
+              borderRadius: 4,
+            }}
+          >
+            {open ? "Detayı gizle" : "Detay göster"}
+          </button>
+        )}
+        {showCodeBtn && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowCode(code_ref);
+            }}
+            style={{
+              fontSize: 10,
+              padding: "2px 6px",
+              background: "transparent",
+              border: "1px solid var(--border)",
+              color: "var(--fg-dim)",
+              cursor: "pointer",
+              borderRadius: 4,
+            }}
+          >
+            Kodu göster
+          </button>
+        )}
+      </div>
+      {detail && open && (
         <pre
           style={{
             marginTop: 6,
@@ -129,11 +166,17 @@ function DetailDisclosure({ detail }: { detail: string }) {
   );
 }
 
-function ErrorMessage({ msg }: { msg: ChatMessage }) {
+function ErrorMessage({
+  msg,
+  onShowCode,
+}: {
+  msg: ChatMessage;
+  onShowCode?: (ref: { file: string; startLine: number; endLine: number; snippet: string }) => void;
+}) {
   return (
     <div className="msg error">
       <div>{linkifyText(msg.text)}</div>
-      {msg.detail && <DetailDisclosure detail={msg.detail} />}
+      <DetailDisclosure detail={msg.detail} code_ref={msg.code_ref} onShowCode={onShowCode} />
     </div>
   );
 }
@@ -151,6 +194,8 @@ export interface ChatMessage {
   text: string;
   /** Hata mesajları için ekstra stack trace / detay (collapsed). */
   detail?: string;
+  /** YZLLM 2026-07-05 (Feature B): MyCL kodla ilgili cevapta ilgili kod konumu — "Kodu göster" popup'ı besler. */
+  code_ref?: { file: string; startLine: number; endLine: number; snippet: string };
   /** Cross-panel focus için. Backend emit ts'i, frontend mesajlar Date.now(). */
   ts: number;
 }
@@ -201,6 +246,9 @@ interface Props {
   dastRunning?: boolean;
   /** YZLLM 2026-06-17: o anki iş — ChatPanel başlığında "Tümünü kopyala" yanında gösterilir. */
   currentJob?: string | null;
+  /** YZLLM 2026-07-05 (Feature B): "Kodu göster" → App salt-okunur kod popup'ını açar. code_ref'i olan mesajlarda
+   *  DetailDisclosure bu callback'i çağırır. Verilmezse "Kodu göster" butonu render edilmez. */
+  onShowCode?: (ref: { file: string; startLine: number; endLine: number; snippet: string }) => void;
 }
 
 export function ChatPanel({
@@ -224,6 +272,7 @@ export function ChatPanel({
   onDastClick,
   dastRunning,
   currentJob,
+  onShowCode,
 }: Props) {
   const [draft, setDraft] = useState("");
   // YZLLM 2026-06-19: balona "Yanıtla" → o mesajı alıntıla, composer'da kısa göster; gönderince alıntı eklenir.
@@ -428,7 +477,7 @@ export function ChatPanel({
                     className={highlighted ? "msg-wrap highlighted" : "msg-wrap"}
                   >
                     {tsLabel && <span className="msg-ts">{tsLabel}</span>}
-                    <ErrorMessage msg={m} />
+                    <ErrorMessage msg={m} onShowCode={onShowCode} />
                     {replyBtn}
                     {copyBtn}
                   </div>
@@ -445,8 +494,9 @@ export function ChatPanel({
                 >
                   {tsLabel && <span className="msg-ts">{tsLabel}</span>}
                   {linkifyText(splitSentences(m.text))}
-                  {/* YZLLM 2026-06-30: sade mesaj + istenirse "Detay göster" (hata-analizi teknik açıklaması). */}
-                  {m.detail && <DetailDisclosure detail={m.detail} />}
+                  {/* YZLLM 2026-06-30: sade mesaj + istenirse "Detay göster" (hata-analizi teknik açıklaması).
+                      YZLLM 2026-07-05 (Feature B): code_ref varsa yanında "Kodu göster" (salt-okunur kod popup'ı). */}
+                  <DetailDisclosure detail={m.detail} code_ref={m.code_ref} onShowCode={onShowCode} />
                   {replyBtn}
                   {copyBtn}
                 </div>

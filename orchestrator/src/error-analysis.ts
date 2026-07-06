@@ -14,6 +14,8 @@
 // (caller askq açmaz). Sessiz fallback YOK.
 
 import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import { resolve as resolvePath, relative as relPath, isAbsolute } from "node:path";
 import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import Anthropic from "@anthropic-ai/sdk";
@@ -60,6 +62,31 @@ export interface ErrorContext {
   loopExhausted?: boolean;
 }
 
+/**
+ * YZLLM 2026-07-03: kod-konumu referansı — "Kodu göster" salt-okunur popup'ını besler. Orkestratör
+ * proje-kökü sınırlı okumayla (tool-handlers normalizeAndCheck) snippet'i doldurur; ön yüz dosyaya DOKUNMAZ
+ * (Tauri fs yok). Konum belirlenemezse code_ref YOK → buton çıkmaz (fail-soft).
+ */
+export interface CodeRef {
+  file: string;
+  startLine: number;
+  endLine: number;
+  snippet: string;
+}
+
+/**
+ * YZLLM 2026-07-03 (teker teker sor): tek bir DISTINCT sorun. Bir gate-fail birden çok distinct sorun
+ * bulursa (SQL-injection + test parolaları + 3.taraf takvim = 3 finding), her biri ayrı ayrı sorulur.
+ * İlişkili düşük-seviye sonuçlar TEK finding'te gruplanır (20 semgrep satırı = 3 finding, 20 değil).
+ */
+export interface ErrorFinding {
+  summary_tr: string;
+  detail_tr?: string;
+  solutions_tr: string[];
+  best_index: number;
+  code_ref?: CodeRef;
+}
+
 /** Ajanın döndüğü analiz bloğu (parse + doğrulama sonrası). */
 export interface ErrorAnalysis {
   blocking: boolean;
@@ -70,6 +97,12 @@ export interface ErrorAnalysis {
   solutions_tr: string[];
   /** Ajanın UYGULAYACAĞI çözümün 0-tabanlı index'i (doğruluk önce, sonra en düşük risk). */
   best_index: number;
+  /**
+   * YZLLM 2026-07-03 (teker teker sor): DISTINCT sorunların listesi. Parser HER ZAMAN ≥1 eleman verir —
+   * `findings` alanı yoksa üst-seviye alanlardan tek eleman sentezlenir (geriye uyumlu: 1 finding = bugünkü
+   * tek-soru yolu birebir). >1 ise orkestratör bir bulgu-kuyruğu kurar (finding-queue.ts) + teker teker sorar.
+   */
+  findings: ErrorFinding[];
 }
 
 /**
@@ -110,6 +143,16 @@ export interface PendingErrorAnalysis {
    * kaydetmez (reuseApproved bayrağını sıfırlamasın). Yalnız applyRecalledErrorAnswer set eder.
    */
   fromRecall?: boolean;
+  /**
+   * YZLLM 2026-07-03 (teker teker sor): triage'ın bulduğu TÜM distinct finding'ler. >1 ise orkestratör
+   * bir bulgu-kuyruğu kurar (finding-queue.ts). Bu pending yalnız KUYRUKTAKİ MEVCUT finding'i temsil eder.
+   */
+  findings?: ErrorFinding[];
+  /**
+   * YZLLM 2026-07-03: bu pending'in mesajına iliştirilmiş kod-konumu ("Kodu göster" popup'ı). handleAskqAnswer
+   * için işlevsel değil; yalnız plumbing izlenebilirliği (asıl taşıyıcı emitChatMessage code_ref'idir).
+   */
+  code_ref?: CodeRef;
 }
 
 // Sabit seçenek etiketleri (TR — orkestrator çıktısı UI'da gösterilir).
@@ -206,25 +249,181 @@ export function buildErrorAnalysisAskq(
  * summary_tr zorunlu (boş olamaz); solutions_tr string dizisi (yoksa []).
  * Bulunamazsa / geçersizse null (caller görünür hata verir, sessiz değil).
  */
-export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
-  const block = extractKindBlock(text, ["error_analysis"]);
-  if (!block) return null;
-  const summary = (block as Record<string, unknown>).summary_tr;
+/** Teker-teker güvenliği: en çok bu kadar ayrı soru sorulur; fazlası tek "diğer bulgular" entry'sinde
+ *  birleştirilir (LLM aşırı-bölerse 20-soru felaketini önler; hiçbir bulgu SESSİZCE düşmez — KATI #4). */
+const MAX_FINDINGS = 8;
+
+/** SAF: LLM'in verdiği code_ref'i gevşek doğrula (file + satır gerekli; snippet'i orkestratör doldurur). */
+function parseCodeRefLoose(obj: unknown): CodeRef | null {
+  if (typeof obj !== "object" || obj === null) return null;
+  const o = obj as Record<string, unknown>;
+  const file = o.file;
+  if (typeof file !== "string" || file.trim() === "") return null;
+  const rawLine = typeof o.startLine === "number" ? o.startLine : typeof o.line === "number" ? o.line : undefined;
+  if (typeof rawLine !== "number" || !Number.isFinite(rawLine)) return null;
+  const startLine = Math.max(1, Math.floor(rawLine));
+  const endRaw = typeof o.endLine === "number" && Number.isFinite(o.endLine) ? Math.floor(o.endLine) : startLine;
+  const endLine = Math.max(startLine, endRaw);
+  const snippet = typeof o.snippet === "string" ? o.snippet : "";
+  return { file: file.trim(), startLine, endLine, snippet };
+}
+
+/** SAF: bir finding objesini doğrula (summary_tr zorunlu; boşsa null). */
+function parseOneFinding(obj: unknown): ErrorFinding | null {
+  if (typeof obj !== "object" || obj === null) return null;
+  const o = obj as Record<string, unknown>;
+  const summary = o.summary_tr;
   if (typeof summary !== "string" || summary.trim() === "") return null;
-  const blocking = (block as Record<string, unknown>).blocking === true;
-  const rawSolutions = (block as Record<string, unknown>).solutions_tr;
+  const rawSolutions = o.solutions_tr;
   const solutions_tr = Array.isArray(rawSolutions)
-    ? rawSolutions.filter((s): s is string => typeof s === "string")
+    ? rawSolutions.filter((s): s is string => typeof s === "string").map((s) => s.trim()).filter((s) => s !== "")
     : [];
-  const rawBest = (block as Record<string, unknown>).best_index;
+  const rawBest = o.best_index;
   const best_index =
     typeof rawBest === "number" && Number.isInteger(rawBest) && rawBest >= 0 && rawBest < solutions_tr.length
       ? rawBest
       : 0;
-  // detail_tr opsiyonel (geriye uyumlu): string + boş-değilse al, aksi undefined (toggle çıkmaz).
-  const rawDetail = (block as Record<string, unknown>).detail_tr;
+  const rawDetail = o.detail_tr;
   const detail_tr = typeof rawDetail === "string" && rawDetail.trim() !== "" ? rawDetail.trim() : undefined;
-  return { blocking, summary_tr: summary.trim(), detail_tr, solutions_tr, best_index };
+  const code_ref = parseCodeRefLoose(o.code_ref);
+  return { summary_tr: summary.trim(), detail_tr, solutions_tr, best_index, ...(code_ref ? { code_ref } : {}) };
+}
+
+export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
+  const block = extractKindBlock(text, ["error_analysis"]);
+  if (!block) return null;
+  const o = block as Record<string, unknown>;
+  const blocking = o.blocking === true;
+
+  // YZLLM 2026-07-03 (teker teker sor): findings[] varsa her DISTINCT sorunu ayrıştır; yoksa üst-seviye
+  // alanlardan tek eleman sentezle (GERİYE UYUMLU — 1 finding = bugünkü tek-soru yolu birebir).
+  let findings: ErrorFinding[] = [];
+  if (Array.isArray(o.findings)) {
+    findings = o.findings.map(parseOneFinding).filter((f): f is ErrorFinding => f !== null);
+  }
+  if (findings.length === 0) {
+    const flat = parseOneFinding(o);
+    if (!flat) return null; // ne findings ne düz-alan → geçersiz (caller görünür hata verir)
+    findings = [flat];
+  }
+  // Soft cap: aşırı-bölmede fazlası TEK "diğer bulgular" entry'sinde birleşir (sessizce düşmez).
+  if (findings.length > MAX_FINDINGS) {
+    const head = findings.slice(0, MAX_FINDINGS - 1);
+    const tail = findings.slice(MAX_FINDINGS - 1);
+    const mergedSolutions = Array.from(new Set(tail.flatMap((f) => f.solutions_tr)));
+    head.push({
+      summary_tr: `Diğer ${tail.length} güvenlik bulgusu (birlikte ele alınacak)`,
+      detail_tr: tail.map((f, i) => `${i + 1}. ${f.summary_tr}`).join("\n"),
+      solutions_tr: mergedSolutions.length > 0 ? mergedSolutions : ["Kalan bulguların hepsini kaynağında düzelt"],
+      best_index: 0,
+    });
+    findings = head;
+  }
+  const head = findings[0];
+  return {
+    blocking,
+    summary_tr: head.summary_tr,
+    detail_tr: head.detail_tr,
+    solutions_tr: head.solutions_tr,
+    best_index: head.best_index,
+    findings,
+  };
+}
+
+/** Snippet için okunacak bağlam satır sayısı (finding satırının etrafı). */
+const CODE_SNIPPET_CONTEXT = 3;
+
+/**
+ * PROJE-KÖKÜ SINIRLI salt-okuma: finding'in code_ref'ine gerçek snippet'i ekler ("Kodu göster" popup'ı).
+ * tool-handlers normalizeAndCheck deseni — dosya kök DIŞINDAysa veya okunamıyorsa `undefined` döner
+ * (buton çıkmaz; fail-soft — kod gösterememek akışı bozmaz). Ön yüz dosyaya ASLA dokunmaz (snippet gömülür).
+ */
+export async function resolveCodeRef(
+  projectRoot: string,
+  ref: CodeRef | undefined,
+): Promise<CodeRef | undefined> {
+  if (!ref || !ref.file) return undefined;
+  try {
+    const rootAbs = resolvePath(projectRoot);
+    const abs = isAbsolute(ref.file) ? resolvePath(ref.file) : resolvePath(rootAbs, ref.file);
+    // GÜVENLİK (mahkeme, YZLLM 2026-07-03): salt string/".." kontrolü YETMEZ — proje kökü İÇİNDEKİ bir symlink
+    // kök DIŞINI gösterebilir (ör. SSH anahtarı). fs.realpath ile GERÇEK dosya kimliğini çöz + kök'ün realpath'ine
+    // göre containment doğrula. realpath dosya yoksa throw → catch → undefined (fail-soft, buton yok).
+    const rootReal = await fs.realpath(rootAbs);
+    const absReal = await fs.realpath(abs);
+    const rel = relPath(rootReal, absReal);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return undefined; // kök dışı (symlink dahil) → buton yok
+    const content = await fs.readFile(absReal, "utf8");
+    const lines = content.split("\n");
+    if (lines.length === 0) return undefined;
+    const start = Math.min(Math.max(1, ref.startLine), lines.length);
+    const end = Math.min(Math.max(start, ref.endLine), lines.length);
+    const from = Math.max(1, start - CODE_SNIPPET_CONTEXT);
+    const to = Math.min(lines.length, end + CODE_SNIPPET_CONTEXT);
+    const snippet = lines
+      .slice(from - 1, to)
+      .map((ln, i) => `${String(from + i).padStart(4)} | ${ln}`)
+      .join("\n");
+    return { file: ref.file, startLine: from, endLine: to, snippet };
+  } catch {
+    return undefined; // okunamıyor → fail-soft
+  }
+}
+
+/**
+ * YZLLM 2026-07-03 (teker teker sor): TEK bir blocking finding'in özet mesajı + askq'sini emit eder, pending döner.
+ * analyzeAndAskError'ın emisyon mantığının yeniden-kullanılabilir hali — bulgu-kuyruğunda finding[1..] için
+ * (finding-queue advanceFindingQueue) çağrılır. Auto modda en iyi çözümü seçip askq açmaz (auto_selected_solution).
+ */
+export function emitBlockingFindingAskq(
+  finding: ErrorFinding,
+  opts: { phase: PhaseId; sig?: string; acceptContinuePhase?: number; auto: boolean; rawDetail?: string },
+): PendingErrorAnalysis {
+  const { options } = buildErrorAnalysisAskq(finding.solutions_tr, true, { allowAcceptContinue: true });
+  const optionLabels = options.map((o) => (typeof o === "string" ? o : o.label));
+  const id = `error_analysis_${randomUUID()}`;
+  const msgDetail = finding.detail_tr ?? opts.rawDetail;
+  const best = finding.solutions_tr[finding.best_index];
+  if (opts.auto && typeof best === "string" && best.trim() !== "") {
+    const others = finding.solutions_tr.filter((_, i) => i !== finding.best_index);
+    emitChatMessage(
+      "assistant",
+      `${finding.summary_tr}\n\n🤖 **En iyi çözüm otomatik seçildi:** ${best}` +
+        (others.length > 0 ? `\nDeğerlendirilen alternatifler:\n${others.map((s) => `- ${s}`).join("\n")}` : ""),
+      { detail: msgDetail, code_ref: finding.code_ref },
+    );
+    return {
+      id,
+      phase: opts.phase,
+      blocking: true,
+      sig: opts.sig,
+      options: optionLabels,
+      solutions_tr: finding.solutions_tr,
+      acceptContinuePhase: opts.acceptContinuePhase,
+      code_ref: finding.code_ref,
+      auto_selected_solution: best.trim(),
+    };
+  }
+  emitChatMessage(
+    "assistant",
+    `${finding.summary_tr}\nBu hata çözülmeden ilerlemek mümkün değil. Nasıl ilerleyelim?`,
+    { detail: msgDetail, code_ref: finding.code_ref },
+  );
+  emitAskq({
+    id,
+    question: `Faz ${opts.phase} hatası — çözülmeden ilerlenemez. Nasıl ilerleyelim?`,
+    options,
+  });
+  return {
+    id,
+    phase: opts.phase,
+    blocking: true,
+    sig: opts.sig,
+    options: optionLabels,
+    solutions_tr: finding.solutions_tr,
+    acceptContinuePhase: opts.acceptContinuePhase,
+    code_ref: finding.code_ref,
+  };
 }
 
 /** Pure: orkestratör analiz prompt'unu kur (test edilebilir). canInvestigate=false → API tek-atış (tool yok).
@@ -273,13 +472,21 @@ export function buildErrorAnalysisPrompt(
     "Decide whether this error is BLOCKING (the pipeline genuinely cannot proceed",
     "until it is resolved) or NON-BLOCKING (work could continue and the fix queued).",
     "",
-    "Emit EXACTLY ONE JSON object as the LAST thing in your reply, no other JSON:",
-    '{"kind":"error_analysis","blocking":<true|false>,"summary_tr":"<1-2 SHORT plain-language sentences IN TURKISH: what broke, in human terms — NO file paths, line numbers, or code>","detail_tr":"<the fuller technical explanation IN TURKISH (file/line/code OK) — the user sees this ONLY on demand via Details. PREFER filling it for a code-level failure (the developer may want to verify the exact file/line/code). Use \"\" ONLY when there is genuinely nothing technical to add (e.g. a pure environment error).>","solutions_tr":["<a SHORT plain-language DIRECTION IN TURKISH — a few words, NOT a full patch, no line numbers/code/endpoint paths>","<option 2>","..."],"best_index":<0-based index of the solution YOU would apply>}',
+    "Emit EXACTLY ONE JSON object as the LAST thing in your reply, no other JSON.",
+    "If the failure contains MULTIPLE DISTINCT problems (e.g. a SQL-injection in a search screen, seeded test",
+    "passwords, and a vulnerable 3rd-party calendar dependency = 3 DISTINCT problems), emit ONE `findings` entry",
+    "per DISTINCT problem — GROUP related low-level results into a single finding (3 problems, NOT 20 separate",
+    "semgrep lines). If there is only ONE problem, `findings` has exactly ONE entry.",
+    '{"kind":"error_analysis","blocking":<true|false>,"findings":[{"summary_tr":"<1-2 SHORT plain-language sentences IN TURKISH: what broke, in human terms — NO file paths, line numbers, or code>","detail_tr":"<fuller technical explanation IN TURKISH (file/line/code OK) — shown ONLY on demand via Details; PREFER filling it for a code-level failure; use \"\" only for a pure environment error>","solutions_tr":["<a SHORT plain-language DIRECTION IN TURKISH — a few words, NOT a full patch, no line numbers/code/endpoint paths>","<option 2>"],"best_index":<0-based index of the solution YOU would apply>,"code_ref":{"file":"<repo-relative path this finding is about>","startLine":<1-based line>,"endLine":<1-based end line>}}]}',
+    "",
+    "`code_ref` is OPTIONAL per finding: include it ONLY when the finding points to a SPECIFIC place in the",
+    "project's source (so the developer can press \"Kodu göster\"). OMIT `code_ref` for findings with no single",
+    "code location (e.g. a dependency CVE from npm-audit). Do NOT include a snippet — MyCL fills it from disk.",
     "",
     "Rules: summary_tr, detail_tr, and every solutions_tr entry MUST be in Turkish (the developer reads Turkish).",
     "summary_tr = the PLAIN essence for a non-technical reader (no file:line, no code). detail_tr = the technical",
     "detail (file/line/code allowed — shown only on demand); if none, use \"\". Each solution is a distinct SHORT",
-    "DIRECTION (a few words — not a restatement of the error, not a full patch/step-by-step). 2-4 solutions is ideal.",
+    "DIRECTION (a few words — not a restatement of the error, not a full patch/step-by-step). 2-4 solutions per finding.",
     'Do NOT include a "queue it" / "re-analyze" option — MyCL adds those automatically.',
     "",
     "DIAGNOSE THE ACTUAL ERROR, not generic causes. If a 'Spawn output' / 'actual error'",
@@ -495,6 +702,13 @@ export async function analyzeAndAskError(
       return await fail("Hata analizi bloğu üretilemedi.", "no valid {kind:error_analysis} block");
     }
 
+    // YZLLM 2026-07-03 (Kodu göster): her finding'in code_ref'ine proje-kökü sınırlı GERÇEK snippet'i doldur
+    // (okunamıyor/kök-dışı → undefined → o finding'de "Kodu göster" butonu çıkmaz). Kuyruğa da resolved gider.
+    for (const f of analysis.findings) {
+      f.code_ref = await resolveCodeRef(state.project_root, f.code_ref);
+    }
+    const headCodeRef = analysis.findings[0]?.code_ref;
+
     // Güvenlik-baseline Unit 2: allowAcceptContinue (blocking gate) → blocking'e zorla
     // (LLM "non-blocking" dese bile gate bloklayıcı; askq "Kabul et, devam et" sunar).
     const blocking = errCtx.allowAcceptContinue ? true : analysis.blocking;
@@ -524,14 +738,14 @@ export async function analyzeAndAskError(
             : ""),
         // Sade özet; teknik açıklama "Detay"da. FAIL-SAFE (mahkeme): LLM detail_tr atlarsa ham hata detayına düş →
         // "Detay" hep içerikli olur (sessiz bilgi kaybı yok; kullanıcı doğrulayabilir). İkisi de boşsa toggle çıkmaz.
-        { detail: analysis.detail_tr ?? errCtx.detail },
+        { detail: analysis.detail_tr ?? errCtx.detail, code_ref: headCodeRef },
       );
       await appendAudit(state.project_root, {
         ts: Date.now(),
         phase: errCtx.phase,
         event: "error-analysis",
         caller: "mycl-orchestrator",
-        detail: `blocking=${blocking} solutions=${analysis.solutions_tr.length} auto_selected=true`,
+        detail: `blocking=${blocking} solutions=${analysis.solutions_tr.length} findings=${analysis.findings.length} auto_selected=true`,
       }).catch(() => {});
       return {
         id,
@@ -541,6 +755,8 @@ export async function analyzeAndAskError(
         solutions_tr: analysis.solutions_tr,
         acceptContinuePhase: errCtx.acceptContinuePhase,
         auto_selected_solution: best.trim(),
+        findings: analysis.findings,
+        code_ref: headCodeRef,
       };
     }
 
@@ -551,7 +767,7 @@ export async function analyzeAndAskError(
         ? `${analysis.summary_tr}\nBu hata çözülmeden ilerlemek mümkün değil. Nasıl ilerleyelim?`
         : `${analysis.summary_tr}\nNasıl ilerleyelim?`,
       // FAIL-SAFE (mahkeme): detail_tr yoksa ham hata detayına düş → "Detay" hep içerikli (sessiz bilgi kaybı yok).
-      { detail: analysis.detail_tr ?? errCtx.detail },
+      { detail: analysis.detail_tr ?? errCtx.detail, code_ref: headCodeRef },
     );
 
     // askq emit → OS bildirimi mevcut askq yolundan OTOMATİK tetiklenir.
@@ -568,7 +784,7 @@ export async function analyzeAndAskError(
       phase: errCtx.phase,
       event: "error-analysis",
       caller: "mycl-orchestrator",
-      detail: `blocking=${blocking} solutions=${analysis.solutions_tr.length}`,
+      detail: `blocking=${blocking} solutions=${analysis.solutions_tr.length} findings=${analysis.findings.length}`,
     }).catch((e) => log.error("error-analysis", "error-analysis audit yazılamadı (denetim izi eksik)", { error: String(e) }));
 
     return {
@@ -578,6 +794,8 @@ export async function analyzeAndAskError(
       options: optionLabels,
       solutions_tr: analysis.solutions_tr,
       acceptContinuePhase: errCtx.acceptContinuePhase,
+      findings: analysis.findings,
+      code_ref: headCodeRef,
     };
   } catch (err) {
     // Hiçbir koşulda ana akışı bozma — ama GÖRÜNÜR + tanılanabilir (sessiz-fallback denetimi: iç fail()

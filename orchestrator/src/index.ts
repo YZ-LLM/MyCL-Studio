@@ -105,7 +105,14 @@ import {
   OPT_QUEUE,
   OPT_REANALYZE,
   type PendingErrorAnalysis,
+  emitBlockingFindingAskq,
 } from "./error-analysis.js";
+import {
+  type FindingQueue,
+  findingKey,
+  perFindingSig,
+  advanceDecision,
+} from "./finding-queue.js";
 import {
   recallAnswer,
   recordAnswer,
@@ -264,6 +271,10 @@ interface OrchestratorRuntime {
   // handleAskqAnswer bu kaydı id ile eşleyip "Çöz" / "İş listesine kaydet" /
   // "Tekrar analiz et" dalını işler. null → açık analiz-askq'ı yok.
   pendingErrorAnalysis: PendingErrorAnalysis | null;
+  // YZLLM 2026-07-03 (teker teker sor): bir gate-fail birden çok DISTINCT finding bulduğunda kurulan
+  // bulgu-kuyruğu — her finding sırayla sorulur (sor→çöz→sonraki), kuyruk bitince gate bir kez yeniden koşar.
+  // null → tek-finding (bugünkü davranış) veya kuyruk yok. pendingErrorAnalysis MEVCUT finding'i temsil eder.
+  findingQueue: FindingQueue | null;
   // WP4 DAST (2026-06-04): 🛡️ buton emitAskq onay kartı açtı; "Başlat"/"İptal"
   // cevabı bekleniyor. null → açık DAST onay-askq'ı yok. handleAskqAnswer KATI
   // eşleşmeyle (askqId === id && selected === Başlat) işler; tarama yalnız buradan
@@ -298,6 +309,7 @@ const runtime: OrchestratorRuntime = {
   pendingMemoryProposal: null,
   pendingPhaseScope: null,
   pendingErrorAnalysis: null,
+  findingQueue: null,
   pendingDast: null,
   currentTaskId: null,
   lastPhase1Intent: null,
@@ -321,6 +333,7 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.controller = null;
   runtime.pendingPhaseScope = null;
   runtime.pendingErrorAnalysis = null;
+  runtime.findingQueue = null;
   runtime.pendingDast = null;
   runtime.pendingAnswerReuse = null;
   setHistoryRoot(state.project_root);
@@ -338,6 +351,68 @@ export function __setPendingErrorAnalysisForTest(p: PendingErrorAnalysis | null)
 }
 export function __getPendingErrorAnalysisForTest(): PendingErrorAnalysis | null {
   return runtime.pendingErrorAnalysis;
+}
+export function __setFindingQueueForTest(q: FindingQueue | null): void {
+  runtime.findingQueue = q;
+}
+export function __getFindingQueueForTest(): FindingQueue | null {
+  return runtime.findingQueue;
+}
+
+/**
+ * YZLLM 2026-07-03 (teker teker sor): kuyruktaki MEVCUT finding'i sor — emitBlockingFindingAskq ile mesaj+askq
+ * emit et, per-finding sig (answer-memory izolasyonu) ile pendingErrorAnalysis kur. Auto modda emitBlockingFindingAskq
+ * auto_selected_solution set eder + askq açmaz (dispatch'i çağıran yapar).
+ */
+function emitQueuedFinding(queue: FindingQueue): PendingErrorAnalysis {
+  const finding = queue.findings[queue.index];
+  const key = findingKey(finding, queue.index);
+  const pending = emitBlockingFindingAskq(finding, {
+    phase: queue.phase,
+    sig: perFindingSig(queue.sig_base, key),
+    acceptContinuePhase: queue.acceptContinuePhase,
+    auto: autoAnswerSuggested(),
+  });
+  pending.findings = queue.findings; // izlenebilirlik — kuyruk asıl doğruluk kaynağı (index/awaitingRerun)
+  runtime.pendingErrorAnalysis = pending;
+  return pending;
+}
+
+/**
+ * YZLLM 2026-07-03: mevcut finding fix'lendikten SONRA kuyruğu ilerlet. Sonraki finding varsa onu sor (auto ise
+ * dispatch et → intercept bir sonrakine ilerletir), yoksa kuyruğu temizle → çağıran gate'i BİR kez yeniden koşar
+ * (final doğrulama). Faz 13 intercept'i (next===13 + awaitingRerun) bunu çağırır.
+ */
+async function advanceFindingQueue(): Promise<"asked" | "exhausted"> {
+  const queue = runtime.findingQueue;
+  if (!queue) return "exhausted";
+  const decision = advanceDecision(queue);
+  queue.index++;
+  queue.awaitingRerun = false;
+  if (decision === "exhausted") {
+    runtime.findingQueue = null;
+    return "exhausted";
+  }
+  const pending = emitQueuedFinding(queue);
+  // Auto modda sonraki finding de otomatik çözülür (askq açılmadı) → dispatch et; concrete-solution dalı
+  // awaitingRerun'ı tekrar set eder → intercept bir sonrakine ilerletir (tam otonom teker teker).
+  if (pending.auto_selected_solution) {
+    await handleAskqAnswer(pending.id, pending.auto_selected_solution).catch((e: unknown) =>
+      log.error("orchestrator", "finding-queue auto-solve routing failed", e),
+    );
+  } else if (autoAnswerSuggested()) {
+    // GÜVENLİK AĞI (mahkeme, YZLLM 2026-07-03): oto-modda bu finding için çözüm ÜRETİLEMEDİ (solutions_tr boş →
+    // emitBlockingFindingAskq GERÇEK askq açtı). finding[0] yolundakiyle SİMETRİK: headless'te askq'da asılı
+    // kalma YOK → OTOMATİK "kabul et + devam" (bulgu rapora/audit'e yazıldı, YUTULMADI — KATI #4/frozen-goal).
+    emitChatMessage(
+      "error",
+      `🔴 Faz 13: bir güvenlik sorunu otomatik çözülemedi — bulgu yutulmadı; "kabul et + devam" ile ilerliyorum (elle düzeltme istenmez).`,
+    );
+    await handleAskqAnswer(pending.id, OPT_ACCEPT_CONTINUE).catch((e: unknown) =>
+      log.error("orchestrator", "finding-queue auto-accept-continue failed", e),
+    );
+  }
+  return "asked";
 }
 
 // v15.7 (2026-05-25): INTENT_TR_LABEL kaldırıldı (classifier confirm askq yok).
@@ -1237,6 +1312,9 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // Yeni proje → güvenlik yakınsama-kırıcı durumunu sıfırla (eski projenin sayacı taşınmasın).
   _securityFindingsPrev = null;
   _securityNoProgress = 0;
+  // GÜVENLİK (mahkeme, YZLLM 2026-07-03): eski projenin bayat bulgu-kuyruğunu temizle — yoksa yeni projede
+  // bir Faz 13 varışı intercept'e takılıp GERÇEK güvenlik gate'ini sessizce bypass edebilir (KATI #4).
+  runtime.findingQueue = null;
   // Netleştirme-mahkemesi sayacı da sıfırlanmalı (Pillar A): yoksa eski projede CLARIFY_INSPECT_MAX'a
   // ulaşan sayaç yeni projeye TAŞINIR → yeni projenin ilk gerçek netleştirme sorusu sessizce bastırılır.
   _clarifyInspectChain = 0;
@@ -2513,6 +2591,11 @@ async function handleUserMessageInner(text: string): Promise<void> {
   disarmRollback();
   // Bayat otomatik-faz-geçişi de iptal — kullanıcı yeni bir şey söylüyor, eski yönlendirme geçersiz.
   _resumePhaseAfterAbort = null;
+  // GÜVENLİK (mahkeme, YZLLM 2026-07-03): yeni kullanıcı turu → yarım kalmış bulgu-kuyruğunu at. Yoksa terk
+  // edilmiş bir kuyruk (awaitingRerun=true) sonraki iterasyonun Faz 13 varışında intercept'e takılıp GERÇEK
+  // güvenlik gate'ini sessizce bypass edebilir (KATI #4). Fix-march'lar buradan GEÇMEZ (executeDispatchedIntent/
+  // advanceToNextPhase iç yol) → aktif teker-teker akışı bozulmaz; yalnız kullanıcı-başlatan yeni tur temizler.
+  runtime.findingQueue = null;
   // History persistence: user mesajını yaz. Frontend setMainState ile UI'a
   // ekledi ama backend echo etmiyordu → tarihte yer almıyordu. Açılışta
   // history_chunk'tan gelmediği için kaybolmuş gibi görünüyordu (kullanıcı
@@ -3492,6 +3575,7 @@ function isPipelineParked(): boolean {
   return (
     getActiveAskq() !== null ||
     runtime.pendingErrorAnalysis !== null ||
+    runtime.findingQueue !== null || // teker-teker bulgu kuyruğu aktif (fix-march ortası) → orphan-drop yok
     runtime.pendingPhaseScope !== null ||
     runtime.pendingMemoryProposal !== null ||
     runtime.pendingDast !== null ||
@@ -4750,6 +4834,21 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         continue;
       }
 
+      // YZLLM 2026-07-03 (teker teker sor) — İNTERCEPT: bir Faz 13 finding'i fix'lendi + pipeline gate'e geri yürüdü.
+      // Bulgu-kuyruğu aktif + rerun-bekliyor ise TAM güvenlik gate'ini yeniden koşma; sıradaki finding'i sor.
+      // Kuyruk bitince (exhausted) düş → gate BİR kez koşar (final doğrulama). SIKI guard: yalnız next===13 +
+      // awaitingRerun → kuyruksuz/normal Faz 13 yeniden-koşması DOKUNULMAZ (regresyon koruması).
+      if (
+        next === 13 &&
+        runtime.findingQueue?.phase === 13 &&
+        runtime.findingQueue.awaitingRerun &&
+        runtime.findingQueue.project_root === state.project_root // GÜVENLİK: bayat/çapraz-proje kuyruk gate'i bypass etmesin
+      ) {
+        const r = await advanceFindingQueue();
+        if (r === "asked") return; // sonraki bulguya park — güvenlik gate'i yeniden koşulmaz
+        // "exhausted" → kuyruk temizlendi → aşağı düş, gate bir kez koşsun (tüm fix'lerden sonra final doğrulama)
+      }
+
       const runner = new MechanicalRunnerBase({
         tag: `phase-${next}`,
         displayLabel: phaseLabelTR(next, spec),
@@ -4971,6 +5070,29 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             cur = 13;
             continue;
           }
+        }
+        // YZLLM 2026-07-03 (teker teker sor): triage >1 DISTINCT güvenlik sorunu bulduysa bulgu-kuyruğu kur.
+        // analyzeAndAskError ZATEN finding[0]'ı emit etti (auto: auto_selected_solution + oto-mesaj; manuel:
+        // finding[0] askq'si). Kuyruk index=0'dan başlar; finding[0]'a per-finding sig ata. Aşağıdaki dispatch
+        // (auto veya kullanıcı seçimi) concrete-solution dalında awaitingRerun set eder → intercept sonraki
+        // finding'e ilerletir; kuyruk bitince gate BİR kez yeniden koşar (final doğrulama). 1 finding → kuyruk yok.
+        if (pending?.findings && pending.findings.length > 1) {
+          const sigBase = `phase-13`;
+          runtime.findingQueue = {
+            phase: 13,
+            project_root: state.project_root,
+            findings: pending.findings,
+            index: 0,
+            sig_base: sigBase,
+            acceptContinuePhase: 13,
+            awaitingRerun: false,
+            anyFixed: false,
+          };
+          pending.sig = perFindingSig(sigBase, findingKey(pending.findings[0], 0));
+          emitChatMessage(
+            "system",
+            `🔎 Güvenlik taraması ${pending.findings.length} ayrı sorun buldu — her birini ayrı ayrı soracağım (bu 1.'si; çözünce sonrakine geçeceğim).`,
+          );
         }
         if (auto) {
           // ELLE DÜZELTME YOK (YZLLM 2026-06-14): otomatik fix varsa uygula; yoksa OTOMATİK "kabul et + devam" (LOUD).
@@ -5582,6 +5704,82 @@ export async function handleAskqAnswer(
     const cached = runtime.pendingErrorAnalysis;
     runtime.pendingErrorAnalysis = null;
     const sel = (Array.isArray(selected) ? selected[0] : selected) ?? "";
+    // YZLLM 2026-07-03 (teker teker sor): bir bulgu-kuyruğu aktifse cevabı KUYRUK-DUYARLI yönlendir — sabit-etiketler
+    // YALNIZ BU finding'e uygulanır (fazı TAMAMLAMAZ); somut çözüm → fix dispatch + intercept sonraki finding'e geçirir.
+    if (runtime.findingQueue && runtime.findingQueue.phase === cached.phase && runtime.state) {
+      const queue = runtime.findingQueue;
+      const curFinding = queue.findings[queue.index];
+      if (sel === OPT_STOP_MANUAL) {
+        // TÜM kuyruğu durdur (kullanıcı elle inceleyecek): kalan finding'leri iş listesine yaz, kuyruğu temizle, park.
+        for (let i = queue.index; i < queue.findings.length; i++) {
+          await appendTask(runtime.state.project_root, {
+            id: randomUUID(),
+            ts: Date.now(),
+            text: `Faz ${cached.phase} güvenlik bulgusu (elle inceleme): ${queue.findings[i].summary_tr}`,
+            status: "pending",
+            source: "manual",
+          }).catch((e) => log.warn("orchestrator", "finding-queue stop task append fail", e));
+        }
+        runtime.findingQueue = null;
+        emitChatMessage(
+          "system",
+          "⏸️ Kalan güvenlik bulguları elle inceleme için parkta — hazır olunca iş listesinden devam et.",
+        );
+        return;
+      }
+      if (sel === OPT_REANALYZE) {
+        emitChatMessage("system", "🔁 Bu bulguyu yeniden gösteriyorum.");
+        emitQueuedFinding(queue); // aynı finding'i tekrar sor (index değişmez — kuyruğu bozma)
+        return;
+      }
+      if (sel === OPT_ACCEPT_CONTINUE || sel === OPT_ACCEPT_PERMANENT || sel === OPT_QUEUE) {
+        if (sel === OPT_QUEUE) {
+          await appendTask(runtime.state.project_root, {
+            id: randomUUID(),
+            ts: Date.now(),
+            text: `Faz ${cached.phase} güvenlik bulgusu (ertelendi): ${curFinding.summary_tr}`,
+            status: "pending",
+            source: "manual",
+          }).catch((e) => log.warn("orchestrator", "finding-queue defer task fail", e));
+        } else if (sel === OPT_ACCEPT_PERMANENT && curFinding.code_ref) {
+          await appendAcceptedFinding(runtime.state.project_root, {
+            ts: Date.now(),
+            scope: "tech-debt",
+            file: curFinding.code_ref.file,
+            category: "security",
+            snippet: curFinding.summary_tr,
+            reason: `kullanıcı Faz ${cached.phase} teker-teker akışında kalıcı kabul etti`,
+          }).catch((e) => log.warn("orchestrator", "finding-queue accept-permanent write fail", e));
+        }
+        emitChatMessage(
+          "system",
+          `⚠️ Bu güvenlik bulgusu ${sel === OPT_QUEUE ? "ertelendi" : "kabul edildi"} — sonraki soruna geçiyorum.`,
+        );
+        const r = await advanceFindingQueue();
+        if (r === "asked") return; // sonraki finding soruldu (manuel: askq açık, bekliyor)
+        // exhausted → kuyruk bitti
+        if (queue.anyFixed) {
+          emitChatMessage("system", "🔁 Tüm sorunlar ele alındı — güvenlik taramasını bir kez yeniden koşuyorum.");
+          await advanceToNextPhase(12); // → Faz 13 gate final doğrulama (kuyruk null → normal koşar)
+        } else {
+          const p = (cached.acceptContinuePhase ?? cached.phase) as PhaseId;
+          await appendAuditModule(runtime.state.project_root, {
+            ts: Date.now(),
+            phase: p,
+            event: `phase-${p}-complete`,
+            caller: "user",
+            detail: "security_accepted_by_user",
+          }).catch((e) => log.warn("orchestrator", "finding-queue accept audit fail", e));
+          emitChatMessage("system", `⚠️ Tüm güvenlik bulguları kabul edildi — akış devam ediyor (Faz ${p}).`);
+          await advanceToNextPhase(p);
+        }
+        return;
+      }
+      // Somut çözüm → BU finding'in fix'ini dispatch et; awaitingRerun+anyFixed set → intercept fix sonrası sonraki
+      // finding'e ilerletir. Aşağıdaki concrete-solution dispatch yoluna DÜŞER (return YOK).
+      queue.awaitingRerun = true;
+      queue.anyFixed = true;
+    }
     if (sel === OPT_REANALYZE) {
       const errCtx: ErrorContext = {
         phase: cached.phase,

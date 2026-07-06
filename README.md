@@ -250,6 +250,13 @@ satırlarını silmeniz yeterli.
 çalar — başka bir işle uğraşırken kaçırmazsın. Sağ kenar çubuğundaki **🔊/🔇 Ses**
 butonuyla sesi kapatıp açabilirsin; tercih kalıcıdır (yeniden açılışta da korunur).
 
+**Teker teker sor + "Kodu göster".** Bir kapı (özellikle Faz 13 Güvenlik) aynı anda
+birden çok ayrı sorun bulursa (ör. SQL injection + test parolaları + zafiyetli bir
+kütüphane), hepsini tek karmaşık soruda yığmaz — her **ayrı sorunu tek tek** sorar:
+sorar, seçtiğin çözümü uygular, sonra bir sonrakine geçer. Kodla ilgili bir soruda
+"Detay göster" yanındaki **"Kodu göster"** butonu, ilgili kod parçasını **salt-okunur**
+bir pencerede gösterir (dosya proje kökünün içinden okunur; düzenlenemez).
+
 ## Resimli kullanım kılavuzu
 
 Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü Türkçe bir kullanım
