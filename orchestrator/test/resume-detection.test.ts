@@ -2,11 +2,15 @@
 // iteration-N-start'ı kaçırsa bile resume scope'u state'ten doğru hesaplanmalı.
 
 import { describe, expect, it } from "vitest";
-import { detectInterruptedPhase2To9Pure } from "../src/resume-detection.js";
+import { detectInterruptedPhase2To9Pure, decideBootQueueAction } from "../src/resume-detection.js";
 import type { AuditEvent, State } from "../src/types.js";
 
 function ev(ts: number, event: string): AuditEvent {
   return { ts, phase: 0, event, caller: "mycl-orchestrator" };
+}
+
+function task(status: string, id = "t1"): { id: string; status?: string } {
+  return { id, status };
 }
 
 type S = Pick<
@@ -104,5 +108,51 @@ describe("resume-detection · detectInterruptedPhase2To9Pure", () => {
       ev(5100, "phase-5-complete"), // iter-2'de phase-6-complete YOK
     ];
     expect(detectInterruptedPhase2To9Pure(s, audit)).toEqual({ phaseId: 6 });
+  });
+});
+
+// YZLLM 2026-07-03: decideBootQueueAction — yarım iterasyonu kaldığı fazdan resume et (Faz 1'den koşma).
+describe("resume-detection · decideBootQueueAction (kesinti-resume)", () => {
+  const base = { current_phase: 13, iteration_count: 1, intent_summary: "auth ekle" } as unknown as Parameters<typeof decideBootQueueAction>[0];
+
+  it("(a) running orphan + mid-Faz-13 + intent dolu → resume (kaldığı fazdan)", () => {
+    const r = decideBootQueueAction(base, [task("running")], [ev(1, "phase-12-complete")]);
+    expect(r).toEqual({ kind: "resume", phaseId: 13, taskId: "t1" });
+  });
+
+  it("(b) yalnız pending iş (running orphan yok) → drain (Faz 1'den)", () => {
+    expect(decideBootQueueAction(base, [task("pending")], []).kind).toBe("drain");
+  });
+
+  it("(c) cp=1 + running → resume DEĞİL (detector Faz 1'i kapsamaz) → drain", () => {
+    const s = { ...base, current_phase: 1 } as typeof base;
+    expect(decideBootQueueAction(s, [task("running")], []).kind).toBe("drain");
+  });
+
+  it("(c2) intent_summary boş → resume DEĞİL (mid-Faz-1 clarify checkpoint yok)", () => {
+    const s = { ...base, intent_summary: "" } as typeof base;
+    expect(decideBootQueueAction(s, [task("running")], []).kind).toBe("drain");
+  });
+
+  it("(d) önceki-iter phase-17-complete VAR ama iterasyon-kapsamlı mid-Faz-13 → yine resume (wasPipelineCompleted tuzağı yok)", () => {
+    const s = { ...base, iteration_count: 2, iteration_started_at: 1000 } as typeof base;
+    // phase-17-complete ts=500 (önceki iter, scope öncesi) → iterasyon-kapsamlı detector onu SAYMAZ.
+    const r = decideBootQueueAction(s, [task("running")], [ev(500, "phase-17-complete"), ev(1200, "phase-12-complete")]);
+    expect(r).toEqual({ kind: "resume", phaseId: 13, taskId: "t1" });
+  });
+
+  it("(e) standDown: pending_diagnostic → resume DEĞİL (boot Faz 0 debug re-emit'i işler)", () => {
+    const s = { ...base, pending_diagnostic: { phase: "D2_WAITING" } } as unknown as typeof base;
+    expect(decideBootQueueAction(s, [task("running")], [ev(1, "phase-12-complete")]).kind).toBe("drain");
+  });
+
+  it("(e2) standDown: foreign + pending_ui_review + cp=6 → resume DEĞİL", () => {
+    const s = { current_phase: 6, iteration_count: 1, intent_summary: "x", origin: "foreign", pending_ui_review: true } as unknown as typeof base;
+    expect(decideBootQueueAction(s, [task("running")], []).kind).toBe("drain");
+  });
+
+  it("(f) hiç iş yok → none", () => {
+    expect(decideBootQueueAction(base, [], []).kind).toBe("none");
+    expect(decideBootQueueAction(base, [task("done")], []).kind).toBe("none");
   });
 });

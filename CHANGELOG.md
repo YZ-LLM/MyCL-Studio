@@ -1,5 +1,17 @@
 ## 2026-07-03
 
+- **fix(resume): yarım iterasyonu kapat-aç'ta kaldığı yerden devam + önceki her şeyi hatırla (YZLLM):**
+  İterasyon TAMAMLANMADAN kapatıp açınca MyCL Faz 1'e (Niyet Toplama) dönüp önceki soruları/kararları TEKRAR
+  soruyordu. Kök: `current_phase` doğru persist ediliyordu ama iş-kuyruğu tek-sürücü yarım işi `running` bırakıp
+  `runDevelopIteration` ile koşulsuz Faz 1'den koşuyordu. **Fix A:** yeni saf `decideBootQueueAction`
+  ([resume-detection.ts](orchestrator/src/resume-detection.ts)) — `running` orphan + iterasyon-kapsamlı yarım-faz
+  + intent dolu ise `emitInitialTaskQueue` orphan'ı flip etmeden **kaldığı fazdan devam** eder (yeni iş yine
+  Faz 1'den). **Fix B:** Faz 1/2 netleştirme soru-cevapları iterasyon-kapsamlı kalıcı kaydedilir
+  ([clarify-log.ts](orchestrator/src/clarify-log.ts)) + resume'da "zaten yanıtlandı, tekrar sorma" olarak enjekte
+  edilir (SDK+CLI backend). **Kritik (çapraz-aile mahkemesi, 12 ajan):** task'lar-arası state reset yalnız
+  `wasPipelineCompleted` (tüm-proje) ile gate'liydi → düşen bir işin bayat state'i sonraki işe sızıp yanlış-resume
+  yapabiliyordu; düşen işin state'i + clarify-log'u artık drop anında temizleniyor. GERİYE UYUMLU (yeni iş +
+  clarify-yok bugünkü davranış). npm run check yeşil + birim testler.
 - **feat(hata): gate birden çok DISTINCT sorun bulduğunda TEKER TEKER sor + "Kodu göster" popup (YZLLM):**
   Canlı (Faz 13 Güvenlik) gate 3 ayrı sorun (SQL injection + test parolaları + 3.taraf takvim) bulup hepsini
   TEK birleşik soruda soruyordu. Artık triage `findings[]` döner (her DISTINCT sorun ayrı; ilişkili düşük-seviye

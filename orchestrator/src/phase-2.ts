@@ -28,6 +28,7 @@ import {
   buildConversationContext,
   renderConversationSection,
 } from "./conversation-context.js";
+import { buildClarifyResumeBlock } from "./clarify-log.js";
 import type { PhaseDeps } from "./phase-deps.js";
 import type { PhaseSpec, State } from "./types.js";
 
@@ -208,6 +209,9 @@ export class Phase2Controller {
       return "fail";
     }
     const escMe = escalatedModelEffort(this.state, this.config, "audit");
+    // YZLLM 2026-07-03: yarım iterasyon kapat-aç → bu iterasyonda ZATEN yanıtlanan Faz 2 netleştirme Q&A'sını
+    // enjekte et (clarify-log) → aynı boyut soruları tekrar sorulmaz. Boşsa "" → değişmez (geriye uyumlu).
+    const clarifyResume = await buildClarifyResumeBlock(this.state.project_root, this.state.iteration_count ?? 1);
     this.base = createQaAskqBackend({
       tag: "phase-2",
       state: this.state,
@@ -217,7 +221,7 @@ export class Phase2Controller {
       effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
       initialUserMessage:
-        "Begin Phase 2 Precision Audit. Walk through the 8 dimensions; COMPLIANCE is last.",
+        "Begin Phase 2 Precision Audit. Walk through the 8 dimensions; COMPLIANCE is last." + clarifyResume,
       tools: [TOOL_ASK_CLARIFYING, TOOL_ABANDON, TOOL_COMPLETE],
       askq: this.spec.askq_config,
     });

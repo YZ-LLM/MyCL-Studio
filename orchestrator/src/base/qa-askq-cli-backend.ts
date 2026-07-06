@@ -21,6 +21,7 @@ import { isApiAccountError } from "../claude-api.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
 import { appendHistory } from "../history-loader.js";
+import { recordClarify } from "../clarify-log.js";
 import { localizeOptionLabels, t } from "../i18n.js";
 import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
@@ -107,6 +108,9 @@ receive the user's answer in the next message; continue accordingly (then anothe
 interface PendingAskq {
   options_en: string[];
   options_tr: string[];
+  /** YZLLM 2026-07-03: clarify (allowOther=true) mü onay mı + soru metni — Faz 1/2 clarify-log kaydı için. */
+  is_approval: boolean;
+  question_tr: string;
 }
 
 export class CliQaAskqBackend implements QaAskqBackend {
@@ -122,6 +126,21 @@ export class CliQaAskqBackend implements QaAskqBackend {
     if (!this.pendingAskq || this.currentAskqId !== askqId) {
       emitError("Yanıt geçersiz (soru güncelliğini yitirmiş)", { askqId });
       return;
+    }
+    // YZLLM 2026-07-03: Faz 1/2 NETLEŞTİRME cevabını iterasyon-kapsamlı kalıcı kaydet (clarify-log) → yarım
+    // iterasyon kapat-aç'ta resume aynı soruyu tekrar sormaz. Yalnız clarify (onay değil) + Faz 1/2. fail-soft.
+    if (!this.pendingAskq.is_approval && (this.opts.tag === "phase-1" || this.opts.tag === "phase-2")) {
+      try {
+        recordClarify(this.opts.state.project_root, {
+          ts: Date.now(),
+          iteration: this.opts.state.iteration_count ?? 1,
+          phase: this.opts.tag === "phase-1" ? 1 : 2,
+          question: this.pendingAskq.question_tr,
+          answer: selected_tr,
+        });
+      } catch (e) {
+        log.warn(this.opts.tag, "clarify-log record fail (non-fatal)", e);
+      }
     }
     const resolver = this.pendingResolver;
     this.pendingResolver = null;
@@ -390,7 +409,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
   ): Promise<string> {
     const askqId = randomUUID();
     this.currentAskqId = askqId;
-    this.pendingAskq = { options_en, options_tr };
+    this.pendingAskq = { options_en, options_tr, is_approval: !allowOther, question_tr };
     // Soruyu history'ye yaz (askq card zaten gösteriyor — live chat'e emit etme).
     appendHistory(this.opts.state.project_root, {
       ts: Date.now(),

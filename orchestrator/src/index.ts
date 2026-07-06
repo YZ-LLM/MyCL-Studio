@@ -50,7 +50,8 @@ import {
 import { computeVerdict, eventsSince, type HarnessVerdict } from "./harness-verdict.js";
 import { classifyOpenedFolder, hasDeliverable } from "./phase-1-codebase-probe.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
-import { detectInterruptedPhase2To9Pure } from "./resume-detection.js";
+import { detectInterruptedPhase2To9Pure, decideBootQueueAction } from "./resume-detection.js";
+import { clearClarifyLog } from "./clarify-log.js";
 import { SerialWorkQueue } from "./serial-queue.js";
 import {
   runDast,
@@ -1548,40 +1549,10 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
     const uiTweakHoldsResume = !!runtime.state.pending_ui_tweak && runtime.state.current_phase <= 9;
     // hasPendingQueueWork (yukarıda): bekleyen iş varsa boot-resume ATLA — iş-listesi sürer (duplicate önlenir).
     if (interrupted29 && !uiTweakHoldsResume && !runtime.state.pending_diagnostic && !hasPendingQueueWork) {
-      let phaseId = interrupted29.phaseId;
-      // YZLLM 2026-06-16: spec-gerektiren faza (>4: UI-codegen/DB/TDD/risk) resume edilecek ama iter-spec DOSYASI
-      // YOKSA (devs/_pending silinmiş/temizlenmiş — currentSpecPath dosya-varlığını kontrol etmez) → Faz 4'ten başla
-      // (spec'i devs/_pending'e yeniden üret). Aksi halde Faz 8 "spec.md missing" ile takılırdı — Faz 2+3 per-iter
-      // spec kırılganlığı (spec artık kök yerine devs/_pending'de; o silinirse spec-okuyucular spec bulamaz).
-      if (phaseId > 4) {
-        const specPath = currentSpecPath(runtime.state);
-        const specExists = await import("node:fs/promises").then((m) =>
-          m.access(specPath).then(() => true).catch(() => false),
-        );
-        if (!specExists) {
-          emitChatMessage(
-            "system",
-            `ℹ️ Faz ${phaseId}'in spec'i bulunamadı (devs/ temizlenmiş olabilir) — spec'i yeniden üretmek için Faz 4'ten devam ediyorum.`,
-          );
-          phaseId = 4 as PhaseId;
-        }
-      }
-      // Faz 2/3/4 (spec-üretici/öncesi) resume: boot-resume Faz 1 girişini ATLADIĞI için ensurePendingIterationDir
-      // çağrılmadı → devs/_pending/<ts>/ dizini yoksa Faz 4 spec'i oraya YAZAMAZ (writeFile ENOENT → "boot resume
-      // failed"). Dizini burada garantile (devs/ silinmiş/yeni-resume senaryosu). Fail-soft.
-      if (phaseId <= 4 && runtime.state.iteration_started_at) {
-        await ensurePendingIterationDir(
-          runtime.state.project_root,
-          runtime.state.iteration_started_at,
-        ).catch((e: unknown) =>
-          log.warn("orchestrator", "boot-resume ensurePendingIterationDir failed", e),
-        );
-      }
-      emitChatMessage(
-        "system",
-        `📍 Faz ${phaseId} yarıda kalmıştı — kaldığı yerden devam ediyorum.`,
-      );
-      void advanceToNextPhase((phaseId - 1) as PhaseId).catch((e) => {
+      // YZLLM 2026-07-03: resume gövdesi resumeInterruptedPhase'e ÇIKARILDI (kuyruk-güdümlü orphan resume ile
+      // PAYLAŞIMLI). Bu (unbound) çağrı byte-eşdeğer: spec-yok→Faz 4 fallback + ensurePendingIterationDir +
+      // advanceToNextPhase(phaseId-1) + aynı "📍 Faz N yarıda kalmıştı" mesajı helper içinde.
+      void resumeInterruptedPhase(interrupted29.phaseId).catch((e) => {
         log.error("orchestrator", "boot-resume advanceToNextPhase failed", e);
         emitError("Önceki oturum sürdürülemedi", String(e));
       });
@@ -2030,26 +2001,85 @@ async function handleTaskQueueRemove({ id }: { id: string }): Promise<void> {
  * orphan uzlaştırmasından sonra bekleyen iş varsa iş-listesi sürücüsünü ateşle —
  * proje açılışında mevcut işler kendiliğinden sırayla işlenmeye başlar.
  */
+/**
+ * YZLLM 2026-07-03: bir YARIM-kalmış fazdan resume — boot-resume bloğu (unbound) + kuyruk-güdümlü orphan resume
+ * (bound: taskId) bu PAYLAŞIMLI mantığı kullanır. Gövde eski boot-resume satır-içinden BYTE-EŞDEĞER çıkarıldı
+ * (spec-yok→Faz 4 fallback + ensurePendingIterationDir + "📍 Faz N yarıda kalmıştı" mesajı + advanceToNextPhase(phaseId-1)).
+ * taskId verilirse orphan işi bu resume'a bağlar → Faz 17'de onTaskMaybeComplete 'done' damgalar + kalan pending'ler drain.
+ */
+async function resumeInterruptedPhase(
+  phaseId: PhaseId,
+  opts?: { taskId?: string; message?: string },
+): Promise<void> {
+  if (!runtime.state) return;
+  if (opts?.taskId) {
+    runtime.currentTaskId = opts.taskId;
+    _drainTaskId = opts.taskId; // yeşil-son 'done' kurtarması
+    _drainActive = true; // kalan pending'ler resume sonrası drain edilsin
+  }
+  let resolvedPhase = phaseId;
+  // spec-gerektiren faza (>4: UI/DB/TDD/risk) resume ama iter-spec DOSYASI yoksa → Faz 4'ten (spec'i yeniden üret).
+  if (resolvedPhase > 4) {
+    const specPath = currentSpecPath(runtime.state);
+    const specExists = await import("node:fs/promises").then((m) =>
+      m.access(specPath).then(() => true).catch(() => false),
+    );
+    if (!specExists) {
+      emitChatMessage(
+        "system",
+        `ℹ️ Faz ${resolvedPhase}'in spec'i bulunamadı (devs/ temizlenmiş olabilir) — spec'i yeniden üretmek için Faz 4'ten devam ediyorum.`,
+      );
+      resolvedPhase = 4 as PhaseId;
+    }
+  }
+  // Faz 2/3/4 resume: boot Faz 1 girişini atladığı için devs/_pending/<ts>/ dizinini garantile (fail-soft).
+  if (resolvedPhase <= 4 && runtime.state.iteration_started_at) {
+    await ensurePendingIterationDir(
+      runtime.state.project_root,
+      runtime.state.iteration_started_at,
+    ).catch((e: unknown) =>
+      log.warn("orchestrator", "boot-resume ensurePendingIterationDir failed", e),
+    );
+  }
+  emitChatMessage(
+    "system",
+    opts?.message ?? `📍 Faz ${resolvedPhase} yarıda kalmıştı — kaldığı yerden devam ediyorum.`,
+  );
+  await advanceToNextPhase((resolvedPhase - 1) as PhaseId);
+}
+
 async function emitInitialTaskQueue(projectRoot: string): Promise<void> {
   try {
-    let items = await readTasks(projectRoot);
-    // YZLLM 2026-06-15 (iş-listesi-güdümlü): "running" orphan = restart/çökmeyle
-    // yarıda kalmış iş-listesi işi → "pending"e geri al (yeniden-kuyruğa). Kuyruk
-    // onu Faz 1'den yeniden işler; boot-resume devreye girmez (hasPendingQueueWork).
-    // (Terminal fail "dropped" damgasını drain-içi reconcile vurur → sonsuz-retry yok.)
+    const items = await readTasks(projectRoot);
+    // YZLLM 2026-07-03: YARIM iterasyon diskte "running" orphan bırakır. Eskiden körlemesine "pending"e alınıp
+    // runDevelopIteration ile Faz 1'den koşuluyordu → current_phase yoksayılıyor → önceki sorular/kararlar TEKRAR
+    // soruluyordu. Artık: iterasyon MID-FLIGHT ise (running orphan + iterasyon-kapsamlı interrupted-faz + intent dolu)
+    // orphan'ı FLIP ETMEDEN kaldığı fazdan devam et. (Orphan running kaldığından hasPendingQueueWork invariant true →
+    // boot-resume bloğu deterministik stand-down → bu tek-resumer; yarış yok.) Yeni iş (pending) → drain (Faz 1'den).
+    const audit = await readAuditLogTail(projectRoot, 300).catch(() => []);
+    const action = decideBootQueueAction(runtime.state ?? ({} as State), items, audit);
+    if (action.kind === "resume" && runtime.state && runtime.state.project_root === projectRoot) {
+      emit("task_queue_loaded", { items }); // orphan "running" kalır — FLIP ETME
+      await resumeInterruptedPhase(action.phaseId, {
+        taskId: action.taskId,
+        message: `📍 Faz ${action.phaseId} yarıda kalmıştı — kaldığım yerden devam ediyorum (baştan sormuyorum).`,
+      });
+      return;
+    }
+    // "drain"/"none": mevcut davranış — orphan "running" işleri "pending"e geri al, kuyruğu Faz 1'den sür.
     const orphans = items.filter((it) => (it.status ?? "pending") === "running");
     for (const orphan of orphans) {
       await patchTask(projectRoot, orphan.id, { status: "pending" }).catch((e) =>
         log.warn("task-queue", "boot orphan reconcile failed", e),
       );
     }
+    const fresh = orphans.length > 0 ? await readTasks(projectRoot) : items;
     if (orphans.length > 0) {
-      items = await readTasks(projectRoot);
       log.info("orchestrator", "boot: orphan 'running' işler 'pending'e (yeniden-kuyruğa) alındı", {
         count: orphans.length,
       });
     }
-    emit("task_queue_loaded", { items });
+    emit("task_queue_loaded", { items: fresh });
     // Bekleyen iş varsa iş-listesini sırayla işlemeye başla (kullanıcı mesaj
     // göndermeden — iş-listesi kendiliğinden boşalan sıralı kuyruktur).
     await kickWorkQueue();
@@ -3728,6 +3758,25 @@ async function reconcileAndDrainTasks(): Promise<void> {
         const id = runtime.currentTaskId;
         runtime.currentTaskId = null;
         await patchTask(root, id, { status: "dropped" }); // retriable DEĞİL → sonsuz-retry yok
+        // YZLLM 2026-07-03 (mahkeme — kritik): düşen iş BAYAT iterasyon-state'i (current_phase/intent_summary/spec/
+        // iteration_started_at) bırakıyordu → SONRAKİ kuyruk işi bunları devralıp (wasPipelineCompleted reset'i proje-
+        // ömründe ilk tamamlamadan ÖNCE hiç koşmaz) yanlış resume + yanlış clarify-enjeksiyonu yapıyordu (kapat-aç'ta
+        // task2, task1'in terk edilmiş işini task2 etiketiyle sessizce sürdürüyordu). Düşen işin state'ini TEMİZLE →
+        // sonraki iş sıfırdan Faz 1. (Resume yolu bu drop'tan GEÇMEZ; yalnız terminal-fail düşen işlerde tetiklenir.)
+        runtime.state = {
+          ...runtime.state,
+          current_phase: 1,
+          intent_summary: undefined,
+          intent_summary_raw: undefined,
+          iteration_started_at: undefined,
+          spec_approved: false,
+          spec_hash: undefined,
+          needed_phases: undefined,
+          needed_phases_proposed: undefined,
+          updated_at: Date.now(),
+        };
+        await saveState(runtime.state);
+        clearClarifyLog(root); // düşen işin clarify Q&A'sı sonraki işe SIZMASIN
         await emitQueueChangedFor(root);
         emitChatMessage(
           "system",

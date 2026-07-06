@@ -257,6 +257,11 @@ sorar, seçtiğin çözümü uygular, sonra bir sonrakine geçer. Kodla ilgili b
 "Detay göster" yanındaki **"Kodu göster"** butonu, ilgili kod parçasını **salt-okunur**
 bir pencerede gösterir (dosya proje kökünün içinden okunur; düzenlenemez).
 
+**Yarım kalırsa kaldığı yerden devam.** Bir iterasyon tamamlanmadan uygulamayı kapatıp
+açarsan MyCL baştan başlamaz — kaldığı **fazdan** (spec/kod/test/güvenlik…) devam eder ve
+o iterasyonun önceki kararlarını hatırlar. Niyet-toplama (Faz 1/2) soruları da bu iterasyon
+için kalıcı tutulur; yeniden açıldığında zaten yanıtladıklarını **tekrar sormaz**.
+
 ## Resimli kullanım kılavuzu
 
 Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü Türkçe bir kullanım

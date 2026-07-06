@@ -20,6 +20,7 @@ import {
   renderConversationSection,
 } from "./conversation-context.js";
 import { translate } from "./translator.js";
+import { buildClarifyResumeBlock } from "./clarify-log.js";
 import type { PhaseDeps } from "./phase-deps.js";
 import type { PhaseSpec, State } from "./types.js";
 
@@ -166,6 +167,9 @@ export class Phase1Controller {
     }
     // Escalation (YZLLM 2026-06-11): model+efor merdivenden (escalation_rung set ise); değilse eski config[role].
     const escMe = escalatedModelEffort(this.state, this.config, "intent");
+    // YZLLM 2026-07-03: yarım iterasyon kapat-aç → bu iterasyonda ZATEN yanıtlanan netleştirme Q&A'sını enjekte et
+    // (clarify-log). Ajan aynı soruları TEKRAR sormaz, cevapları kullanıp devam eder. Boşsa "" → değişmez (geriye uyumlu).
+    const clarifyResume = await buildClarifyResumeBlock(this.state.project_root, this.state.iteration_count ?? 1);
     this.base = createQaAskqBackend({
       tag: "phase-1",
       state: this.state,
@@ -174,7 +178,7 @@ export class Phase1Controller {
       modelId: escMe.modelId,
       effortOverride: escMe.effort,
       apiKey: this.config.api_keys.main,
-      initialUserMessage: "Begin Phase 1 intent clarification now.",
+      initialUserMessage: "Begin Phase 1 intent clarification now." + clarifyResume,
       tools: [TOOL_ASK_CLARIFYING, TOOL_APPROVE_INTENT],
       askq: this.spec.askq_config,
     });
