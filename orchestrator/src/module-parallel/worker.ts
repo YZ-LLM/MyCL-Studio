@@ -77,7 +77,16 @@ export function makeScopedCodegenWorker(config: MyclConfig, baseState: State): R
           sub: "output",
           text: `codegen: ${outcome.kind}${outcome.kind === "failed" ? ` — ${outcome.reason}` : ""}`,
         });
-        if (outcome.kind === "done") return { ok: true };
+        // ZAMAN-KAYBI PLANI (mahkeme bulgusu YZLLM 2026-07-07): worker'ın KENDİ anchor/doğrulaması YOK (dispatch
+        // yalnız kapsam-çakışması kontrol eder, İÇERİK/tamlık değil). Codegen idle/wall-clock tavanı capped bir
+        // "done" ürettiyse (eksik olabilir) FAIL-CLOSED → seri fallback'e düş (seri yol phase-8 runIntegrityAnchor'ı
+        // koşar). Aksi hâlde doğrulanmamış modül sessizce ana ağaca merge olurdu (KATI #4 sessiz-fallback ihlali).
+        if (outcome.kind === "done") {
+          if (outcome.capped) {
+            return { ok: false, error: "codegen idle/wall-clock tavanı — modül doğrulanmadı (seri fallback)" };
+          }
+          return { ok: true };
+        }
         return { ok: false, error: outcome.kind === "failed" ? outcome.reason : "aborted" };
       } finally {
         emitAgentEvent({ sub: "completed", agent_label: m.id });

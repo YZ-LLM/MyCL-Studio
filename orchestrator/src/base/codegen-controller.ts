@@ -152,7 +152,10 @@ export interface CodegenRunOpts {
 }
 
 export type CodegenOutcome =
-  | { kind: "done"; turns: number }
+  // capped: outcome bir bütçe tavanıyla (idle/wall-clock) GÖRÜNÜR force-conclude edildi (eksik olabilir). Faz 5/8
+  // kendi doğrulaması (anchor/dev-server) hakem olur → çoğu caller bunu yok sayar; AMA kendi doğrulaması OLMAYAN
+  // caller (module-parallel worker) capped'te FAIL-CLOSED olmalı (aksi hâlde doğrulanmamış modül sessizce merge olur).
+  | { kind: "done"; turns: number; capped?: boolean }
   | { kind: "aborted"; turns: number }
   | { kind: "failed"; reason: string };
 

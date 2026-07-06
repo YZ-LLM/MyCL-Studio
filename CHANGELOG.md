@@ -1,3 +1,17 @@
+## 2026-07-07
+
+- **perf(codegen): CLI codegen backend'ine idle + wall-clock zaman bütçesi — 4.8-saat kuyruğunu keser (YZLLM):**
+  Zaman-kaybı tespiti (cave5 19 iterasyon gerçek verisi): Faz 8 TDD codegen medyan 12dk ama MAX **288dk (4.8 saat)**
+  — `codegen/cli-backend.ts`'te HİÇBİR timer yoktu, sınırsız thrashing. `cli-run.ts`'in kanıtlanmış deseni porto
+  edildi: idle (15dk tam çıktı-yok = hung; `--include-partial-messages` ile token delta'ları idle'ı sıfırlar →
+  meşru uzun-düşünme kesilmez) + wall-clock (faz-türüne göre: Faz 8→90dk, Faz 5→60dk, diğer→30dk; medyan×5-8 pay
+  → normal koşuya dokunmaz). Tavan **SESSİZ DEĞİL** (KATI #4): görünür banner + `codegen-budget-cap` audit +
+  `{kind:"done"}` → fazın kendi doğrulaması hakem (Faz 8 `runIntegrityAnchor` → eksik iş `tdd-red` → gate fail →
+  rollback; Faz 5 dev-server+CSP). **Kapsam:** yalnız CLI codegen backend (SDK backend + qa-askq ayrı adımlarda).
+  Çapraz-aile mahkemesi (Sonnet, 6 mercek) 4 bulgu buldu, hepsi düzeltildi: abort-yarışı, onCap settled-guard,
+  eksik `--include-partial-messages` (meşru thinking'i keserdi — YÜKSEK), parallel-module capped-bypass (worker
+  fail-closed → seri fallback). npm run check yeşil + birim testler.
+
 ## 2026-07-06
 
 - **fix(boot): iş kuyruğundan işi alınca "niyet bekliyorum" diye tekrar sorma — kuyruk = tek narrator (YZLLM):**

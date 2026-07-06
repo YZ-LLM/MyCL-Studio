@@ -38,6 +38,7 @@ import {
 import type { CodegenOutcome, CodegenRunOpts } from "../base/codegen-controller.js";
 import type { CodegenBackend } from "./backend.js";
 import { killProcessTree } from "../dev-server-launcher.js";
+import { appendAudit } from "../audit.js";
 import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "../ipc.js";
 import { log } from "../logger.js";
 import { globalConfigDir } from "../paths.js";
@@ -50,6 +51,32 @@ const DISALLOWED_TOOLS = DANGEROUS_BASH_DENY;
 
 /** Codegen'in ihtiyaç duyduğu araçlar (auto-approve allowlist). */
 const ALLOWED_TOOLS = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"];
+
+// ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): CLI codegen'de HİÇBİR timer YOKTU (cli-backend eski notu: "--max-turns YOK")
+// → gerçek veri: Faz 8 medyan 12dk ama MAX 288dk (4.8 saat) sınırsız thrashing. cli-run.ts'teki KANITLANMIŞ deseni
+// (idle reset-on-output + set-once wall-clock) porto ediyoruz. idle = TAM SESSİZLİK (hung); wall-clock = aktif ama
+// patolojik uzun. Eşikler medyan×5-8 pay: normal codegen'e ASLA dokunmaz, yalnız patolojiyi keser. Tavan SESSİZ
+// DEĞİL: görünür banner + `codegen-budget-cap` audit + {kind:"done"} → fazın kendi doğrulaması (Faz 8 anchor / Faz 5
+// dev-server+CSP) GERÇEK durumu belirler (correct-by-construction hakem; eksik iş LOUD fail eder, KATI #4).
+// idle = TAM ÇIKTI-YOK süresi. cli-run.ts (salt-okunur analiz) 10dk kullanır; AMA codegen ajanı `npm install`/`npm
+// test`i tek Bash çağrısında koşar → o sürede stream'e HİÇBİR olay düşmez (install ~10dk sürebilir, Faz 5 install
+// timeout'u 600s). 10dk idle meşru bir build'i kesebilirdi → codegen'e daha cömert 15dk (build'i rahat aşar, gerçek
+// hung'ı yine yakalar; runaway'i zaten wall-clock keser). Correct-by-construction: meşru işi ASLA kesme.
+const CODEGEN_IDLE_MS = 900_000; // 15 dk tam çıktı-yok → hung → sonuçlandır
+
+/** Codegen wall-clock tavanı — faz-türüne göre (tag). Medyan×5-8 pay. */
+export function codegenWallClockMs(tag: string): number {
+  if (tag === "phase-8") return 90 * 60_000; // TDD codegen (medyan ~12dk, patoloji 288dk)
+  if (tag === "phase-5") return 60 * 60_000; // UI codegen (kod-yorumu: 133dk runaway)
+  return 30 * 60_000; // verify-feature / gate-autofix / parallel-module
+}
+
+/** Banner için okunur faz etiketi (tag → TR). */
+function codegenPhaseLabel(tag: string): string {
+  if (tag === "phase-8") return "Faz 8 (TDD kod üretimi)";
+  if (tag === "phase-5") return "Faz 5 (UI kod üretimi)";
+  return `Kod üretimi (${tag})`;
+}
 
 // undefined = henüz çözülmedi; null = bulunamadı; string = mutlak yol.
 let claudePathCache: string | null | undefined;
@@ -250,8 +277,71 @@ export class CliCodegenBackend implements CodegenBackend {
       let numTurns = 0;
       let stderrTail = "";
 
+      // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): idle + wall-clock timer'ları (cli-run.ts deseni). `settled` guard →
+      // tek çözüm; finish() timer'ları temizler + grubu öldürür + tek kez resolve eder (çift-resolve yok).
+      let settled = false;
+      let idleTimer: ReturnType<typeof setTimeout>;
+      let wallTimer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (outcome: CodegenOutcome): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(idleTimer);
+        if (wallTimer) clearTimeout(wallTimer);
+        // STRAY-CLEANUP: claude grup-lideri → -pid grubu (orphan grandchild dev-server dahil) öldürür.
+        if (child.pid) {
+          try {
+            killProcessTree(child.pid);
+          } catch (err) {
+            log.warn("cli-backend", "finish kill failed", err);
+          }
+        }
+        this.child = null;
+        emitClaudeStream({ sub: "stop", text: `cli-${opts.tag} done` });
+        // ABORT HER ZAMAN KAZANIR (mahkeme bulgusu): timer (onCap→done) ile abort() dar yarışında — abort() bu
+        // sürüde settled/timer'a dokunmaz — kullanıcı abort'u yanlışlıkla {kind:"done"}'a düşmesin (rollback+
+        // "phase-8-aborted" yolu korunur). this.aborted senkron set edildiğinden burada güvenle kontrol edilir.
+        resolve(this.aborted && outcome.kind !== "aborted" ? { kind: "aborted", turns: numTurns } : outcome);
+      };
+
+      // Bütçe tavanı → GÖRÜNÜR sonuçlandır (sessiz kesme YOK, KATI #4). {kind:"done"} → fazın kendi doğrulaması
+      // (Faz 8 anchor / Faz 5 dev-server+CSP) gerçek durumu belirler. Yazılan dosyalar diskte kalır (--no-session-
+      // persistence yalnız konuşmayı kaybeder) → yeniden koşuda kaldığı yerden. numTurns closure'dan (fire anındaki).
+      const onCap = (which: "idle" | "wall", ms: number): void => {
+        if (settled) return; // kapanış zaten sonuçlandırdıysa (89:59'da doğal bitiş) yanlış "tavan" banner/audit üretme (mahkeme bulgusu — settled-guard tutarlılığı)
+        const min = Math.round(ms / 60_000);
+        const label = codegenPhaseLabel(opts.tag);
+        log.warn("cli-backend", `codegen ${which}-cap — force-conclude`, { tag: opts.tag, ms, turns: numTurns });
+        emitChatMessage(
+          "system",
+          which === "wall"
+            ? `⏱️ ${label} ${min} dk bütçe tavanına ulaştı (olası takılma/sonsuz döngü) — mevcut haliyle sonuçlandırılıyor; MyCL final testi gerçek durumu belirleyecek. (Yazılan dosyalar diskte kalır.)`
+            : `⏱️ ${label} ${min} dk boyunca hiç çıktı üretmedi (takılma) — mevcut haliyle sonuçlandırılıyor; MyCL final testi gerçek durumu belirleyecek.`,
+        );
+        void appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.state.current_phase,
+          event: "codegen-budget-cap",
+          caller: "mycl-orchestrator",
+          detail: `${opts.tag} ${which}-cap ${min}dk (turns=${numTurns})`,
+        }).catch((e) => log.warn("cli-backend", "budget-cap audit yazılamadı", e));
+        // capped:true → kendi doğrulaması OLMAYAN caller (module-parallel worker) fail-closed olsun (doğrulanmamış
+        // modül sessizce merge olmasın). Faz 5/8 bunu yok sayar (anchor/dev-server zaten hakem).
+        finish({ kind: "done", turns: numTurns, capped: true });
+      };
+
+      const idleMs = CODEGEN_IDLE_MS;
+      const wallMs = codegenWallClockMs(opts.tag);
+      const resetIdle = (): void => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => onCap("idle", idleMs), idleMs);
+      };
+      resetIdle();
+      // Wall-clock: spawn'da BİR kez kurulur, çıktıyla sıfırlanmaz → "sürekli akıtan ama bitmeyen" runaway'i keser.
+      wallTimer = setTimeout(() => onCap("wall", wallMs), wallMs);
+
       const rl = createInterface({ input: child.stdout! });
       rl.on("line", (line) => {
+        resetIdle(); // aktif çıktı → idle sıfırla (yavaş-ama-aktif codegen ölmez; yalnız tam-sessizlik/wall-clock keser)
         const trimmed = line.trim();
         if (!trimmed) return;
         let ev: Record<string, unknown>;
@@ -279,24 +369,21 @@ export class CliCodegenBackend implements CodegenBackend {
 
       child.on("error", (err) => {
         log.error("cli-backend", "spawn error", err);
-        resolve({ kind: "failed", reason: `claude CLI spawn failed: ${String(err)}` });
+        finish({ kind: "failed", reason: `claude CLI spawn failed: ${String(err)}` });
       });
 
       child.on("close", (code) => {
+        if (settled) return; // timer/error zaten sonuçlandırdı (çift-resolve yok)
         // STRAY-CLEANUP: ajanın başlattığı (kuralları çiğneyen) arka-plan orphan'larını süpür —
-        // claude grup-lideri olduğu için -pid grubu temizler. claude zaten çıktı; grup hâlâ canlı
-        // grandchild taşıyorsa onları öldürür (port-çakışması/zombi yok). Best-effort (hata yutulur).
-        if (child.pid) killProcessTree(child.pid);
-        this.child = null;
-        emitClaudeStream({ sub: "stop", text: `cli-${opts.tag} done` });
+        // claude grup-lideri olduğu için -pid grubu temizler (finish içinde de yapılır; burada erken cleanup).
         if (this.aborted) {
-          resolve({ kind: "aborted", turns: numTurns });
+          finish({ kind: "aborted", turns: numTurns });
           return;
         }
         // Başarı: exit 0 + result event'i is_error=false (veya result hiç
         // gelmediyse exit 0'a güven).
         if (code === 0 && (!resultSeen || !resultIsError)) {
-          resolve({ kind: "done", turns: numTurns });
+          finish({ kind: "done", turns: numTurns });
         } else {
           // Auto Mode: hata usage/rate-limit imzası taşıyorsa CLI'yi limitli işaretle (hata-yolu) → fallback.
           const rlErr = detectCliRateLimit(stderrTail);
@@ -306,7 +393,7 @@ export class CliCodegenBackend implements CodegenBackend {
           const transientHint = /529|Overloaded|overloaded_error/i.test(`${this.lastTextTail} ${stderrTail}`)
             ? " :: API 529 Overloaded (transient — geçici sunucu yükü)"
             : "";
-          resolve({
+          finish({
             kind: "failed",
             reason: `claude CLI exit=${code}${stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""}${transientHint}`,
           });
@@ -396,6 +483,11 @@ export class CliCodegenBackend implements CodegenBackend {
       "--output-format",
       "stream-json",
       "--verbose",
+      // KRİTİK (mahkeme bulgusu YZLLM 2026-07-07): partial mesajlar — uzun thinking/sentez turunda token delta'larını
+      // stream'ler. Bu OLMADAN idle-timer meşru uzun-düşünme turunu (effort=max) yanlışlıkla keserdi (o tur bitene
+      // dek stdout'a satır düşmez → resetIdle çağrılmaz). cli-run.ts:94 + cli-session.ts:105 ile PARİTE. handleEvent
+      // yalnız TAM "assistant"ı işler → partial "stream_event"ler yok sayılır (çift parseTestResultMarkers/observer YOK).
+      "--include-partial-messages",
       // v15.14 (YZLLM canlı-test 0620): `acceptEdits` yalnız Write/Edit'i oto-onaylar,
       // Bash'i DEĞİL. Borulu/bileşik Bash (`cat x 2>&1 | head`) Claude Code'da her
       // alt-komut için ayrı izin kontrolü doğurur → non-interaktif stream-json'da
