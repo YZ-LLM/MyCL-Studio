@@ -68,16 +68,47 @@ describe("classifyProjectType (abonelik / CLI text-JSON)", () => {
     expect(cliMock).toHaveBeenCalledTimes(1);
   });
 
-  it("CLI fail → unknown (fail-soft)", async () => {
-    cliMock.mockResolvedValueOnce({ ok: false, text: "", toolUses: [], turns: 0, error: "x" });
+  it("CLI fail (HER İKİ deneme) → unknown (fail-soft, bir kez retry sonrası)", async () => {
+    cliMock.mockResolvedValue({ ok: false, text: "", toolUses: [], turns: 0, error: "x" });
     const r = await classifyProjectType(cfg, SUMMARY);
     expect(r.project_type).toBe("unknown");
+    expect(cliMock).toHaveBeenCalledTimes(2); // geçici hata → bir kez yeniden dener, sonra fail-soft
   });
 
-  it("blok yok → unknown (fail-soft)", async () => {
-    cliMock.mockResolvedValueOnce({ ok: true, text: "düz metin, json yok", toolUses: [], turns: 1 });
+  it("blok yok (HER İKİ deneme) → unknown (fail-soft, bir kez retry sonrası)", async () => {
+    cliMock.mockResolvedValue({ ok: true, text: "düz metin, json yok", toolUses: [], turns: 1 });
     const r = await classifyProjectType(cfg, SUMMARY);
     expect(r.project_type).toBe("unknown");
+    expect(cliMock).toHaveBeenCalledTimes(2);
+  });
+
+  // YZLLM 2026-07-07 (canlı cave5 fix): geçici "no project_type block" glitch'i bir kez retry ile KURTARILIR.
+  // Aynı proje 5× "web" sınıflandı ama bir kez blok gelmedi → unknown → yanlış UI-atlama riski. Retry bunu yutar.
+  it("geçici glitch (1. deneme blok yok, 2. deneme geçerli) → retry ile KURTARIR", async () => {
+    cliMock
+      .mockResolvedValueOnce({ ok: true, text: "model preamble, blok yok bu sefer", toolUses: [], turns: 1 })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: `{"kind":"project_type","project_type":"web","has_database":true,"ui_complexity":"moderate"}`,
+        toolUses: [],
+        turns: 1,
+      });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.project_type).toBe("web"); // unknown DEĞİL — retry kurtardı
+    expect(r.has_database).toBe(true);
+    expect(cliMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("geçerli ilk denemede → retry YOK (tek çağrı)", async () => {
+    cliMock.mockResolvedValueOnce({
+      ok: true,
+      text: `{"kind":"project_type","project_type":"api","has_database":true}`,
+      toolUses: [],
+      turns: 1,
+    });
+    const r = await classifyProjectType(cfg, SUMMARY);
+    expect(r.project_type).toBe("api");
+    expect(cliMock).toHaveBeenCalledTimes(1); // başarı → gereksiz retry yok
   });
 
   it("geçersiz project_type değeri → unknown ama has_database korunur", async () => {

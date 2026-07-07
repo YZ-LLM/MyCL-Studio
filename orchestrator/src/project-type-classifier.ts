@@ -130,7 +130,10 @@ async function classifyViaCli(
   summary: string,
 ): Promise<ProjectClassification> {
   const model = config.selected_models.translator;
-  try {
+  // Tek deneme: cli çağır + JSON bloğunu ayrıştır. GEÇİCİ glitch (cli !ok / blok yok — model çıktısını beklenen
+  // tek-JSON formatında üretmedi) → null döndür (caller BİR KEZ yeniden dener). Geçerli tip → sonuç; geçersiz tip
+  // (blok geldi ama VALID_TYPES dışı) → model gerçekten karar veremedi (retry aynı sonucu verir) → degraded dön.
+  const attempt = async (): Promise<ProjectClassification | null> => {
     const res = await runClaudeCli({
       systemPrompt: SYSTEM_PROMPT + CLI_JSON_INSTRUCTION,
       userMessage: summary,
@@ -139,13 +142,13 @@ async function classifyViaCli(
       timeoutMs: 120_000,
     });
     if (!res.ok) {
-      log.warn("project-type-classifier", "cli failed (fail-soft)", { error: res.error });
-      return { project_type: "unknown" };
+      log.warn("project-type-classifier", "cli failed (retry edilebilir)", { error: res.error });
+      return null;
     }
     const block = extractKindBlock(res.text, ["project_type"]);
     if (!block) {
-      log.warn("project-type-classifier", "cli: no project_type block (fail-soft)");
-      return { project_type: "unknown" };
+      log.warn("project-type-classifier", "cli: no project_type block (retry edilebilir)");
+      return null;
     }
     const raw = block.project_type;
     const hasDb = typeof block.has_database === "boolean" ? block.has_database : undefined;
@@ -158,12 +161,24 @@ async function classifyViaCli(
       });
       return { project_type: raw as ProjectType, has_database: hasDb, ui_complexity: uiComplexity };
     }
+    // Blok geldi ama tip geçersiz → retry-edilmez (model karar veremedi); hasDb/uiComplexity korunarak degraded.
     log.warn("project-type-classifier", "cli: invalid project_type (fail-soft)", { raw });
     return { project_type: "unknown", has_database: hasDb, ui_complexity: uiComplexity };
+  };
+  // YZLLM 2026-07-07 (canlı cave5: AYNI proje 5× "web" sınıflandı ama bir kez "no project_type block" → unknown →
+  // UI-atlama kararı yanlış olabilirdi). relevance sınıflandırıcısındaki (scoreBatchViaCli) KANITLI deseni uygula:
+  // GEÇİCİ format-glitch'i BİR KEZ retry ile yut (Sonnet bile arada tek-JSON bloğunu bozabiliyor). blok-yok/cli-fail
+  // retryable; geçersiz-tip değil (degraded döner). Kalite düşmez — yalnız glitch'e dayanıklılık.
+  try {
+    const first = await attempt();
+    if (first) return first;
+    log.warn("project-type-classifier", "cli glitch → bir kez yeniden deneniyor");
+    const second = await attempt();
+    if (second) return second;
   } catch (err) {
     log.error("project-type-classifier", "cli threw (fail-soft)", err);
-    return { project_type: "unknown" };
   }
+  return { project_type: "unknown" };
 }
 
 /**

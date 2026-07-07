@@ -1,5 +1,15 @@
 ## 2026-07-07
 
+- **fix(proje-tipi): sınıflandırıcı geçici JSON-glitch'te "unknown"a düşmeden ÖNCE bir kez yeniden dener (canlı cave5):**
+  YZLLM canlıda gördü: "⚠️ Proje tipi otomatik belirlenemedi. UI fazları varsayılan olarak çalıştırılacak." Trace
+  ([project-type-classifier.ts](orchestrator/src/project-type-classifier.ts)): AYNI proje (cave5) 07-01/02/05'te 5× **web**
+  sınıflandı ama 07-07'de bir kez `no project_type block` → unknown. Model zayıf DEĞİL (Sonnet 4.6); ama CLI text-JSON
+  modunda yetenekli model bile arada tek-JSON bloğunu bozabiliyor — ve bu sınıflandırıcıda, MyCL'in relevance
+  sınıflandırıcısının aksine, **retry YOKTU** → ilk tökezlemede pes edip "unknown" diyordu. Artık `scoreBatchViaCli`'nin
+  kanıtlı desenini uygular: geçici glitch (cli-fail / blok-yok) → **bir kez yeniden dener**; geçersiz-tip (model gerçekten
+  karar veremedi) retry-edilmez (degraded döner). Fail-soft "unknown"→UI-koş korunur (kalite düşmez, yalnız
+  dayanıklılık). Not: cave5 zaten web → fail-soft doğru düştü, zarar yok; fix gelecekteki yanlış UI-atlama riskini keser.
+  4 birim test eklendi (glitch→retry ile KURTARIR + başarıda retry yok). npm run check yeşil.
 - **perf(gate-eskalasyon): aynı gate bulgusunu iki kez müfettişe gönderme — çift-inceleme dedup (4c, YZLLM zaman-kaybı planı):**
   Bir mekanik gate hatası oto-cevap açıkken İKİ kez çapraz-aile Sonnet müfettişine (tam agentik pass + Bash repro)
   gidiyordu: #1 gate-loop'ta ([index.ts](orchestrator/src/index.ts) `advanceToNextPhaseInner`), #2 `failPhase`'de —
