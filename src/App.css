@@ -1764,3 +1764,33 @@ select:focus {
     box-shadow: 0 0 0 0 rgba(88, 166, 255, 0);
   }
 }
+
+/* CodeModal "Kodu göster" söz dizimi renklendirmesi (YZLLM 2026-07-07) — dark tema (GitHub-dark benzeri; app
+   dark-only). Yalnız class'lı <span> (CSP-güvenli); gutter (satır no) soluk + seçilemez, yalnız kod renklenir. */
+.hl-gutter {
+  color: var(--fg-dim);
+  opacity: 0.5;
+  user-select: none;
+}
+.hl-comment {
+  color: #8b949e;
+  font-style: italic;
+}
+.hl-keyword {
+  color: #ff7b72;
+}
+.hl-string {
+  color: #a5d6ff;
+}
+.hl-number {
+  color: #79c0ff;
+}
+.hl-tag {
+  color: #7ee787;
+}
+.hl-attr {
+  color: #79c0ff;
+}
+.hl-func {
+  color: #d2a8ff;
+}

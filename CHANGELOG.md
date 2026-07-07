@@ -1,5 +1,14 @@
 ## 2026-07-07
 
+- **feat(ui): "Kodu göster" popup'unda söz dizimi renklendirmesi — dile göre, daha okunabilir (YZLLM):**
+  CodeModal düz mono metin gösteriyordu; artık dosya uzantısından dil tespit edilip ([syntax.tsx](src/components/syntax.tsx))
+  renklenir: HTML özel tokenizer (etiket/attr/değer/yorum), diğer diller (JS/TS/CSS/JSON/Python/Go/Rust/Shell/SQL/YAML)
+  ortak soldan-sağa tokenizer (yorum/string/sayı/keyword), bilinmeyen uzantı → düz. Satır-no gutter ayrılıp soluk
+  gösterilir, yalnız kod renklenir; çok-satırlı token (blok yorum / şablon-string / satıra yayılan etiket) doğru dağıtılır.
+  **Dış bağımlılık YOK** (proje dep-minimal) + **CSP-güvenli** (yalnız class'lı `<span>`, eval/CDN yok); renkler
+  `.hl-*` class'ları ([App.css](src/App.css), GitHub-dark benzeri — app dark-only). Tokenizer ASLA throw etmez (hata →
+  düz metin). **Kod-bütünlüğü doğrulandı:** renderToStaticMarkup ile 4 örnek (HTML/JS/Python/bilinmeyen) karakter-karakter
+  girdiyle AYNI (renk eklenir, kod bozulmaz). npm run check yeşil (frontend typecheck + build).
 - **fix(proje-tipi): sınıflandırıcı geçici JSON-glitch'te "unknown"a düşmeden ÖNCE bir kez yeniden dener (canlı cave5):**
   YZLLM canlıda gördü: "⚠️ Proje tipi otomatik belirlenemedi. UI fazları varsayılan olarak çalıştırılacak." Trace
   ([project-type-classifier.ts](orchestrator/src/project-type-classifier.ts)): AYNI proje (cave5) 07-01/02/05'te 5× **web**

@@ -3,6 +3,11 @@
 //
 // GuideModal'i model alır (aynı overlay + dış-tık kapatır + iç panel stopPropagation + "Kapat" header) AMA
 // gövde markdown DEĞİL — düzenlenemeyen mono <pre>. Yalnız CSS değişkenleri kullanılır (dark/light + responsive).
+//
+// YZLLM 2026-07-07: kod artık DİLE GÖRE renklenir (highlightSnippet) — HTML özel, diğer kodlar ortak tokenizer;
+// dosya uzantısından dil tespiti (langFromFile). Renkler .hl-* class'ları (App.css, dark tema). Bilinmeyen → düz.
+
+import { highlightSnippet, langFromFile } from "./syntax.js";
 
 interface CodeRef {
   file: string;
@@ -101,7 +106,7 @@ export function CodeModal({ open, codeRef, onClose }: Props) {
               color: "var(--fg)",
             }}
           >
-            {codeRef.snippet}
+            {highlightSnippet(codeRef.snippet, langFromFile(codeRef.file))}
           </pre>
         </div>
       </div>
