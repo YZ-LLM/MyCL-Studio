@@ -1,5 +1,14 @@
 ## 2026-07-07
 
+- **perf(codegen): SDK codegen'de GÖRÜNÜR force-conclude + TÜM codegen çağıranlarına tur-bütçesi (YZLLM):**
+  SDK codegen backend'i (`codegen-controller.ts` `for(;;)`) maxTurns tavanında eskiden yalnız sessiz `log.warn`
+  ediyordu → şimdi GÖRÜNÜR banner + `codegen-budget-cap` audit + `{kind:"done", capped:true}` (CLI backend ile
+  simetrik; anchor/dev-server hakem). Artık **sınırsız SDK codegen döngüsü kalmadı** — bütün çağıranlar bütçe
+  geçiriyor: Faz 0 (10/18), Faz 5 (30/60), Faz 8 (50/100), gate-autofix/verify-feature/parallel-module (25/50)
+  [soft→max tur]. softTurnBudget'ta ajan "sonuçlandır" nudge'ı alır (bağlam korunur); maxTurns'te force-conclude.
+  CLI backend bu alanları yok sayar (kendi wall-clock'unu kullanır — [#1]). `capped:true` → module-parallel worker
+  fail-closed (seri fallback → seri yol phase-8 anchor'ı koşar). Çapraz-aile mahkemesi doğruladı (bir bayat JSDoc
+  düzeltildi). npm run check yeşil.
 - **perf(codegen): CLI codegen backend'ine idle + wall-clock zaman bütçesi — 4.8-saat kuyruğunu keser (YZLLM):**
   Zaman-kaybı tespiti (cave5 19 iterasyon gerçek verisi): Faz 8 TDD codegen medyan 12dk ama MAX **288dk (4.8 saat)**
   — `codegen/cli-backend.ts`'te HİÇBİR timer yoktu, sınırsız thrashing. `cli-run.ts`'in kanıtlanmış deseni porto

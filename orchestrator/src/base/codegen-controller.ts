@@ -18,6 +18,7 @@ import {
 } from "../history.js";
 import { randomUUID } from "node:crypto";
 import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
+import { appendAudit } from "../audit.js";
 import { autoAnswerPick } from "../auto-answer.js";
 import { log } from "../logger.js";
 import { executeTool, type ToolContext } from "../tool-handlers.js";
@@ -137,14 +138,14 @@ export interface CodegenRunOpts {
    */
   allowed_tool_names?: string[];
   /**
-   * v15.8 (2026-05-30): Turn bütçesi (opt-in — undefined = SINIRSIZ, legacy
-   * davranış korunur; codegen fazları 5/8/9 etkilenmez). Faz 0 D1 (debug
-   * triage) maliyet optimizasyonu için: ajan 88 turn boyunca OS forensiğine
-   * dalmasın.
+   * Turn bütçesi (opt-in — undefined = SINIRSIZ). v15.8 (2026-05-30): önce yalnız Faz 0 D1 (88-turn OS-forensik
+   * tangenti). YZLLM 2026-07-07 (zaman-kaybı planı): SINIRSIZ SDK codegen döngüsü kalmadı — TÜM codegen çağıranları
+   * artık bütçe geçirir: Faz 0 (10/18), Faz 5 (30/60), Faz 8 (50/100), gate-autofix/verify-feature/parallel-module
+   * (25/50). (CLI backend bu alanları YOK SAYAR; kendi wall-clock'unu kullanır — bkz. codegen/cli-backend.ts.)
    *
    * softTurnBudget: bu turn'de (bir kez) budgetNudge tool_result'a eklenir →
    *   ajan elindeki bulgularla sonuçlansın (context korunur).
-   * maxTurns: bu turn'e ulaşılınca loop kesilir (caller force-conclude eder).
+   * maxTurns: bu turn'e ulaşılınca loop GÖRÜNÜR force-conclude eder ({kind:"done", capped:true} + banner + audit).
    */
   softTurnBudget?: number;
   budgetNudge?: string;
@@ -292,12 +293,27 @@ export class CodegenBaseController {
       // caller (Faz 0) elindeki bilgiyle force-conclude eder. Tangent/runaway
       // koruması — sınırsız keşif maliyetini keser.
       if (opts.maxTurns !== undefined && turn >= opts.maxTurns) {
-        log.warn(opts.tag, "max turn budget reached — stopping loop", {
+        log.warn(opts.tag, "max turn budget reached — force-conclude", {
           turn,
           maxTurns: opts.maxTurns,
         });
+        // GÖRÜNÜR force-conclude (YZLLM 2026-07-07, zaman-kaybı planı; KATI #4 — sessiz kesme YOK). Eskiden yalnız
+        // log.warn'du → kullanıcı codegen'in tavanda kesildiğini GÖRMÜYORDU. Banner + codegen-budget-cap audit +
+        // capped:true (module-parallel worker fail-closed olsun). {kind:"done"} → fazın kendi doğrulaması hakem
+        // (Faz 8 runIntegrityAnchor / Faz 5 dev-server+CSP). CLI backend (cli-backend.ts) ile simetrik.
+        emitChatMessage(
+          "system",
+          `⏱️ Faz ${opts.phaseId} kod üretimi ${opts.maxTurns} tur bütçe tavanına ulaştı — mevcut haliyle sonuçlandırılıyor; MyCL final doğrulaması gerçek durumu belirleyecek.`,
+        );
+        void appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.phaseId,
+          event: "codegen-budget-cap",
+          caller: "mycl-orchestrator",
+          detail: `${opts.tag} max-turns-cap ${opts.maxTurns} tur`,
+        }).catch((e) => log.warn(opts.tag, "budget-cap audit yazılamadı", e));
         await clearHistory(opts.state.project_root, opts.phaseId);
-        return { kind: "done", turns: turn };
+        return { kind: "done", turns: turn, capped: true };
       }
       log.info(opts.tag, "turn start", {
         turn,

@@ -59,6 +59,13 @@ export function makeScopedCodegenWorker(config: MyclConfig, baseState: State): R
           toolContext: toolCtx,
           allowed_tool_names: WORKER_TOOLS,
           betas: config.claude_code_flags.betas,
+          // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): SDK (API modu) tur-bütçesi — CLI modunda wall-clock (cli-backend)
+          // zaten sınırlar. Bu OLMADAN API modunda parallel-module worker'ı SINIRSIZ koşar + hiç cap olmadığından
+          // aşağıdaki capped-fail-closed hiç tetiklenmezdi. verify-feature/parallel-module tier'ı (soft 25 → max 50).
+          softTurnBudget: 25,
+          maxTurns: 50,
+          budgetNudge:
+            "⚠ TURN BUDGET: You've used most of your step budget. Do NOT open new directions or refactors — CONCLUDE this module: finish the remaining work within your assigned scope, make sure it builds/tests, then stop.",
           // Tam iz (kör nokta yok): her tool çağrısı modül-etiketiyle .mycl/traces'a.
           observer: async (ctx) => {
             void traceAgentEvent({

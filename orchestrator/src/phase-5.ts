@@ -329,6 +329,12 @@ export class Phase5Controller {
       allowed_tool_names: this.spec.allowed_tools,
       toolContext: toolCtx,
       betas: this.config.claude_code_flags.betas,
+      // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): SDK backend (API modu) tur-bütçesi. CLI backend YOK SAYAR (wall-clock).
+      // softTurnBudget nudge → mevcut UI'yi sonuçlandır; maxTurns LOUD force-conclude → dev-server+CSP hakem.
+      softTurnBudget: 30,
+      maxTurns: 60,
+      budgetNudge:
+        "⚠ TURN BUDGET: You've used most of your step budget. Do NOT open new directions, experiments, or refactors — CONCLUDE the current UI: finish the remaining screens/flows, make sure the app runs, then stop.",
       observer: async (ctx) => {
         // Audit event ismi mode'a göre değişir:
         //   - normal mode + Write → "ui-file-write"

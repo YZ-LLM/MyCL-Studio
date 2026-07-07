@@ -492,6 +492,11 @@ async function runCodegen(
     allowed_tool_names: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
     toolContext: deps.toolCtx,
     betas: deps.config.claude_code_flags.betas,
+    // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): SDK tur-bütçesi (CLI backend zaten wall-clock ile sınırlar).
+    softTurnBudget: 25,
+    maxTurns: 50,
+    budgetNudge:
+      "⚠ TURN BUDGET: Conclude the verification now with your current findings; do not open new directions or refactors.",
   });
   const outcome = await controller.run();
   log.info("verify-feature", "codegen outcome", { kind: outcome.kind });

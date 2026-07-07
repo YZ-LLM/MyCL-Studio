@@ -77,6 +77,12 @@ export async function runGateAutofix(
       // Yalnız okuma + düzenleme; Write/Bash gerekmez (mevcut dosyada minimal edit).
       allowed_tool_names: ["Read", "Edit", "Grep", "Glob"],
       betas: config.claude_code_flags.betas,
+      // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): SDK tur-bütçesi (CLI backend zaten wall-clock ile sınırlar). Odaklı
+      // düzeltme → küçük bütçe. Cap sonrası gate ZATEN yeniden koşulup doğrular (arbiter) → capped false-green yapmaz.
+      softTurnBudget: 25,
+      maxTurns: 50,
+      budgetNudge:
+        "⚠ TURN BUDGET: Wrap up now — apply the minimal fix for the reported errors and stop; do not refactor or explore new directions.",
     });
     const outcome = await backend.run();
     log.info("gate-autofix", "focused fix done", { phaseId, kind: outcome.kind });

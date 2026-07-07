@@ -517,6 +517,13 @@ export class Phase8Controller {
       allowed_tool_names: this.spec.allowed_tools,
       toolContext: toolCtx,
       betas: this.config.claude_code_flags.betas,
+      // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): SDK backend (API modu) tur-bütçesi. CLI backend bunları YOK SAYAR
+      // (kendi wall-clock'unu kullanır). softTurnBudget'ta nudge → ajan mevcut işi sonuçlandırsın (context korunur);
+      // maxTurns'te LOUD force-conclude → anchor hakem. Eşikler runaway'i keser, normal codegen turlarına dokunmaz.
+      softTurnBudget: 50,
+      maxTurns: 100,
+      budgetNudge:
+        "⚠ TURN BUDGET: You've used most of your step budget. Do NOT open new directions, experiments, or refactors — CONCLUDE the current implementation: finish the remaining acceptance criteria, run the tests to GREEN (emit MYCL_TEST_RESULT: green), then stop.",
       observer: (ctx) => this.observeTool(ctx),
       // CLI: ajanın MYCL_TEST_RESULT marker'ı → tdd-green/red audit (per-AC).
       onTestResult: this.cliMode
