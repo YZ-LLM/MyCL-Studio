@@ -1,5 +1,21 @@
 ## 2026-07-07
 
+- **perf(model-yönlendirme): relevance-Opus bug sınıfını koddan sistematik tara + hafif işleri doğru tier'a indir (YZLLM "bunun gibi şeyleri sen koddan tespit et"):**
+  Relevance sınıflandırıcısının Opus'a düşmesi (aşağıda) tek örnekti; iterasyon akışı baştan sona tarandı (3 Explore
+  denetimi) → aynı sınıftan çağrı yerleri Opus/`main`'de koşuyordu (ucuz iş → pahalı model). Düzeltilenler:
+  `subagentModelId` ([config.ts](orchestrator/src/config.ts)) ayarsız `model_tiers`'da `main`(Opus) yerine iş-tier'ın
+  katalog varsayılanına düşer (Faz 0 hipotez fan-out + Faz 5 tasarım paneli — relevance ile AYNI sınıf); mutasyon-probu
+  ([test-validity.ts](orchestrator/src/test-validity.ts)) → balanced; görev-bölücü ([intake.ts](orchestrator/src/task-queue/intake.ts),
+  kodun kendi yorumu "salt sınıflandırma") → classification/balanced; modül-ayrıştırıcı
+  ([decompose.ts](orchestrator/src/module-parallel/decompose.ts) planlama, K1 fail-closed) → orchestration/balanced;
+  distractor üretimi ([spec-comprehension.ts](orchestrator/src/spec-comprehension.ts), şu an ölü kod) + faz-katkı
+  skorlayıcı ([phase-contribution.ts](orchestrator/src/phase-contribution.ts) bilgilendirici rapor) → balanced. Hepsi
+  sağlayıcı-güvenli (z.ai'de `resolveLlmClient`/`glmModelFor` tier'a göre GLM'e eşler; `orchestratorModelId` ile aynı
+  `modelForTier` mekanizması). **Çapraz-aile Sonnet mahkemesi (fail-closed, 3 müfettiş) 2 işi STRONG tuttu:**
+  gate-autofix (CODEGEN — dosya yazar; `codegen→strong` ZORUNLU, zayıf model = daha çok döngü = amacın tersi) +
+  living-docs/module-stock/model-discovery (nadir çalışır = kazanç≈0 ama çıktı ileri fazları/model seçimini besler).
+  Kalite sabit kısıt korundu (balanced = projenin ilan ettiği tam-kalite tabanı, cheap/haiku YOK). npm run check yeşil
+  (subagent-model testi yeni doğru davranışa güncellendi).
 - **perf(relevance): alaka sınıflandırıcısı `main` (Opus 4.8) yerine `translator` (ucuz tier) kullansın — Faz 1 önsözünde ~27s (YZLLM):**
   Canlı trace kanıtı (cave5 iterasyon #30): "Yeni iterasyon başlıyor" ile ana ajanın başlaması arasındaki 38 saniyenin
   ~27'si, geçmiş bağlamı "alakalı mı" diye 0-10 puanlayan **relevance sınıflandırıcısının Opus 4.8 ile** koşmasıydı.

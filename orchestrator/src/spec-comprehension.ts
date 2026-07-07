@@ -8,6 +8,7 @@
 // cevap verdi" diye loglanır — seçilen çeldirici ASLA loglanmaz. Sızarsa sistem saçmalar.
 
 import { runReasoning } from "./llm-reasoning.js";
+import { selectModelForTask } from "./model-catalog.js";
 import { translate } from "./translator.js";
 import type { MyclConfig } from "./config.js";
 import type { PhaseId } from "./types.js";
@@ -69,7 +70,9 @@ async function generateDistractors(
     const r = await runReasoning(config, {
       systemPrompt: sys,
       userMessage: user,
-      modelId: config.selected_models.main,
+      // Sahte-AC (distractor) üretimi hafif iş → Opus (main) gereksiz; balanced tier yeter (üretilemezse kapı zaten
+      // atlanır, yanlış-kabul YOK). NOT: runComprehensionGate şu an devre dışı → bu yol ölü; ileride açılırsa doğru tier.
+      modelId: selectModelForTask("classification", config.selected_models.model_tiers).modelId,
       projectRoot,
       maxTokens: 800,
     });

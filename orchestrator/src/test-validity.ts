@@ -6,6 +6,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runReasoning } from "./llm-reasoning.js";
+import { modelForTier } from "./model-catalog.js";
 import { VERIFY_BEFORE_CLAIM } from "./agent-language.js";
 import { log } from "./logger.js";
 import type { MyclConfig } from "./config.js";
@@ -89,7 +90,9 @@ export async function probeTestValidity(opts: {
     const r = await runReasoning(opts.config, {
       systemPrompt: MUTATE_SYSTEM,
       userMessage: `FILE: ${file}\n\n${orig.slice(0, 9000)}`,
-      modelId: opts.config.selected_models.main,
+      // Tek-satır davranışsal mutasyon üretimi hafif iş — Opus (main) gereksiz. balanced tier yeter; üretilemezse
+      // prob zaten atlanır (checked:false), kaliteyi düşürmez. z.ai'de resolveLlmClient tier'a göre GLM'e eşler.
+      modelId: modelForTier("balanced", opts.config.selected_models.model_tiers).id,
       projectRoot: opts.projectRoot,
       effort: "low",
       maxTokens: 500,

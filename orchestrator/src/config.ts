@@ -490,7 +490,12 @@ export function subagentModelId(models: SelectedModels, role: SubagentRole): str
   if (explicit) return explicit;
   const tierModel = models.model_tiers?.[ROLE_TIER[role]];
   if (tierModel) return tierModel;
-  return models.main;
+  // model_tiers ayarsız (legacy config) → iş-seviyesine göre KATALOG varsayılanı: balanced roller (ux/security/
+  // data/hypothesis) Sonnet, strong roller (architect/synthesizer/verifier) Opus. Eski `models.main` fallback'i
+  // TÜM rolleri Opus'a düşürüyordu (relevance-Opus ile AYNI sınıf bug; Faz 0 hipotez fan-out + Faz 5 tasarım paneli
+  // gereksiz pahalıya koşuyordu). orchestratorModelId ile aynı `modelForTier` mekanizması → z.ai'de resolveLlmClient/
+  // glmModelFor tier'a göre GLM'e eşler (sağlayıcı-güvenli).
+  return modelForTier(ROLE_TIER[role], models.model_tiers).id;
 }
 
 function resolveSelectedModels(file: ConfigFile): SelectedModels {

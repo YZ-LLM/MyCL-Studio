@@ -13,10 +13,10 @@ import { randomUUID } from "node:crypto";
 import { resolveLlmClient } from "../claude-api.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCli } from "../cli-run.js";
-import { backendForRole, orchestratorModelId, type MyclConfig } from "../config.js";
+import { backendForRole, type MyclConfig } from "../config.js";
 import { emitChatMessage, emitClaudeStream } from "../ipc.js";
 import { log } from "../logger.js";
-import { selectEffortForTask } from "../model-catalog.js";
+import { selectEffortForTask, selectModelForTask } from "../model-catalog.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "../tool-policy.js";
 import { appendTask, readTasks, taskStatus } from "./store.js";
 import type { TaskQueueItem } from "./types.js";
@@ -93,7 +93,9 @@ async function splitTasks(
   rawText: string,
   pendingTexts: string[],
 ): Promise<SplitTask[] | null> {
-  const model = orchestratorModelId(config.selected_models);
+  // Salt sınıflandırma (kodun kendi yorumu: "pure classification") → orchestratorModelId (Opus) gereksiz. İş-tipine
+  // göre balanced tier; z.ai'de resolveLlmClient GLM'e eşler. Backend seçimi (cli/api) ayrı — orchestrator rolü.
+  const model = selectModelForTask("classification", config.selected_models.model_tiers).modelId;
   const useCli = backendForRole(config, "orchestrator") === "cli";
   let text: string;
   if (useCli) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { subagentModelId } from "../src/config.js";
+import { modelForTier } from "../src/model-catalog.js";
 import type { SelectedModels } from "../src/config.js";
 
 const base: SelectedModels = { translator: "TR", main: "MAIN" };
@@ -25,11 +26,18 @@ describe("config · subagentModelId (auto-model: yapılacak işe göre)", () => 
     expect(subagentModelId(m, "hypothesis")).toBe("BAL");
   });
 
-  it("model_tiers yoksa / ilgili tier boşsa → main fallback (regresyon yok)", () => {
-    expect(subagentModelId(base, "architect")).toBe("MAIN");
-    expect(subagentModelId({ ...base, model_tiers: {} }, "ux")).toBe("MAIN");
-    // strong set ama balanced değil → balanced rol main'e düşer
-    expect(subagentModelId({ ...base, model_tiers: { strong: "S" } }, "ux")).toBe("MAIN");
-    expect(subagentModelId({ ...base, model_tiers: { strong: "S" } }, "architect")).toBe("S");
+  it("model_tiers yoksa / ilgili tier boşsa → iş-seviyesine göre KATALOG varsayılanı (main/Opus DEĞİL — relevance-Opus bug sınıfı fix)", () => {
+    // ESKİ (buggy) davranış: main'e düşüyordu → balanced roller (ux/security/data/hypothesis) dahil TÜM roller
+    // kullanıcının main modeline (genelde Opus) koşuyordu — relevance sınıflandırıcısının Opus'a düşmesiyle aynı sınıf.
+    // ARTIK: rolün iş-tier'ının katalog varsayılanına düşer (orchestratorModelId ile aynı modelForTier mekanizması).
+    const strongDefault = modelForTier("strong").id;
+    const balancedDefault = modelForTier("balanced").id;
+    expect(strongDefault).not.toBe(balancedDefault); // gerçekten ayrı tier'lar
+    expect(subagentModelId(base, "architect")).toBe(strongDefault); // strong rol → strong katalog default
+    expect(subagentModelId({ ...base, model_tiers: {} }, "ux")).toBe(balancedDefault); // balanced rol → balanced default (main DEĞİL)
+    expect(subagentModelId({ ...base, model_tiers: {} }, "hypothesis")).toBe(balancedDefault);
+    // strong set (config değeri VERBATİM döner) ama balanced boş → balanced rol balanced-default'a (main DEĞİL)
+    expect(subagentModelId({ ...base, model_tiers: { strong: "STRONG" } }, "ux")).toBe(balancedDefault);
+    expect(subagentModelId({ ...base, model_tiers: { strong: "STRONG" } }, "architect")).toBe("STRONG");
   });
 });

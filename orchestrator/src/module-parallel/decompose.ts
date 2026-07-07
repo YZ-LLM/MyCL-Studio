@@ -4,6 +4,7 @@
 // DETERMİNİSTİK doğrular → LLM "bağımsız" diye över ama kapıyı kod geçer. Bölemezse/ayrık değilse → null → SERİ.
 
 import { runReasoning } from "../llm-reasoning.js";
+import { selectModelForTask } from "../model-catalog.js";
 import { extractKindBlock } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
 import { shouldParallelize } from "./independence.js";
@@ -53,7 +54,9 @@ export async function proposeModules(
   const res = await runReasoning(config, {
     systemPrompt: DECOMPOSE_SYSTEM,
     userMessage: `Plan only — do NOT implement. Split this into independent modules:\n\n${request}`,
-    modelId: config.selected_models.main,
+    // Modül ayrıştırma = planlama (kod yazmaz) → Opus (main) gereksiz. orchestration tier (balanced) yeter; sonuç
+    // K1 kapısından (shouldParallelize) fail-closed geçer (ayrık değilse SERİ codegen). z.ai'de GLM'e eşlenir.
+    modelId: selectModelForTask("orchestration", config.selected_models.model_tiers).modelId,
     projectRoot,
   });
   if (!res.ok) return null;
