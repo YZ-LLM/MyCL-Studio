@@ -1,5 +1,16 @@
 ## 2026-07-07
 
+- **perf(faz-9): risk düzeltmelerini İZOLE KOPYALARDA paralel koş + çakışmada mahkeme birleştir (YZLLM):** Faz 9 risk
+  incelemesi ≥2 kod düzeltmesi bulduğunda eskiden bunları TEK TEK (her biri tam Faz 8) seri koşuyordu. Artık
+  ([risk-fix-parallel.ts](orchestrator/src/risk-fix-parallel.ts)) her düzeltme mevcut kodun izole bir KOPYASINDA aynı
+  anda koşar (git worktree DEĞİL — worktree yalnız commit'li kodu görür, pipeline işi commit'siz), değişen dosyalar
+  tam-ağaç farkıyla bulunur (Bash dahil), aynı dosyayı ≥2 fix değiştirdiyse **çapraz-aile mahkemesi** (Sonnet üretici +
+  düşman doğrulayıcı) doğru birleşimi üretir, sonra tüm test takımı bir kez koşulur. **Fail-closed:** worker/silme/büyük
+  dosya/okuma hatası/mahkeme reddi/test kırmızısı → hiçbir kalıcı değişiklik bırakmadan (geri alınır) SERİ (tam
+  test-odaklı) yola düşülür; geri alma kısmen başarısız olursa bozuk taban üstüne otomatik düzeltme YAPILMAZ + görünür
+  uyarı (KATI #4). Bayrak `parallel_risk_fixes` (varsayılan AÇIK, kullanıcı isteği). Çapraz-aile mahkemesi 3 tur (12
+  bulgu düzeltildi: veri-kaybı, sessiz-yutma, Bash-görünmezlik dahil). **Canlıda henüz doğrulanmadı** — ilk gerçek
+  çok-düzeltmeli Faz 9 koşusunda izlenmeli; kapatmak için `parallel_risk_fixes: false`. npm run check yeşil + birim test.
 - **perf(efor): kod üretimi + inceleme fazları max→xhigh (en büyük gecikme kaynağı) — kullanıcı canlıda izler (YZLLM):**
   `selectEffortForTask`'e per-iş efor tavanı: codegen (Faz 5/8) + review (Faz 2/9) → **xhigh** (Claude Code'un kodlama/
   agentik iş için önerdiği varsayılan; max nadiren ek değer katar ama belirgin daha yavaş). Şartname (Faz 4), tasarım

@@ -156,6 +156,7 @@ import { Phase2Controller } from "./phase-2.js";
 import { Phase3Controller } from "./phase-3.js";
 import { Phase4Controller } from "./phase-4.js";
 import { resolveRiskFixTarget } from "./risk-fix-routing.js";
+import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller } from "./phase-5.js";
 import { Phase6Controller } from "./phase-6.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
@@ -3987,8 +3988,45 @@ async function dispatchRiskFixes(
     `🔧 Faz 9 — ${fixes.length} risk "düzelt" işaretlendi; her birini ilgili fazda otomatik düzeltiyorum (UI→Faz 5, DB→Faz 7, kod→Faz 8).`,
   );
 
-  for (let i = 0; i < fixes.length; i++) {
-    const f = fixes[i];
+  // ZAMAN-KAYBI PLANI #6 (YZLLM 2026-07-07, "varsayılan açık, çakışmada mahkeme"): kod-fix'lerini (target 8) İZOLE
+  // KOPYALARDA paralel dene. Başarılıysa o fix'leri seri döngüden çıkar (dosyalar ana ağaca zaten uygulandı);
+  // başarısızsa (worker/mahkeme/konsolide-test) TAM seri (fail-closed). ui/db fix'leri her zaman seri.
+  const routeOf = (f: { fix_phase?: string }) =>
+    resolveRiskFixTarget(f.fix_phase, { skipUi: !!state.skip_ui_phases, noDb: state.has_database === false });
+  let remainingFixes = fixes;
+  if (cfg.features.parallel_risk_fixes !== false) {
+    const codeFixes: CodeFix[] = fixes
+      .filter((f) => routeOf(f).target === 8)
+      .map((f) => ({ detail: (f.detail?.trim() || f.risk).slice(0, 2000), risk: f.risk }));
+    if (codeFixes.length >= 2) {
+      const par = await runParallelRiskFixes(state, cfg, codeFixes).catch((e) => {
+        log.error("orchestrator", "runParallelRiskFixes hata", e);
+        return { ok: false, reason: String(e).slice(0, 120), treeCorrupted: false };
+      });
+      if (par.ok) {
+        emitChatMessage("system", `✅ ${codeFixes.length} kod düzeltmesi PARALEL uygulandı — ${par.reason}`);
+        remainingFixes = fixes.filter((f) => routeOf(f).target !== 8); // kalan: yalnız ui/db (+ skip)
+      } else if (par.treeCorrupted) {
+        // KISMİ GERİ ALMA BAŞARISIZ (mahkeme bulgusu; KATI #4 "dur"): ana ağaçta doğrulanmamış içerik olabilir →
+        // BOZUK taban üstüne otomatik seri düzeltme YAPMA. Kod risk düzeltmelerini seri döngüden ÇIKAR (açık bırak) + LOUD.
+        emitChatMessage(
+          "system",
+          `⛔ Paralel düzeltme geri alınamadı — ana ağaçta ELLE KONTROL gereken dosyalar olabilir (${par.reason}). Kod risk ` +
+            `düzeltmelerini otomatik SÜRDÜRMÜYORUM (bozuk taban üstüne yazmam). Dosyaları kontrol edip 'Çalıştır' ile devam et; ` +
+            `Faz 13/14 kapıları da tarayacak.`,
+        );
+        remainingFixes = fixes.filter((f) => routeOf(f).target !== 8); // kod-fix'leri seri KOŞMA (bozuk taban üstüne yazma)
+      } else {
+        emitChatMessage(
+          "system",
+          `↩️ Paralel düzeltme uygulanmadı (${par.reason}) — tek tek (tam test-odaklı) yola düşüyorum.`,
+        );
+      }
+    }
+  }
+
+  for (let i = 0; i < remainingFixes.length; i++) {
+    const f = remainingFixes[i];
     const detail = (f.detail?.trim() || f.risk).slice(0, 2000);
     // Saf yönlendirme + kapsam koruması (test edilebilir helper'da).
     const route = resolveRiskFixTarget(f.fix_phase, {
@@ -4005,8 +4043,8 @@ async function dispatchRiskFixes(
       emitChatMessage(
         "system",
         route.skipReason === "no-ui"
-          ? `⏭ Risk ${i + 1}/${fixes.length} atlandı — UI riski ama proje UI içermiyor: ${detail.slice(0, 120)}`
-          : `⏭ Risk ${i + 1}/${fixes.length} atlandı — DB riski ama proje veritabanı kullanmıyor: ${detail.slice(0, 120)}`,
+          ? `⏭ Risk ${i + 1}/${remainingFixes.length} atlandı — UI riski ama proje UI içermiyor: ${detail.slice(0, 120)}`
+          : `⏭ Risk ${i + 1}/${remainingFixes.length} atlandı — DB riski ama proje veritabanı kullanmıyor: ${detail.slice(0, 120)}`,
       );
       continue;
     }
@@ -4020,7 +4058,7 @@ async function dispatchRiskFixes(
     const phaseName = target === 5 ? "Faz 5 (UI)" : target === 7 ? "Faz 7 (DB)" : "Faz 8 (kod)";
     emitChatMessage(
       "system",
-      `🔧 Risk ${i + 1}/${fixes.length} → ${phaseName} ile düzeltiliyor: ${detail.slice(0, 160)}`,
+      `🔧 Risk ${i + 1}/${remainingFixes.length} → ${phaseName} ile düzeltiliyor: ${detail.slice(0, 160)}`,
     );
     await appendAuditModule(state.project_root, {
       ts: Date.now(),
@@ -4046,18 +4084,18 @@ async function dispatchRiskFixes(
       const r = await runController(ctrl, () => ctrl.run(), `Risk düzeltiliyor — ${phaseName}`);
       if (r === "complete") {
         state = { ...state, ...ctrl.statePatch };
-        emitChatMessage("system", `✅ Risk ${i + 1}/${fixes.length} düzeltildi (${phaseName}).`);
+        emitChatMessage("system", `✅ Risk ${i + 1}/${remainingFixes.length} düzeltildi (${phaseName}).`);
       } else {
         emitChatMessage(
           "system",
-          `⚠️ Risk ${i + 1}/${fixes.length} düzeltilemedi (${phaseName}) — açık bırakıldı, sonraki riske geçiyorum.`,
+          `⚠️ Risk ${i + 1}/${remainingFixes.length} düzeltilemedi (${phaseName}) — açık bırakıldı, sonraki riske geçiyorum.`,
         );
       }
     } catch (err) {
       log.error("orchestrator", "risk-fix dispatch hata", err);
       emitChatMessage(
         "system",
-        `⚠️ Risk ${i + 1}/${fixes.length} düzeltme hata verdi — açık bırakıldı: ${String(err).slice(0, 120)}`,
+        `⚠️ Risk ${i + 1}/${remainingFixes.length} düzeltme hata verdi — açık bırakıldı: ${String(err).slice(0, 120)}`,
       );
     } finally {
       // Tek-seferlik tüketim: set ettiğim alanı her halükarda temizle (controller atlasa/patlasa bile sızmasın).
