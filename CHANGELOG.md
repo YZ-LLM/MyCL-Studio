@@ -1,5 +1,23 @@
 ## 2026-07-07
 
+- **perf(gate-eskalasyon): aynı gate bulgusunu iki kez müfettişe gönderme — çift-inceleme dedup (4c, YZLLM zaman-kaybı planı):**
+  Bir mekanik gate hatası oto-cevap açıkken İKİ kez çapraz-aile Sonnet müfettişine (tam agentik pass + Bash repro)
+  gidiyordu: #1 gate-loop'ta ([index.ts](orchestrator/src/index.ts) `advanceToNextPhaseInner`), #2 `failPhase`'de —
+  aynı `inspectGateFinding`. #1 ESCALATE hükmü verdiğinde autofix atlanır → `outcome` DEĞİŞMEZ → #2 aynı bulguyu
+  yeniden inceliyordu (redundant Sonnet pass). Artık #1'in escalate hükmü `mechHolder.priorGateRuling` ile failPhase'e
+  taşınır + reuse edilir. **YALNIZ escalate taşınır (fail-closed:** autofix'e değil insana/rapora doğru); `proceed`→
+  autofix→`reOutcome` durumunda outcome değiştiği için taşınmaz → #2 yeni post-autofix hatayı doğru şekilde yeniden
+  inceler. Çapraz-aile Sonnet mahkemesi (3/3 SAFE) davranış-paritesi + **sahte-yeşil YOK** doğruladı ("escalate en
+  muhafazakâr aksiyon — bulgu sessizce yutulmaz, en kötü ihtimalle insana bir tık erken devredilir"). NOT: dedup
+  zinciri için özel regresyon testi yok (failPhase/advanceToNextPhaseInner runtime-bağımlı, test-harness'i yok) →
+  güvence ağır yorumlar + mahkeme + fail-closed tasarım. npm run check yeşil.
+  Aynı denetimde **doğrulanıp ATLANANLAR** (kayıt için): relevance kalıcı-oturum (2a — kalıcı oturum bağlam biriktirir,
+  durumsuz skorlamayı bozar → mahkeme UNSAFE); `readAuditLog`→tail (3a — `keywordPreFilter`'dan önce eski-ama-alakalı
+  audit'i düşürür = recall kaybı, "hiçbir şeyi unutmuyor" ihlali); deep-solve bağlam-tekrarı (4b — carry-forward
+  `priorAttempts` ile ZATEN var; iter≥2 wall-clock kısaltma UNSAFE = Opus sessiz-düşünmeyi öldürür). Gate-eskalasyonun
+  sahte-yeşil-riskli sadeleştirmeleri (deterministik-gate müfettiş-atla / verify-scope / regression-guard-scope) YZLLM
+  kararıyla kapsam dışı. **Sonuç: kaldırılabilir gerçek israf model-yönlendirmeydi (aşağıda); relevance/gate alt-sistemi
+  maliyetleri kalite garantileri için tasarlanmış.**
 - **perf(model-yönlendirme): relevance-Opus bug sınıfını koddan sistematik tara + hafif işleri doğru tier'a indir (YZLLM "bunun gibi şeyleri sen koddan tespit et"):**
   Relevance sınıflandırıcısının Opus'a düşmesi (aşağıda) tek örnekti; iterasyon akışı baştan sona tarandı (3 Explore
   denetimi) → aynı sınıftan çağrı yerleri Opus/`main`'de koşuyordu (ucuz iş → pahalı model). Düzeltilenler:

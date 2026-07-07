@@ -139,7 +139,7 @@ import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { discoverModelsViaWeb, verifyModelCallable } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
-import { inspectGateFinding, mahkemeRuling, inspectClarify, recordMahkemeLesson, type MahkemeAction } from "./inspector.js";
+import { inspectGateFinding, mahkemeRuling, inspectClarify, recordMahkemeLesson, type MahkemeAction, type MahkemeRuling } from "./inspector.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { runPhaseContributionReport } from "./phase-contribution.js";
@@ -502,6 +502,12 @@ interface FailReasonHolder {
   // YZLLM 2026-06-12: fail model+efor tırmanmasıyla düzelebilir mi? false → tırmanma (climb) BOŞA (örn. saf
   // AC-etiketleme/kapsama: kod doğru, model gücü çözmez). Tanımsız → eski davranış (tırmanabilir). Faz 8 set eder.
   lastFailEscalatable?: boolean;
+  // 4c (çift-inceleme dedup, YZLLM zaman-kaybı planı): gate-loop mahkemesi bu bulguyu ZATEN inceleyip escalate
+  // ettiyse + outcome DEĞİŞMEDİYSE (fixRan=false) → failPhase aynı bulguyu YENİDEN incelemesin (redundant Sonnet
+  // agentik pass + Bash repro). #1'in hükmü buraya taşınır; failPhase reuse eder. YALNIZ escalate taşınır
+  // (fail-closed: autofix'e değil insana/rapora doğru; proceed→autofix→reOutcome durumunda outcome DEĞİŞİR →
+  // taşınmaz, failPhase yeni post-autofix hatayı doğru şekilde YENİDEN inceler).
+  priorGateRuling?: { action: MahkemeAction; summary: string };
 }
 function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): string {
   const reason = controller?.lastFailReason;
@@ -1119,20 +1125,30 @@ async function failPhase(
   let mahkemeDiverted = false;
   if (autoResolve && runtime.config.features.inspector_enabled) {
     try {
-      const insp = await inspectGateFinding(runtime.config, {
-        projectRoot: runtime.state.project_root,
-        gateLabel: `Faz ${n}`,
-        errors: ctrl?.lastFailReason ?? message,
-      });
-      const ruling = mahkemeRuling(insp);
-      // TECRÜBE-RECORD (Parça 2): mahkeme kararını derse çevir (sorun→kanıtlı-çözüm→ilke; best-effort).
-      await recordMahkemeLesson({
-        signature: `Faz ${n} ${(ctrl?.lastFailReason ?? message).slice(0, 100)}`,
-        problem: ctrl?.lastFailReason ?? message,
-        result: insp,
-        ruling,
-        ts: Date.now(),
-      });
+      // 4c (çift-inceleme dedup): gate-loop bu bulguyu ZATEN escalate olarak inceleyip mechHolder'a taşıdıysa
+      // (outcome DEĞİŞMEDİ) → yeniden inceleme (tam Sonnet agentik pass + Bash repro) REDUNDANT → #1'in hükmünü
+      // reuse et. Aksi (proceed→reOutcome yeni hata / inceleme koşmadı) normal incele + dersi kaydet (reuse'da #1
+      // zaten kaydetti → çift-kayıt yok). Reuse yalnız escalate → fail-closed (autofix'e değil insana/rapora doğru).
+      let ruling: MahkemeRuling;
+      if (ctrl?.priorGateRuling) {
+        ruling = { convened: true, action: ctrl.priorGateRuling.action, summary: ctrl.priorGateRuling.summary };
+        log.info("orchestrator", "4c: gate-loop mahkeme hükmü reuse edildi (çift-inceleme atlandı)", { phase: n, action: ruling.action });
+      } else {
+        const insp = await inspectGateFinding(runtime.config, {
+          projectRoot: runtime.state.project_root,
+          gateLabel: `Faz ${n}`,
+          errors: ctrl?.lastFailReason ?? message,
+        });
+        ruling = mahkemeRuling(insp);
+        // TECRÜBE-RECORD (Parça 2): mahkeme kararını derse çevir (sorun→kanıtlı-çözüm→ilke; best-effort).
+        await recordMahkemeLesson({
+          signature: `Faz ${n} ${(ctrl?.lastFailReason ?? message).slice(0, 100)}`,
+          problem: ctrl?.lastFailReason ?? message,
+          result: insp,
+          ruling,
+          ts: Date.now(),
+        });
+      }
       if (ruling.convened && ruling.action !== "proceed") {
         // FROZEN-GOAL (escalate-stall fix, canlı Arcelik_BO 2026-06-22): bu noktada otoCevap ZATEN açık
         // (mahkeme yalnız autoResolve=otoCevap iken koşar). Oto-modda askq'da BLOKLAMAK = SESSİZ STALL
@@ -5254,6 +5270,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // ORADA yapılıp ORASI yeniden doğrulanır — geri dönüş yok. Bu yüzden HER mekanik gate fail'inde (yalnız fix_cmd'li
       // lint değil) önce FAZIN İÇİNDE odaklı-minimal düzeltme + gate'i YENİDEN koş. Bir deneme (gateAutofixTried);
       // olmazsa investigate+solve. (Faz 13 güvenlik yukarıda kendi dalında döner — buraya düşmez.)
+      // 4c: gate-loop mahkemesinin escalate hükmünü yakala → failPhase'e taşı (aynı bulguyu iki kez inceleme).
+      let gateLoopEscalateRuling: { action: MahkemeAction; summary: string } | undefined;
       if (
         outcome.kind === "fail" &&
         spec.type === "mechanical" &&
@@ -5287,6 +5305,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             if (ruling.convened) {
               mahkemeAction = ruling.action;
               if (ruling.action === "proceed") mahkemeGuidance = ruling.summary; // B5: gerekçe fix'e taşınır
+              // 4c: escalate → autofix ATLANIR (fixRan=false) → outcome DEĞİŞMEZ → aynı bulgu failPhase'de yeniden
+              // incelenmesin; hükmü mechHolder'a taşı (aşağıda). proceed'de outcome autofix'le değişir → taşınmaz.
+              if (ruling.action === "escalate") gateLoopEscalateRuling = { action: "escalate", summary: ruling.summary };
               emitChatMessage("system", `⚖️ Mahkeme (${ruling.action}): ${ruling.summary}`);
             }
           } catch (e) {
@@ -5378,6 +5399,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         lastFailReason:
           `Faz ${next} (${phaseLabelTR(next, spec)}) başarısız.` +
           (outcome.stderr ? `\n\nThe actual error output (diagnose THIS):\n${outcome.stderr.slice(0, 1500)}` : ""),
+        // 4c: gate-loop escalate hükmü varsa (outcome değişmedi) → failPhase reuse etsin, aynı bulguyu yeniden
+        // Sonnet müfettişe göndermesin. Yoksa (proceed→reOutcome / inceleme koşmadı) failPhase normal inceler.
+        ...(gateLoopEscalateRuling ? { priorGateRuling: gateLoopEscalateRuling } : {}),
       };
       await failPhase(next, mechHolder);
       return;
