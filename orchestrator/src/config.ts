@@ -425,7 +425,11 @@ export function relevanceApiKey(keys: ApiKeys): string {
  * `selected_models.relevance` set ederse onun değeri devreye girer (override).
  */
 export function relevanceModelId(models: SelectedModels): string {
-  return models.relevance ?? models.main;
+  // ZAMAN-KAYBI (YZLLM 2026-07-07, canlı trace kanıtı): relevance/dedup UCUZ bir sınıflandırma işi (chunk'ları
+  // "alakalı mı" diye 0-10 puanla). Eskiden `?? main`e düşüyordu → `relevance` set değilse ana model (Opus 4.8) ile
+  // koşup Faz 1 önsözünde ~27s yakıyordu. classifier.ts yorumu + TASK_RELEVANCE (classification → balanced) daha
+  // ucuz model der. Artık `translator`a düş (dengeli/ucuz tier, Sonnet) → aynı iş çok daha hızlı, kalite tier'ı doğru.
+  return models.relevance ?? models.translator ?? models.main;
 }
 
 /**

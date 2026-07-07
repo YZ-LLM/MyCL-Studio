@@ -1,5 +1,13 @@
 ## 2026-07-07
 
+- **perf(relevance): alaka sınıflandırıcısı `main` (Opus 4.8) yerine `translator` (ucuz tier) kullansın — Faz 1 önsözünde ~27s (YZLLM):**
+  Canlı trace kanıtı (cave5 iterasyon #30): "Yeni iterasyon başlıyor" ile ana ajanın başlaması arasındaki 38 saniyenin
+  ~27'si, geçmiş bağlamı "alakalı mı" diye 0-10 puanlayan **relevance sınıflandırıcısının Opus 4.8 ile** koşmasıydı.
+  Kök: `relevanceModelId` = `relevance ?? main` → `relevance` ayarı boş olduğundan ana modele (Opus 4.8) düşüyordu —
+  oysa hem [classifier.ts](orchestrator/src/relevance/classifier.ts) yorumu ("relevance ?? translator") hem
+  `TASK_RELEVANCE` (classification → balanced) ucuz model der. Artık `relevance ?? translator ?? main` → ucuz/dengeli
+  tier (Sonnet). Kalite düşmez (Sonnet zaten classification'ın DOĞRU tier'ı; Opus fazlalıktı). Aynı düzeltme
+  agent-memory dedup'ını da hızlandırır. npm run check yeşil.
 - **perf(faz-9): risk düzeltmelerini İZOLE KOPYALARDA paralel koş + çakışmada mahkeme birleştir (YZLLM):** Faz 9 risk
   incelemesi ≥2 kod düzeltmesi bulduğunda eskiden bunları TEK TEK (her biri tam Faz 8) seri koşuyordu. Artık
   ([risk-fix-parallel.ts](orchestrator/src/risk-fix-parallel.ts)) her düzeltme mevcut kodun izole bir KOPYASINDA aynı
