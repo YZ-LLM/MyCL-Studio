@@ -1,5 +1,14 @@
 ## 2026-07-07
 
+- **perf(qa-askq): Faz 1/2/9 keşif oturumuna zaman bütçesi — 62dk "niyet toplama"yı keser (YZLLM):**
+  Canlı kanıt: Faz 1 (Niyet) tek oturumda **62 DK** `jQuery|bootstrap` grepledi (soru sormadan) — `runClaudeCliSession`'a
+  wall-clock geçilmiyordu (default 30dk + retry = 62dk). **Fix:** per-tag keşif wall-clock (Faz 1→8dk, Faz 2→12dk,
+  Faz 9→15dk; gerçek medyan 3/5/7.5dk × ~2.5 pay) + per-faz TOPLAM makine-bütçesi (20/30/40dk, oturum-süreleri
+  toplamı, kullanıcı-bekleme hariç, HARD cap). Tavana ulaşınca faz **DÜRÜSTÇE fail** eder + `failPhase`'te qa-askq'ya
+  özel DUR+rehber (deep-solve/error-analysis'e düşüp boşa ~90dk yakmaz, boş-niyetle ilerletmez). **Kalite (çapraz-aile
+  mahkemesi, 3 tur):** graceful-conclude/coerce KIRILGAN çıktı (partial-blok/resume-after-kill/oto-onay) → onun yerine
+  dürüst fail seçildi; ayrıca sentezlenmiş (coerce edilen) onay + vazgeçme artık **her zaman kullanıcıya sorulur**
+  (oto-cevapla sessizce onaylanmaz — sessiz bozuk-niyet önlenir, KATI #4). npm run check yeşil + birim testler.
 - **perf(codegen): SDK codegen'de GÖRÜNÜR force-conclude + TÜM codegen çağıranlarına tur-bütçesi (YZLLM):**
   SDK codegen backend'i (`codegen-controller.ts` `for(;;)`) maxTurns tavanında eskiden yalnız sessiz `log.warn`
   ediyordu → şimdi GÖRÜNÜR banner + `codegen-budget-cap` audit + `{kind:"done", capped:true}` (CLI backend ile

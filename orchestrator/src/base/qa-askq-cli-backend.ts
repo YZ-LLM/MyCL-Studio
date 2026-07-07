@@ -113,6 +113,28 @@ interface PendingAskq {
   question_tr: string;
 }
 
+// ZAMAN-KAYBI PLANI (YZLLM 2026-07-07 + mahkeme): qa-askq keşif oturumu per-tag wall-clock. Canlı kanıt: Faz 1
+// (Niyet) tek oturumda 62 DK `jQuery|bootstrap` grepledi (default 30dk/oturum çok gevşek + retry ile 62dk).
+// Faz-türüne göre SIKI tavan (gerçek medyan×~2.5 pay: normal koşuya dokunmaz — Faz 1 medyan 3dk, Faz 2 5dk, Faz 9
+// 7.5dk). Tavana ulaşınca oturum ölür → faz DÜRÜSTÇE fail eder (mahkeme: partial-blok/coerce/resume kırılgan +
+// coerce edilen niyet oto-onayla sessizce yayılabilirdi → fail + escalation daha güvenli, KATI #4).
+export function qaAskqWallClockMs(tag: string): number {
+  if (tag === "phase-1") return 8 * 60_000; // Niyet (medyan 3dk)
+  if (tag === "phase-2") return 12 * 60_000; // Hassasiyet (medyan 5dk)
+  if (tag === "phase-9") return 15 * 60_000; // Risk incelemesi (medyan 7.5dk)
+  return 30 * 60_000; // diğer qa-askq — mevcut default (değişmez)
+}
+
+// Per-faz TOPLAM makine-bütçesi (mahkeme Bulgu 6): per-oturum wall-clock tek oturumu keser ama ajan her turda
+// tavan-altı keşfedip soru sorarsa maxTurns×tavan SAATLER olurdu. Bu, oturum-süreleri TOPLAMINA (kullanıcı-bekleme
+// hariç) sınır koyar; aşılınca faz dürüstçe fail. Gerçek medyanın ~4-6 katı (normal çok-turlu netleştirmeye yeter).
+export function qaAskqTotalBudgetMs(tag: string): number {
+  if (tag === "phase-1") return 20 * 60_000; // Niyet
+  if (tag === "phase-2") return 30 * 60_000; // Hassasiyet
+  if (tag === "phase-9") return 40 * 60_000; // Risk incelemesi (onlarca Read/Grep)
+  return 60 * 60_000; // diğer
+}
+
 export class CliQaAskqBackend implements QaAskqBackend {
   private pendingAskq: PendingAskq | null = null;
   private pendingResolver: ((selected_tr: string) => void) | null = null;
@@ -191,10 +213,26 @@ export class CliQaAskqBackend implements QaAskqBackend {
     let userMessage = opts.initialUserMessage;
     let noJsonNudges = 0; // JSON yok → örnekli nudge (≤2), sonra prose'tan sentez (takılma yok)
     let fieldNudges = 0; // eksik zorunlu alan → örnekli nudge (≤2), sonra coerce + devam
+    // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07 + mahkeme): per-faz TOPLAM makine-bütçesi. Per-oturum wall-clock tek
+    // oturumu keser ama ajan her turda <tavan keşfedip soru sorarsa maxTurns×tavan = SAATLER olabilirdi (mahkeme
+    // Bulgu 6). totalMachineMs yalnız oturum SÜRELERİNİ toplar (kullanıcı-bekleme HARİÇ — o askClarifying'de, ölçüm
+    // dışında). Aşılırsa faz DÜRÜSTÇE fail (KATI #4 — sessiz coerce YOK).
+    let totalMachineMs = 0;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (this.aborted) return { kind: "aborted" };
+      // TOPLAM makine-bütçesi (mahkeme Bulgu 6): oturum SÜRELERİ toplamı faz tavanını aşarsa DÜRÜSTÇE fail (elle devam).
+      const remainingBudgetMs = qaAskqTotalBudgetMs(opts.tag) - totalMachineMs;
+      if (remainingBudgetMs <= 0) {
+        const reason = `${opts.tag}: keşif toplam zaman bütçesi (${Math.round(qaAskqTotalBudgetMs(opts.tag) / 60_000)} dk) aşıldı — ajan sonuçlandıramadı, elle devam gerekiyor`;
+        emitChatMessage("system", `⏱️ ${reason}.`);
+        return { kind: "failed", reason };
+      }
+      // HARD tavan (mahkeme Bulgu B): bu oturumun wall-clock'u kalan toplam bütçeyi AŞAMAZ → ilan edilen toplam
+      // tavan gerçekten sert (son oturum bir per-oturum kadar taşmaz). Taban 60s (son turda anlamlı iş yapabilsin).
+      const sessionCapMs = Math.max(60_000, Math.min(qaAskqWallClockMs(opts.tag), remainingBudgetMs));
 
+      const _sessionT0 = Date.now();
       const res = await runClaudeCliSession({
         sessionId,
         resume,
@@ -202,6 +240,9 @@ export class CliQaAskqBackend implements QaAskqBackend {
         systemPrompt: resume ? undefined : systemPrompt,
         modelId: opts.modelId,
         cwd: opts.state.project_root,
+        // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): per-tag keşif wall-clock (default 30dk yerine 8/12/15dk) + kalan
+        // toplam bütçeyle sınırlı (hard cap). 62dk Faz 1'i keser.
+        wallClockMs: sessionCapMs,
         // YZLLM 2026-06-13: qa-askq fazları (Faz 1/2/9 niyet/hassasiyet/risk-inceleme) SALT-OKUNUR analizdir →
         // yazma + Bash + alt-ajan (Agent/Task) hepsi yasak. İki kanıtlı kaçış: (1) Bash AÇIKKEN ajan
         // `cat > admin.js << EOF` ile production kodunu EZDİ; (2) Agent çağrılınca alt-ajan üst-kısıta tabi
@@ -217,10 +258,20 @@ export class CliQaAskqBackend implements QaAskqBackend {
         observer: (tu) =>
           emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
       });
+      totalMachineMs += Date.now() - _sessionT0; // yalnız oturum (makine) süresi; kullanıcı-bekleme aşağıda, ölçüm dışı
       if (this.aborted) return { kind: "aborted" };
       if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
       if (!res.ok) {
-        return { kind: "failed", reason: `claude CLI failed: ${res.error ?? "bilinmeyen"}` };
+        // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07 + mahkeme): keşif wall-clock/idle tavanı → DÜRÜST fail (KATI #4 —
+        // sessiz DEĞİL). Ajan sürekli arayıp sonuçlandırmadı; partial metinden otomatik coerce GÜVENLİ DEĞİL
+        // (mahkeme Bulgu 1: coerce edilen niyet oto-onayla sessizce Faz 4'e yayılabilir; Bulgu 3: kill anındaki
+        // yarım blok res.text'e girmez zaten) → faz AÇIKÇA fail eder + escalation/insan. Gerçek hata da fail.
+        const isBudgetCap = /wall-clock|idle timeout/i.test(res.error ?? "");
+        const reason = isBudgetCap
+          ? `${opts.tag}: keşif zaman bütçesi (${Math.round(qaAskqWallClockMs(opts.tag) / 60_000)} dk/oturum) aşıldı — ajan sürekli arama yaptı, sonuçlandıramadı`
+          : `claude CLI failed: ${res.error ?? "bilinmeyen"}`;
+        if (isBudgetCap) emitChatMessage("system", `⏱️ ${reason}.`);
+        return { kind: "failed", reason };
       }
 
       let block = extractKindBlock(res.text, [
@@ -230,6 +281,9 @@ export class CliQaAskqBackend implements QaAskqBackend {
         "tweak",
         "ac_failure",
       ]);
+      // Bu blok coerce/sentez edildi mi (ajanın ham metninden dolduruldu) → düşük güven → onaysa HER ZAMAN kullanıcıya
+      // sorulur, ASLA oto-cevapla otomatik onaylanmaz (mahkeme Bulgu 1: sessiz bozuk-niyet yayılımını önler; KATI #4).
+      let blockSynthesized = false;
       if (block === null) {
         if (noJsonNudges < 2) {
           noJsonNudges++;
@@ -250,6 +304,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
           res.text,
         );
         block = { kind: "approval", ...coerced };
+        blockSynthesized = true; // tümüyle prose'tan sentez → onay HER ZAMAN kullanıcıya sorulur (Bulgu 1)
         emitChatMessage(
           "system",
           `⚠️ ${opts.tag}: ajan yapılandırılmış blok üretmedi; mevcut metinle devam edildi (dolduruldu: ${defaulted.join(", ") || "—"}).`,
@@ -295,6 +350,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
           // v15.12: nudge sonrası hâlâ eksik → takılma yerine coerce + görünür uyarı + devam.
           const { coerced, defaulted } = coerceToSchema(block, schema, res.text);
           block = { ...coerced, kind: block.kind };
+          blockSynthesized = true; // zorunlu alan coerce edildi → düşük güven → onay kullanıcıya sorulur (Bulgu 1)
           emitChatMessage(
             "system",
             `⚠️ ${opts.tag}: '${String(block.kind)}' bloğunda eksik alan vardı — mevcut bilgiyle dolduruldu, devam edildi (${defaulted.join(", ") || "—"}).`,
@@ -309,6 +365,28 @@ export class CliQaAskqBackend implements QaAskqBackend {
         return o;
       };
       if (block.kind === "abandon") {
+        // SENTEZLENMİŞ (düşük-güven) vazgeçme → YIKICI (niyet/spec sıfırlar, Faz 1'e döner) → kullanıcıya SOR
+        // (mahkeme Bulgu A: coerce edilen abandon'ı sessizce çalıştırma; forceUserPrompt=true → oto-cevaba girmez).
+        if (blockSynthesized) {
+          const confirm = await this.emitAndAwait(
+            "Denetim net bir sonuç üretemedi ve 'vazgeç' olarak yorumlandı. Niyeti sıfırlayıp baştan başlayayım mı?",
+            ["Evet, sıfırla", "Hayır, devam et"],
+            ["yes", "no"],
+            false,
+            null,
+            true,
+          ).catch((err) => {
+            if (err === ABORT_SENTINEL) return "__abort__";
+            throw err;
+          });
+          if (confirm === "__abort__") return { kind: "aborted" };
+          if (!/evet|yes/i.test(confirm)) {
+            resume = true;
+            userMessage =
+              "Do NOT abandon. Based on the project snapshot, output a clear ask_clarifying question or an approval block.";
+            continue;
+          }
+        }
         return { kind: "abandoned", abandonInput: dropKind(block) };
       }
       if (block.kind === "tweak") {
@@ -321,7 +399,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
       if (block.kind === "approval") {
         let decision: "approve" | "revise" | "cancel";
         try {
-          decision = await this.askApproval(block);
+          decision = await this.askApproval(block, blockSynthesized);
         } catch (err) {
           if (err === ABORT_SENTINEL) return { kind: "aborted" };
           return { kind: "failed", reason: `approval flow failed: ${String(err)}` };
@@ -381,8 +459,12 @@ export class CliQaAskqBackend implements QaAskqBackend {
     return r.text;
   }
 
-  /** Approval askq: summary TR + suffix, Approve/Revise/Cancel. */
-  private async askApproval(block: Record<string, unknown>): Promise<"approve" | "revise" | "cancel"> {
+  /** Approval askq: summary TR + suffix, Approve/Revise/Cancel. forceUserPrompt: sentezlenmiş/düşük-güven onay →
+   *  oto-cevap baypas edilir, HER ZAMAN kullanıcıya sorulur (mahkeme Bulgu 1). */
+  private async askApproval(
+    block: Record<string, unknown>,
+    forceUserPrompt = false,
+  ): Promise<"approve" | "revise" | "cancel"> {
     const suffixKey = this.opts.askq.approval_suffix_key ?? "generic";
     const summaryField = this.opts.askq.approval_summary_field ?? "summary";
     const summary_en = String(block[summaryField] ?? block.summary ?? block.pitch ?? "");
@@ -391,7 +473,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
     const r = await translate(this.opts.config, summary_en, "en-to-tr");
     const question_tr = `${r.text}${t(`askq.approval_suffix.${suffixKey}`, "tr")}`;
 
-    const selected_tr = await this.emitAndAwait(question_tr, options_tr, options_en, false, null);
+    const selected_tr = await this.emitAndAwait(question_tr, options_tr, options_en, false, null, forceUserPrompt);
     const trIdx = options_tr.indexOf(selected_tr);
     const selected_en = trIdx >= 0 ? options_en[trIdx] : selected_tr;
     if (/^approve$/i.test(selected_en.trim())) return "approve";
@@ -406,6 +488,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
     options_en: string[],
     allowOther: boolean,
     suggested_en: string | null,
+    forceUserPrompt = false,
   ): Promise<string> {
     const askqId = randomUUID();
     this.currentAskqId = askqId;
@@ -433,6 +516,7 @@ export class CliQaAskqBackend implements QaAskqBackend {
     if (
       autoAnswerSuggested() &&
       !isUserPreferenceClarify &&
+      !forceUserPrompt && // sentezlenmiş/düşük-güven onay → oto-cevaba GİRME, kullanıcıya sor (mahkeme Bulgu 1)
       (suggested_option_tr !== undefined || options_tr.length > 0)
     ) {
       const pick = suggested_option_tr ?? options_tr[0]!;

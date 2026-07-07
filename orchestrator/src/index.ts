@@ -1006,6 +1006,19 @@ async function failPhase(
       return; // STOP — proje-fix döngüsüne GİRME.
     }
   }
+  // qa-askq (Faz 1/2/9 niyet/hassasiyet/risk) KEŞİF ZAMAN BÜTÇESİ aşımı (zaman-kaybı planı YZLLM 2026-07-07): ajan
+  // projede çok arama yaptı, sonuçlandıramadı → PROJE/KOD hatası DEĞİL. error-analysis/derin-çözüm ANLAMSIZ
+  // (düzeltilecek kod yok) + boşa ~6×15dk yakar VEYA mahkeme "escalate"iyle BOŞ NİYET ilerletebilir. DUR + net rehber
+  // (KATI #4 sessiz değil; DONMUŞ HEDEF #1 "geç YA DA escalate" → burada escalate=insana yönlendir).
+  if ((n === 1 || n === 2 || n === 9) && /keşif.*zaman bütçesi/i.test(ctrl?.lastFailReason ?? "")) {
+    emitChatMessage(
+      "system",
+      `⏱️ Faz ${n} keşfi zaman bütçesini aştı — ajan projede çok arama yaptı, sonuçlandıramadı. Proje çok büyükse ya ` +
+        `da istek çok genişse **daha net/dar bir istekle 'Çalıştır'** ile tekrar dene. (Kod hatası değil; otomatik ` +
+        `düzeltme/ilerletme YAPMADIM.)`,
+    );
+    return; // STOP — deep-solve/mahkeme/advance YOK (boşa döngü + boş-niyet ilerletme önlenir).
+  }
   // Merdiven KALDIRILDI (YZLLM 2026-06-16 "merdiven kullanmıcaz"): fail'de model yükseltme + aynı-fazı-tekrar YOK.
   // (Canlı kanıt: E2BIG yanlış-pozitifinde 3 tur boşa tırmandı.) Her faz iş-türüne uygun modelle TEK seferde çalışır
   // (escalatedModelEffort). Ortam/abort/API hataları yukarıda zaten return etti; geriye kalan gerçek proje/kod
