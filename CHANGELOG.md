@@ -1,5 +1,12 @@
 ## 2026-07-07
 
+- **perf(efor): kod üretimi + inceleme fazları max→xhigh (en büyük gecikme kaynağı) — kullanıcı canlıda izler (YZLLM):**
+  `selectEffortForTask`'e per-iş efor tavanı: codegen (Faz 5/8) + review (Faz 2/9) → **xhigh** (Claude Code'un kodlama/
+  agentik iş için önerdiği varsayılan; max nadiren ek değer katar ama belirgin daha yavaş). Şartname (Faz 4), tasarım
+  (Faz 3/7) ve hata ayıklama (Faz 0) → **max korunur** (düşünme derinliği kritik). Faz 1 (niyet) zaten high. Kalite
+  sabit kısıt: kullanıcı canlıda izler, bir fazda gerileme görürse o iş max'a geri alınır (kullanıcı seçimi:
+  "efor ayarını yap, canlıda izle"). "Kullanıcı ayarı kral": açık DÜŞÜK config seçimi asla yükseltilmez; **ultracode
+  (bilinçli en-derin) her zaman korunur** (tavanla ezilmez). Birim testler + çapraz-aile mahkemesi. npm run check yeşil.
 - **perf(faz-8): bağımsız düşman testi 15dk wall-clock + `adversarial_tester` bayrağı (YZLLM):** Faz 8 yeşilinde
   kodu kırmaya çalışan bağımsız düşman-test ajanı (2. TAM codegen ajanı) her seferinde koşuyordu; wall-clock'u
   30dk→**15dk** (kuyruğu yarılar, güven-sağlamlaştırma korunur). Yeni `FeatureFlags.adversarial_tester` (default AÇIK,

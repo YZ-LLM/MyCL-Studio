@@ -121,11 +121,18 @@ describe("TRANSLATOR_MODEL (YZLLM: sabit hızlı çeviri modeli — değiştiril
 
 // 2026-06-10 (YZLLM: "efor seçimi de otomatik; kolay işte max gereksiz düşünüyor; en küçük hata istemem").
 describe("selectEffortForTask (oto-efor — kaliteli hız)", () => {
-  it("KALİTE-kritik işler config eforunu AYNEN alır (tam düşünme, dokunulmaz)", () => {
-    for (const k of ["codegen", "spec", "design", "review", "debug"] as const) {
-      expect(selectEffortForTask(k, "max")).toBe("max");
+  // 2026-07-07 (YZLLM zaman-kaybı planı, "efor ayarını yap canlıda izle"): codegen/review → xhigh tavanı; spec/design/
+  // debug → max korunur; ultracode (bilinçli en-derin) her zaman korunur.
+  it("codegen/review → xhigh (max→xhigh); spec/design/debug → max korunur; ultracode korunur", () => {
+    for (const k of ["codegen", "review"] as const) {
+      expect(selectEffortForTask(k, "max")).toBe("xhigh"); // en büyük gecikme kaynağı → xhigh (önerilen)
+      expect(selectEffortForTask(k, undefined)).toBe("xhigh"); // config yok → max tabanı → xhigh
+      expect(selectEffortForTask(k, "ultracode")).toBe("ultracode"); // bilinçli en-derin → EZİLMEZ
+    }
+    for (const k of ["spec", "design", "debug"] as const) {
+      expect(selectEffortForTask(k, "max")).toBe("max"); // düşünme derinliği kritik → max korunur
       expect(selectEffortForTask(k, "ultracode")).toBe("ultracode");
-      expect(selectEffortForTask(k, undefined)).toBe("max"); // config yok → max
+      expect(selectEffortForTask(k, undefined)).toBe("max");
     }
   });
   it("hafif/sık işler high TAVANINA çekilir (max → high; gereksiz düşünme yok)", () => {
@@ -138,9 +145,11 @@ describe("selectEffortForTask (oto-efor — kaliteli hız)", () => {
   it("kullanıcının bilinçli DÜŞÜK seçimi yükseltilmez (ekonomi tercihi)", () => {
     expect(selectEffortForTask("orchestration", "medium")).toBe("medium");
     expect(selectEffortForTask("intent", "high")).toBe("high");
+    expect(selectEffortForTask("codegen", "high")).toBe("high"); // high < xhigh tavanı → korunur (yükseltmez)
   });
-  it("geçersiz config eforu → güvenli max tabanı", () => {
-    expect(selectEffortForTask("codegen", "bozuk-değer")).toBe("max");
+  it("geçersiz config eforu → güvenli max tabanı, sonra per-iş tavanı", () => {
+    expect(selectEffortForTask("codegen", "bozuk-değer")).toBe("xhigh"); // geçersiz → max tabanı → codegen tavanı xhigh
+    expect(selectEffortForTask("spec", "bozuk-değer")).toBe("max"); // spec tavansız → max
   });
 });
 

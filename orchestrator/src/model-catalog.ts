@@ -322,16 +322,34 @@ function isEffortChoice(v: unknown): v is EffortChoice {
   return typeof v === "string" && v in EFFORT_RANK;
 }
 
+// ZAMAN-KAYBI PLANI (YZLLM 2026-07-07, "efor ayarını yap, canlıda izle"): strong-tier işlerde per-iş efor tavanı.
+// Kod üretimi (codegen) + inceleme (review) → xhigh: Claude Code'un kodlama/agentik iş için ÖNERDİĞİ varsayılan;
+// max nadiren ek değer katar ama belirgin daha yavaştır (en büyük gecikme kaynağı). Şartname (spec) + tasarım
+// (design) + hata ayıklama (debug) → tavan YOK → max korunur (düşünme derinliği bu işlerde kritik). Kalite sabit
+// kısıt: kullanıcı canlıda izler, bir işte gerileme görürse o iş max'a geri alınır.
+const STRONG_EFFORT_CEILING: Partial<Record<TaskKind, EffortChoice>> = {
+  codegen: "xhigh",
+  review: "xhigh",
+};
+
 /**
- * İş tipine göre eforu otomatik seç. strong-tier → config eforu aynen (tam düşünme);
- * diğerleri → min(config, "high"). SAF + deterministik.
+ * İş tipine göre eforu otomatik seç. strong-tier → config eforu aynen (tam düşünme), AMA per-iş tavanı varsa min alınır
+ * (codegen/review → xhigh). diğerleri → min(config, "high"). "kullanıcı ayarı kral": açık DÜŞÜK config seçimi asla
+ * yükseltilmez (hep min alınır). SAF + deterministik.
  */
 export function selectEffortForTask(
   taskKind: TaskKind,
   configEffort: string | undefined,
 ): EffortChoice {
   const base: EffortChoice = isEffortChoice(configEffort) ? configEffort : "max";
-  if (TASK_RELEVANCE[taskKind].tier === "strong") return base;
+  if (TASK_RELEVANCE[taskKind].tier === "strong") {
+    // ultracode = kullanıcının BİLİNÇLİ en-derin seçimi (ayrı Claude Code modu) → tavanla EZME ("kullanıcı ayarı
+    // kral"). Tavan yalnız VARSAYILAN max'ı codegen/review'de xhigh'e indirir.
+    if (base === "ultracode") return base;
+    const ceiling = STRONG_EFFORT_CEILING[taskKind];
+    if (ceiling && EFFORT_RANK[base] > EFFORT_RANK[ceiling]) return ceiling;
+    return base;
+  }
   return EFFORT_RANK[base] > EFFORT_RANK.high ? "high" : base;
 }
 
