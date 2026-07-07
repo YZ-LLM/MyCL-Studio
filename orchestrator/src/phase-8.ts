@@ -1152,7 +1152,15 @@ export class Phase8Controller {
       emitChatMessage("system", `✅ Test geçerliliği: testler bozulan davranışı yakaladı (${r.file}) — koruma gerçek.`);
     }
     // Bağımsız düşman-test yazarı (Özellik #2): kodu yazandan AYRI ajan kodu kırmaya çalışır (taraflı-test riski).
-    await runAdversarialTester(this.state, this.config).catch((e: unknown) => log.warn("phase-8", "adversarial tester failed", e));
+    // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): bayrakla kapatılabilir (default AÇIK). Kapalı = "hızlı mod" — 2. tam
+    // ajan koşmaz (kuyruğu kısaltır; güven-sağlamlaştırma güvencesi düşer). Anchor + mutation-probe yine korunur.
+    if (this.config.features.adversarial_tester !== false) {
+      await runAdversarialTester(this.state, this.config).catch((e: unknown) =>
+        log.warn("phase-8", "adversarial tester failed", e),
+      );
+    } else {
+      emitChatMessage("system", "⏭️ Düşman testi kapalı (hızlı mod) — atlandı (anchor + mutasyon-probu yine koşuyor).");
+    }
   }
 
   /**

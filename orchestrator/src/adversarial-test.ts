@@ -85,6 +85,9 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
       allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       disallowedTools: [...SUBAGENT_SPAWN_TOOLS], // test'i KENDİ yazar/koşar; alt-ajan doğurmasın (kaçış + 200+sn donma)
       timeoutMs: 600_000, // YZLLM 2026-06-12: 10 dk idle (çıktı yoksa) — hung'u kurtar; aktif test yazımı/koşumu çıktı akıtır, ölmez
+      // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): 15dk wall-clock (default 30dk yerine). Düşman-test HER Faz 8 yeşilinde
+      // koşan 2. TAM ajan → tavanı yarıya indir (güven-sağlamlaştırma korunur, kuyruğu kısaltır). Bayrakla kapatılabilir.
+      wallClockMs: 900_000,
     });
   } catch (e) {
     log.warn("adversarial-test", "çağrı başarısız", e);

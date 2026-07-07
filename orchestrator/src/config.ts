@@ -201,6 +201,12 @@ export interface FeatureFlags {
    * Türkçe rapor chat'e (kullanıcı gereksiz fazı görüp KENDİ budar). Tek runReasoning çağrısı; varsayılan AÇIK.
    */
   phase_contribution_report?: boolean;
+  /**
+   * Bağımsız DÜŞMAN TESTİ yazarı (adversarial-test.ts): Faz 8 yeşilinde kodu KIRMAYA çalışan ayrı bir ajan.
+   * Güven-sağlamlaştırma (sahte-yeşil panzehiri) — varsayılan AÇIK. `false`: "hızlı mod" — atlanır (kuyruğu kısaltır,
+   * ama düşman-test güvencesi düşer). YZLLM 2026-07-07 (zaman-kaybı planı): her Faz 8 yeşilinde 2. tam ajan koşuyordu.
+   */
+  adversarial_tester?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -208,6 +214,7 @@ const DEFAULT_FEATURES: FeatureFlags = {
   claude_code_cli_enabled: false,
   auto_update_claude: true,
   over_engineering_control: false,
+  adversarial_tester: true,
   // YZLLM 2026-06-21: "mahkeme varsayılan olarak açık olsun." Müfettiş↔orkestratör mahkemesi
   // varsayılan AÇIK (Ayarlar'dan kapatılabilir). Test config'leri inspector_enabled'ı kendileri
   // ayarlar (DEFAULT_FEATURES spread etmeyenler etkilenmez); gate/fix yollarındaki çağrı flag-arkası.

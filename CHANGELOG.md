@@ -1,5 +1,10 @@
 ## 2026-07-07
 
+- **perf(faz-8): bağımsız düşman testi 15dk wall-clock + `adversarial_tester` bayrağı (YZLLM):** Faz 8 yeşilinde
+  kodu kırmaya çalışan bağımsız düşman-test ajanı (2. TAM codegen ajanı) her seferinde koşuyordu; wall-clock'u
+  30dk→**15dk** (kuyruğu yarılar, güven-sağlamlaştırma korunur). Yeni `FeatureFlags.adversarial_tester` (default AÇIK,
+  config'ten kapatılabilir): kapalı = "hızlı mod" — düşman-test atlanır (anchor + mutasyon-probu yine koşar). Kalite:
+  anchor+mutation-probe FARKLI kod durumu koşar, tekilleştirilemez (mahkeme) → dokunulmadı; yalnız düşman-ajan sınırlandı.
 - **perf(qa-askq): Faz 1/2/9 keşif oturumuna zaman bütçesi — 62dk "niyet toplama"yı keser (YZLLM):**
   Canlı kanıt: Faz 1 (Niyet) tek oturumda **62 DK** `jQuery|bootstrap` grepledi (soru sormadan) — `runClaudeCliSession`'a
   wall-clock geçilmiyordu (default 30dk + retry = 62dk). **Fix:** per-tag keşif wall-clock (Faz 1→8dk, Faz 2→12dk,
