@@ -1,3 +1,24 @@
+## 2026-07-08
+
+- **feat(edd): Entegrasyon Driven Define — yabancı projeyi birim-birim TAM anla + belgele (Faz 1 / motor, YZLLM):**
+  Yabancı proje entegre edildiğinde MEVCUT davranışını BİRİM-BİRİM derin analiz eden yeni `orchestrator/src/edd/` modülü.
+  Kod DOĞRU varsayılır — bug arama YOK; amaç MyCL'in projeye tam hakim olması + belgelemesi, böylece sonraki iterasyonlar
+  var olan davranışı bozmadan ilerler. Kanıtlı boşluğun (Faz 8 codegen onboarding bilgisinin hiçbirini almıyordu) temelini
+  kapatır — codegen'e enjeksiyon Faz 2'de.
+  - **enumerate** — dil-agnostik birim listesi (KATI#1: uzantı hardcode yok, binary/boyut sniff'i; MAX_FILES tavanı YOK
+    → tam kapsam; analiz-dışı dosya sessizce atlanmaz, sebeple işaretlenir → "hiçbir şey kaçmasın").
+  - **progress** — `.mycl/edd-progress.jsonl` resumable ledger (append + patch + fold, çökme-toleranslı). Tek doğruluk
+    kaynağı davranış kayıtları; `edd-analysis.md` bundan TÜRETİLİR.
+  - **analyzer** — backend-aware PARİTE (API modu = diğer modlar, fark yok): CLI abonelik VEYA API/z.ai runTurn döngüsü;
+    ikisi de salt-okunur (Read/Grep/Glob; Write/Edit/Bash/alt-ajan yasak). API yolunda executeTool-öncesi sert allowlist
+    (yabancı repo içeriği modele beslendiği için prompt-injection'a karşı kod-seviyesi güvence).
+  - **engine** (`maybeRunEdd`) — enumerate → resume → batch-analiz (poison-pill izolasyonu) → görünür ilerleme →
+    `edd-analysis.md`. Onboarding marker'ından bağımsız + atomik concurrency-guard → kesintide bir sonraki açılışta
+    gerçekten kaldığı yerden devam eder. Tetikler: onboarding sonu (gap'leri bloklamayan fire-and-forget) + her yabancı
+    proje açılışında resume.
+  Çapraz-aile mahkemesi 3 blocker (resumability ulaşılmaz) + major'lar (API salt-okunurluk / rol-key / poison-pill) buldu
+  → hepsi düzeltildi → re-verify RESOLVED. `npm run check` yeşil. Sıradaki: Faz 2 (codegen davranış enjeksiyonu).
+
 ## 2026-07-07
 
 - **feat(ui): "Kodu göster" popup'unda söz dizimi renklendirmesi — dile göre, daha okunabilir (YZLLM):**

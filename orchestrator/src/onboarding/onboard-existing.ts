@@ -25,6 +25,7 @@ import { appendTask } from "../task-queue/store.js";
 import type { TaskQueueItem } from "../task-queue/types.js";
 import { copyProjectToAccessible, isUnderMyclProjeler } from "./copy-to-accessible.js";
 import { snapshotBehaviorBaseline } from "../behavior-baseline.js";
+import { maybeRunEdd } from "../edd/engine.js";
 
 const PROJECT_MAP_REL = join(".mycl", "project-map.json");
 const ONBOARD_REPORT_REL = join(".mycl", "onboarding-report.md");
@@ -429,5 +430,13 @@ export async function runOnboarding(
         await deps.kickQueue().catch((e: unknown) => log.warn("onboarding", "kuyruk tetiklenemedi", e));
       }
     }
+
+    // 6.7 EDD (Entegrasyon Driven Define, YZLLM 2026-07-07): projeyi BİRİM BİRİM derinlemesine anla + belgele
+    //     (mevcut davranış sözleşmeleri → iterasyonlar bozmadan ilerlesin + codegen bilerek karar versin). Tam (miss
+    //     nothing), resumable, API+CLI AYNI, tavansız. FIRE-AND-FORGET (arka planda): gap-kuyruğunu BLOKLAMAZ (mahkeme:
+    //     büyük projede EDD saatlerce sürebilir); codegen o ana kadar analiz-edilen birimleri kullanır (kısmi de değerli).
+    //     KESİNTİDE bir sonraki foreign açılışta handleOpenProject'in maybeRunEdd tetiği DEVAM ettirir (marker'dan
+    //     bağımsız, resumable — mahkeme blocker fix). Concurrency-guard'lı.
+    void maybeRunEdd(config, state);
   }
 }

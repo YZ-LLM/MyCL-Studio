@@ -186,6 +186,7 @@ import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } 
 import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
+import { maybeRunEdd } from "./edd/engine.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
@@ -1668,6 +1669,13 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
       void bootstrapLivingDocs(runtime.state, runtime.config).catch((e: unknown) =>
         log.warn("orchestrator", "living-docs bootstrap failed (non-fatal)", e),
       );
+    }
+
+    // EDD RESUME (mahkeme blocker fix): foreign-origin projede EDD one-time onboarding'e HAPSOLMASIN. Fresh
+    // onboarding HARİÇ (o kendi sonunda tetikler) — her açılışta pending EDD işi varsa maybeRunEdd DEVAM ettirir
+    // (onboarding marker'dan BAĞIMSIZ, resumable, concurrency-guard'lı; tamamlandıysa no-op). Fire-and-forget, bloklamaz.
+    if (!wantOnboard && runtime.config && runtime.state?.origin === "foreign") {
+      void maybeRunEdd(runtime.config, runtime.state);
     }
 
     // Proje haritasını ARKA PLANDA hesapla (open'ı bloklamaz) → orkestratör recall'ı merkezi modülleri görür.
