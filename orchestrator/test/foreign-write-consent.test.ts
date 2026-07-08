@@ -26,6 +26,7 @@ import {
   buildTouchedBehaviorSummary,
   formatTouchedForConsent,
   runForeignWriteConsentGate,
+  confirmForeignWriteFiles,
   resolveForeignWriteConsent,
   isForeignWriteConsentAskqId,
   type TouchedBehavior,
@@ -170,6 +171,39 @@ describe("foreign-write-consent · runForeignWriteConsentGate (gate dalları)", 
     answerQueue = ["Yalnız seçtiklerim", "Uygula", "Atla", "Uygula"];
     const out = await runForeignWriteConsentGate(st, cfg, items(3), { source: "risk-fix" });
     expect(out.map((o) => o.key)).toEqual(["0", "2"]);
+  });
+});
+
+describe("foreign-write-consent · confirmForeignWriteFiles (B1.1 hassas onay)", () => {
+  let root: string;
+  const cfg = {} as MyclConfig;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "fwc-b11-"));
+    answerQueue = [];
+    emittedQuestions.length = 0;
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("origin!=='foreign' → true (askq YOK)", async () => {
+    const st = { origin: "mycl", project_root: root } as unknown as State;
+    expect(await confirmForeignWriteFiles(st, cfg, ["src/a.ts"])).toBe(true);
+    expect(emittedQuestions).toHaveLength(0);
+  });
+
+  it("boş dosya listesi → true (askq YOK)", async () => {
+    const st = { origin: "foreign", project_root: root } as unknown as State;
+    expect(await confirmForeignWriteFiles(st, cfg, [])).toBe(true);
+    expect(emittedQuestions).toHaveLength(0);
+  });
+
+  it("foreign 'Uygula' → true; 'İptal' → false", async () => {
+    const st = { origin: "foreign", project_root: root } as unknown as State;
+    answerQueue = ["Uygula"];
+    expect(await confirmForeignWriteFiles(st, cfg, ["src/a.ts", "src/b.ts"])).toBe(true);
+    answerQueue = ["İptal (uygulama)"];
+    expect(await confirmForeignWriteFiles(st, cfg, ["src/a.ts"])).toBe(false);
   });
 });
 

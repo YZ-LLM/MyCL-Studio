@@ -21,6 +21,7 @@ import { selectModelForTask } from "./model-catalog.js";
 import { runReasoning } from "./llm-reasoning.js";
 import { INSPECTOR_MODEL_DEFAULT } from "./inspector.js";
 import { extractKindBlock } from "./cli-json.js";
+import { confirmForeignWriteFiles } from "./foreign-write-consent.js";
 import { resolveMechanicalCmd, isMissingCommand } from "./base/mechanical-runner.js";
 import { emitAgentEvent, emitChatMessage, emitError } from "./ipc.js";
 import { withAgentRun } from "./agent-cost-context.js";
@@ -50,6 +51,9 @@ export interface ParallelRiskFixOutcome {
   /** GERİ ALMA KISMEN BAŞARISIZ (mahkeme bulgusu): ana ağaçta doğrulanmamış içerik kalmış olabilir → caller SERİ
    * fallback'i o dosyalara UYGULAMAMALI (bozuk taban üstüne otomatik düzeltme yapmasın), GÖRÜNÜR uyarıp durmalı. */
   treeCorrupted?: boolean;
+  /** B1.1 (foreign): kullanıcı GERÇEK-dosya onayını REDDETTİ → caller SERİ fallback YAPMAMALI (aksi halde aynı
+   * düzeltmeler seri uygulanır = reddi baypas eder); kod-fix'leri ATLA (uygulanmadan bırak). */
+  userRejected?: boolean;
 }
 
 /** Kopyaya alınmayacak dizin adları (ağır / paylaşılmamalı / build çıktısı). */
@@ -429,6 +433,17 @@ export async function runParallelRiskFixes(
         return { ok: false, reason: `mahkeme birleşimi başarısız (${rel}) → seri` };
       }
       toWrite.push({ rel, content: merged, base: baseContent, existed });
+    }
+
+    // 4.5) B1.1 YABANCI-YAZMA HASSAS ONAYI (foreign): B1 kapısı NİYET kapsamıyla sordu; burada GERÇEK dosya listesi
+    // (toWrite) belli → yazımdan ÖNCE kesin dosyalar + EDD-dokunulan davranışla son onay. Red → userRejected (caller
+    // SERİ fallback YAPMAZ; kod-fix atlanır). İzole kopyalar zaten temizlenir → ana ağaç dokunulmadı.
+    if (state.origin === "foreign") {
+      const ok = await confirmForeignWriteFiles(state, cfg, toWrite.map((w) => w.rel));
+      if (!ok) {
+        await cleanup();
+        return { ok: false, userRejected: true, reason: "kullanıcı gerçek-dosya onayını reddetti — kod düzeltmeleri uygulanmadı" };
+      }
     }
 
     // 5) UYGULA → konsolide test → kırmızıysa VEYA yazım/test sırasında HERHANGİ bir hatada TÜM yazılanları base'e

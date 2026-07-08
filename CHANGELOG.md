@@ -1,5 +1,14 @@
 ## 2026-07-08
 
+- **feat(entegre): B1.1 — risk-fix paralel yolunda GERÇEK-dosya hassas onayı (YZLLM):**
+  B1 kapısı risk-fix'leri NİYET kapsamıyla (fix detail'inden çıkarım) onaylatıyordu; paralel yol (`runParallelRiskFixes`)
+  düzeltmeleri izole kopyada koşup ana ağaca UYGULAMADAN önce GERÇEKTEN değişecek dosyaları (`toWrite`) bilir. Yeni
+  `confirmForeignWriteFiles` (foreign-only): kesin dosya listesi + EDD-dokunulan davranışla SON onay ister → "davranış
+  X'i sordum ama Y'yi yazdım" boşluğunu kapatır. **Serial-fallback tuzağı önlendi:** kullanıcı reddederse
+  `ParallelRiskFixOutcome.userRejected` → `dispatchRiskFixes` SERİ fallback YAPMAZ (aksi halde aynı fix'ler seri
+  uygulanıp reddi baypas ederdi); kod-fix'ler uygulanmadan bırakılır. İzole kopyalar temizlenir → ana ağaç dokunulmaz.
+  `origin!=="foreign"`→no-op (byte-aynı). Çapraz-aile mahkemesi SAĞLAM (tuzak-önleme kod-doğrulandı). 18 test. check yeşil.
+
 - **feat(entegre): kategori-farkında oto-cevap — entegre modda YALNIZ güvenli akış kararları oto (Part A, YZLLM):**
   Entegre (foreign) modda oto-cevap eskiden TAMAMEN bastırılıyordu; artık kategori-farkında (kullanıcı isteği "sadece
   emin olduğu konularda"). Yeni SAF `decideAutoAnswer(category, {enabled,suppressed,isApproval,hasSuggestion})`:

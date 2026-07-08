@@ -243,3 +243,51 @@ export async function runForeignWriteConsentGate(
 export function seedFilesFromText(root: string, text: string, extract: (t: string) => string[]): string[] {
   return extract(text).map((p) => (isAbsolute(p) ? p : join(root, p)));
 }
+
+/**
+ * B1.1 HASSAS ONAY (yazımdan hemen önce, GERÇEK dosya listesiyle): risk-fix'lerin PARALEL yolu, düzeltmeleri izole
+ * kopyada koşup ana ağaca UYGULAMADAN önce GERÇEKTEN değişecek dosyaları bilir (toWrite). B1 kapısı NİYET kapsamıyla
+ * (fix detail'inden çıkarım) sordu; bu, "davranış X'i sordum ama Y'yi yazdım" boşluğunu kapatır: kesin dosya listesi +
+ * EDD-dokunulan davranışı gösterip son onay ister. `origin!=="foreign"` → true (no-op). Red → false (caller UYGULAMAZ).
+ */
+export async function confirmForeignWriteFiles(
+  state: State,
+  config: MyclConfig,
+  relFiles: string[],
+): Promise<boolean> {
+  if (state.origin !== "foreign") return true;
+  const files = relFiles.filter(Boolean);
+  if (files.length === 0) return true;
+
+  const root = state.project_root;
+  let byUnit: Map<string, EddUnitRecord>;
+  try {
+    byUnit = await readEddProgress(root);
+  } catch (e) {
+    log.warn("foreign-write-consent", "edd-progress okunamadı (kapsam belirsiz sorulur)", { error: String(e) });
+    byUnit = new Map();
+  }
+  let graph;
+  try {
+    graph = await buildReverseImportGraph(root);
+  } catch (e) {
+    log.warn("foreign-write-consent", "import grafiği kurulamadı (B1.1) — yalnız seed dosyalarla sorulur", { error: String(e) });
+    graph = null;
+  }
+  const absSeeds = files.map((r) => join(root, ...r.split("/")));
+  const affected = graph ? getAffected(graph, absSeeds, 2, root) : [];
+  const touched = buildTouchedBehaviorSummary(byUnit, files, affected);
+  const docWhatTr = new Map<string, string>();
+  for (const t of touched.filter((x) => x.coverage === "documented").slice(0, MAX_DOC_UNITS)) {
+    if (t.what_it_does) docWhatTr.set(t.unit, await trText(config, t.what_it_does));
+  }
+
+  emitChatMessage(
+    "system",
+    `🔐 Entegre mod — risk düzeltmeleri hazır; ana koda UYGULAMADAN ÖNCE kesin dosya listesi (${files.length}):\n` +
+      files.map((f) => `• ${f}`).join("\n") +
+      `\n\n${formatTouchedForConsent(touched, docWhatTr)}`,
+  );
+  const sel = await emitConsentAskq("Bu kesin değişiklikleri uygulayayım mı?", ["Uygula", "İptal (uygulama)"]);
+  return sel === "Uygula";
+}

@@ -4069,6 +4069,11 @@ async function dispatchRiskFixes(
       if (par.ok) {
         emitChatMessage("system", `✅ ${codeFixes.length} kod düzeltmesi PARALEL uygulandı — ${par.reason}`);
         remainingFixes = fixes.filter((f) => routeOf(f).target !== 8); // kalan: yalnız ui/db (+ skip)
+      } else if ("userRejected" in par && par.userRejected) {
+        // B1.1 (foreign): kullanıcı GERÇEK-dosya onayını reddetti → SERİ fallback YAPMA (aksi halde aynı fix'ler seri
+        // uygulanır = reddi baypas eder). Kod-fix'leri ATLA (uygulanmadan bırak); yalnız ui/db seri kalır.
+        emitChatMessage("system", "⏭️ Kod risk düzeltmeleri uygulanmadı — kesin dosya onayını reddettin (var olan kod korunuyor).");
+        remainingFixes = fixes.filter((f) => routeOf(f).target !== 8);
       } else if (par.treeCorrupted) {
         // KISMİ GERİ ALMA BAŞARISIZ (mahkeme bulgusu; KATI #4 "dur"): ana ağaçta doğrulanmamış içerik olabilir →
         // BOZUK taban üstüne otomatik seri düzeltme YAPMA. Kod risk düzeltmelerini seri döngüden ÇIKAR (açık bırak) + LOUD.
