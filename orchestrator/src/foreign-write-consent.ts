@@ -19,7 +19,7 @@ import type { State } from "./types.js";
 import { emitAskq, emitChatMessage } from "./ipc.js";
 import { translate } from "./translator.js";
 import { log } from "./logger.js";
-import { readEddProgress, type EddUnitRecord } from "./edd/progress.js";
+import { readEddProgress, summarizeProgress, type EddUnitRecord } from "./edd/progress.js";
 import { buildReverseImportGraph, getAffected, type AffectedModule } from "./fix/dep-graph/index.js";
 
 const CONSENT_ID_PREFIX = "foreign_write_consent_";
@@ -242,6 +242,54 @@ export async function runForeignWriteConsentGate(
 /** Caller'ın item üretmesi için: metinden dosya seed'lerini (MUTLAK) çıkar. extractFilePaths sarmalayıcısı. */
 export function seedFilesFromText(root: string, text: string, extract: (t: string) => string[]): string[] {
   return extract(text).map((p) => (isAbsolute(p) ? p : join(root, p)));
+}
+
+/**
+ * BİLGİLENDİRME (onay DEĞİL): kullanıcı zaten bir hata için "nasıl ilerleyelim?" (Çöz/Kaydet/…) sorusuyla KARAR verecek;
+ * bu, o düzeltmenin EDD'den dokunacağı BELGELENMİŞ mevcut davranışı gösterir → kullanıcı "Çöz"ü bilerek seçer (foreign,
+ * gate-fail). Yalnız BELGELENMİŞ dokunulan davranış varsa döner (aksi undefined → gürültü ekleme; kullanıcı yine askq ile
+ * karar verir → "kayıt yok=güvenli" çıkarımı yapılmaz, sadece EK BAĞLAM). Non-foreign / EDD yok → undefined.
+ */
+export async function describeTouchedForFiles(
+  state: State,
+  config: MyclConfig,
+  relFiles: string[],
+): Promise<string | undefined> {
+  if (state.origin !== "foreign") return undefined;
+  const files = relFiles.filter(Boolean);
+  if (files.length === 0) return undefined;
+  const root = state.project_root;
+  let byUnit: Map<string, EddUnitRecord>;
+  try {
+    byUnit = await readEddProgress(root);
+  } catch (e) {
+    log.warn("foreign-write-consent", "describeTouchedForFiles: edd-progress okunamadı — bilgilendirme atlandı", { error: String(e) });
+    return undefined;
+  }
+  if (summarizeProgress(byUnit).done === 0) return undefined; // EDD henüz koşmadı → ek bağlam yok
+  let graph;
+  try {
+    graph = await buildReverseImportGraph(root);
+  } catch (e) {
+    log.warn("foreign-write-consent", "describeTouchedForFiles: dep-graph kurulamadı — yalnız seed dosyalarla", { error: String(e) });
+    graph = null;
+  }
+  const absSeeds = files.map((r) => join(root, ...r.split("/")));
+  const affected = graph ? getAffected(graph, absSeeds, 2, root) : [];
+  const touched = buildTouchedBehaviorSummary(byUnit, files, affected);
+  const documented = touched.filter((t) => t.coverage === "documented");
+  if (documented.length === 0) return undefined; // belgelenmiş dokunulan davranış yok → bağlam ekleme
+  const docWhatTr = new Map<string, string>();
+  for (const t of documented.slice(0, MAX_DOC_UNITS)) {
+    if (t.what_it_does) docWhatTr.set(t.unit, await trText(config, t.what_it_does));
+  }
+  // Yalnız belgelenmiş olanları göster; ama DÜRÜST ol (KATI#4/anti-false-safe): bu ALT-SINIR (yalnız belgelenmiş +
+  // statik-import bağımlılıklar; belgelenmemiş/dinamik bağlar görünmez) → kullanıcı listeyi "tam" sanmasın.
+  return (
+    "ℹ️ Bu düzeltme var olan şu davranış(lar)a dokunabilir — bilerek karar ver:\n" +
+    formatTouchedForConsent(documented, docWhatTr) +
+    "\n(Not: bu bilinen/belgelenmiş kısım — tam liste olmayabilir.)"
+  );
 }
 
 /**

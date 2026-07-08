@@ -25,6 +25,7 @@ import { resolveLlmClient, isApiAccountError } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, resolveProvider, zaiKeyForRole, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
+import { describeTouchedForFiles } from "./foreign-write-consent.js";
 import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES, USER_FACING_CLARITY_RULE } from "./agent-language.js";
 import { log } from "./logger.js";
 import type { PhaseId, State } from "./types.js";
@@ -758,6 +759,18 @@ export async function analyzeAndAskError(
         findings: analysis.findings,
         code_ref: headCodeRef,
       };
+    }
+
+    // ENTEGRE-MOD BİLGİLENDİRME (YZLLM 2026-07-08): "nasıl ilerleyelim?" (Çöz/…) SORULMADAN önce, bu düzeltmenin
+    // EDD'den dokunacağı BELGELENMİŞ mevcut davranışı göster → kullanıcı "Çöz"ü bilerek seçer. Foreign + belgelenmiş
+    // dokunulan davranış varsa; aksi sessiz (gürültü ekleme). Onay DEĞİL — kullanıcı yine mevcut askq ile karar verir.
+    if (state.origin === "foreign") {
+      const touchedMsg = await describeTouchedForFiles(
+        state,
+        config,
+        analysis.findings.map((f) => f.code_ref?.file).filter((x): x is string => !!x),
+      ).catch(() => undefined);
+      if (touchedMsg) emitChatMessage("system", touchedMsg);
     }
 
     // UI'da SADE özet (orkestratör TR çıktısı). Teknik açıklama "Detay göster" ile açılır (detail_tr varsa).

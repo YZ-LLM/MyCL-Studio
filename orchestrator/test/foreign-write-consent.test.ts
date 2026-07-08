@@ -27,12 +27,13 @@ import {
   formatTouchedForConsent,
   runForeignWriteConsentGate,
   confirmForeignWriteFiles,
+  describeTouchedForFiles,
   resolveForeignWriteConsent,
   isForeignWriteConsentAskqId,
   type TouchedBehavior,
   type ForeignWriteItem,
 } from "../src/foreign-write-consent.js";
-import type { EddUnitRecord } from "../src/edd/progress.js";
+import { appendEddUnit, patchEddUnit, type EddUnitRecord } from "../src/edd/progress.js";
 import type { AffectedModule } from "../src/fix/dep-graph/index.js";
 import type { State } from "../src/types.js";
 import type { MyclConfig } from "../src/config.js";
@@ -204,6 +205,50 @@ describe("foreign-write-consent · confirmForeignWriteFiles (B1.1 hassas onay)",
     expect(await confirmForeignWriteFiles(st, cfg, ["src/a.ts", "src/b.ts"])).toBe(true);
     answerQueue = ["İptal (uygulama)"];
     expect(await confirmForeignWriteFiles(st, cfg, ["src/a.ts"])).toBe(false);
+  });
+});
+
+describe("foreign-write-consent · describeTouchedForFiles (entegre bilgilendirme, onay değil)", () => {
+  let root: string;
+  const cfg = {} as MyclConfig;
+  async function addDoneUnit(unit: string, what: string) {
+    await appendEddUnit(root, { unit, status: "pending", ts: 1 });
+    await patchEddUnit(root, unit, { status: "done", behavior: { what_it_does: what, invariants: [], side_effects: [] } });
+  }
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "fwc-desc-"));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("non-foreign → undefined", async () => {
+    await addDoneUnit("src/a.ts", "does a");
+    const st = { origin: "mycl", project_root: root } as unknown as State;
+    expect(await describeTouchedForFiles(st, cfg, ["src/a.ts"])).toBeUndefined();
+  });
+  it("EDD henüz koşmadı (done=0) → undefined", async () => {
+    const st = { origin: "foreign", project_root: root } as unknown as State;
+    expect(await describeTouchedForFiles(st, cfg, ["src/a.ts"])).toBeUndefined();
+  });
+  it("boş dosya listesi → undefined", async () => {
+    await addDoneUnit("src/a.ts", "does a");
+    const st = { origin: "foreign", project_root: root } as unknown as State;
+    expect(await describeTouchedForFiles(st, cfg, [])).toBeUndefined();
+  });
+  it("belgelenmiş dokunulan davranış → mesaj (var olan davranış + what_it_does)", async () => {
+    await addDoneUnit("src/auth.ts", "guards /api");
+    const st = { origin: "foreign", project_root: root } as unknown as State;
+    const msg = await describeTouchedForFiles(st, cfg, ["src/auth.ts"]);
+    expect(msg).toBeDefined();
+    expect(msg!).toContain("var olan");
+    expect(msg!).toContain("src/auth.ts");
+    expect(msg!).toContain("guards /api");
+  });
+  it("sorulan dosya EDD'de belgeli DEĞİL → undefined (gürültü ekleme; kullanıcı yine askq ile karar)", async () => {
+    await addDoneUnit("src/other.ts", "x");
+    const st = { origin: "foreign", project_root: root } as unknown as State;
+    expect(await describeTouchedForFiles(st, cfg, ["src/asked.ts"])).toBeUndefined();
   });
 });
 

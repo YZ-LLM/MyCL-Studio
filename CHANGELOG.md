@@ -1,5 +1,14 @@
 ## 2026-07-08
 
+- **feat(entegre): gate-fail'de "nasıl ilerleyelim?" sorusuna EDD-dokunulan-davranış bağlamı (YZLLM):**
+  Entegre modda bir hata çıkınca MyCL kullanıcıya "nasıl ilerleyelim? (Çöz/Kaydet/Tekrar)" sorar (dead-end değil —
+  "Çöz" kullanıcı-başlatımlı). Artık bu soru SORULMADAN önce, o düzeltmenin EDD analizinden dokunacağı BELGELENMİŞ
+  mevcut davranışı gösterir (`describeTouchedForFiles`, foreign-only) → kullanıcı "Çöz"ü bilerek seçer. Onay/kapı
+  DEĞİL — sadece bilgilendirme; yalnız belgelenmiş dokunulan davranış varsa çıkar (aksi sessiz, gürültü yok) + dürüst
+  "tam liste olmayabilir" (alt-sınır: statik-import + belgelenmiş) notu. Non-foreign yol byte-aynı. (B2 — foreign'de
+  gate-autofix'i otonom açma — kasıtlı YAPILMADI: gate-fail zaten kullanıcı-güdümlü, otonom açmak konservatif duruşla
+  çelişirdi; bunun yerine bu hafif bağlam.) Çapraz-aile mahkemesi: 0 blocker/major; log + dürüstlük notu düzeltildi. 23 test. check yeşil.
+
 - **feat(entegre): B1.1 — risk-fix paralel yolunda GERÇEK-dosya hassas onayı (YZLLM):**
   B1 kapısı risk-fix'leri NİYET kapsamıyla (fix detail'inden çıkarım) onaylatıyordu; paralel yol (`runParallelRiskFixes`)
   düzeltmeleri izole kopyada koşup ana ağaca UYGULAMADAN önce GERÇEKTEN değişecek dosyaları (`toWrite`) bilir. Yeni
