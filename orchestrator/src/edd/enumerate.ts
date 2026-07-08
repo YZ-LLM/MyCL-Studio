@@ -19,8 +19,9 @@ const SKIP_DIRS = new Set([
   "error_folder", "__pycache__", "venv", ".venv", "vendor", "coverage",
   ".next", ".nuxt", ".svelte-kit", ".turbo", "bin", "obj", "Pods", "DerivedData",
 ]);
-/** 256KB üstü → too-large (üretilmiş/minified/veri; davranış-analizi anlamsız + bütçe koruması). */
-const MAX_UNIT_BYTES = 256 * 1024;
+/** 256KB üstü → too-large (üretilmiş/minified/veri; davranış-analizi anlamsız + bütçe koruması). Faz 4 reconcile +
+ *  codegen-note hash'lemesi de bu eşiği kullanır (edd/source-hash) → tek doğruluk kaynağı burada. */
+export const MAX_UNIT_BYTES = 256 * 1024;
 const BINARY_SNIFF_BYTES = 4096;
 
 export interface SourceUnit {

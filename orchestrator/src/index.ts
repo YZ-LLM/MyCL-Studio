@@ -1675,7 +1675,9 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
     // EDD RESUME (mahkeme blocker fix): foreign-origin projede EDD one-time onboarding'e HAPSOLMASIN. Fresh
     // onboarding HARİÇ (o kendi sonunda tetikler) — her açılışta pending EDD işi varsa maybeRunEdd DEVAM ettirir
     // (onboarding marker'dan BAĞIMSIZ, resumable, concurrency-guard'lı; tamamlandıysa no-op). Fire-and-forget, bloklamaz.
-    if (!wantOnboard && runtime.config && runtime.state?.origin === "foreign") {
+    // !midPipeline (mahkeme Major — kardeş bootstrapLivingDocs ile tutarlı): mid-pipeline re-open'da resume edilen ağır
+    // codegen (kendi claude CLI'ı) ile EDD'nin kendi CLI'ı EŞZAMANLI koşmasın (feedback_resource_careful "eşzamanlı ağır yok").
+    if (!wantOnboard && runtime.config && runtime.state?.origin === "foreign" && !midPipeline) {
       void maybeRunEdd(runtime.config, runtime.state);
     }
 

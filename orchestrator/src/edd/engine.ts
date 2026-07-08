@@ -8,7 +8,6 @@
 // Tetik: maybeRunEdd (onboarding marker'ından BAĞIMSIZ, resumable+idempotent+concurrency-guard) — mahkeme blocker fix:
 // EDD one-time onboarding'e HAPSOLMAZ; her foreign açılışta pending varsa devam eder.
 
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { MyclConfig } from "../config.js";
@@ -16,6 +15,7 @@ import type { State } from "../types.js";
 import { emitChatMessage } from "../ipc.js";
 import { log } from "../logger.js";
 import { enumerateSourceUnits } from "./enumerate.js";
+import { safeSourceHash } from "./source-hash.js";
 import {
   appendEddUnit,
   patchEddUnit,
@@ -30,26 +30,29 @@ const BATCH_SIZE = 4;
 /** İlerleme mesajı + edd-analysis.md render'ı kaç batch'te bir (spam/IO throttle; kısmi kapsam yine canlı kalır). */
 const PROGRESS_EVERY = 25;
 
-async function fileHash(abs: string): Promise<string | undefined> {
-  try {
-    return createHash("sha256")
-      .update(await fs.readFile(abs))
-      .digest("hex")
-      .slice(0, 16);
-  } catch {
-    return undefined;
-  }
-}
-
 async function markDone(
   root: string,
   unit: string,
   absOf: Map<string, string>,
   rec: EddBehaviorRecord,
 ): Promise<void> {
+  // safeSourceHash: boyut/silinme güvenli (mahkeme Major — dev dosyayı belleğe almaz) + hata görünür loglu (KATI#4).
+  // Dosya analiz SIRASINDA silinmiş/dev-olmuşsa → done YAZMA, unanalyzable işaretle (mahkeme regression: aksi halde
+  // done+no-hash → reconcile'da pending → enumerate silineni listelemez → KALICI HAYALET pending). unanalyzable(-after-
+  // analysis) sebepleri reconcile'da REVIVE edilebilir (dosya geri gelirse). Geçici okuma hatası (hash yok ama var) →
+  // done+no-hash; reconcile onu dosya-var iken pending'e alıp yeniden analiz eder (hayalet değil, dosya listede).
+  const h = await safeSourceHash(absOf.get(unit) ?? "");
+  if (h.gone) {
+    await patchEddUnit(root, unit, { status: "unanalyzable", reason: "deleted-after-analysis" });
+    return;
+  }
+  if (h.tooLarge) {
+    await patchEddUnit(root, unit, { status: "unanalyzable", reason: "too-large-after-analysis" });
+    return;
+  }
   await patchEddUnit(root, unit, {
     status: "done",
-    hash: await fileHash(absOf.get(unit) ?? ""),
+    hash: h.hash,
     behavior: {
       what_it_does: rec.what_it_does,
       invariants: rec.invariants,
@@ -147,8 +150,74 @@ async function runEdd(config: MyclConfig, state: State): Promise<void> {
   );
 }
 
+/**
+ * Faz 4 — bayatlama uzlaşması: done birimin GÜNCEL kaynak-hash'i analiz-anı hash'iyle uyuşmuyorsa (dosya değişmiş) →
+ * pending'e döndür (bir sonraki runEdd yeniden analiz eder → taze sözleşme). Dosya SİLİNMİŞSE → unanalyzable("deleted").
+ * Böylece bayat sözleşme SESSİZCE kullanılmaz (KATI#4): consumer'lar (Faz 2/3) done'a bakar → pending/unanalyzable birim
+ * düşer, tazelenene kadar gösterilmez. Analiz-anı hash'i olmayan (eski) kayıt karşılaştırılamaz → dokunulmaz.
+ * NOT: plan "behavior-consent 'yes' → invalidate" der; ama EDD foreign-only + consent kapısı foreign'de erken-return
+ * (davranış-onay-gate.ts:206) → foreign'de consent kararı YOK → bu tetik EDD ile hiç çakışmaz (uygulanamaz, atlanır).
+ */
+/** reconcile'ın yeniden-analize-açtığı unanalyzable sebepleri (dosya geri gelirse REVIVE edilir; ilk-enumerate binary/too-large DEĞİL). */
+const RECONCILE_UNANALYZABLE_REASONS = new Set(["deleted-after-analysis", "too-large-after-analysis"]);
+
+export async function reconcileEddStaleness(
+  root: string,
+): Promise<{ invalidated: number; deleted: number; tooLarge: number; revived: number }> {
+  const byUnit = await readEddProgress(root);
+  let invalidated = 0;
+  let deleted = 0;
+  let tooLarge = 0;
+  let revived = 0;
+  for (const rec of byUnit.values()) {
+    const abs = join(root, ...rec.unit.split("/"));
+
+    // REVIVE (mahkeme minor): reconcile'ın işaretlediği unanalyzable birim dosyası geri geldi/normalleşti → pending
+    // (yeniden analiz). Yalnız reconcile-kaynaklı sebepler (ilk-enumerate binary/too-large kalıcıdır, dokunma).
+    if (rec.status === "unanalyzable" && rec.reason && RECONCILE_UNANALYZABLE_REASONS.has(rec.reason)) {
+      const h = await safeSourceHash(abs);
+      if (!h.gone && !h.tooLarge && h.hash !== undefined) {
+        await patchEddUnit(root, rec.unit, { status: "pending" });
+        revived++;
+      }
+      continue;
+    }
+
+    if (rec.status !== "done") continue;
+
+    // done kaydını GÜNCEL dosya durumuna göre uzlaştır. safeSourceHash ÖNCE (mahkeme regression fix): no-hash done'da
+    // bile dosyayı kontrol et → gone/too-large ise unanalyzable (pending'e DÖNDÜRME → enumerate silineni listelemez,
+    // KALICI HAYALET pending olur). Yalnız dosya GERÇEKTEN var iken doğrulanamaz/değişmiş done pending'e alınır.
+    const h = await safeSourceHash(abs);
+    if (h.gone) {
+      await patchEddUnit(root, rec.unit, { status: "unanalyzable", reason: "deleted-after-analysis" });
+      deleted++;
+    } else if (h.tooLarge) {
+      // Major (kaynak): analiz sonrası dev dosya → OKUNMADAN unanalyzable (bellek koruması). Küçülürse revive eder.
+      await patchEddUnit(root, rec.unit, { status: "unanalyzable", reason: "too-large-after-analysis" });
+      tooLarge++;
+    } else if (h.hash === undefined) {
+      // Dosya VAR ama okunamadı (geçici). Analiz-anı hash'i de yoksa (KATI#4 deliği: doğrulanamaz done) → pending
+      // (yeniden analiz; dosya listede → hayalet değil). Analiz-anı hash'i varsa → transient, done bırak, sonraki tur retry.
+      if (rec.hash === undefined) {
+        await patchEddUnit(root, rec.unit, { status: "pending" });
+        invalidated++;
+      }
+    } else if (rec.hash === undefined || h.hash !== rec.hash) {
+      // Doğrulanamaz done (hash yok) VEYA değişmiş → yeniden analiz kuyruğuna (dosya var → hayalet değil).
+      await patchEddUnit(root, rec.unit, { status: "pending" });
+      invalidated++;
+    }
+  }
+  return { invalidated, deleted, tooLarge, revived };
+}
+
 // Aynı proje için eşzamanlı ikinci runEdd'i önle (mahkeme minor: re-open yarışı → çift analiz). In-memory guard.
 const _eddRunning = new Set<string>();
+// Bayatlık uzlaşması sıklık-sınırı (mahkeme minor): hızlı aç/kapa (Tauri reconnect / dev-loop) TÜM done-korpusu
+// yeniden hash'lemesin. Son reconcile ts'i (in-memory, root başına); cooldown içindeyse reconcile atlanır (analiz devam).
+const _lastReconcile = new Map<string, number>();
+const RECONCILE_COOLDOWN_MS = 60_000;
 
 /**
  * EDD'yi resumable + idempotent tetikle (mahkeme BLOCKER fix): onboarding başarı-marker'ından BAĞIMSIZ. Zaten koşuyorsa
@@ -162,10 +231,25 @@ export async function maybeRunEdd(config: MyclConfig, state: State): Promise<voi
   if (_eddRunning.has(root)) return;
   _eddRunning.add(root);
   try {
+    // Faz 4: bayat birimleri (kaynak-hash değişti) yeniden-analize AÇ, silinenleri düş — skip-check'ten ÖNCE, ki
+    // "tamamlandı (pending===0)" durumunda bile değişmiş birim tespit edilip pending'e dönsün (sessiz bayat kullanım yok).
+    // Cooldown (mahkeme minor): son reconcile 60sn içindeyse atla → hızlı reopen tüm korpusu tekrar hash'lemesin.
+    const now = Date.now();
+    if (now - (_lastReconcile.get(root) ?? 0) >= RECONCILE_COOLDOWN_MS) {
+      _lastReconcile.set(root, now);
+      try {
+        const rc = await reconcileEddStaleness(root);
+        if (rc.invalidated || rc.deleted || rc.tooLarge || rc.revived) {
+          log.info("edd/engine", "bayatlık uzlaşması → yeniden analiz", rc);
+        }
+      } catch (e) {
+        log.warn("edd/engine", "bayatlık uzlaşması hatası (atlandı — analiz yine de dener)", { error: String(e) });
+      }
+    }
     let skip = false;
     try {
       const s = summarizeProgress(await readEddProgress(root));
-      if (s.total > 0 && s.pending === 0) skip = true; // tamamlandı → atla (yeni-dosya tazeliği Faz 4)
+      if (s.total > 0 && s.pending === 0) skip = true; // tamamlandı (bayatlar yukarıda pending'e döndü) → atla
     } catch (e) {
       log.warn("edd/engine", "edd-progress okunamadı (yine de dener)", { error: String(e) });
     }

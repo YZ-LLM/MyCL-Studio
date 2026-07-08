@@ -14,12 +14,12 @@
 // o birimin EDD kaydı bayatlar; burada asgari korkuluk = inline seçilen her birimin GÜNCEL hash'ini analiz-anı hash'iyle
 // karşılaştır → uyuşmazsa "⚠️ değişmiş, doğrula" işaretle (sessiz bayat kullanım YOK). Silinmiş birim inline edilmez.
 
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { State } from "../types.js";
 import { log } from "../logger.js";
 import { readEddProgress, summarizeProgress, type EddUnitRecord } from "./progress.js";
+import { safeSourceHash } from "./source-hash.js";
 
 /** Inline gömülen anahtar birim sayısı (bounded: initialMessage şişmesin; gerisi on-demand dosyadan). */
 const INLINE_TOP_UNITS = 8;
@@ -27,22 +27,6 @@ const INLINE_TOP_UNITS = 8;
 const MAX_ITEMS_PER_UNIT = 6;
 
 const ANALYSIS_MD = ".mycl/edd-analysis.md";
-
-/** engine.ts fileHash ile AYNI algoritma (sha256 ilk-16 hex) — bayatlama karşılaştırması tutarlı olsun. */
-async function currentHash(abs: string): Promise<{ hash?: string; gone: boolean }> {
-  try {
-    const buf = await fs.readFile(abs);
-    return { hash: createHash("sha256").update(buf).digest("hex").slice(0, 16), gone: false };
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    // ENOENT → birim silinmiş (inline etme). Diğer okuma hatası (EACCES/EISDIR…) → doğrulanamaz: GÖRÜNÜR logla
-    // (KATI#4 sessiz yutma yok), bayat işaretlemeden dahil et (bloke etme — best-effort).
-    if (code !== "ENOENT") {
-      log.warn("edd/codegen-note", "birim hash doğrulanamadı (bayat kontrolü atlandı)", { abs, error: String(e) });
-    }
-    return { gone: code === "ENOENT", hash: undefined };
-  }
-}
 
 /** Bir liste alanını (invariants/side_effects) formatla; MAX_ITEMS üstü GÖRÜNÜR "+N more" ile kırpılır (sessiz değil). */
 function formatList(label: string, items: string[], analysisExists: boolean): string[] {
@@ -111,9 +95,9 @@ export async function buildEddCodegenNote(root: string): Promise<string | undefi
     if (inline.length >= INLINE_TOP_UNITS) break;
     if (rec.status !== "done" || !rec.behavior) continue;
     const abs = join(root, ...rec.unit.split("/"));
-    const { hash: cur, gone } = await currentHash(abs);
-    if (gone) continue; // birim silinmiş → inline etme (var olmayan davranış basma)
-    const stale = rec.hash !== undefined && cur !== undefined && cur !== rec.hash;
+    const h = await safeSourceHash(abs); // boyut/silinme güvenli (mahkeme Major — dev dosyayı belleğe almaz)
+    if (h.gone || h.tooLarge) continue; // silinmiş/dev-olmuş birim → inline etme (var olmayan/anormal davranış basma)
+    const stale = rec.hash !== undefined && h.hash !== undefined && h.hash !== rec.hash;
     const block = formatUnitContract(rec, stale, analysisExists);
     if (block) inline.push(block);
   }

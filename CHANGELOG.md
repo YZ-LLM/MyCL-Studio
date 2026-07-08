@@ -1,5 +1,21 @@
 ## 2026-07-08
 
+- **feat(edd): EDD Faz 4 — bayatlama önleme (kaynak-hash uzlaşması, YZLLM):**
+  Codegen (ya da harici edit / git pull) bir birimi değiştirdikten sonra o birimin EDD davranış-sözleşmesi bayatlar;
+  Faz 4 bunu otomatik tazeler: `reconcileEddStaleness` her done birimin güncel kaynak-hash'ini analiz-anı hash'iyle
+  karşılaştırır → değişmiş → `pending` (bir sonraki EDD turu yeniden belgeler); silinmiş → `unanalyzable("deleted-after-
+  analysis")`; dosya geri gelir/normalleşirse → REVIVE (pending). `maybeRunEdd`'de skip-check'ten önce koşar → "tamamlandı"
+  durumunda bile değişmiş birim yakalanır (bayat sözleşme sessizce kullanılmaz — KATI#4). Foreign açılışta otomatik.
+  - **Kaynak güvenliği:** yeni `edd/source-hash.ts` — dosyayı `fs.open`+fstat ile açıp boyutu kontrol eder, MAX_UNIT_BYTES
+    (256KB, enumerate ile ortak eşik) üstünü OKUMADAN eler + sınırlı okuma (TOCTOU-güvenli) → analiz sonrası dev dosya
+    (log/build artefaktı) belleği patlatmaz (feedback_resource_careful). codegen-note da bu paylaşılan helper'a geçti.
+  - **Eşzamanlı-ağır koruması:** EDD resume tetiği `!midPipeline` ile gate'lendi (kardeş bootstrapLivingDocs ile tutarlı)
+    → mid-pipeline re-open'da EDD + resume codegen iki ağır CLI paralel koşmaz. Hızlı reopen için 60sn reconcile cooldown.
+  - **Not:** plan "consent 'yes' → invalidate" der; EDD foreign-only + consent kapısı foreign'de erken-return → çakışmaz (atlandı).
+  Çapraz-aile mahkemesi 3 major (KATI#4 no-hash deliği / kaynak-guard / eşzamanlı-ağır) + 2 minor, ardından fix'in soktuğu
+  1 major regression (hayalet pending) + 1 minor (TOCTOU) buldu → HEPSİ düzeltildi → 2. re-verify: 0 bulgu, regresyon yok.
+  11 birim test. `npm run check` yeşil. **EDD 4 fazın hepsi tamamlandı.**
+
 - **feat(edd): EDD Faz 3 — Faz 1 (niyet) + Faz 9 (risk) ajanlarına mevcut-davranış zemini (YZLLM):**
   Faz 1 niyet ve Faz 9 risk incelemesi ajanları, entegre edilen yabancı projenin mevcut davranışından haberdar olsun:
   yeni `orchestrator/src/edd/grounding.ts` kompakt (bir-satırlık "ne yapar") genel-bakış üretir → niyet ajanı iş-listesi
