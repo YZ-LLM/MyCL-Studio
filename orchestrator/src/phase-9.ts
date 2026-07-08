@@ -22,6 +22,7 @@ import {
 import { resolveCliProvider, type ToolDef } from "./claude-api.js";
 import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
 import { runDebateReview, DEBATE_AXES } from "./phase-9-debate-review.js";
+import { eddGroundingForState } from "./edd/grounding.js";
 import { emitChatMessage, emitError } from "./ipc.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
@@ -195,6 +196,10 @@ export class Phase9Controller {
 
     const escMe = escalatedModelEffort(this.state, this.config, "risk-review");
 
+    // EDD (foreign, Faz 3): mevcut davranış zemini → risk incelemesi bir değişikliğin var olan bir davranışı bozup
+    // bozmadığını mevcut haritaya karşı değerlendirir. HER İKİ yola da verilir (parite: CLI debate + API tek-ajan). "".
+    const eddGrounding = (await eddGroundingForState(this.state)) ?? "";
+
     // YZLLM 2026-06-13: CLI/abonelik → çok-ajanlı "bulan + çürüten" debate review (Anthropic /ultrareview
     // deseni). N uzman bulucu paralel tarar → bağımsız çürütücüler yanlış-pozitifi eler → ETKİLEŞİMSİZ
     // (onay yok) → doğrulanan bulgular decisions[] olarak risk-fix dispatch'ine akar. API modunda eski
@@ -217,6 +222,7 @@ export class Phase9Controller {
           phase9Audit,
           techDebtFindings: renderTechDebtFindings(techDebt),
           changedFiles: renderChangedFilesList(techDebt),
+          eddGrounding, // EDD (foreign): mevcut davranış zemini — bulucular değişikliği mevcut davranışa karşı tartar
         },
         cliP9.extraEnv,
       );
@@ -282,6 +288,9 @@ export class Phase9Controller {
         TECH_DEBT_FILES: renderChangedFilesList(techDebt),
         CONVERSATION_CONTEXT: convSection,
       });
+      // EDD (foreign): mevcut davranış zemini prompt'un sonuna (inline özet + Read'li CLI backend için edd-analysis.md
+      // pointer — grounding koşullu üretir). Debate yoluyla parite. MyCL'de "" (no-op).
+      systemPrompt += eddGrounding;
     } catch (err) {
       log.error("phase-9", "template load failed", err);
       emitError("Şablon yüklenemedi", String(err));

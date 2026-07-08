@@ -1,5 +1,20 @@
 ## 2026-07-08
 
+- **feat(edd): EDD Faz 3 — Faz 1 (niyet) + Faz 9 (risk) ajanlarına mevcut-davranış zemini (YZLLM):**
+  Faz 1 niyet ve Faz 9 risk incelemesi ajanları, entegre edilen yabancı projenin mevcut davranışından haberdar olsun:
+  yeni `orchestrator/src/edd/grounding.ts` kompakt (bir-satırlık "ne yapar") genel-bakış üretir → niyet ajanı iş-listesi
+  dışı / var olan davranışa dokunan bir istekte daha yerinde netleştirir, risk ajanı bir değişikliğin mevcut bir davranışı
+  bozup bozmadığını haritaya karşı tartar. Faz 2'den farkı: bu BREADTH (genişlik/farkındalık), Faz 2 codegen'e DEPTH verir.
+  - **İki kanal:** inline kompakt özet (her backend bağlam alır) + `.mycl/edd-analysis.md` on-demand pointer (VARSA, "dosya
+    erişimin varsa" koşullu). qa-askq CLI backend'i Read'li (varsayılan auto→cli) → tam sözleşmeleri okur; Read'siz API ajanı
+    koşullu ifadeyle zararsızca yok sayar. Pointer `analysisExists` guard'lı (var olmayan dosyaya yollamaz).
+  - **Parite (KATI: API=diğer modlar):** Faz 9'un HER iki yolu — CLI çok-ajanlı debate (bulucu bağlamına) + API tek-ajan
+    (system prompt'a) — aynı zemini alır.
+  - **Foreign-only + güvenli:** yalnız foreign kökende (MyCL projede no-op); best-effort (bloke etmez); silinmiş birim
+    listelenmez; kısmi kapsam ("still pending") görünür; bounded (≤50 birim); bayatlık jenerik caveat'la görünür (KATI#4).
+  Çapraz-aile mahkemesi 2 major (bayat "Read'siz" önermesi → koşullu pointer eklendi / debate koşulsuz pointer → guard'a
+  bağlandı) + 3 minor buldu → hepsi düzeltildi → re-verify: 0 blocker/major, regresyon yok. 8 birim test. `npm run check` yeşil.
+
 - **feat(edd): EDD Faz 2 — mevcut-davranış haritasını Faz 8 codegen'e enjekte et (kanıtlı boşluk kapatma, YZLLM):**
   Faz 8 TDD codegen eskiden mevcut proje bilgisinin hiçbirini almıyordu (yalnız `PROJECT_ROOT` + `SPEC_PATH`) → yabancı
   kodu her iterasyonda sıfırdan keşfedip mevcut davranışı bilmeden kırabiliyordu. Faz 2 bu boşluğu kapatır: EDD Faz 1'in

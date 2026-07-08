@@ -68,6 +68,8 @@ export interface DebateReviewContext {
   phase9Audit: string;
   techDebtFindings: string;
   changedFiles: string;
+  /** EDD (foreign, Faz 3): mevcut davranışın kompakt zemini (yoksa ""/undefined). Bulucular değişikliği buna karşı tartar. */
+  eddGrounding?: string;
 }
 
 export interface DebateReviewResult {
@@ -85,11 +87,16 @@ const FINDER_TIMEOUT_MS = 150_000;
 const VALIDATOR_TIMEOUT_MS = 120_000;
 
 function contextBlock(ctx: DebateReviewContext): string {
+  // EDD zemini (foreign): kompakt davranış özeti + (analiz dosyası yazılmışsa) on-demand pointer — İKİSİ DE eddGrounding
+  // içinde HAZIR gelir (edd/grounding buildEddGroundingOverview: analysisExists guard'lı). Burada koşulsuz pointer basma
+  // (mahkeme Major: var olmayan dosyaya yollamamak için tek-guard grounding'te; çift-guard/koşulsuz-pointer YOK).
+  const edd = ctx.eddGrounding ? ctx.eddGrounding + "\n" : "";
   return (
     "## Spec risks (from spec.md)\n---\n" + ctx.specRisks + "\n---\n\n" +
     "## Phase 9 audit (recent events)\n---\n" + ctx.phase9Audit + "\n---\n\n" +
     "## Technical-debt deterministic scan (THIS iteration's changed files)\n---\n" + ctx.techDebtFindings + "\n---\n\n" +
-    "## Changed files you may inspect (THIS iteration only)\n" + ctx.changedFiles + "\n"
+    "## Changed files you may inspect (THIS iteration only)\n" + ctx.changedFiles + "\n" +
+    edd
   );
 }
 

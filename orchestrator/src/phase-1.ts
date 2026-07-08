@@ -13,6 +13,7 @@ import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { log } from "./logger.js";
 import { buildCodebaseSnapshot } from "./phase-1-codebase-probe.js";
+import { eddGroundingForState } from "./edd/grounding.js";
 import { buildRelevantProjectContext } from "./relevance/injectors.js";
 import { substitute } from "./template-engine.js";
 import {
@@ -144,12 +145,15 @@ export class Phase1Controller {
       }
     }
 
-    // v15.7 (2026-05-27): Kodbase snapshot — Phase 1 ana ajan Read/Grep'siz
-    // çalıştığı için kodbase yapısını göremiyor → "frontend mi backend mi
-    // eksik?" gibi yanıtı zaten kodda olan sorular soruyor. Deterministik
-    // snapshot (top-level dirs, src tree, deps, routes) prompt'a enjekte
-    // edilir; ana ajan WHAT-user-wants sorgusuna odaklanır.
+    // v15.7 (2026-05-27): Deterministik kodbase snapshot (top-level dirs, src tree, deps, routes) prompt'a enjekte
+    // edilir → ana ajan yapıyı ARAŞTIRMADAN önünde bulur, "frontend mi backend mi eksik?" gibi yanıtı zaten kodda olan
+    // soruları sormaz, WHAT-user-wants'a odaklanır. (Not: qa-askq CLI backend'i 2026-06-13'ten beri Read/Grep/Glob'lu —
+    // snapshot artık "araştıramıyor" için değil, keşfi ATLATIP anında zemin verdiği için değerli.)
     const codebaseSnapshot = await buildCodebaseSnapshot(this.state.project_root);
+    // EDD (foreign, Faz 3): mevcut davranışın kompakt zemini → niyet ajanı var olan davranıştan HABERDAR olur (iş-listesi
+    // dışı/mevcut davranışa dokunan istekte daha yerinde netleştirme). İnline özet + (Read'li CLI backend için) edd-analysis.md
+    // pointer — grounding koşullu üretir. MyCL kökeninde "" (no-op). Best-effort, bloke etmez.
+    const eddOverview = (await eddGroundingForState(this.state)) ?? "";
 
     let systemPrompt: string;
     try {
@@ -158,7 +162,7 @@ export class Phase1Controller {
         USER_INTENT: intent_en,
         PROJECT_CONTEXT_DIGEST: projectContext,
         CONVERSATION_CONTEXT: convSection,
-        CODEBASE_SNAPSHOT: codebaseSnapshot,
+        CODEBASE_SNAPSHOT: codebaseSnapshot + eddOverview,
       });
     } catch (err) {
       log.error("phase-1", "template load failed", err);
