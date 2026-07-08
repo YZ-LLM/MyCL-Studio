@@ -1,5 +1,19 @@
 ## 2026-07-08
 
+- **feat(entegre): kategori-farkında oto-cevap — entegre modda YALNIZ güvenli akış kararları oto (Part A, YZLLM):**
+  Entegre (foreign) modda oto-cevap eskiden TAMAMEN bastırılıyordu; artık kategori-farkında (kullanıcı isteği "sadece
+  emin olduğu konularda"). Yeni SAF `decideAutoAnswer(category, {enabled,suppressed,isApproval,hasSuggestion})`:
+  **non-foreign BYTE-AYNI** (`if (!suppressed) return true` category'den önce → parite); foreign'de yalnız `safe-flow`
+  geçer (onay/ack → oto; güvenli clarify → yalnız ajan öneri koyduysa). `autoAnswerSuggested/Pick` default kategori
+  `dangerous-write` = FAIL-SAFE (etiketlenmemiş çağrı foreign'de OFF). Etiketlenen güvenli siteler: kavrama-ack
+  (production-schema askOnce), Faz 4 spec onayı (Faz 7 DB → dangerous), faz-kapsam onayı, qa-askq classifier
+  (`classifyQaAskq`: Faz 1/2 clarify → user-preference, Faz 9 risk → dangerous, diğer → safe-flow). Kod-değiştiren
+  siteler (gate-autofix/debug/codegen/failPhase/risk-decision) DEFAULT'ta kalır → foreign'de bugünkü gibi kullanıcıda.
+  Frontend: entegre modda checkbox artık devre-dışı DEĞİL — etkileşimli + "güvenli kararlarda oto" (ChatPanel
+  `autoAnswerForeignScoped`). Çapraz-aile mahkemesi: mis-tag + parite lensi SAĞLAM (hiçbir tehlikeli site safe-flow
+  etiketlenmemiş, non-foreign byte-aynı); README + bayat yorumlar güncellendi. 12 birim test. `npm run check` yeşil.
+  B1 (yabancı-yazma onay kapısı) ile birlikte entegre-mod güvenli oto-cevap tamam.
+
 - **feat(entegre): yabancı-yazma onay kapısı — MyCL var olan kodu değiştirmeden önce EDD-bilgili onay ister (YZLLM):**
   Entegre (foreign) modda `dispatchRiskFixes` (Faz 9 risk düzeltmeleri) oto-cevaptan BAĞIMSIZ çalışıyor +
   `behavior-consent-gate` foreign'de erken-return ediyordu → yabancı kod ONAYSIZ değişebiliyordu (entegre oto-cevap

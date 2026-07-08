@@ -14,7 +14,7 @@ import { MAIN_AGENT_LANGUAGE_RULE, USER_FACING_CLARITY_RULE } from "../agent-lan
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "../tool-policy.js";
-import { autoAnswerSuggested } from "../auto-answer.js";
+import { autoAnswerSuggested, classifyQaAskq } from "../auto-answer.js";
 import { selectEffortForTask } from "../model-catalog.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isApiAccountError } from "../claude-api.js";
@@ -513,8 +513,11 @@ export class CliQaAskqBackend implements QaAskqBackend {
     // + diğer fazlar (Faz 9 risk dahil) oto-cevaba dahil.
     const isUserPreferenceClarify =
       allowOther && (this.opts.tag === "phase-1" || this.opts.tag === "phase-2");
+    // Kategori (YZLLM 2026-07-08): entegre modda yalnız safe-flow oto. isApproval = !allowOther (onay=allowOther false).
+    // isUserPreferenceClarify + forceUserPrompt guard'ları KORUNUR (non-foreign parite + düşman-güven).
+    const aaCategory = classifyQaAskq(this.opts.tag, !allowOther);
     if (
-      autoAnswerSuggested() &&
+      autoAnswerSuggested(aaCategory, { isApproval: !allowOther, hasSuggestion: suggested_option_tr !== undefined }) &&
       !isUserPreferenceClarify &&
       !forceUserPrompt && // sentezlenmiş/düşük-güven onay → oto-cevaba GİRME, kullanıcıya sor (mahkeme Bulgu 1)
       (suggested_option_tr !== undefined || options_tr.length > 0)

@@ -1627,9 +1627,10 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
         log.warn("orchestrator", "origin persist edilemedi", e),
       );
     }
-    // ENTEGRE (foreign-origin) projede oto-cevabı BASTIR (YZLLM cave5): bu projenin kararlarını (mock vs gerçek
-    // DB gibi) kullanıcı verir → sorular ona gelir, oto-cevap baypas etmez. Non-foreign → normal oto-cevap.
-    // Modül-singleton → bu açılışın TÜM askq'larını etkiler. UI'a bildir (checkbox entegre-modda devre-dışı görünsün).
+    // ENTEGRE (foreign-origin) projede oto-cevap KATEGORİ-FARKINDA (YZLLM 2026-07-08, cave5 evrimi): bu bayrak artık
+    // TAM-blok DEĞİL — decideAutoAnswer'da kategoriyle değerlendirilir → yalnız GÜVENLİ-AKIŞ kararları (onay/kavrama/
+    // faz-kapsam) foreign'de oto; kod-değiştiren + kullanıcı-tercihi (mock vs gerçek DB) kararlar kullanıcıda kalır.
+    // Non-foreign → parite (byte-aynı). UI'a bildir (checkbox entegre-modda ETKİLEŞİMLİ + "güvenli kararlarda oto").
     {
       const integrateSuppress = runtime.state.origin === "foreign";
       setIntegrateModeSuppression(integrateSuppress);
@@ -4510,10 +4511,11 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           const phaseList = proposed
             .map((p) => `Faz ${p}`)
             .join(", ");
-          if (autoAnswerSuggested()) {
+          if (autoAnswerSuggested("safe-flow", { isApproval: true })) {
             // Oto-cevap (YZLLM 2026-06-15): faz-kapsam askq'si qa-askq dışı DOĞRUDAN emit →
             // autoAnswer'ı kaçırıyordu (47 dk takılma sebeplerinden biri). Açıksa "Önerilen
-            // seti onayla"yı otomatik seç; askq'yi UI'a göstermeden fall-through ile devam et
+            // seti onayla"yı otomatik seç; askq'yi UI'a göstermeden fall-through ile devam et.
+            // Kategori (YZLLM 2026-07-08): faz-kapsam = plan seçimi (kod yazmaz) → safe-flow (foreign'de de oto).
             // (manuel "Önerilen seti onayla" handler'ıyla birebir: needed_phases=proposed).
             emitChatMessage(
               "system",

@@ -298,9 +298,8 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
   /** Tek askq emit + cevabı bekle (pendingResolver). allowOther=serbest metin ("okudum anladım"). */
   private async askOnce(question_tr: string, options_tr: string[], allowOther: boolean): Promise<string> {
     // Oto-cevap (YZLLM 2026-06-15): açıksa askq'yi UI'a göstermeden ilk seçenekle yanıtla →
-    // pipeline takılmaz. Önceden bu yol (Faz 4 spec / Faz 7 DB netleştirme+kavrama-kapısı)
-    // autoAnswer'ı kaçırıyordu → her onayda 47 dk takılma.
-    const auto = autoAnswerPick(options_tr);
+    // pipeline takılmaz. askOnce YALNIZ runComprehensionGate'ten (kavrama-ack) → safe-flow (foreign'de de oto).
+    const auto = autoAnswerPick(options_tr, undefined, "safe-flow", { isApproval: true });
     if (auto !== null) {
       emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay/ilk seçenek): "${auto}"`);
       return auto;
@@ -331,8 +330,10 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
     const question_tr = r.text + t(`askq.approval_suffix.${suffixKey}`, "tr");
 
     // Oto-cevap (YZLLM 2026-06-15): açıksa onayı UI'a göstermeden ilk seçenekle (Onayla) ver.
-    // Bu yol (Faz 4 spec / Faz 7 DB onayı) FIX-5'i kaçırıyordu → her onayda takılma.
-    const auto = autoAnswerPick(options_tr);
+    // Kategori (YZLLM 2026-07-08): Faz 4 spec = safe-flow (foreign'de oto); Faz 7 DB = dangerous-write (foreign'de kullanıcıda).
+    const auto = autoAnswerPick(options_tr, undefined, this.opts.phaseId === 7 ? "dangerous-write" : "safe-flow", {
+      isApproval: true,
+    });
     let selected_tr: string;
     if (auto !== null) {
       emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay): "${auto}"`);

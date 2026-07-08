@@ -100,9 +100,10 @@ gördüğü — var olan bir projeyi MyCL'e taşır:
 - **Eksikler iş-listesine OTOMATİK eklenir + sırayla yapılır:** test / responsive /
   güvenlik / parmak-izi gibi kaynak-değiştiren MyCL standartları GAP-raporu olur, her biri
   iş-listesine eklenip **onay beklemeden** normal gate'li iterasyonda sırayla işlenir.
-- **Entegre modunda oto-cevap KAPALI:** mock mu gerçek-veritabanı mı gibi kararlar otomatik
-  verilmez — sana sorulur. **Faz 6 (UI İncelemesi) de atlanır** (gap-işleri UI-yapımı değil,
-  mevcut projede dev-server çoğu zaman yoktur).
+- **Entegre modunda oto-cevap SEÇMELİ:** yalnız GÜVENLİ akış kararları (onaylar, faz-kapsamı,
+  kavrama-ack) otomatik cevaplanır; var olan kodu/DB'yi/güvenliği değiştiren kararlar ve
+  kullanıcı-tercihi (mock mu gerçek-veritabanı mı gibi) sorular HEP sana gelir. **Faz 6 (UI
+  İncelemesi) de atlanır** (gap-işleri UI-yapımı değil, mevcut projede dev-server çoğu zaman yoktur).
 - **Var olan davranış koruması (davranış temeli):** entegrasyon başında MyCL mevcut test durumunu
   (geç/kal kümesi) bir kez anlık görüntüler; gap-işleri kuyruğa girmeden ÖNCE. Sonraki bir iterasyon
   önceden GEÇEN bir testi kırarsa MyCL bunu **görünür** kılar ("var olan davranış X değişti — istedin mi?")

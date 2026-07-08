@@ -172,7 +172,8 @@ interface MainState {
   pendingAskq: PendingAskq | null;
   /** Orkestratör "şu projeyi aç" istedi (ör. okunamayan proje kopyalandı → kopyayı aç). useEffect tüketir + temizler. */
   pendingOpenRequest: { path: string; integrate?: boolean } | null;
-  /** Entegre (foreign-origin) projede oto-cevap bastırılıyor → checkbox devre-dışı görünür (YZLLM). */
+  /** Entegre (foreign) projede oto-cevap KATEGORİ-FARKINDA (YZLLM 2026-07-08): yalnız güvenli-akış kararları oto;
+   *  checkbox etkileşimli kalır, etiket "güvenli kararlarda oto"ya döner (ChatPanel autoAnswerForeignScoped). */
   autoAnswerSuppressed: boolean;
   translations: TranslationEntry[];
   ccEvents: CCEvent[];
@@ -1578,7 +1579,7 @@ function App() {
           onAddTaskToQueue={handleAddTaskToQueue}
           autoAnswer={autoAnswer}
           onAutoAnswerToggle={handleAutoAnswerToggle}
-          autoAnswerDisabled={mainState.autoAnswerSuppressed}
+          autoAnswerForeignScoped={mainState.autoAnswerSuppressed}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
           onShowCode={(ref) => setCodeModal({ open: true, codeRef: ref })}

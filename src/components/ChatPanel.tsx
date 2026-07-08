@@ -237,8 +237,9 @@ interface Props {
   /** v15.13 (saha 3/5): Oto-cevap — önerili netleştirme soruları otomatik yanıtlansın mı. */
   autoAnswer?: boolean;
   onAutoAnswerToggle?: (enabled: boolean) => void;
-  /** YZLLM (cave5): entegre (foreign-origin) projede oto-cevap kullanılamaz → checkbox devre-dışı + kapalı görünür. */
-  autoAnswerDisabled?: boolean;
+  /** YZLLM 2026-07-08: entegre (foreign) projede oto-cevap KAPSAMLI çalışır (yalnız güvenli akış kararları). Checkbox
+   *  etkileşimli kalır; yalnız etiket/tooltip "güvenli kararlarda oto"ya döner. (Eski: tamamen devre-dışı.) */
+  autoAnswerForeignScoped?: boolean;
   /** WP4 DAST: 🛡️ Güvenlik Taraması butonu — backend açıklama+onay askq'ı açar
    *  (buton DOĞRUDAN taramaz). Yalnız çalışan localhost app'ine. */
   onDastClick?: () => void;
@@ -268,7 +269,7 @@ export function ChatPanel({
   onAddTaskToQueue,
   autoAnswer,
   onAutoAnswerToggle,
-  autoAnswerDisabled,
+  autoAnswerForeignScoped,
   onDastClick,
   dastRunning,
   currentJob,
@@ -601,29 +602,27 @@ export function ChatPanel({
           <label
             className="intent-pill"
             title={
-              autoAnswerDisabled
-                ? "Entegre (mevcut proje entegrasyonu) modunda oto-cevap kullanılamaz — kararları sen veriyorsun; sorular sana gelir."
+              autoAnswerForeignScoped
+                ? "Entegre modda oto-cevap yalnız GÜVENLİ akış kararlarında çalışır (onaylar, faz-kapsamı, kavrama). Var olan kodu/DB/güvenliği değiştiren kararlar ve önemli tercih (mock mu gerçek-DB mi) soruları HEP sana gelir."
                 : "Açıkken: bir önerisi olan netleştirme soruları otomatik o öneriyle yanıtlanır (daha hızlı iterasyon). Onaylar + önerisi olmayan sorular yine size sorulur."
             }
             style={{
               marginLeft: "auto",
-              cursor: autoAnswerDisabled ? "not-allowed" : "pointer",
+              cursor: "pointer",
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
-              opacity: autoAnswerDisabled ? 0.5 : 1,
             }}
           >
             <input
               type="checkbox"
               data-testid="auto-answer-toggle"
-              checked={!!autoAnswer && !autoAnswerDisabled}
-              disabled={autoAnswerDisabled}
+              checked={!!autoAnswer}
               onChange={(e) => onAutoAnswerToggle(e.target.checked)}
               style={{ margin: 0 }}
             />
             <span className="intent-pill-label">
-              Oto-cevap{autoAnswerDisabled ? " (entegre modunda kapalı)" : ""}
+              Oto-cevap{autoAnswerForeignScoped ? " (güvenli kararlarda oto)" : ""}
             </span>
           </label>
         )}

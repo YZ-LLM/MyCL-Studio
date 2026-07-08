@@ -10,19 +10,57 @@
 // YZLLM 2026-06-20: DEFAULT AÇIK isteniyor → FRONTEND default'u açık (App.tsx localStorage !== "0") +
 // mount'ta set_auto_answer{true} ile burayı sync eder. Backend default'u FALSE kalır (headless/test
 // izolasyonu: frontend sync'i olmayan birim-testler manuel-onay akışını bozmadan koşar).
+//
+// KATEGORİ-FARKINDA (YZLLM 2026-07-08, "entegre modda güvenli oto-cevap"): entegre (foreign) projede oto-cevap
+// eskiden TAMAMEN bastırılıyordu (_integrateSuppressed). Artık kategori-bazlı: yalnız GÜVENLİ-AKIŞ kararları
+// (onay/toplayıcı/faz-kapsam/kavrama) foreign'de oto-cevaplanır; KOD-DEĞİŞTİREN ve KULLANICI-TERCİHİ kararlar
+// foreign'de kullanıcıya kalır (bugünkü güvenlik korunur — regresyon yok). Non-foreign davranış BYTE-AYNI.
 
 let _enabled = false;
-// YZLLM (cave5): ENTEGRE (foreign-origin) projede oto-cevap BASTIRILIR — kararları kullanıcı verir (mevcut
-// projesinde "mock mu gerçek DB mi" gibi seçimleri oto-cevap baypas etmesin). _enabled (kullanıcının GLOBAL
-// tercihi) DEĞİŞMEZ; bu ayrı bayrak yalnız entegre-projede askq'ları kullanıcıya yönlendirir. handleOpenProject
-// origin'e göre set eder; non-foreign projede false → normal oto-cevap.
+// YZLLM (cave5): ENTEGRE (foreign-origin) projede oto-cevap bastırma bayrağı. handleOpenProject origin'e göre set eder.
+// Artık tam-blok DEĞİL: decideAutoAnswer'da kategoriyle birlikte değerlendirilir (yalnız güvenli-akış foreign'de geçer).
 let _integrateSuppressed = false;
+
+/**
+ * Oto-cevap karar kategorisi:
+ *   safe-flow       = sadece akışı ilerletir/toplar (onay, ack, faz-kapsam, kavrama) — foreign'de OTO-CEVAPLANABİLİR.
+ *   dangerous-write = yabancı kodu/davranışı değiştiren aksiyon tetikler (gate-autofix, risk, debug, codegen) — foreign'de KULLANICIDA.
+ *   user-preference = kullanıcının kendi tercihi (mock mu gerçek-DB mi gibi) — foreign'de KULLANICIDA.
+ */
+export type AutoAnswerCategory = "safe-flow" | "dangerous-write" | "user-preference";
+
+/**
+ * SAF karar: bu askq oto-cevaplanmalı mı? PARİTE DEĞİŞMEZİ: `if (!suppressed) return true` category'den ÖNCE → non-foreign
+ * davranışı eski `_enabled` ile BYTE-AYNI (category ne olursa olsun). Foreign'de yalnız safe-flow geçer; safe-flow
+ * clarify'da ek koşul "ajan öneri koydu" (hasSuggestion) — "sadece emin olduğu konularda" (YZLLM). Test edilebilir.
+ */
+export function decideAutoAnswer(
+  category: AutoAnswerCategory,
+  s: { enabled: boolean; suppressed: boolean; isApproval?: boolean; hasSuggestion?: boolean },
+): boolean {
+  if (!s.enabled) return false;
+  if (!s.suppressed) return true; // NON-FOREIGN: kategori'ye bakmadan eski davranış (parite)
+  if (category !== "safe-flow") return false; // FOREIGN: dangerous + user-preference → kullanıcıda
+  if (s.isApproval) return true; // foreign güvenli onay/ack → oto
+  return s.hasSuggestion === true; // foreign güvenli clarify → yalnız ajan öneri koyduysa
+}
+
+/**
+ * SAF: qa-askq (Faz 1/2/9) askq'sını kategoriye çevir. Faz 1/2 NETLEŞTİRME (onay değil) = kullanıcı-tercihi
+ * (mock mu gerçek-DB mi → mevcut isUserPreferenceClarify niyeti); Faz 9 risk = kod-değiştiren (dispatchRiskFixes);
+ * diğer (onaylar + diğer faz clarify) = güvenli-akış. Test edilebilir.
+ */
+export function classifyQaAskq(tag: string, isApproval: boolean): AutoAnswerCategory {
+  if (!isApproval && (tag === "phase-1" || tag === "phase-2")) return "user-preference";
+  if (tag === "phase-9") return "dangerous-write";
+  return "safe-flow";
+}
 
 export function setAutoAnswerSuggested(on: boolean): void {
   _enabled = on;
 }
 
-/** Entegre-projede oto-cevabı bastır (origin==="foreign"). Tüm autoAnswerSuggested/Pick okumaları bunu uygular. */
+/** Entegre-projede oto-cevap bastırma bayrağını set et (origin==="foreign"). */
 export function setIntegrateModeSuppression(on: boolean): void {
   _integrateSuppressed = on;
 }
@@ -32,24 +70,39 @@ export function isIntegrateSuppressed(): boolean {
   return _integrateSuppressed;
 }
 
-export function autoAnswerSuggested(): boolean {
-  return _enabled && !_integrateSuppressed;
+/**
+ * Oto-cevap AÇIK + bu kategori foreign'de izinli mi? Çağıran kategorisini verir; DEFAULT "dangerous-write" = FAIL-SAFE
+ * (etiketlenmemiş çağrı foreign'de OFF, non-foreign'de parite). opts: isApproval (onay/ack), hasSuggestion (öneri var mı).
+ */
+export function autoAnswerSuggested(
+  category: AutoAnswerCategory = "dangerous-write",
+  opts?: { isApproval?: boolean; hasSuggestion?: boolean },
+): boolean {
+  return decideAutoAnswer(category, {
+    enabled: _enabled,
+    suppressed: _integrateSuppressed,
+    isApproval: opts?.isApproval,
+    hasSuggestion: opts?.hasSuggestion,
+  });
 }
 
 /**
- * Oto-cevap AÇIKSA bu askq için seçilecek TR cevabı döndürür (öneri varsa onu, yoksa ilk
- * seçeneği); KAPALIYSA veya hiç seçenek yoksa null → caller normal şekilde kullanıcı cevabını
- * bekler. Mesaj YAZMAZ (saf) — döngüsel import olmasın diye "🤖 Oto-cevap" notunu caller emit eder.
- *
- * YZLLM 2026-06-15 (canlı test): FIX-5 yalnız qa-askq backend'lerini (Faz 1/2 netleştirmeleri)
- * yamamıştı; production-schema (Faz 4 spec / Faz 7 DB), codegen (Faz 8) ve faz-kapsam (index.ts)
- * ONAYLARI bu kontrolü KAÇIRIYORDU → oto-cevap açıkken bile her onayda pipeline 47 dk takıldı.
- * Tüm askq emit yolları emitAskq'den ÖNCE bunu çağırmalı; non-null dönerse askq UI'a hiç
- * gösterilmeden auto-resolve edilir. Faz 6 görsel-incelemesi bu yoldan GEÇMEZ (deferred;
- * controller çağırmaz) → kullanıcı sürer.
+ * Oto-cevap AÇIKSA (ve bu kategori foreign'de izinliyse) bu askq için seçilecek TR cevabı döndürür (öneri varsa onu,
+ * yoksa ilk seçeneği); değilse null → caller kullanıcı cevabını bekler. Mesaj YAZMAZ (saf). category DEFAULT dangerous.
  */
-export function autoAnswerPick(options_tr: string[], suggested_tr?: string): string | null {
-  if (!_enabled || _integrateSuppressed) return null; // entegre-projede oto-cevap yok → kullanıcı yanıtlar
+export function autoAnswerPick(
+  options_tr: string[],
+  suggested_tr?: string,
+  category: AutoAnswerCategory = "dangerous-write",
+  opts?: { isApproval?: boolean },
+): string | null {
+  const allowed = decideAutoAnswer(category, {
+    enabled: _enabled,
+    suppressed: _integrateSuppressed,
+    isApproval: opts?.isApproval,
+    hasSuggestion: suggested_tr !== undefined,
+  });
+  if (!allowed) return null;
   if (suggested_tr === undefined && options_tr.length === 0) return null;
   return suggested_tr ?? options_tr[0]!;
 }

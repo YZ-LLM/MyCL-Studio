@@ -298,7 +298,8 @@ export class ProductionSchemaBaseController implements ProductionBackend {
   private async askOnce(question_tr: string, options_tr: string[], allowOther: boolean): Promise<string> {
     // Oto-cevap (YZLLM 2026-06-15): açıksa askq'yi UI'a göstermeden ilk seçenekle yanıtla (API/SDK
     // paritesi — CLI backend ile birebir). Önceden bu yol autoAnswer'ı kaçırıyordu → onayda takılma.
-    const auto = autoAnswerPick(options_tr);
+    // askOnce YALNIZ runComprehensionGate'ten çağrılır (kavrama-ack "okudum anladım") → safe-flow (foreign'de de oto).
+    const auto = autoAnswerPick(options_tr, undefined, "safe-flow", { isApproval: true });
     if (auto !== null) {
       emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay/ilk seçenek): "${auto}"`);
       return auto;
@@ -332,7 +333,11 @@ export class ProductionSchemaBaseController implements ProductionBackend {
     const question_tr = r.text + t(`askq.approval_suffix.${suffixKey}`, "tr");
 
     // Oto-cevap (YZLLM 2026-06-15): açıksa onayı UI'a göstermeden ilk seçenekle (Onayla) ver — API/SDK paritesi.
-    const auto = autoAnswerPick(options_tr);
+    // Kategori (YZLLM 2026-07-08): Faz 4 spec onayı = safe-flow (foreign'de oto); Faz 7 DB onayı = dangerous-write
+    // (foreign'de kullanıcıda — DB şema aşağı-akışta migration/kod tetikler).
+    const auto = autoAnswerPick(options_tr, undefined, this.opts.phaseId === 7 ? "dangerous-write" : "safe-flow", {
+      isApproval: true,
+    });
     let selected_tr: string;
     if (auto !== null) {
       emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay): "${auto}"`);
