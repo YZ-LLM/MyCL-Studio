@@ -1,5 +1,19 @@
 ## 2026-07-08
 
+- **feat(entegre): yabancı-yazma onay kapısı — MyCL var olan kodu değiştirmeden önce EDD-bilgili onay ister (YZLLM):**
+  Entegre (foreign) modda `dispatchRiskFixes` (Faz 9 risk düzeltmeleri) oto-cevaptan BAĞIMSIZ çalışıyor +
+  `behavior-consent-gate` foreign'de erken-return ediyordu → yabancı kod ONAYSIZ değişebiliyordu (entegre oto-cevap
+  özelliğinin daha önce UNSAFE bulunup geri alınmasının kökü). Yeni `orchestrator/src/foreign-write-consent.ts`:
+  risk-fix dispatch'i başında, her fix'in EDD'den dokunacağı mevcut davranışı (`what_it_does` + invariant'lar) gösterip
+  BATCH onay ister (Hepsini / Yalnız seçtiklerim / Hiçbirini); yalnız onaylananlar uygulanır. `behavior-consent-gate`
+  desenini yansıtır (doğrudan `emitAskq` → oto-cevaba UĞRAMAZ; karar hep kullanıcıda). **Anti-false-safe:** "EDD kaydı
+  yok = güvenli" ÇIKARIMI YASAK — belgelenmemiş/analiz-dışı birimler "kapsam belirsiz" olarak GÖRÜNÜR + yine de açık
+  onay ister; EDD/graph okunamazsa da sessiz oto-onay YOK. `origin!=="foreign"` → no-op (MyCL projelerde byte-aynı).
+  Çapraz-aile mahkemesi: 2 major (gate-autofix foreign'de onaysız yazıyor) BAĞIMSIZ DOĞRULAMAYLA YANLIŞ-POZİTİF
+  çıktı (gate-autofix/debug zaten `autoAnswerSuggested()`-kapılı → foreign'de ulaşılmaz) → red; gerçek bulgular
+  (seedFiles fallback tutarsızlığı, ölü alan, gate-dalı testleri) düzeltildi. 15 birim test. `npm run check` yeşil.
+  Bu, entegre-mod güvenli oto-cevap özelliğinin (B1) güvenlik temeli — sıradaki: kategori-farkında oto-cevap (Part A).
+
 - **feat(edd): EDD Faz 4 — bayatlama önleme (kaynak-hash uzlaşması, YZLLM):**
   Codegen (ya da harici edit / git pull) bir birimi değiştirdikten sonra o birimin EDD davranış-sözleşmesi bayatlar;
   Faz 4 bunu otomatik tazeler: `reconcileEddStaleness` her done birimin güncel kaynak-hash'ini analiz-anı hash'iyle

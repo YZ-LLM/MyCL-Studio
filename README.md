@@ -109,6 +109,9 @@ gördüğü — var olan bir projeyi MyCL'e taşır:
   — bloke etmez, sen gözden geçir/geri al. Yabancı projede kesin bir davranış spec'i olmadığı için
   MyCL projelerindeki "değiştirmeden önce tek tek sor" yerine bu deterministik "yakala + göster" kullanılır
   (çalışan test yoksa görünür şekilde atlanır, hiçbir şey uydurulmaz).
+- **Yabancı kodu değiştirmeden önce onay ister:** MyCL entegre modda var olan kodu KENDİLİĞİNDEN değiştireceği
+  yerlerde (örn. Faz 9 risk düzeltmeleri) önce sana sorar — her düzeltmeyi ve EDD analizinden dokunacağı mevcut
+  davranışı (hangi birim, ne yapar) gösterir; yalnız onayladıkların uygulanır. Onaylamazsan var olan kod korunur.
 - **Mevcut projeyi BOZMAZ:** yabancı kaynak dosyalarına dokunulmaz; MyCL yabancı bir
   projenin `vite.config`'ini onaysız düzenlemez ve mevcut `.gitignore`'a yalnız varsa
   ekler (yeni oluşturmaz). Okunamayan (sandbox) bir proje, ev-dışı **"MyCL Projeler"**

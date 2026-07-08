@@ -34,6 +34,13 @@ import {
   resolveConsentAnswer,
   isConsentAskqId,
 } from "./behavior-consent-gate.js";
+import {
+  runForeignWriteConsentGate,
+  resolveForeignWriteConsent,
+  isForeignWriteConsentAskqId,
+  seedFilesFromText,
+} from "./foreign-write-consent.js";
+import { extractFilePaths } from "./fix/evidence.js";
 import { finalizeDevsArtifacts } from "./devs-finalize.js";
 import { refreshDevsSpecs } from "./devs-spec-refresh.js";
 import { clearHistory } from "./history.js";
@@ -4006,10 +4013,38 @@ async function dispatchRiskFixes(
   decisions: { risk: string; decision: string; detail?: string; fix_phase?: string }[],
 ): Promise<State> {
   let state = stateIn;
-  const fixes = (decisions ?? []).filter(
+  const fixesAll = (decisions ?? []).filter(
     (d) => String(d.decision).trim().toLowerCase() === "fix",
   );
-  if (fixes.length === 0) return state;
+  if (fixesAll.length === 0) return state;
+
+  // YABANCI-YAZMA ONAY KAPISI (YZLLM 2026-07-08): entegre (foreign) projede risk-fix'ler VAR OLAN kodu OTONOM
+  // değiştiriyor (oto-cevaptan bağımsız + behavior-consent foreign'de erken-return → bugün onaysız). Bu kapı,
+  // her fix'in EDD'den dokunacağı mevcut davranışı gösterip kullanıcı onayı ister → yalnız onaylananlar uygulanır.
+  // MyCL projede no-op (kapı origin!=="foreign"da items'ı aynen döndürür) → byte-aynı.
+  let fixes = fixesAll;
+  if (state.origin === "foreign") {
+    const items = fixesAll.map((f, i) => {
+      const text = f.detail?.trim() || f.risk; // boş/whitespace detail → risk metnine düş (label/seed AYNI kaynak — mahkeme Major)
+      return {
+        key: String(i),
+        label: text.slice(0, 160),
+        seedFiles: seedFilesFromText(state.project_root, text, extractFilePaths),
+      };
+    });
+    const approved = await runForeignWriteConsentGate(state, cfg, items, { source: "risk-fix" });
+    const okKeys = new Set(approved.map((a) => a.key));
+    fixes = fixesAll.filter((_, i) => okKeys.has(String(i)));
+    await appendAuditModule(state.project_root, {
+      ts: Date.now(),
+      phase: 9,
+      event: "foreign-write-consent",
+      caller: "mycl-orchestrator",
+      detail: `risk-fix onayı: ${fixes.length}/${fixesAll.length} uygulanacak`,
+    }).catch(() => {});
+    if (fixes.length === 0) return state; // hiçbiri onaylanmadı → yabancı kod korunuyor (kapı mesajı yazdı)
+  }
+
   emitChatMessage(
     "system",
     `🔧 Faz 9 — ${fixes.length} risk "düzelt" işaretlendi; her birini ilgili fazda otomatik düzeltiyorum (UI→Faz 5, DB→Faz 7, kod→Faz 8).`,
@@ -5619,6 +5654,13 @@ export async function handleAskqAnswer(
   // tek-tek döngüyü ilerletir. isConsentAskqId ise diğer dallara DÜŞMEZ (bilinmeyen/eski id de sessizce tüketilir).
   if (isConsentAskqId(id)) {
     resolveConsentAnswer(id, selectedText);
+    return;
+  }
+
+  // ── YABANCI-YAZMA ONAYI (YZLLM 2026-07-08): entegre projede MyCL var olan kodu değiştirmeden önce onay. Kendi id
+  // öneki (foreign_write_consent_*) → kapının bellekteki çözücüsünü tetikler; diğer dallara DÜŞMEZ.
+  if (isForeignWriteConsentAskqId(id)) {
+    resolveForeignWriteConsent(id, selectedText);
     return;
   }
 
