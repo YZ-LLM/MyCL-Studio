@@ -314,6 +314,14 @@ export interface State {
    * çünkü bir dosya hem onaylı hem reddedilmiş davranış taşıyabilir). Yol çözülemezse boş (uydurulmaz).
    */
   behavior_consent_no_paths?: string[];
+  /**
+   * EDD (Entegrasyon Driven Define, yalnız foreign köken): Faz 8 codegen'e enjekte edilecek MEVCUT-davranış
+   * bağlam notu. EDD analizinin (`.mycl/edd-analysis.md` + edd-progress.jsonl) anahtar birimlerinin davranış
+   * sözleşmelerini + tam haritaya on-demand işareti içerir. GEÇİCİ + Faz 8'e özgü (consent-note deseni); her Faz 8
+   * öncesi progress'ten yeniden üretilir. ÇERÇEVE: bu BAĞLAM'dır, kısıt değil — spec bir davranışı değiştirmek
+   * istiyorsa SPEC KAZANIR (aktif consent "değiştir" kararı da EDD "koru"dan üstün). Kaynak: edd-progress.jsonl.
+   */
+  pending_edd_context_note?: string;
   // NOT: onboarding "tamamlandı" işareti artık state alanı DEĞİL, `.mycl/onboarded.json` dosyasıdır
   // (yalnız MyCL projeyi GERÇEKTEN okuyabildiyse yazılır). Eski `onboarded_at` (her denemede damgalanıyordu →
   // başarısız apology koşusu da "yapıldı" sanılıyordu, cave5 bug) KALDIRILDI. Bkz onboarding/onboard-existing.ts.

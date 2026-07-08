@@ -187,6 +187,7 @@ import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
 import { maybeRunEdd } from "./edd/engine.js";
+import { attachEddCodegenNote } from "./edd/codegen-note.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
@@ -4738,16 +4739,24 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // Davranış-onay kapısı: var olan davranışı değiştirmeden önce kullanıcıya tek tek sor
       // (Faz 8 codegen BAŞLAMADAN). "Dur" derse pipeline durur (kullanıcı spec'i gözden geçirecek).
       if (!(await runBehaviorConsentGate(state, cfg))) return;
+      // EDD (foreign): mevcut-davranış haritasını Faz 8 codegen notuna kur (consent kapısından hemen sonra; MyCL
+      // kökeninde no-op). Codegen var olan kodu bilerek değiştirir (kanıtlı boşluk kapatma). Best-effort — bloke etmez.
+      await attachEddCodegenNote(state);
       emitChatMessage(
         "system",
         "Faz 8 başlıyor — TDD codegen. Bu biraz sürebilir.",
       );
       const p8 = new Phase8Controller({ state, config: cfg, spec });
-      const r = await runController(p8, () => p8.run(), "TDD uygulanıyor");
-      // Davranış-onay notu Faz 8'e özgü — tüketildi; sonraki fazlara/diske SIZMASIN (mahkeme #2).
-      // Sonraki spread `{...state, ...statePatch}` bu temizlenmiş (undefined) değeri korur.
-      state.pending_behavior_consent_note = undefined;
-      state.behavior_consent_no_paths = undefined;
+      let r: Awaited<ReturnType<typeof p8.run>>;
+      try {
+        r = await runController(p8, () => p8.run(), "TDD uygulanıyor");
+      } finally {
+        // Davranış-onay + EDD notu Faz 8'e özgü — tüketildi; sonraki fazlara/diske SIZMASIN (mahkeme #2). Throw'da da
+        // temizlensin diye finally (tekil-koşum yoluyla simetri). Sonraki spread `{...state,...statePatch}` bunu korur.
+        state.pending_behavior_consent_note = undefined;
+        state.behavior_consent_no_paths = undefined;
+        state.pending_edd_context_note = undefined;
+      }
       log.info("orchestrator", "phase 8 end", { result: r });
       if (r === "complete") {
         await recordPhaseComplete(8);
@@ -6893,15 +6902,18 @@ async function runPhaseOnce(
         result = "consent-stopped";
         break;
       }
+      // EDD (foreign): mevcut-davranış haritasını codegen notuna kur (tek-koş yolu da bağlamı korur; MyCL'de no-op).
+      await attachEddCodegenNote(state);
       const p = new Phase8Controller({ state, config: cfg, spec });
       runtime.controller = p;
       try {
         result = String(await p.run());
       } finally {
         runtime.controller = null;
-        // Onay notu Faz 8'e özgü — tüketildi; sızmasın (mahkeme #2). Throw'da da temizlensin diye finally.
+        // Onay + EDD notu Faz 8'e özgü — tüketildi; sızmasın (mahkeme #2). Throw'da da temizlensin diye finally.
         state.pending_behavior_consent_note = undefined;
         state.behavior_consent_no_paths = undefined;
+        state.pending_edd_context_note = undefined;
       }
       break;
     }

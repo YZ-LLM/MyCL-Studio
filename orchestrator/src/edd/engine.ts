@@ -195,13 +195,19 @@ async function renderEddAnalysis(root: string, progress: Map<string, EddUnitReco
       (pending.length ? `, ${pending.length} bekliyor` : "") +
       `. Tek doğruluk kaynağı: .mycl/edd-progress.jsonl.`,
     "",
+    // Öncelik çerçevesi DOSYADA da sabit (mahkeme Major): ajan notu görmeden dosyayı doğrudan açsa bile "spec kazanır"
+    // kaybolmasın — "must preserve" buyurgan başlıkları bu kuralın altında okunur.
+    "> **RULE — this document is CONTEXT, not a constraint.** It describes the project's CURRENT behavior so changes " +
+      "don't break unrelated features. Preserve the invariants below UNLESS this iteration's spec explicitly requires " +
+      "changing them — when the spec and this document conflict, the **SPEC WINS**.",
+    "",
   ];
   for (const r of done) {
     const b = r.behavior!;
     lines.push(`## ${r.unit}`);
     if (b.what_it_does) lines.push(b.what_it_does);
     if (b.invariants.length) {
-      lines.push("", "**Invariants (must preserve):**");
+      lines.push("", "**Invariants (preserve unless the spec changes them):**");
       for (const inv of b.invariants) lines.push(`- ${inv}`);
     }
     if (b.side_effects.length) {

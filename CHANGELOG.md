@@ -1,5 +1,20 @@
 ## 2026-07-08
 
+- **feat(edd): EDD Faz 2 — mevcut-davranış haritasını Faz 8 codegen'e enjekte et (kanıtlı boşluk kapatma, YZLLM):**
+  Faz 8 TDD codegen eskiden mevcut proje bilgisinin hiçbirini almıyordu (yalnız `PROJECT_ROOT` + `SPEC_PATH`) → yabancı
+  kodu her iterasyonda sıfırdan keşfedip mevcut davranışı bilmeden kırabiliyordu. Faz 2 bu boşluğu kapatır: EDD Faz 1'in
+  birim-birim davranış haritasını codegen'in `initialMessage`'ına iki kanalla verir — tam harita on-demand
+  (`.mycl/edd-analysis.md`, dokunulan birim okunur) + en anahtar birimlerin sözleşmesi inline (anında zemin).
+  - **Kanal:** `state.pending_edd_context_note` (consent-note desenini birebir yansıtır); yalnız foreign kökende kurulur
+    (MyCL'de no-op), her iki Faz 8 call-site'ında consent kapısından sonra üretilir + Faz 8'e özgü olarak try/finally'de temizlenir.
+  - **Öncelik çerçevesi:** not + `edd-analysis.md` başlığı "bu BAĞLAM'dır, kısıt değil — spec bir davranışı değiştirmek
+    isterse SPEC KAZANIR" der (EDD veto değil; mahkeme öncelik-uzlaşması).
+  - **KATI#4 bayat koruması:** inline seçilen her birimin güncel hash'i analiz-anı hash'iyle karşılaştırılır; uyuşmazsa
+    "⚠️ değişmiş, doğrula" işaretlenir (sessiz bayat kullanım yok); silinmiş birim inline edilmez. Tam invalidasyon Faz 4'te.
+  - **KATI#1:** not stack-özel "blast-radius" iddiası basmaz ("anahtar birimler"); MAX_ITEMS üstü kırpma görünür "+N more".
+  Çapraz-aile mahkemesi 3 major (bayat sözleşme / stack-iddiası / spec-önceliği) + 4 minor buldu → hepsi düzeltildi →
+  re-verify: 0 blocker/major, regresyon yok. 11 birim test. `npm run check` yeşil.
+
 - **feat(edd): Entegrasyon Driven Define — yabancı projeyi birim-birim TAM anla + belgele (Faz 1 / motor, YZLLM):**
   Yabancı proje entegre edildiğinde MEVCUT davranışını BİRİM-BİRİM derin analiz eden yeni `orchestrator/src/edd/` modülü.
   Kod DOĞRU varsayılır — bug arama YOK; amaç MyCL'in projeye tam hakim olması + belgelemesi, böylece sonraki iterasyonlar

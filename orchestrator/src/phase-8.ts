@@ -491,6 +491,10 @@ export class Phase8Controller {
       `koş + dur. Faz tamamlanır.` +
       this.pendingMigrationNote +
       this.pendingFixNote +
+      // EDD (Entegrasyon Driven Define, yalnız foreign): mevcut proje davranış-haritası → codegen var olan kodu bilir
+      // (kanıtlı boşluk: eskiden sıfır onboarding bilgisi alıyordu). Consent notundan ÖNCE: bu BAĞLAM; aktif consent
+      // "değiştir" kararı daha yetkili → sonra gelir. Çerçeve "spec kazanır" not içinde gömülü. Boşsa "" (no-op).
+      (this.state.pending_edd_context_note ?? "") +
       // Davranış-onay kapısı (behavior-consent-gate, Faz 8 KURULMADAN önce koştu): ONAYLANAN değişiklikler
       // "feature+test+kod birlikte güncelle", REDDEDİLEN davranışlar "dokunma" olarak gömülü. Boşsa "" (no-op).
       (this.state.pending_behavior_consent_note ?? "");
