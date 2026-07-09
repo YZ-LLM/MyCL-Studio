@@ -173,6 +173,15 @@ entegre eder.
   belirsizlik (tercih/zevk/geri-alınamaz) ise sana sorar, gereksiz bir soruysa
   çıkarılabilir cevapla seni bekletmeden ilerler. Varsayılan **açık** (Ayarlar →
   müfettiş'ten kapatılabilir).
+- **Hiçbir şey sorma (tam otonom)** — composer'daki oto-cevap kutusunun yanındaki ikinci
+  kutu. Açıkken MyCL sana **hiç soru sormaz**: onay, netleştirme, faz-kapsamı, UI incelemesi
+  (Faz 6) ve tercih kararlarını kendi verir; zor/riskli olanları kullanıcı yerine mahkemeye
+  götürür (her karar sohbette **görünür**). Entegre (yabancı) bir projede var olan kodu
+  değiştiren düzeltmeler, dokunulan mevcut davranışı **göstererek** otomatik uygulanır
+  (sormadan ama görünür). **Koruma devrede kalan istisnalar** (mod açık olsa da yine onayın
+  istenir/durur): yıkıcı işlemler (iş/pipeline iptali), düşük-güvenli/belirsiz onaylar, kalıcı
+  model ayarı ve yıkıcı kabuk komutları. Oto-cevabın üst kümesidir (açıkken oto-cevap zorunlu
+  açık sayılır). Varsayılan **kapalı** (opt-in); kapalıyken tüm davranış değişmez.
 - **Sızma testi / DAST** — `katana` (gezinme) + `nuclei` ile çalışan uygulama
   aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı
   onaylı; pipeline'da otomatik koşmaz — pentest ağır olduğundan yükü kullanıcı kontrol

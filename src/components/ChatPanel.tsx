@@ -240,6 +240,10 @@ interface Props {
   /** YZLLM 2026-07-08: entegre (foreign) projede oto-cevap KAPSAMLI çalışır (yalnız güvenli akış kararları). Checkbox
    *  etkileşimli kalır; yalnız etiket/tooltip "güvenli kararlarda oto"ya döner. (Eski: tamamen devre-dışı.) */
   autoAnswerForeignScoped?: boolean;
+  /** YZLLM 2026-07-09: HİÇBİR ŞEY SORMA (tam otonom) — oto-cevabın üst-seviyesi; açıkken MyCL kullanıcıya hiç
+   *  sormaz, zor/riskli kararlar mahkemeye gider. Oto-cevap görsel açık+kilitli (superset). */
+  neverAsk?: boolean;
+  onNeverAskToggle?: (enabled: boolean) => void;
   /** WP4 DAST: 🛡️ Güvenlik Taraması butonu — backend açıklama+onay askq'ı açar
    *  (buton DOĞRUDAN taramaz). Yalnız çalışan localhost app'ine. */
   onDastClick?: () => void;
@@ -270,6 +274,8 @@ export function ChatPanel({
   autoAnswer,
   onAutoAnswerToggle,
   autoAnswerForeignScoped,
+  neverAsk,
+  onNeverAskToggle,
   onDastClick,
   dastRunning,
   currentJob,
@@ -602,13 +608,16 @@ export function ChatPanel({
           <label
             className="intent-pill"
             title={
-              autoAnswerForeignScoped
-                ? "Entegre modda oto-cevap yalnız GÜVENLİ akış kararlarında çalışır (onaylar, faz-kapsamı, kavrama). Var olan kodu/DB/güvenliği değiştiren kararlar ve önemli tercih (mock mu gerçek-DB mi) soruları HEP sana gelir."
-                : "Açıkken: bir önerisi olan netleştirme soruları otomatik o öneriyle yanıtlanır (daha hızlı iterasyon). Onaylar + önerisi olmayan sorular yine size sorulur."
+              neverAsk
+                ? "Hiçbir şey sorma modu açıkken oto-cevap zorunlu açıktır (üst-seviye kapsar)."
+                : autoAnswerForeignScoped
+                  ? "Entegre modda oto-cevap yalnız GÜVENLİ akış kararlarında çalışır (onaylar, faz-kapsamı, kavrama). Var olan kodu/DB/güvenliği değiştiren kararlar ve önemli tercih (mock mu gerçek-DB mi) soruları HEP sana gelir."
+                  : "Açıkken: bir önerisi olan netleştirme soruları otomatik o öneriyle yanıtlanır (daha hızlı iterasyon). Onaylar + önerisi olmayan sorular yine size sorulur."
             }
             style={{
               marginLeft: "auto",
-              cursor: "pointer",
+              cursor: neverAsk ? "default" : "pointer",
+              opacity: neverAsk ? 0.6 : 1,
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
@@ -617,13 +626,36 @@ export function ChatPanel({
             <input
               type="checkbox"
               data-testid="auto-answer-toggle"
-              checked={!!autoAnswer}
+              checked={!!autoAnswer || !!neverAsk}
+              disabled={!!neverAsk}
               onChange={(e) => onAutoAnswerToggle(e.target.checked)}
               style={{ margin: 0 }}
             />
             <span className="intent-pill-label">
-              Oto-cevap{autoAnswerForeignScoped ? " (güvenli kararlarda oto)" : ""}
+              Oto-cevap{autoAnswerForeignScoped && !neverAsk ? " (güvenli kararlarda oto)" : ""}
             </span>
+          </label>
+        )}
+        {/* YZLLM 2026-07-09: HİÇBİR ŞEY SORMA (tam otonom) checkbox — oto-cevabın üst-seviyesi (superset). */}
+        {onNeverAskToggle && (
+          <label
+            className="intent-pill"
+            title="Açıkken: MyCL kararları kendi verir, zor/riskli olanları mahkemeye götürür — onay, netleştirme ve UI-inceleme soruları otomatik geçilir; entegre (yabancı) projede var olan kodu değiştiren düzeltmeler dokunulan davranışı GÖSTEREREK otomatik uygulanır (her karar sohbette görünür). Koruma devrede kalan İSTİSNALAR (yine onayın/durur): yıkıcı işlemler (iş/pipeline iptali), düşük-güvenli/belirsiz onaylar, kalıcı model ayarı ve yıkıcı kabuk komutları."
+            style={{
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <input
+              type="checkbox"
+              data-testid="never-ask-toggle"
+              checked={!!neverAsk}
+              onChange={(e) => onNeverAskToggle(e.target.checked)}
+              style={{ margin: 0 }}
+            />
+            <span className="intent-pill-label">Hiçbir şey sorma</span>
           </label>
         )}
         {/* YZLLM 2026-06-27: 📄 Proje Dökümanı butonu sağdaki Orkestra Ajanı paneline taşındı. */}

@@ -21,6 +21,7 @@ import { translate } from "./translator.js";
 import { log } from "./logger.js";
 import { readEddProgress, summarizeProgress, type EddUnitRecord } from "./edd/progress.js";
 import { buildReverseImportGraph, getAffected, type AffectedModule } from "./fix/dep-graph/index.js";
+import { isNeverAsk } from "./auto-answer.js";
 
 const CONSENT_ID_PREFIX = "foreign_write_consent_";
 const APPLY_ALL = "Hepsini uygula";
@@ -204,12 +205,26 @@ export async function runForeignWriteConsentGate(
   }
 
   void opts; // source şu an yalnız "risk-fix" (tek dal); genişlerse header burada dallanır.
-  // Görünür liste (KATI#4: ne onaylayacağı net) — numaralı, dokunulan davranışla.
-  const header = `🔐 Entegre mod — MyCL ${items.length} risk düzeltmesiyle VAR OLAN kodunu değiştirmek istiyor. Onayın olmadan dokunmam. Her biri + dokunacağı mevcut davranış:`;
+  const neverAsk = isNeverAsk();
+  // Görünür liste (KATI#4: ne onaylayacağı net) — numaralı, dokunulan davranışla. HİÇBİR ŞEY SORMA modunda header
+  // dürüst dallanır (dokunacağı davranışı yine GÖSTERİR ama onay sormadığını bildirir — "sormadan ama göstererek").
+  const header = neverAsk
+    ? `🔐 Entegre mod (hiçbir şey sorma) — MyCL ${items.length} risk düzeltmesiyle VAR OLAN kodunu SORMADAN otomatik değiştirecek. Her biri + dokunacağı mevcut davranış (GÖRÜNÜR):`
+    : `🔐 Entegre mod — MyCL ${items.length} risk düzeltmesiyle VAR OLAN kodunu değiştirmek istiyor. Onayın olmadan dokunmam. Her biri + dokunacağı mevcut davranış:`;
   const blocks = enriched.map(
     (e, i) => `**${i + 1}. ${e.labelTr}**\n${formatTouchedForConsent(e.touched, e.docWhatTr)}`,
   );
   emitChatMessage("system", `${header}\n\n${blocks.join("\n\n")}`);
+
+  // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): yabancı-yazma onayını SORMADAN ver — ama dokunulan davranışı YUKARIDA GÖSTERDİK
+  // (LOUD, sessiz değil). Tümü uygulanır ("herşeye o karar versin"). anti-false-safe/EDD-belirsizlik özeti yine görünür.
+  if (neverAsk) {
+    emitChatMessage(
+      "system",
+      `🤖 Hiçbir şey sorma modu: yukarıdaki ${items.length} düzeltme SORULMADAN otomatik onaylandı (dokunulan mevcut davranış görünür).`,
+    );
+    return items;
+  }
 
   // Batch karar.
   const sel = await emitConsentAskq(
@@ -341,6 +356,11 @@ export async function confirmForeignWriteFiles(
       files.map((f) => `• ${f}`).join("\n") +
       `\n\n${formatTouchedForConsent(touched, docWhatTr)}`,
   );
+  // HİÇBİR ŞEY SORMA: kesin dosya listesini GÖSTERDİK (yukarıda); onay sormadan uygula (B1 kapısı da otomatik onayladı).
+  if (isNeverAsk()) {
+    emitChatMessage("system", "🤖 Hiçbir şey sorma modu: yukarıdaki kesin değişiklikler SORULMADAN uygulanıyor.");
+    return true;
+  }
   const sel = await emitConsentAskq("Bu kesin değişiklikleri uygulayayım mı?", ["Uygula", "İptal (uygulama)"]);
   return sel === "Uygula";
 }

@@ -15,11 +15,23 @@
 // eskiden TAMAMEN bastırılıyordu (_integrateSuppressed). Artık kategori-bazlı: yalnız GÜVENLİ-AKIŞ kararları
 // (onay/toplayıcı/faz-kapsam/kavrama) foreign'de oto-cevaplanır; KOD-DEĞİŞTİREN ve KULLANICI-TERCİHİ kararlar
 // foreign'de kullanıcıya kalır (bugünkü güvenlik korunur — regresyon yok). Non-foreign davranış BYTE-AYNI.
+//
+// HİÇBİR ŞEY SORMA modu (YZLLM 2026-07-09, "herşeye o karar versin; zor şeylerde mahkemeye soruyor zaten"): _neverAsk
+// ÜST-SEVİYE (superset) bayrak — açıkken decideAutoAnswer HER kategoriyi oto-cevaplar (foreign dahil), _enabled/
+// _integrateSuppressed'ı AŞAR. KULLANICI KARARI (2026-07-09 AskUserQuestion): foreign'de var olan kodu DEĞİŞTİREN fix'ler
+// "GÖSTER + otomatik uygula" — KÖR değil: kod-değiştiren yollar (gate-autofix / failPhase / debug / risk / Faz 13)
+// uygulamadan önce dokunulan davranışı/niyeti GÖSTERİR (emitForeignAutoFixNotice / emitSecurityFixImpact / foreign-write-
+// consent göster-katmanı). GÜVENLİK TABANI (mod açıkken bile): bash-guard denylist; cancel_pipeline (yıkıcı iş-iptali);
+// forceUserPrompt (düşük-güven/sentezlenmiş onay); mahkeme salt-okunur. Mod "sormadan ama GÖSTEREREK" (LOUD, sessiz değil).
+// Varsayılan KAPALI → mod kapalıyken bu dosyanın kararı BYTE-AYNI (neverAsk=false ilk satırı atlanır).
 
 let _enabled = false;
 // YZLLM (cave5): ENTEGRE (foreign-origin) projede oto-cevap bastırma bayrağı. handleOpenProject origin'e göre set eder.
 // Artık tam-blok DEĞİL: decideAutoAnswer'da kategoriyle birlikte değerlendirilir (yalnız güvenli-akış foreign'de geçer).
 let _integrateSuppressed = false;
+// HİÇBİR ŞEY SORMA (tam otonom) — kullanıcıya sıfır soru; frontend `set_never_ask` ile set eder. Superset: açıkken
+// oto-cevap zorla-açık sayılır (isAutoAnswerEnabled/autoAnswerSuggested). Güvenlik tabanı AYRI katmanlarda korunur.
+let _neverAsk = false;
 
 /**
  * Oto-cevap karar kategorisi:
@@ -36,9 +48,15 @@ export type AutoAnswerCategory = "safe-flow" | "dangerous-write" | "user-prefere
  */
 export function decideAutoAnswer(
   category: AutoAnswerCategory,
-  s: { enabled: boolean; suppressed: boolean; isApproval?: boolean; hasSuggestion?: boolean },
+  s: { enabled: boolean; suppressed: boolean; isApproval?: boolean; hasSuggestion?: boolean; neverAsk?: boolean },
 ): boolean {
-  if (!s.enabled) return false;
+  // HİÇBİR ŞEY SORMA: her kategori oto — foreign dahil (YZLLM 2026-07-09 kararı: "foreign'de GÖSTER + otomatik uygula").
+  // KÖR-oto DEĞİL: bu yalnız "oto-cevapla" kararıdır; foreign'de VAR OLAN kodu değiştiren yollar (gate-autofix / failPhase /
+  // debug / risk / Faz 13) uygulamadan önce dokunacağı davranışı GÖSTERİR (emitSecurityFixImpact / foreign-write-consent
+  // göster-katmanı / entegre-mod oto-fix notu) → "sormadan ama göstererek". Güvenlik tabanı AYRI: bash-guard denylist,
+  // cancel_pipeline (yıkıcı) ve forceUserPrompt (düşük-güven) korunur. Non-foreign parite (never-ask öncesi = _enabled).
+  if (s.neverAsk) return true;
+  if (!s.enabled) return false; // ⬇ neverAsk=false → mevcut mantık BİREBİR (mod kapalı = byte-aynı; parite değişmezi)
   if (!s.suppressed) return true; // NON-FOREIGN: kategori'ye bakmadan eski davranış (parite)
   if (category !== "safe-flow") return false; // FOREIGN: dangerous + user-preference → kullanıcıda
   if (s.isApproval) return true; // foreign güvenli onay/ack → oto
@@ -65,6 +83,24 @@ export function setIntegrateModeSuppression(on: boolean): void {
   _integrateSuppressed = on;
 }
 
+/** HİÇBİR ŞEY SORMA (tam otonom) modunu set et. Frontend `set_never_ask` komutu çağırır. */
+export function setNeverAsk(on: boolean): void {
+  _neverAsk = on;
+}
+
+/**
+ * Hiçbir şey sorma modu açık mı. Tüketiciler (doğrudan-emitAskq kapıları — decideAutoAnswer'ı BYPASS ederler, ayrı okur):
+ * behavior-consent-gate (oto-onay+not+GÖSTER), foreign-write-consent (oto-onay+GÖSTER), qa-askq controller/cli-backend
+ * (user-preference clarify oto), index.ts inspectClarify (mahkeme ask=true→oto-ilerle + döngü guard), memory-proposal
+ * (oto "Projeye özel"), model-upgrade (kalıcı ayara dokunma→bilgi), Faz 6 (oto görsel-inceleme+ilerle),
+ * emitForeignAutoFixNotice (foreign kod-değiştiren fix'lerde "yabancı kod değişiyor" GÖSTER). KORUNAN istisnalar (mod
+ * açıkken bile sorar/durur): yıkıcı iş-iptali (cancel_pipeline), düşük-güven/sentezlenmiş onay (forceUserPrompt),
+ * bash-guard denylist. Foreign kod-değiştirme: kör DEĞİL → GÖSTER + oto (kullanıcı kararı 2026-07-09).
+ */
+export function isNeverAsk(): boolean {
+  return _neverAsk;
+}
+
 /** Şu an entegre-bastırma aktif mi (UI'ı bilgilendirmek için). */
 export function isIntegrateSuppressed(): boolean {
   return _integrateSuppressed;
@@ -76,7 +112,7 @@ export function isIntegrateSuppressed(): boolean {
  * otomatik uygula" opt-in'i için — güvenlik-fix kararı (Faz 13) foreign'de bu bayrakla açılır (kategori-bastırmayı aşar).
  */
 export function isAutoAnswerEnabled(): boolean {
-  return _enabled;
+  return _enabled || _neverAsk; // superset: hiçbir şey sorma açıksa ham toggle da açık sayılır (Faz 13 güvenlik opt-in vb.)
 }
 
 /**
@@ -92,6 +128,7 @@ export function autoAnswerSuggested(
     suppressed: _integrateSuppressed,
     isApproval: opts?.isApproval,
     hasSuggestion: opts?.hasSuggestion,
+    neverAsk: _neverAsk,
   });
 }
 
@@ -110,6 +147,7 @@ export function autoAnswerPick(
     suppressed: _integrateSuppressed,
     isApproval: opts?.isApproval,
     hasSuggestion: suggested_tr !== undefined,
+    neverAsk: _neverAsk,
   });
   if (!allowed) return null;
   if (suggested_tr === undefined && options_tr.length === 0) return null;

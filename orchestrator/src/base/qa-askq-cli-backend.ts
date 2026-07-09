@@ -14,7 +14,7 @@ import { MAIN_AGENT_LANGUAGE_RULE, USER_FACING_CLARITY_RULE } from "../agent-lan
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession } from "../cli-session.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "../tool-policy.js";
-import { autoAnswerSuggested, classifyQaAskq } from "../auto-answer.js";
+import { autoAnswerSuggested, classifyQaAskq, isNeverAsk } from "../auto-answer.js";
 import { selectEffortForTask } from "../model-catalog.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isApiAccountError } from "../claude-api.js";
@@ -511,10 +511,12 @@ export class CliQaAskqBackend implements QaAskqBackend {
     // YZLLM 2026-06-17: ÖNEMLİ kullanıcı-tercihi (Faz 1/2 NETLEŞTİRME — allowOther=true,
     // yani !is_approval) oto-cevapla GEÇİLMEZ; kullanıcı seçer. Onaylar (allowOther=false)
     // + diğer fazlar (Faz 9 risk dahil) oto-cevaba dahil.
+    // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): kullanıcı-tercihi netleştirmesi de otomatik seçilir (geri-alınabilir tercih).
+    // AMA forceUserPrompt (sentezlenmiş/düşük-güven onay → düşman-güven/sahte-yeşil koruması) never-ask'ta bile KORUNUR:
+    // MyCL kendi güveni düşükken onayı kör-geçmez (güvenlik-benzeri istisna). Mod KAPALI → guard'lar aynen (parite).
     const isUserPreferenceClarify =
-      allowOther && (this.opts.tag === "phase-1" || this.opts.tag === "phase-2");
+      !isNeverAsk() && allowOther && (this.opts.tag === "phase-1" || this.opts.tag === "phase-2");
     // Kategori (YZLLM 2026-07-08): entegre modda yalnız safe-flow oto. isApproval = !allowOther (onay=allowOther false).
-    // isUserPreferenceClarify + forceUserPrompt guard'ları KORUNUR (non-foreign parite + düşman-güven).
     const aaCategory = classifyQaAskq(this.opts.tag, !allowOther);
     if (
       autoAnswerSuggested(aaCategory, { isApproval: !allowOther, hasSuggestion: suggested_option_tr !== undefined }) &&

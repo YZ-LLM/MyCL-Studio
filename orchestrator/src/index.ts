@@ -188,7 +188,7 @@ import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
-import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression } from "./auto-answer.js";
+import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } from "./user-directives.js";
@@ -418,6 +418,23 @@ async function emitSecurityFixImpact(pending: PendingErrorAnalysis): Promise<voi
 }
 
 /**
+ * HİÇBİR ŞEY SORMA + FOREIGN GÖSTER katmanı (YZLLM 2026-07-09 "foreign'de göster+oto-uygula"): var olan yabancı kodu
+ * DEĞİŞTİREN bir oto-fix (gate-autofix / failPhase-fix / debug-fix — hedef dosyaları önceden bilinmeyen yollar)
+ * uygulanmadan önce "yabancı kod değişiyor" farkındalığını GÖRÜNÜR kılar (sormadan ama göstererek). Dosya-bilen yollar
+ * (Faz 13 emin-fix / risk-fix) ayrıca describeTouchedForFiles ile dokunulan mevcut davranışı gösterir. Yalnız
+ * foreign + hiçbir şey sorma modunda konuşur; aksi no-op (byte-aynı).
+ */
+function emitForeignAutoFixNotice(context: string): void {
+  if (isNeverAsk() && runtime.state?.origin === "foreign") {
+    emitChatMessage(
+      "system",
+      `🔐 Entegre mod (hiçbir şey sorma): ${context} — var olan yabancı kodda değişiklik SORULMADAN uygulanıyor; ` +
+        "yapılan değişiklikler sohbette/diff'te görünür kalır.",
+    );
+  }
+}
+
+/**
  * YZLLM 2026-07-03: mevcut finding fix'lendikten SONRA kuyruğu ilerlet. Sonraki finding varsa onu sor (auto ise
  * dispatch et → intercept bir sonrakine ilerletir), yoksa kuyruğu temizle → çağıran gate'i BİR kez yeniden koşar
  * (final doğrulama). Faz 13 intercept'i (next===13 + awaitingRerun) bunu çağırır.
@@ -444,6 +461,8 @@ async function advanceFindingQueue(): Promise<"asked" | "exhausted"> {
     // GÜVENLİK AĞI (mahkeme, YZLLM 2026-07-03): oto-modda bu finding için çözüm ÜRETİLEMEDİ (solutions_tr boş →
     // emitBlockingFindingAskq GERÇEK askq açtı). finding[0] yolundakiyle SİMETRİK: headless'te askq'da asılı
     // kalma YOK → OTOMATİK "kabul et + devam" (bulgu rapora/audit'e yazıldı, YUTULMADI — KATI #4/frozen-goal).
+    // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): foreign'de de accept-continue GÖRÜNÜR (aşağıda emitChatMessage) — "hiç sorma"
+    // + çözülemeyen güvenlik bulgusu bastırılmadan kaydedilip devam edilir ("göster+devam"; kör-kabul değil, LOUD).
     emitChatMessage(
       "error",
       `🔴 Faz 13: bir güvenlik sorunu otomatik çözülemedi — bulgu yutulmadı; "kabul et + devam" ile ilerliyorum (elle düzeltme istenmez).`,
@@ -1219,6 +1238,9 @@ async function failPhase(
       emitChatMessage("system", "⚖️ Mahkeme (faz hatası) erişilemedi — inceleme atlandı, normal otomatik akışa düşüldü (denetimsiz). Müfettişe ulaşılamıyorsa anahtar/bağlantıyı kontrol et.");
     }
   }
+  // HİÇBİR ŞEY SORMA + FOREIGN GÖSTER (YZLLM 2026-07-09 "göster+oto"): otomatik çözüm (analyzeAndAskError autoResolve →
+  // concrete-solution dispatch) var olan yabancı kodu değiştirebilir → uygulanmadan farkındalık göster. no-op if non-foreign.
+  if (autoResolve) emitForeignAutoFixNotice("hata otomatik çözülüyor (kod düzeltmesi uygulanabilir)");
   if (!autoResolve && !mahkemeDiverted) {
     emitChatMessage(
       "system",
@@ -1751,6 +1773,16 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
             !_declinedModelUpgrades.has(t.strong) &&
             !declinedPersisted
           ) {
+            // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): model KALICI bir ayardır (kullanıcı kral — feedback_model_policy).
+            // Sorma AMA otomatik de yükseltme (ayarını ezme) → mevcut ayarla devam + GÖRÜNÜR bilgi. Kullanıcı isterse
+            // Ayarlar'dan geçer. ("Herşeye o karar versin" bile kalıcı kullanıcı tercihini/model politikasını ezmez.)
+            if (isNeverAsk()) {
+              emitChatMessage(
+                "system",
+                `🆕 Güncel güçlü model bulundu: **${t.strong}** (şu an: ${currentStrong}). Hiçbir şey sorma modunda model ayarını otomatik değiştirmem (kalıcı kullanıcı tercihi) — istersen Ayarlar'dan geçebilirsin.`,
+              );
+              return;
+            }
             const askqId = randomUUID();
             _pendingModelUpgrade = { askqId, model: t.strong };
             emitChatMessage(
@@ -2871,11 +2903,14 @@ async function executeAgentDecision(
       const cfg = runtime.config;
       if (autoAnswerSuggested() && cfg.features.inspector_enabled) {
         if (_clarifyInspectChain >= CLARIFY_INSPECT_MAX) {
-          emitChatMessage(
-            "system",
-            `⚖️ Mahkeme: arka arkaya ${_clarifyInspectChain} netleştirme çözüldü ama ilerleme yok → ` +
-              `döngü emniyeti için sana soruyorum.`,
-          );
+          // never-ask'ta "sana soruyorum" YANILTICI (aşağıdaki isNeverAsk bloğu ilerletir/durdurur) → bastır (mahkeme minor).
+          if (!isNeverAsk()) {
+            emitChatMessage(
+              "system",
+              `⚖️ Mahkeme: arka arkaya ${_clarifyInspectChain} netleştirme çözüldü ama ilerleme yok → ` +
+                `döngü emniyeti için sana soruyorum.`,
+            );
+          }
         } else {
           try {
             const ruling = await inspectClarify(cfg, {
@@ -2907,14 +2942,45 @@ async function executeAgentDecision(
               });
               return;
             }
-            emitChatMessage("system", `⚖️ Mahkeme: belirsizlik gerçek — sana soruyorum.\n${ruling.summary}`);
+            // never-ask'ta bu mesajı HİÇ basma: aşağıdaki isNeverAsk bloğu TEK "en makul seçenekle ilerliyorum" mesajını
+            // basar (çift-mesaj önlenir; mahkeme minor). ruling.summary zaten audit'e yazıldı (yukarıda). Non-never-ask: sor.
+            if (!isNeverAsk()) {
+              emitChatMessage("system", `⚖️ Mahkeme: belirsizlik gerçek — sana soruyorum.\n${ruling.summary}`);
+            }
           } catch (e) {
             log.warn("orchestrator", "mahkeme clarify-incelemesi hata (yutuldu → insana sor)", {
               error: String(e),
             });
-            emitChatMessage("system", "⚖️ Mahkeme (netleştirme) erişilemedi — güvenli tarafta kaldım, soruyu sana yönelttim (denetimsiz).");
+            if (!isNeverAsk()) {
+              emitChatMessage("system", "⚖️ Mahkeme (netleştirme) erişilemedi — güvenli tarafta kaldım, soruyu sana yönelttim (denetimsiz).");
+            }
           }
         }
+      }
+      // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): mahkeme "gerçek belirsizlik — insana sor" dese/erişilemese bile insana GİTME
+      // (kullanıcı yok) → en makul/ilk seçenekle ilerle (clarify prompt'ta conservative/güvenli-önce). GÖRÜNÜR (LOUD).
+      // DÖNGÜ EMNİYETİ (mahkeme 2026-07-09): devre-kesici + ask=true dalları buraya RETURN'süz düşer; _clarifyInspectChain'i
+      // BURADA say → ajan ısrarla aynı belirsizliği üretip autoPick çözemezse sonsuz setImmediate→handleUserMessage→
+      // ask_clarify çevrimi OLMASIN. MAX aşılırsa autoPick YAPMA → LOUD dur (frozen-goal: geç YA DA escalate; görünür
+      // duruş, sessiz-döngü değil). Gerçek ilerleme (ask_clarify DIŞI aksiyon) sayacı yukarıda sıfırlar (2868).
+      if (isNeverAsk()) {
+        const autoPick = clarifyOptions.find((o) => o !== "Vazgeç") ?? clarifyOptions[0]!;
+        _clarifyInspectChain++;
+        if (_clarifyInspectChain > CLARIFY_INSPECT_MAX) {
+          emitChatMessage(
+            "system",
+            `⚠️ Hiçbir şey sorma: art arda ${_clarifyInspectChain} netleştirme çözülemedi — döngü emniyeti için otomatik ilerletmeyi DURDURDUM (son makul cevap: "${autoPick}"). Farklı bir işle sayaç sıfırlanır.`,
+          );
+          return;
+        }
+        emitChatMessage(
+          "system",
+          `🤖 Hiçbir şey sorma modu: netleştirme sorulmadı — en makul seçenek "${autoPick}" ile ilerliyorum.\n${clarifyQuestion}`,
+        );
+        setImmediate(() => {
+          void handleUserMessage(autoPick);
+        });
+        return;
       }
       emitAskq({
         id: askqId,
@@ -3063,7 +3129,8 @@ async function executeAgentDecision(
     }
     case "cancel_pipeline": {
       // YIKICI (iş kaybı riski) → onay KORUNUR (YZLLM: silme/yıkıcı onayı gerçek kullanıcı-seçimidir; "direk işe
-      // koyul" KURAL'ı işe-başlamak içindir, işi YOK ETMEK için değil).
+      // koyul" KURAL'ı işe-başlamak içindir, işi YOK ETMEK için değil). HİÇBİR ŞEY SORMA modunda BİLE korunur —
+      // pipeline/iş iptali geri-alınamaz; "yıkıcı/yüksek-risk koruma açık kalır" (kullanıcı AskUserQuestion'da onayladı).
       const chatMsg =
         decision.message_to_user
           ? `${decision.reason}\n\n${decision.message_to_user}`
@@ -3111,6 +3178,15 @@ async function executeAgentDecision(
         user_text: text,
         decision_action: decision.action,
       };
+      // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): hafıza kapsamı düşük-riskli, geri-alınabilir tercih → güvenli varsayılan
+      // "Projeye özel" otomatik seçilir (kararı MyCL verir; genel hafızayı kirletmez). Mevcut cevap-işleme yolu kullanılır.
+      if (isNeverAsk()) {
+        emitChatMessage("system", '🤖 Hiçbir şey sorma modu: hafıza kaydı "Projeye özel" olarak otomatik seçildi.');
+        await handleAskqAnswer(askqId, "📁 Projeye özel").catch((e: unknown) =>
+          log.error("orchestrator", "never-ask memory-proposal auto-route failed", e),
+        );
+        return;
+      }
       emitAskq({
         id: askqId,
         question: "Hangi hafızaya kaydedeyim?",
@@ -4738,6 +4814,28 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // kuyruk işi bu işaret sayesinde orphan-drop'tan korunur). approve/revise/cancel'da
       // temizlenir. void r — deferred dışı sonuç bu yola gelmez.
       void r;
+      // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): Faz 6 UI görsel-incelemesi normalde kullanıcı kararı gerektirir (park).
+      // "Mutlak hiçbir şey sorma"da park ETME → a11y/görsel rapor p6.run()'da YUKARIDA GÖSTERİLDİ (LOUD, göstererek),
+      // otomatik onayla + Faz 7'e ilerle (advanceToNextPhase — approve_ui yoluyla birebir). KATI #9 istisnası: YALNIZ mod
+      // AÇIKKEN; mod kapalı varsayılanda Faz 6 hep kullanıcıya kalır (park). pending_ui_review SET EDİLMEZ.
+      if (isNeverAsk()) {
+        state = { ...state, ...p6.statePatch };
+        runtime.state = state;
+        await saveState(state);
+        await appendAuditModule(state.project_root, {
+          ts: Date.now(),
+          phase: 6,
+          event: "phase-6-complete",
+          caller: "mycl-orchestrator",
+          detail: "never_ask_auto_review",
+        });
+        emitChatMessage(
+          "system",
+          "🤖 Hiçbir şey sorma modu: Faz 6 UI incelemesi otomatik onaylandı (yukarıdaki erişilebilirlik raporu görünür) — Faz 7'e geçiliyor.",
+        );
+        await advanceToNextPhase(6);
+        return;
+      }
       state = { ...state, ...p6.statePatch, pending_ui_review: true };
       runtime.state = state;
       await saveState(state);
@@ -5110,6 +5208,10 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // YZLLM 2026-06-11 ("Faz 11/13'teydim niye Faz 8'e döndü"): Faz 13 güvenlik bulgusunu ÖNCE FAZIN İÇİNDE
         // odaklı-minimal düzelt + Faz 13'ü YENİDEN doğrula (diğer mekanik gate'ler gibi). Çözülürse Faz 8'e/codegen'e
         // HİÇ dönmez (8→9→…→13 yeniden-koşma yok). Yalnız Oto-cevap açıkken + bir kez (gateAutofixTried).
+        // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09 "foreign'de göster+oto-uygula"): autoAnswerSuggested() foreign'de de true →
+        // gate-autofix foreign'de AÇIK. runGateAutofix çağrısından önce/sonra foreign+never-ask'ta dokunulan davranış
+        // GÖSTERİLİR (aşağıda emitForeignAutoFixNotice); mahkeme escalate/proceed korumaları aynen (fix riskliyse insansız
+        // accept-continue LOUD).
         if (
           outcome.kind === "fail" &&
           autoAnswerSuggested() &&
@@ -5183,6 +5285,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             "system",
             "🔧 Faz 13 (Güvenlik) — bulguları fazın içinde düzeltiyorum + güvenliği yeniden doğruluyorum (Faz 8'e dönmeden).",
           );
+          emitForeignAutoFixNotice("Faz 13 güvenlik düzeltmesi");
           const fixRan = await runGateAutofix(state, cfg, 13, phaseLabelTR(13, spec), outcome.stderr, secMahkemeGuidance);
           if (fixRan) {
             const reRunner = new MechanicalRunnerBase({
@@ -5264,7 +5367,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               allowAcceptContinue: true,
               acceptContinuePhase: 13,
             },
-            // autoResolve: non-foreign=auto (parite); foreign=yalnız yakınsarken (yakınsamıyorsa auto-seçme YOK → askq → kullanıcı: döngü koruması).
+            // autoResolve: non-foreign=auto (parite); entegre opt-in foreign=yalnız yakınsarken; HİÇBİR ŞEY SORMA foreign'de
+            // auto=true → emin-fix oto-seçilir (göster+uygula: aşağıda if(auto) dalı foreign'de emitSecurityFixImpact gösterir).
             { autoResolve: autoFixSec && (auto || secStep.converging) },
           ).catch(() => null);
         }
@@ -5305,11 +5409,17 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             `🔎 Güvenlik taraması ${pending.findings.length} ayrı sorun buldu — her birini ayrı ayrı soracağım (bu 1.'si; çözünce sonrakine geçeceğim).`,
           );
         }
+        // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09 "foreign'de göster+oto-uygula"): auto=autoAnswerSuggested() foreign'de de true →
+        // bu blok foreign'de de çalışır. Emin-fix dalında FOREIGN'de emitSecurityFixImpact ile dokunulan davranış GÖSTERİLİR
+        // (kör değil). Çözülemeyen dalı zaten LOUD accept-continue (görünür kabul + devam — kullanıcı "hiç sorma" dedi).
+        // Non-foreign davranış BİREBİR (emin-fix VEYA otomatik accept-continue).
         if (auto) {
           // ELLE DÜZELTME YOK (YZLLM 2026-06-14): otomatik fix varsa uygula; yoksa OTOMATİK "kabul et + devam" (LOUD).
           if (pending?.auto_selected_solution) {
             _securityAutoResolveCount++;
             runtime.pendingErrorAnalysis = pending;
+            // HİÇBİR ŞEY SORMA foreign: uygulamadan ÖNCE dokunulan mevcut davranışı GÖSTER (kullanıcı kararı "göster+oto").
+            if (state.origin === "foreign") await emitSecurityFixImpact(pending);
             await handleAskqAnswer(pending.id, pending.auto_selected_solution).catch((e: unknown) =>
               log.error("orchestrator", "faz-13 auto-solve routing failed", e),
             );
@@ -5447,6 +5557,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             "system",
             `🔧 Faz ${next} (${phaseLabelTR(next, spec)}) — bildirilen hataları fazın içinde düzeltiyorum (bu fazın işi; debug'a kaçmadan).`,
           );
+          emitForeignAutoFixNotice(`Faz ${next} (${phaseLabelTR(next, spec)}) otomatik düzeltmesi`);
           fixRan = await runGateAutofix(state, cfg, next, phaseLabelTR(next, spec), outcome.stderr, mahkemeGuidance);
         }
         if (fixRan) {
@@ -6817,6 +6928,23 @@ async function handleRunPhase(
       // FROZEN-GOAL #10: Faz 6 'deferred' (UI inceleme PARKI) bir BAŞARI yolu — fail DEĞİL. Eski kod isSuccess=false
       // sayıp "❌ başarısız" yazıyor + pending_ui_review set ETMİYORDU → iş reconcile'da SESSİZCE orphan-drop oluyordu.
       // Normal advance yoluyla aynı: park bayrağı + 'waiting' statüsü (Phase6 inceleme istemini zaten yazdı).
+      // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): tek-seferlik faz-run yolu da park ETMESİN → otomatik onayla + ilerle
+      // (normal pipeline Faz 6 yoluyla simetrik; a11y raporu controller'da gösterildi). Mod kapalı → eski park davranışı.
+      if (isNeverAsk()) {
+        await appendAuditModule(runtime.state.project_root, {
+          ts: Date.now(),
+          phase: phaseId,
+          event: "phase-6-complete",
+          caller: "mycl-orchestrator",
+          detail: "never_ask_auto_review",
+        });
+        emitChatMessage(
+          "system",
+          "🤖 Hiçbir şey sorma modu: Faz 6 UI incelemesi otomatik onaylandı — sonraki faza geçiliyor.",
+        );
+        await advanceToNextPhase(phaseId);
+        return;
+      }
       runtime.state = { ...runtime.state, pending_ui_review: true, updated_at: Date.now() };
       await saveState(runtime.state);
       emitPhaseChanged(phaseId, phaseId, "waiting");
@@ -7501,6 +7629,11 @@ ipcRouter.register("task_queue_remove", async (data: unknown) => {
 // v15.13 (saha 3/5): Oto-cevap toggle (Orkestrator yanındaki checkbox).
 ipcRouter.register("set_auto_answer", (data: unknown) => {
   setAutoAnswerSuggested((data as { enabled?: boolean } | undefined)?.enabled === true);
+});
+// HİÇBİR ŞEY SORMA (tam otonom) toggle (YZLLM 2026-07-09). Oto-cevabın ÜST-SEVİYESİ (superset):
+// açıkken MyCL kullanıcıya hiç sormaz; zor/riskli kararlar mahkemeye. Güvenlik tabanı (bash-guard, Faz 13) korunur.
+ipcRouter.register("set_never_ask", (data: unknown) => {
+  setNeverAsk((data as { enabled?: boolean } | undefined)?.enabled === true);
 });
 // Duraklat/Devam (YZLLM 2026-06-13): paused=true → yeni LLM çağrıları bir sonraki
 // sınırda bekler (in-flight tur tamamlanır); paused=false → kaldığı yerden devam.

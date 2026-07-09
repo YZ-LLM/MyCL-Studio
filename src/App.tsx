@@ -783,6 +783,17 @@ function App() {
     void orch.send({ kind: "set_auto_answer", data: { enabled } });
   };
 
+  // HİÇBİR ŞEY SORMA (tam otonom) toggle (YZLLM 2026-07-09). Oto-cevabın ÜST-SEVİYESİ (superset): açıkken MyCL
+  // kullanıcıya hiç sormaz, zor/riskli kararlar mahkemeye gider. DEFAULT KAPALI (opt-in). localStorage'da saklanır.
+  const [neverAsk, setNeverAsk] = useState<boolean>(
+    () => localStorage.getItem("mycl_never_ask") === "1",
+  );
+  const handleNeverAskToggle = (enabled: boolean): void => {
+    setNeverAsk(enabled);
+    localStorage.setItem("mycl_never_ask", enabled ? "1" : "0");
+    void orch.send({ kind: "set_never_ask", data: { enabled } });
+  };
+
   // YZLLM 2026-07-03: Cevap-bekleme sesi (askq geldiğinde bip). DEFAULT AÇIK — yalnız kullanıcı
   // açıkça kapattıysa ("0") kapalı. Saf ön-yüz tercihi (backend'e bildirilmez); localStorage'da saklanır.
   const [soundOn, setSoundOn] = useState<boolean>(
@@ -947,6 +958,8 @@ function App() {
           void orch.send({ kind: "read_features" });
           // v15.13 (saha 3/5): oto-cevap tercihini (localStorage) backend'e geri yükle.
           void orch.send({ kind: "set_auto_answer", data: { enabled: autoAnswer } });
+          // YZLLM 2026-07-09: hiçbir şey sorma tercihini (localStorage) backend'e geri yükle.
+          void orch.send({ kind: "set_never_ask", data: { enabled: neverAsk } });
         } else {
           setConfigStatus({
             state: "missing",
@@ -1580,6 +1593,8 @@ function App() {
           autoAnswer={autoAnswer}
           onAutoAnswerToggle={handleAutoAnswerToggle}
           autoAnswerForeignScoped={mainState.autoAnswerSuppressed}
+          neverAsk={neverAsk}
+          onNeverAskToggle={handleNeverAskToggle}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
           onShowCode={(ref) => setCodeModal({ open: true, codeRef: ref })}

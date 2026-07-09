@@ -578,6 +578,7 @@ export type OrchestratorCommand =
   | { kind: "task_queue_add"; data: { text: string } }
   | { kind: "task_queue_remove"; data: { id: string } }
   | { kind: "set_auto_answer"; data: { enabled: boolean } }
+  | { kind: "set_never_ask"; data: { enabled: boolean } }
   | { kind: "set_paused"; data: { paused: boolean } }
   | {
       kind: "save_features";

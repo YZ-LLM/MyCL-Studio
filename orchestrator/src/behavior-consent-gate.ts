@@ -22,6 +22,7 @@ import { translate } from "./translator.js";
 import { save as saveState } from "./state.js";
 import { currentSpecPath } from "./devs-paths.js";
 import { readAuditLogTail } from "./audit.js";
+import { isNeverAsk } from "./auto-answer.js";
 import {
   computeBehaviorChangeSet,
   appendBehaviorConsent,
@@ -224,9 +225,22 @@ export async function runBehaviorConsentGate(state: State, config: MyclConfig): 
   const yes: BehaviorChange[] = [];
   const no: BehaviorChange[] = [];
 
-  // Devre kesici (patoloji koruması, toplu-soru DEĞİL): tek iterasyonda çok fazla değişiklik →
-  // neredeyse kesin bozuk-diff. 12 açılır pencere yerine tek bilinçli karar.
-  if (set.changes.length > MAX_CONSENT_ASKS) {
+  // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): var olan davranış değişikliklerini TEK TEK SORMADAN otomatik onayla —
+  // ama GÖRÜNÜR yap (LOUD, sessiz değil; "sormadan ama göstererek") + consent-note yine üret (aşağıda) → .feature +
+  // test + kod BİRLİKTE güncellenir (bayat artefakt yok — behavior-consent'in özü korunur). Devre-kesici GEÇİLİR
+  // (kullanıcıya sormanın yerini otomasyon aldı); consent.jsonl kararları yine yazılır (denetim izi).
+  if (isNeverAsk()) {
+    yes.push(...set.changes);
+    const linesTr = await Promise.all(set.changes.map((c) => trText(config, c.priorStatement)));
+    emitChatMessage(
+      "system",
+      `🤖 Hiçbir şey sorma modu: ${set.changes.length} var olan davranış değişikliği SORULMADAN otomatik onaylandı ` +
+        "(GÖRÜNÜR — sessiz değil); .feature + test + kod birlikte güncellenecek (bayat artefakt bırakılmaz):\n" +
+        linesTr.map((t) => `• ${t}`).join("\n"),
+    );
+  } else if (set.changes.length > MAX_CONSENT_ASKS) {
+    // Devre kesici (patoloji koruması, toplu-soru DEĞİL): tek iterasyonda çok fazla değişiklik →
+    // neredeyse kesin bozuk-diff. 12 açılır pencere yerine tek bilinçli karar.
     emitChatMessage(
       "system",
       `⚠️ Bu iterasyon **${set.changes.length}** var olan davranışı birden değiştiriyor — bu genelde ` +

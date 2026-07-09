@@ -34,7 +34,7 @@ import { clearHistory } from "./history.js";
 // dev-server-launcher / command handler import'ları kaldırıldı — Phase 0 D3
 // silinince bu helper'lar bu modülde gereksiz. Faz 5 (UI tweak mode) ve
 // command handler kendi modüllerinde reuse ediyor.
-import { autoAnswerSuggested } from "./auto-answer.js";
+import { autoAnswerSuggested, isNeverAsk } from "./auto-answer.js";
 import {
   emitAskq,
   emitChatMessage,
@@ -801,6 +801,14 @@ export class Phase0Controller {
           ? "\n\n⚠️ Ajan emin değil — en güvenli doğru seçenek tercih edildi."
           : ""),
     );
+    // HİÇBİR ŞEY SORMA + FOREIGN GÖSTER (YZLLM 2026-07-09 "göster+oto"): bu debug düzeltmesi var olan yabancı kodu
+    // değiştirebilir → sormadan uygulanır ama farkındalık GÖRÜNÜR (kör değil). Non-foreign / mod kapalı → no-op.
+    if (isNeverAsk() && this.state.origin === "foreign") {
+      emitChatMessage(
+        "system",
+        "🔐 Entegre mod (hiçbir şey sorma): bu düzeltme var olan yabancı kodu değiştirebilir — sormadan uygulanır, değişiklikler sohbette/diff'te görünür kalır.",
+      );
+    }
 
     const askqId = randomUUID();
     this.statePatch = {

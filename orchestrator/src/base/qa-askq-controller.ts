@@ -17,7 +17,7 @@ import type { MyclConfig } from "../config.js";
 import { localizeOptionLabels, t } from "../i18n.js";
 import { appendHistory } from "../history-loader.js";
 import { recordClarify } from "../clarify-log.js";
-import { autoAnswerSuggested, classifyQaAskq } from "../auto-answer.js";
+import { autoAnswerSuggested, classifyQaAskq, isNeverAsk } from "../auto-answer.js";
 import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import { translate } from "../translator.js";
@@ -435,11 +435,13 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
         // NETLEŞTİRME askq'leri — "notlar nereye kaydedilsin" gibi mimari/ürün kararı)
         // oto-cevapla GEÇİLMEZ; kullanıcı kendisi seçer. Onaylar + Faz 9 risk netleştirmesi
         // + diğer fazlar oto-cevaba dahil (pipeline akıcı + risk oto-akışı korunur).
+        // HİÇBİR ŞEY SORMA (YZLLM 2026-07-09): kullanıcı-tercihi netleştirmesi (mock mu gerçek-DB mi) de otomatik seçilir
+        // (MyCL makul/ilk varsayılanı alır — geri-alınabilir tercih, kullanıcı "herşeye o karar versin" dedi). Mod KAPALI
+        // → guard KORUNUR (non-foreign'de de tercih-clarify kullanıcıya — kategori mantığı bunu ezmesin, parite).
         const isUserPreferenceClarify =
-          !isApproval && (this.opts.tag === "phase-1" || this.opts.tag === "phase-2");
+          !isNeverAsk() && !isApproval && (this.opts.tag === "phase-1" || this.opts.tag === "phase-2");
         // Kategori (YZLLM 2026-07-08): entegre modda yalnız safe-flow oto (onaylar + diğer-faz clarify); Faz 1/2 clarify
-        // = user-preference, Faz 9 risk = dangerous-write → foreign'de kullanıcıda. isUserPreferenceClarify guard'ı
-        // KORUNUR (non-foreign'de de tercih-clarify kullanıcıya — kategori mantığı bunu ezmesin, parite).
+        // = user-preference, Faz 9 risk = dangerous-write → foreign'de kullanıcıda.
         const aaCategory = classifyQaAskq(this.opts.tag, isApproval);
         let selected_tr: string;
         if (

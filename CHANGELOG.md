@@ -1,5 +1,21 @@
 ## 2026-07-09
 
+- **feat(otonom): "Hiçbir şey sorma" (tam otonom) modu — MyCL kullanıcıya hiç sormaz, zor kararlar mahkemeye (YZLLM):**
+  Composer'da oto-cevabın ÜST KÜMESİ yeni bir toggle (`set_never_ask` IPC + `mycl_never_ask` localStorage + boot-sync).
+  Açıkken MyCL onay / netleştirme / faz-kapsamı / UI-inceleme (Faz 6) / tercih kararlarını KENDİ verir; kalan insan-soru
+  noktaları (inspectClarify `ask=true`, memory-proposal, user-preference clarify) oto/mahkemeye çevrilir. **Entegre
+  (yabancı) projede** var olan kodu değiştiren fix'ler (gate-autofix / failPhase / debug / Faz 13 / risk-fix) dokunulan
+  mevcut davranışı **GÖSTEREREK** otomatik uygulanır (YZLLM kararı "göster + otomatik uygula" — AskUserQuestion):
+  `emitForeignAutoFixNotice` (yeni) + `emitSecurityFixImpact` + foreign-write-consent göster-katmanı; kör-yazma YOK.
+  **KORUNAN istisnalar** (mod açıkken bile sorar/durur): yıkıcı iş-iptali (`cancel_pipeline`), düşük-güven/sentezlenmiş
+  onay (`forceUserPrompt`), kalıcı model ayarı (kullanıcı kral → bilgi ver, değiştirme), bash-guard denylist.
+  inspectClarify'a döngü emniyeti (`_clarifyInspectChain` → MAX'ta LOUD dur) + never-ask'ta çelişkili "sana soruyorum"
+  mesajı bastırıldı. **Non-foreign + mod KAPALI davranış BYTE-AYNI** (`decideAutoAnswer` neverAsk=false paritesi; SAF
+  testler). **4 tur çapraz-aile mahkemesi** (KATI #12): CRITICAL Faz 13 accept-continue kör-kabul → foreign göster+oto;
+  B1-baypas gate-autofix/failPhase/debug → GÖSTER katmanı; overclaim doc/tooltip düzeltildi. check yeşil (1901 test).
+  **NOT (KATI #9 istisnası):** mod AÇIKKEN Faz 6 UI incelemesi otomatik geçilir (a11y/görsel rapor gösterilir) — mod
+  KAPALI varsayılanda KATI #9 aynen geçerli (Faz 6 hep kullanıcı incelemesinde).
+
 - **fix(entegre): güvenlik-oto-fix döngü koruması TÜM bulgulara (çapraz-aile mahkemesi blocker'ı):**
   Önceki commit'te (f9307e3) entegre güvenlik-oto-fix'in "yalnız yakınsarken" (`secStep.converging`) döngü koruması
   YALNIZ kuyruğun ilk bulgusuna uygulanıyordu; aynı taramadaki 2+ bulgu (`emitQueuedFinding`) converging'i kontrol
