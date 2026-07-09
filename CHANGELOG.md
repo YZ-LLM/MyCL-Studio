@@ -1,3 +1,16 @@
+## 2026-07-09
+
+- **feat(entegre): "ajan eminse otomatik düzelt" — entegre modda EMİN güvenlik-fix'ini oto-uygula (opt-in, YZLLM):**
+  Entegre modda Faz 13 güvenlik bulguları eskiden tek tek kullanıcıya soruluyordu (kod-değiştiren = dangerous → foreign'de
+  kullanıcı). Kullanıcı isteğiyle: oto-cevap açıkken güvenlik düzeltmeleri OTOMATİK uygulanır — AMA yalnız (a) analiz EMİN
+  bir çözüm seçebiliyorsa (best-solution) VE (b) bulgular AZALIYORSA (`secStep.converging` → döngü koruması). Değilse
+  kullanıcıya sorulur; riski otomatik KABUL etme (accept-continue) foreign'de YOK. Uygulamadan önce fix'in EDD'den
+  dokunacağı mevcut davranışı gösterir (`emitSecurityFixImpact` → describeTouchedForFiles, bilgilendirme). Yeni
+  `isAutoAnswerEnabled()` (ham toggle, bastırmadan bağımsız) yalnız güvenlik-fix opt-in'inde okunur. **Non-foreign
+  BYTE-AYNI** (`if(auto)` bloğu değişmedi; autoResolve non-foreign'de eski `auto`). Yalnız Faz 13'e scoped. Kaynak:
+  impact `light` (import-grafiği kurmadan → kuyrukta ×N ağır değil). behavior-baseline regresyon ağı korunur. check yeşil.
+  NOT: çapraz-aile mahkemesi usage-limit'e takıldı (1pm reset) → kendi sıkı kod-yolu doğrulamamla sevk; mahkeme reset'te teyit.
+
 ## 2026-07-08
 
 - **feat(entegre): gate-fail'de "nasıl ilerleyelim?" sorusuna EDD-dokunulan-davranış bağlamı (YZLLM):**

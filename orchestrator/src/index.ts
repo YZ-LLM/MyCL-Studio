@@ -39,6 +39,7 @@ import {
   resolveForeignWriteConsent,
   isForeignWriteConsentAskqId,
   seedFilesFromText,
+  describeTouchedForFiles,
 } from "./foreign-write-consent.js";
 import { extractFilePaths } from "./fix/evidence.js";
 import { finalizeDevsArtifacts } from "./devs-finalize.js";
@@ -186,7 +187,7 @@ import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
-import { autoAnswerSuggested, autoAnswerPick, setAutoAnswerSuggested, setIntegrateModeSuppression } from "./auto-answer.js";
+import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } from "./user-directives.js";
@@ -386,11 +387,29 @@ function emitQueuedFinding(queue: FindingQueue): PendingErrorAnalysis {
     phase: queue.phase,
     sig: perFindingSig(queue.sig_base, key),
     acceptContinuePhase: queue.acceptContinuePhase,
-    auto: autoAnswerSuggested(),
+    // Faz 13 GÜVENLİK kuyruğu: entegre opt-in — oto-cevap açıksa (bastırmayı aşarak) emin fix'i otomatik uygula
+    // (emitBlockingFindingAskq best-çözüm-var kapısı = güven). Diğer kuyruklar eski davranış (kategori-bastırmalı).
+    auto: queue.phase === 13 ? isAutoAnswerEnabled() : autoAnswerSuggested(),
   });
   pending.findings = queue.findings; // izlenebilirlik — kuyruk asıl doğruluk kaynağı (index/awaitingRerun)
   runtime.pendingErrorAnalysis = pending;
   return pending;
+}
+
+/**
+ * ENTEGRE (foreign) opt-in "ajan eminse otomatik düzelt": bir güvenlik düzeltmesi OTOMATİK uygulanmadan önce, fix'in
+ * EDD'den dokunacağı BELGELENMİŞ mevcut davranışı GÖSTER (onay DEĞİL — bilgilendirme; kullanıcı neyin değiştiğini görsün,
+ * behavior-baseline zaten regresyon bayrağı taşır). Non-foreign / code_ref yok / belgelenmiş dokunulan yok → sessiz.
+ */
+async function emitSecurityFixImpact(pending: PendingErrorAnalysis): Promise<void> {
+  const st = runtime.state;
+  const cfg = runtime.config;
+  if (!st || !cfg || st.origin !== "foreign") return;
+  const file = pending.code_ref?.file;
+  if (!file) return;
+  // light: güvenlik-fix kuyruğu birçok bulguyu tek tek işler → her impact'te import-grafiği kurma (kaynak koruması).
+  const msg = await describeTouchedForFiles(st, cfg, [file], { light: true }).catch(() => undefined);
+  if (msg) emitChatMessage("system", msg);
 }
 
 /**
@@ -412,6 +431,7 @@ async function advanceFindingQueue(): Promise<"asked" | "exhausted"> {
   // Auto modda sonraki finding de otomatik çözülür (askq açılmadı) → dispatch et; concrete-solution dalı
   // awaitingRerun'ı tekrar set eder → intercept bir sonrakine ilerletir (tam otonom teker teker).
   if (pending.auto_selected_solution) {
+    await emitSecurityFixImpact(pending); // entegre opt-in: uygulamadan önce dokunulan davranışı göster (foreign)
     await handleAskqAnswer(pending.id, pending.auto_selected_solution).catch((e: unknown) =>
       log.error("orchestrator", "finding-queue auto-solve routing failed", e),
     );
@@ -5211,6 +5231,10 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // yutulmaz). _securityAutoResolveCount iterasyonda sıfırlandığı için güvenilmez → esas: basamak + bulgu-azalması
         // (security-convergence.ts, SAF + test'li). Oto-cevap KAPALIYSA eski blocking-askq (insan kabul/yeniden-analiz).
         const auto = autoAnswerSuggested();
+        // ENTEGRE (foreign) opt-in "ajan eminse otomatik düzelt" (YZLLM 2026-07-09): güvenlik-fix'i foreign'de de otomatik
+        // uygula — AMA yalnız YAKINSARKEN (converging = bulgular azalıyor → döngü koruması) + EMİN'ken (analyzeAndAskError
+        // best-çözüm seçebiliyorsa). Değilse KULLANICIYA sor (riski otomatik KABUL ETME — accept-continue foreign'de yok).
+        const autoFixSec = isAutoAnswerEnabled();
         const secStep = stepSecurityConvergence(
           { prevFindings: _securityFindingsPrev, noProgress: _securityNoProgress },
           sumSecurityFindings(outcome.stderr),
@@ -5235,7 +5259,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               allowAcceptContinue: true,
               acceptContinuePhase: 13,
             },
-            { autoResolve: auto },
+            // autoResolve: non-foreign=auto (parite); foreign=yalnız yakınsarken (yakınsamıyorsa auto-seçme YOK → askq → kullanıcı: döngü koruması).
+            { autoResolve: autoFixSec && (auto || secStep.converging) },
           ).catch(() => null);
         }
         // YZLLM 2026-06-26: güvenlik analizi Claude account-error gördü ama z.ai (GLM) var → z.ai'ya geç +
@@ -5299,6 +5324,19 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               log.error("orchestrator", "faz-13 auto-accept-continue failed", e),
             );
           }
+          return;
+        }
+        // ENTEGRE opt-in (foreign, auto=false): oto-cevap açık + EMİN (analyzeAndAskError best-çözüm seçti) + YAKINSIYOR
+        // → güvenlik fix'ini OTOMATİK uygula + neye dokunduğunu GÖSTER (emitSecurityFixImpact). accept-continue YOK
+        // (riski otomatik kabul etmez); emin değil/yakınsamıyorsa auto_selected boş → bu dal atlanır → aşağıdaki
+        // blocking-askq'ya düşer (kullanıcı KABUL/yeniden-analiz seçer). Non-foreign yukarıdaki `if (auto)` dalıyla işlendi.
+        if (autoFixSec && pending?.auto_selected_solution && secStep.converging) {
+          _securityAutoResolveCount++;
+          runtime.pendingErrorAnalysis = pending;
+          await emitSecurityFixImpact(pending);
+          await handleAskqAnswer(pending.id, pending.auto_selected_solution).catch((e: unknown) =>
+            log.error("orchestrator", "faz-13 entegre auto-solve routing failed", e),
+          );
           return;
         }
         // Oto-cevap KAPALI → blocking askq (insan KABUL/yeniden-analiz seçer; "elle DÜZELT" değil).

@@ -254,6 +254,7 @@ export async function describeTouchedForFiles(
   state: State,
   config: MyclConfig,
   relFiles: string[],
+  opts?: { light?: boolean },
 ): Promise<string | undefined> {
   if (state.origin !== "foreign") return undefined;
   const files = relFiles.filter(Boolean);
@@ -267,12 +268,16 @@ export async function describeTouchedForFiles(
     return undefined;
   }
   if (summarizeProgress(byUnit).done === 0) return undefined; // EDD henüz koşmadı → ek bağlam yok
-  let graph;
-  try {
-    graph = await buildReverseImportGraph(root);
-  } catch (e) {
-    log.warn("foreign-write-consent", "describeTouchedForFiles: dep-graph kurulamadı — yalnız seed dosyalarla", { error: String(e) });
-    graph = null;
+  // light (kaynak — mahkeme/kendi-denetim): tekrar tekrar çağrılan yerlerde (güvenlik-fix kuyruğu ×N) import-grafiği
+  // KURMA (buildReverseImportGraph ağır); yalnız doğrudan dosyanın davranışını göster (bağımlı blast-radius atlanır).
+  let graph = null as Awaited<ReturnType<typeof buildReverseImportGraph>> | null;
+  if (!opts?.light) {
+    try {
+      graph = await buildReverseImportGraph(root);
+    } catch (e) {
+      log.warn("foreign-write-consent", "describeTouchedForFiles: dep-graph kurulamadı — yalnız seed dosyalarla", { error: String(e) });
+      graph = null;
+    }
   }
   const absSeeds = files.map((r) => join(root, ...r.split("/")));
   const affected = graph ? getAffected(graph, absSeeds, 2, root) : [];

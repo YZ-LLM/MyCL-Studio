@@ -9,6 +9,7 @@ import {
   autoAnswerPick,
   decideAutoAnswer,
   classifyQaAskq,
+  isAutoAnswerEnabled,
 } from "../src/auto-answer.js";
 
 describe("auto-answer · entegre-modu bastırma", () => {
@@ -37,6 +38,15 @@ describe("auto-answer · entegre-modu bastırma", () => {
     setAutoAnswerSuggested(false);
     expect(autoAnswerSuggested()).toBe(false);
     expect(autoAnswerPick(["a"], undefined)).toBeNull();
+  });
+
+  it("isAutoAnswerEnabled: entegre-bastırmadan BAĞIMSIZ ham toggle (güvenlik-fix opt-in için)", () => {
+    setAutoAnswerSuggested(true);
+    setIntegrateModeSuppression(true); // foreign bastırma
+    expect(autoAnswerSuggested()).toBe(false); // bastırmalı → false
+    expect(isAutoAnswerEnabled()).toBe(true); // ama ham toggle AÇIK (foreign güvenlik-fix opt-in bunu okur)
+    setAutoAnswerSuggested(false);
+    expect(isAutoAnswerEnabled()).toBe(false);
   });
 });
 

@@ -71,6 +71,15 @@ export function isIntegrateSuppressed(): boolean {
 }
 
 /**
+ * Kullanıcının GLOBAL oto-cevap tercihi (entegre-bastırmadan BAĞIMSIZ). Foreign'de autoAnswerSuggested() bastırma
+ * yüzünden false döner; bu ise ham toggle'ı verir. YZLLM 2026-07-09: entegre modda GÜVENLİK düzeltmelerini "ajan eminse
+ * otomatik uygula" opt-in'i için — güvenlik-fix kararı (Faz 13) foreign'de bu bayrakla açılır (kategori-bastırmayı aşar).
+ */
+export function isAutoAnswerEnabled(): boolean {
+  return _enabled;
+}
+
+/**
  * Oto-cevap AÇIK + bu kategori foreign'de izinli mi? Çağıran kategorisini verir; DEFAULT "dangerous-write" = FAIL-SAFE
  * (etiketlenmemiş çağrı foreign'de OFF, non-foreign'de parite). opts: isApproval (onay/ack), hasSuggestion (öneri var mı).
  */
