@@ -1,5 +1,14 @@
 ## 2026-07-09
 
+- **fix(entegre): güvenlik-oto-fix döngü koruması TÜM bulgulara (çapraz-aile mahkemesi blocker'ı):**
+  Önceki commit'te (f9307e3) entegre güvenlik-oto-fix'in "yalnız yakınsarken" (`secStep.converging`) döngü koruması
+  YALNIZ kuyruğun ilk bulgusuna uygulanıyordu; aynı taramadaki 2+ bulgu (`emitQueuedFinding`) converging'i kontrol
+  etmeden sadece toggle'la foreign kodu otomatik değiştiriyordu → "sormadan değiştiriyor" riskini finding[1+] için
+  geri açıyordu. Mahkeme (usage-limit sonrası koştu) bunu blocker olarak yakaladı. FİX: `FindingQueue.converging`
+  (tur başında `secStep.converging`'den) + SAF `findingQueueAutoApply` → TÜM kuyruk bulgular aynı döngü/riski-kabul
+  korumasıyla; foreign'de yakınsamıyorsa hepsi kullanıcıya sorulur. Non-foreign parite BİREBİR (`autoAnswerSuggested ||
+  (enabled && converging)` → non-foreign converging'siz eski davranış). Re-verify: 0 blocker/major. finding-queue testleri. check yeşil.
+
 - **feat(entegre): "ajan eminse otomatik düzelt" — entegre modda EMİN güvenlik-fix'ini oto-uygula (opt-in, YZLLM):**
   Entegre modda Faz 13 güvenlik bulguları eskiden tek tek kullanıcıya soruluyordu (kod-değiştiren = dangerous → foreign'de
   kullanıcı). Kullanıcı isteğiyle: oto-cevap açıkken güvenlik düzeltmeleri OTOMATİK uygulanır — AMA yalnız (a) analiz EMİN

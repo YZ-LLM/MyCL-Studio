@@ -27,6 +27,28 @@ export interface FindingQueue {
   awaitingRerun: boolean;
   /** En az bir finding GERÇEKTEN fix'lendi mi (yalnız-kabul kuyruğunda gate'i tekrar koşmaya gerek yok). */
   anyFixed: boolean;
+  /** Bu triage TURUNDA güvenlik bulguları AZALIYOR mu (security-convergence). Entegre "ajan eminse otomatik düzelt"
+   *  opt-in'inde döngü koruması: yakınsamıyorsa (false) kuyruğun HİÇBİR bulgusu foreign'de otomatik uygulanmaz →
+   *  kullanıcıya sorulur. TÜM bulgulara tutarlı (yalnız finding[0]'a değil — mahkeme blocker fix 2026-07-09). */
+  converging: boolean;
+}
+
+/**
+ * SAF: bir kuyruk-finding'i OTOMATİK uygula(ma) kararı. Faz 13 (güvenlik) entegre opt-in: oto-cevap toggle AÇIK VE bu
+ * tur YAKINSIYOR (converging) → otomatik. Yakınsamıyorsa (döngü/riski-kabul koruması) → false → kullanıcıya sorulur.
+ * Diğer faz/kuyruklar: normal oto-cevap (kategori-bastırmalı autoAnswerSuggested). Test edilebilir; run-loop'tan ayrı.
+ */
+export function findingQueueAutoApply(
+  queue: Pick<FindingQueue, "phase" | "converging">,
+  s: { autoAnswerEnabled: boolean; autoAnswerSuggested: boolean },
+): boolean {
+  if (queue.phase === 13) {
+    // NON-FOREIGN: normal oto-cevap (autoAnswerSuggested = bastırma yoksa _enabled) — converging'siz, ESKİ davranışla
+    // BİREBİR (finding[0]'ın autoResolve=auto||converging mantığıyla tutarlı; mahkeme minor: race'siz tam parite).
+    // FOREIGN opt-in: autoAnswerSuggested false (bastırma) → yalnız _enabled && YAKINSIYOR (döngü/riski-kabul koruması).
+    return s.autoAnswerSuggested || (s.autoAnswerEnabled && queue.converging);
+  }
+  return s.autoAnswerSuggested;
 }
 
 /**

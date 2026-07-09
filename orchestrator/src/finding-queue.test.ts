@@ -2,7 +2,7 @@
 // perFindingSig tekilliği, advanceDecision geçişleri. Yan etki yok (answer-memory.test deseni).
 
 import { describe, expect, it } from "vitest";
-import { findingKey, perFindingSig, advanceDecision, type FindingQueue } from "./finding-queue.js";
+import { findingKey, perFindingSig, advanceDecision, findingQueueAutoApply, type FindingQueue } from "./finding-queue.js";
 import type { ErrorFinding } from "./error-analysis.js";
 
 function finding(over: Partial<ErrorFinding> = {}): ErrorFinding {
@@ -10,8 +10,34 @@ function finding(over: Partial<ErrorFinding> = {}): ErrorFinding {
 }
 
 function queue(findings: ErrorFinding[], index = 0): FindingQueue {
-  return { phase: 13, project_root: "/tmp/p", findings, index, sig_base: "phase-13", awaitingRerun: false, anyFixed: false };
+  return { phase: 13, project_root: "/tmp/p", findings, index, sig_base: "phase-13", awaitingRerun: false, anyFixed: false, converging: true };
 }
+
+describe("findingQueueAutoApply (mahkeme blocker+parite fix — döngü koruması TÜM bulgulara, non-foreign birebir)", () => {
+  // FOREIGN: autoAnswerSuggested=false (entegre bastırma), autoAnswerEnabled=ham toggle.
+  const foreign = (enabled: boolean) => ({ autoAnswerEnabled: enabled, autoAnswerSuggested: false });
+  // NON-FOREIGN: bastırma yok → autoAnswerSuggested = autoAnswerEnabled.
+  const nonForeign = (enabled: boolean) => ({ autoAnswerEnabled: enabled, autoAnswerSuggested: enabled });
+
+  it("FOREIGN Faz 13 + toggle açık + YAKINSIYOR → otomatik (true)", () => {
+    expect(findingQueueAutoApply({ phase: 13, converging: true }, foreign(true))).toBe(true);
+  });
+  it("FOREIGN Faz 13 + toggle açık + YAKINSAMIYOR → OTOMATİK DEĞİL (kullanıcı) — kritik: finding[1+] de korunur (blocker)", () => {
+    expect(findingQueueAutoApply({ phase: 13, converging: false }, foreign(true))).toBe(false);
+  });
+  it("FOREIGN Faz 13 + toggle KAPALI → otomatik değil", () => {
+    expect(findingQueueAutoApply({ phase: 13, converging: true }, foreign(false))).toBe(false);
+  });
+  it("NON-FOREIGN Faz 13 parite: toggle açık → converging'DEN BAĞIMSIZ otomatik (eski davranış birebir)", () => {
+    expect(findingQueueAutoApply({ phase: 13, converging: false }, nonForeign(true))).toBe(true); // yakınsamasa bile
+    expect(findingQueueAutoApply({ phase: 13, converging: true }, nonForeign(true))).toBe(true);
+    expect(findingQueueAutoApply({ phase: 13, converging: false }, nonForeign(false))).toBe(false);
+  });
+  it("Faz 13 dışı → autoAnswerSuggested (kategori-bastırmalı), converging'e bakmaz", () => {
+    expect(findingQueueAutoApply({ phase: 10, converging: false }, { autoAnswerEnabled: false, autoAnswerSuggested: true })).toBe(true);
+    expect(findingQueueAutoApply({ phase: 8, converging: true }, { autoAnswerEnabled: true, autoAnswerSuggested: false })).toBe(false);
+  });
+});
 
 describe("findingKey", () => {
   it("code_ref varsa file:startLine tercih edilir (kararlı)", () => {

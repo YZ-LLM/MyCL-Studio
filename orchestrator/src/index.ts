@@ -125,6 +125,7 @@ import {
   findingKey,
   perFindingSig,
   advanceDecision,
+  findingQueueAutoApply,
 } from "./finding-queue.js";
 import {
   recallAnswer,
@@ -387,9 +388,13 @@ function emitQueuedFinding(queue: FindingQueue): PendingErrorAnalysis {
     phase: queue.phase,
     sig: perFindingSig(queue.sig_base, key),
     acceptContinuePhase: queue.acceptContinuePhase,
-    // Faz 13 GÜVENLİK kuyruğu: entegre opt-in — oto-cevap açıksa (bastırmayı aşarak) emin fix'i otomatik uygula
-    // (emitBlockingFindingAskq best-çözüm-var kapısı = güven). Diğer kuyruklar eski davranış (kategori-bastırmalı).
-    auto: queue.phase === 13 ? isAutoAnswerEnabled() : autoAnswerSuggested(),
+    // Faz 13 GÜVENLİK kuyruğu: entegre opt-in — oto-cevap AÇIK + bu tur YAKINSIYOR (queue.converging → döngü koruması
+    // TÜM bulgulara tutarlı) ise emin fix'i otomatik uygula (emitBlockingFindingAskq best-çözüm kapısı = güven). Diğer
+    // kuyruklar eski davranış (kategori-bastırmalı). Mahkeme blocker fix: converging kontrolü finding[1+]'e de uygulanır.
+    auto: findingQueueAutoApply(queue, {
+      autoAnswerEnabled: isAutoAnswerEnabled(),
+      autoAnswerSuggested: autoAnswerSuggested(),
+    }),
   });
   pending.findings = queue.findings; // izlenebilirlik — kuyruk asıl doğruluk kaynağı (index/awaitingRerun)
   runtime.pendingErrorAnalysis = pending;
@@ -5290,6 +5295,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             acceptContinuePhase: 13,
             awaitingRerun: false,
             anyFixed: false,
+            // Mahkeme blocker fix: bu turun yakınsama kararını kuyruğa taşı → TÜM bulgular (finding[0] değil) aynı
+            // döngü/riski-kabul korumasıyla otomatik uygulanır (emitQueuedFinding → findingQueueAutoApply).
+            converging: secStep.converging,
           };
           pending.sig = perFindingSig(sigBase, findingKey(pending.findings[0], 0));
           emitChatMessage(
