@@ -1,3 +1,19 @@
+## 2026-07-10
+
+- **fix(otonom): gate-timeout/asılma → durmak YOK; gerçek çözüm + çok-açılı orkestra (YZLLM "MyCL hiçbir sorunu atlamasın"):**
+  Hiçbir şey sorma modu AÇIKKEN bir mekanik gate (Faz 10-17, özellikle Faz 16 E2E) komutu zaman aşımına/asılmaya uğrayınca
+  pipeline SESSİZCE duruyordu (iş "düştü"; `failPhase`'in `isEnvironmentError` dalı koşulsuz `return`). Canlı: Faz 16 E2E
+  120s timeout (WebServer node:events 5xx = dev-server boot etmedi) → "kör düzeltme yapmadım, elle inceleyin" + dur.
+  **Artık:** SAF-timeout (errno/port YOK) + mod açık → mevcut STOP yerine GERÇEK-çözüm akışına düşer (mahkeme reproduce-first
+  + error-analysis + Faz 0 D1 → fix → gate GERÇEKTEN yeniden koşulur). Çözemezse **çok-açılı orkestra** (işe/projeye uygun
+  3 mercek hipotez fan-out: state-data / async-timing / integration-contract). Tükenince (`TIMEOUT_DIVERT_MAX`) dürüst
+  görünür-dur/kuyruk (`escalateUnanalyzableError` — ATLAMA/sahte-yeşil DEĞİL). **SAHTE-YEŞİL yapısal engelli:** gate ancak
+  gerçek yeşil re-run ile ilerler; kör-fix/skip/threshold-düşürme yasağı korunur; mahkeme `escalate→accept-continue`
+  timeout-divert'te ATLANIR (`timeoutDivertActive` — iki mahkeme çağrısında da). **Mod KAPALI + gerçek env → mevcut STOP
+  BYTE-AYNI** (parite; SAF `decideTimeoutDivert`/`isTimeoutHangOnly` testleri). Yeni: `claude-api.ts` `isTimeoutHang`/
+  `isTimeoutHangOnly` (HARD_ENV_RE ayrımı) + `timeout-diagnosis.ts`. **2 tur çapraz-aile mahkemesi** (KATI #12): CRITICAL
+  `priorGateRuling`-reuse sahte-yeşil + major `priorAttempts`/dev-server-tanı düzeltildi. check yeşil (1912 test).
+
 ## 2026-07-09
 
 - **feat(otonom): "Hiçbir şey sorma" (tam otonom) modu — MyCL kullanıcıya hiç sormaz, zor kararlar mahkemeye (YZLLM):**

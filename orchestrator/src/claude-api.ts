@@ -97,21 +97,37 @@ export function isApiAccountError(text: string): boolean {
  * (E2BIG/env çok büyük, port dolu, komut yok, spawn) — bunlar model zayıflığı DEĞİL → escalation merdiveni tırmanmamalı
  * (daha güçlü/pahalı model bu hatayı çözmez). Yalnız genuine proje/kod hatasında tırman. SAF.
  */
+// SERT ortam (errno/port/spawn) alt-deseni — SAF asılma/timeout HARİÇ. Modül-sabiti (drift önlemi: isEnvironmentError +
+// isTimeoutHangOnly aynı kaynaktan okur). OS/kaynak errno'ları (YZLLM 2026-06-22, tıkanma-envanteri): OOM/disk-dolu/fd-
+// limiti/izin/symlink-döngü — PROJE kodu hatası DEĞİL (kod kurcalayarak çözülmez). Yanlış-pozitif düşük + sonuç SESLİ
+// escalate. EAGAIN/EPERM çıplak errno proje test-çıktısında da görünebilir → spawn/OS-mesaj BAĞLAMINA çapalı; ama kanonik
+// "resource temporarily unavailable" ortam sayılır. ENOSPC/ENOMEM/EMFILE/E2BIG/ELOOP unambiguous çıplak. `[ENV] spawn failed`
+// SERT ortam (spawn faultu). `[ENV] command timed out` BURADA YOK → o TIMEOUT_HANG_RE'de (teşhis edilir, kör-STOP değil).
+const HARD_ENV_RE =
+  /E2BIG|argument list too long|EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)|spawn \w+ ENOENT|command not found|: not found|EACCES|EPERM[:,]? operation not permitted|spawn \S+ EPERM|ECONNREFUSED|ENOTFOUND|\bENOMEM\b|\bENOSPC\b|\bEMFILE\b|\bENFILE\b|spawn \S+ EAGAIN|resource temporarily unavailable|\bELOOP\b|out of memory|no space left|too many open files|\[ENV\] spawn failed/i;
+
+// Gate-komutu TIMEOUT/asılma imzası (mechanical-runner.ts:762 `[ENV] command timed out / process killed`). Bu SERT ortam
+// DEĞİL — belirsiz "sonsuz döngü / dev-server boot-fail / yavaş" sınıfı; teşhis edilir, kör-STOP edilmez (bkz. isTimeoutHangOnly).
+const TIMEOUT_HANG_RE = /\[ENV\] command timed out|command timed out \/ process killed/i;
+
 export function isEnvironmentError(text: string): boolean {
   if (isApiAccountError(text)) return true;
-  // OS/kaynak errno'ları (YZLLM 2026-06-22, tıkanma-envanteri): OOM/disk-dolu/fd-limiti/izin/symlink-döngü
-  // — bunlar PROJE kodu hatası DEĞİL (kod kurcalayarak çözülmez) ve mechanical-runner.isSpawnEnvFailure bunları
-  // zaten tanıyordu ama merkezi text-sınıflandırıcı KAÇIRIYORDU → faz-hatası proje-fix döngüsüne sızıyordu.
-  // Yanlış-pozitif riski düşük (errno'lar test-iddiası metninde nadir) + sonuç SESLİ escalate (sessiz stall değil).
-  // EAGAIN/EPERM çıplak errno olarak proje test-çıktısında da görünebilir (false-env-pozitif → gerçek bug fix-döngüsü
-  // kesilir) → spawn/OS-mesaj BAĞLAMINA çapala. AMA iki yön de kapanmalı: spawn-formunda OLMAYAN gerçek ortam-EAGAIN'i
-  // (libuv "EAGAIN: resource temporarily unavailable") de yakala — kaçarsa ortam hatası proje-fix döngüsüne sızar (false-
-  // env-negatif, bu sınıfta DAHA kötü). Bu yüzden kanonik mesaj "resource temporarily unavailable" da ortam sayılır; çıplak
-  // 'EAGAIN' (test-iddiası metni) bu mesajı İÇERMEDİĞİNDEN proje kalır. ENOSPC/ENOMEM/EMFILE/E2BIG/ELOOP unambiguous →
-  // çıplak kalır. EPERM "operation not permitted" ile çapalı (test'teki çıplak 'EPERM' eşleşmez). EACCES/command-not-found mevcut.
-  return /E2BIG|argument list too long|EADDRINUSE|address already in use|port \d+.*(in use|busy|kullan)|spawn \w+ ENOENT|command not found|: not found|EACCES|EPERM[:,]? operation not permitted|spawn \S+ EPERM|ECONNREFUSED|ENOTFOUND|\bENOMEM\b|\bENOSPC\b|\bEMFILE\b|\bENFILE\b|spawn \S+ EAGAIN|resource temporarily unavailable|\bELOOP\b|out of memory|no space left|too many open files|\[ENV\] (command timed out|spawn failed)/i.test(
-    text,
-  );
+  return HARD_ENV_RE.test(text) || TIMEOUT_HANG_RE.test(text);
+}
+
+/** SAF: bu metin bir gate-komutu TIMEOUT/asılma imzası mı? ([ENV] command timed out / process killed). */
+export function isTimeoutHang(text: string): boolean {
+  return TIMEOUT_HANG_RE.test(text);
+}
+
+/**
+ * SAF: SADECE saf-asılma mı (sert errno/port YOK)? Timeout stderr'i `[ENV] command timed out … — <orijinal stderr>`
+ * formunda; kuyrukta sert env (EADDRINUSE/ENOMEM/ENOENT…) varsa GERÇEK ortam sorunu → false (mevcut STOP korunur).
+ * Yalnız errno'suz asılma → true = belirsiz "sonsuz döngü / dev-server boot-fail / gerçekten yavaş" sınıfı → teşhis
+ * edilir (mod açıkken; gerçek çözüm/çok-açılı orkestra). Mod kapalıyken çağıran zaten STOP eder (parite korunur).
+ */
+export function isTimeoutHangOnly(text: string): boolean {
+  return TIMEOUT_HANG_RE.test(text) && !HARD_ENV_RE.test(text);
 }
 
 /** Ortam hatasına özel Türkçe rehber (proje hatası değil — döngüye girmeden kullanıcıya ne yapacağını söyle). SAF. */

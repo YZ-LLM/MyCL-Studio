@@ -143,7 +143,8 @@ import { getLastTechDebtFindings, acceptedFindingKey, resetLastTechDebtFindings 
 import { sumSecurityFindings, stepSecurityConvergence } from "./security-convergence.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
 import { runRegressionGuard } from "./regression-guard.js";
-import { isApiAccountError, isEnvironmentError, environmentErrorAdvice } from "./claude-api.js";
+import { isApiAccountError, isEnvironmentError, environmentErrorAdvice, isTimeoutHangOnly } from "./claude-api.js";
+import { decideTimeoutDivert, runTimeoutMultiAngle, TIMEOUT_DIVERT_MAX } from "./timeout-diagnosis.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { discoverModelsViaWeb, verifyModelCallable } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
@@ -606,6 +607,10 @@ const AUTO_SOLVE_MAX = 6;
 // kararları tutar → error-analysis "bunlar denendi, tekrarlama" olarak enjekte eder (aynı-soru döngüsü kırılır).
 const MANUAL_LOOP_MAX = 3;
 const autoSolveSig = new Map<number, { sig: string; count: number; priorSolutions: string[] }>();
+// YZLLM 2026-07-09 (gate-timeout "atlama yok → çöz → orkestra → dürüst dur"): bir faz için timeout-divert deneme sayacı
+// — sonsuz-döngü emniyeti. TIMEOUT_DIVERT_MAX aşılınca gerçek-çözüm/orkestra denemesi durur → dürüst görünür-dur. MODÜL-
+// SEVİYE (Faz 0 re-run döngüsü boyunca yaşar — gateAutofixTried gibi local OLMAZ). Gerçek faz-tamamlanışta temizlenir.
+const timeoutRetried = new Map<PhaseId, number>();
 // Cevap-hatırlama Kademe 3 BACKSTOP (mahkeme YZLLM 2026-07-03): recall erken-return loop-guard'ı (autoSolveSig)
 // atlar → onaylı cevap hatayı ÇÖZMÜYORSA aynı çözüm sessizce sonsuz tekrarlanabilirdi (frozen-goal ihlali). Aynı
 // hata-imzası arka arkaya RECALL_AUTO_MAX kez oto-uygulandıysa sessiz tekrarı DURDUR → görünür dur + taze akışa
@@ -726,6 +731,50 @@ let _securityNoProgress = 0; // art arda "bulgu azalmadı" deneme sayısı (≥2
 // kaydı tutulur (merdiven öğrenmeye devam etsin); üst-rung yeniden-koşumu YOK.
 async function recordPhaseComplete(n: PhaseId): Promise<void> {
   await recordRungOutcome(n, true);
+}
+
+/**
+ * TIMEOUT/asılma divert'i için errCtx'i GERÇEK-çözüm bağlamıyla zenginleştir (YZLLM 2026-07-09 "atlama YOK → gerçek
+ * çözüm → çok-açılı orkestra"): HANG çerçevesi (kör-fix YASAK, yeniden-üreterek teşhis et) + E2E'de (Faz 16) dev-server
+ * GERÇEK-GÖZLEM talimatı (`npm run dev`'i Bash ile çalıştır — statik tahmin değil) + rekürans/E2E'de çok-açılı orkestra
+ * hipotezleri (işe/projeye uygun 3 mercek). `ctrl.lastFailReason`'a
+ * DOKUNMAZ (failSignature imzası kararlı kalsın). Fail-soft (her parça hata yutar → çağıran derin-çözüm gövdesiyle devam).
+ */
+async function enrichTimeoutContext(errCtx: ErrorContext, n: PhaseId, ctrl?: FailReasonHolder): Promise<void> {
+  const st = runtime.state;
+  const cfg = runtime.config;
+  if (!st || !cfg) return;
+  const parts: string[] = [errCtx.detail ?? ""];
+  const e2eHint =
+    n === 16
+      ? " Bu bir E2E gate'i: asılmanın EN sık sebebi dev-server'ın boot ETMEMESİdir (Playwright webServer 120s bekleyip " +
+        "node:events 5xx). GERÇEK sebebi görmek için `npm run dev`'i (veya projenin dev komutunu) Bash ile ÇALIŞTIR, boot " +
+        "hatasını/port durumunu gözlemle — statik tahmin DEĞİL, gerçek gözlem."
+      : "";
+  parts.push(
+    "\n\n[TIMEOUT/HANG] Bu gate hata VERMEDİ — ASILDI/timeout (çıkış kodu yok). Olası kök: (a) uygulama/test kodunda " +
+      "sonsuz döngü/runaway, (b) dev-server boot edemiyor, (c) gerçekten yavaş. KÖR DÜZELTME YASAK (asılmayı çözmez + " +
+      "sahte-yeşil riski). Asılan komutu Bash ile YENİDEN ÜRETEREK gerçek sebebi teşhis et. Çözüm ancak GERÇEK yeniden-" +
+      "koşuda geçer." +
+      e2eHint,
+  );
+  // Çok-açılı orkestra ("bulamazsa"): rekürans (aynı asılma tekrar) VEYA E2E → işe/projeye uygun 3 mercek hipotez üretir.
+  const prev = autoSolveSig.get(n);
+  const recurring = !!prev && prev.sig === failSignature(n, ctrl) && prev.count >= 1;
+  if (recurring || n === 16) {
+    const bugReport =
+      `Gate Faz ${n} hung/timed out (no exit code). Suspected: infinite loop / async race / dev-server boot-fail. ` +
+      `Investigate THIS project's code (Read/Grep/Bash) to find the real cause, work- and project-appropriately.`;
+    const hyps = await runTimeoutMultiAngle(cfg, st.project_root, bugReport, parts.join("\n"));
+    if (hyps.length) {
+      // TAZE kök-neden hipotezleri → yalnız detail (bilgi bağlamı). errCtx.priorAttempts'e YAZMA (mahkeme major fix): o alan
+      // "zaten UYGULANDI, gate HÂLÂ fail → TEKRAR ÖNERME" anlamında; taze hipotezleri oraya koymak analizi kendi hipotezini
+      // araştırmaktan MEN ederdi (yanlış çerçeve). Detail nötr bağlam olarak analyzeAndAskError/Faz 0 D1 prompt'una girer.
+      parts.push(`\n\n[ÇOK-AÇILI KÖK-NEDEN HİPOTEZLERİ (taze — araştırılacak, denenmiş DEĞİL)]\n${hyps.join("\n")}`);
+      emitChatMessage("system", `🔬 ${hyps.length} kök-neden hipotezi (çok açılı orkestra) üretildi → gerçek-çözüme rehber.`);
+    }
+  }
+  errCtx.detail = parts.join("");
 }
 
 /**
@@ -1000,6 +1049,11 @@ async function failPhase(
   emitPhaseChanged(n, n, "error");
   if (!runtime.state || !runtime.config) return;
   const errCtx: ErrorContext = { phase: n, message, detail: ctrl?.lastFailReason };
+  // TIMEOUT-DIVERT bayrağı (mahkeme 2026-07-09 sahte-yeşil fix): bu failPhase turu bir gate-timeout divert'i mi. Öyleyse
+  // aşağıdaki mahkeme-escalate→ACCEPT-CONTINUE (advanceToNextPhase) dalı ATLANIR — çünkü timeout'ta gate hiç yeniden
+  // koşulmadan "geçti" saymak SAHTE-YEŞİL olur (mahkeme escalate deseni gate-fail için, timeout için değil). Bunun yerine
+  // GERÇEK-çözüm (analyzeAndAskError + Faz 0 D1) devralır → fix → gate GERÇEKTEN yeniden koşulur.
+  let timeoutDivertActive = false;
   // HESAP/ORTAM hatası (YZLLM 2026-06-11): kredi/bakiye yetersiz, fatura, auth/kota → PROJE hatası DEĞİL, model
   // zayıflığı DEĞİL. Her API çağrısı aynı hatayı verir → escalation (modeli pahalıya tırmandırma) + hata-analizi
   // (o da API çağrısı) ANLAMSIZ ve kısır döngü. DUR + net söyle; tırmanma/analiz/fix YAPMA.
@@ -1062,8 +1116,42 @@ async function failPhase(
   {
     const envReason = `${ctrl?.lastFailReason ?? ""}\n${message}`;
     if (isEnvironmentError(envReason)) {
-      emitChatMessage("system", `⛔ ${environmentErrorAdvice(envReason)}`);
-      return; // STOP — proje-fix döngüsüne GİRME.
+      // YZLLM 2026-07-09 ("hiçbir sorunu atlama; en doğru çözümü bul; bulamazsa orkestra farklı açılardan — işe/projeye
+      // uygun"): SAF-timeout/asılma (errno'suz) + MOD AÇIK → kör-STOP yerine GERÇEK-çözüm akışına düş. decideTimeoutDivert:
+      //   stop     = gerçek env (port/errno) / mod kapalı / manuel → mevcut STOP (BYTE-AYNI parite).
+      //   divert   = gerçek çözüm (mahkeme reproduce-first + error-analysis + Faz 0 D1) + çok-açılı orkestra.
+      //   escalate = TIMEOUT_DIVERT_MAX tükendi → dürüst görünür-dur/kuyruk (escalateUnanalyzableError; ATLAMA/sahte-yeşil DEĞİL).
+      // autoAnswerSuggested() zaten hiçbir-şey-sorma'yı kapsar (decideAutoAnswer'da `if(neverAsk) return true`) → tek terim yeter.
+      const modeOn = autoAnswerSuggested();
+      const decision = decideTimeoutDivert({
+        isTimeoutHangOnly: isTimeoutHangOnly(envReason),
+        modeOn,
+        divertCount: timeoutRetried.get(n) ?? 0,
+      });
+      if (decision === "stop") {
+        emitChatMessage("system", `⛔ ${environmentErrorAdvice(envReason)}`);
+        return; // STOP — proje-fix döngüsüne GİRME (mevcut davranış birebir).
+      }
+      if (decision === "escalate") {
+        emitChatMessage(
+          "system",
+          `⛔ Faz ${n} gate'i ${TIMEOUT_DIVERT_MAX} kez teşhis+çözüm denememe rağmen asılmaya devam ediyor — otomatik ` +
+            `çözemedim (kör düzeltme sahte-yeşil olurdu). Bulguyu iş listesine kaydedip GÖRÜNÜR duruyorum (atlamıyorum); ` +
+            `asılan komutu elle incele.`,
+        );
+        await escalateUnanalyzableError(n, true, failSignature(n, ctrl));
+        return;
+      }
+      // decision === "divert": mevcut STOP yerine GERÇEK-çözüm akışına düş (aşağıdaki derin-çözüm gövdesi).
+      timeoutDivertActive = true; // mahkeme-escalate→accept-continue'yu ATLA (sahte-yeşil önleme) → gerçek-çözüm devralır.
+      timeoutRetried.set(n, (timeoutRetried.get(n) ?? 0) + 1);
+      emitChatMessage(
+        "system",
+        `🔎 Faz ${n} gate'i asıldı/timeout — kör düzeltme yerine GERÇEK sebebini teşhis ediyorum (yeniden-üretme + ` +
+          `çok açılı kök-neden). Sorunu ATLAMIYORUM.`,
+      );
+      await enrichTimeoutContext(errCtx, n, ctrl);
+      // return YOK → mahkeme reproduce-first + error-analysis + Faz 0 D1 devralır (errCtx zenginleştirildi).
     }
   }
   // qa-askq (Faz 1/2/9 niyet/hassasiyet/risk) KEŞİF ZAMAN BÜTÇESİ aşımı (zaman-kaybı planı YZLLM 2026-07-07): ajan
@@ -1202,7 +1290,11 @@ async function failPhase(
           ts: Date.now(),
         });
       }
-      if (ruling.convened && ruling.action !== "proceed") {
+      if (ruling.convened && ruling.action !== "proceed" && !timeoutDivertActive) {
+        // TIMEOUT-DIVERT İSTİSNASI (mahkeme 2026-07-09 sahte-yeşil fix): timeout-divert'te bu accept-continue dalı
+        // ATLANIR — gate hiç yeniden koşulmadan "escalate → advanceToNextPhase" ile geçmek SAHTE-YEŞİL olurdu (E2E
+        // koşmadı). Timeout-divert'te mahkeme escalate/suppress dese bile GERÇEK-çözüm (analyzeAndAskError + Faz 0 D1)
+        // devralır → fix → gate GERÇEKTEN yeniden koşulur (index.ts:5257 pass / reOutcome doğrulaması).
         // FROZEN-GOAL (escalate-stall fix, canlı Arcelik_BO 2026-06-22): bu noktada otoCevap ZATEN açık
         // (mahkeme yalnız autoResolve=otoCevap iken koşar). Oto-modda askq'da BLOKLAMAK = SESSİZ STALL
         // (kullanıcı izlemiyor → soru cevapsız asılı kalır; frozen-goal "asla sessizce tıkanma" ihlali —
@@ -1297,7 +1389,11 @@ async function failPhase(
             caller: "mycl-orchestrator",
             detail: ruling.summary.slice(0, 400),
           }).catch(() => {});
-          if (ruling.action === "suppress") {
+          if (ruling.action === "suppress" && !timeoutDivertActive) {
+            // TIMEOUT-DIVERT İSTİSNASI (mahkeme minor 2026-07-09 — correct-by-construction): birinci mahkemedeki
+            // (1292) sahte-yeşil guard'ının İKİZİ. Timeout-divert'te suppress→advanceToNextPhase de gate'i yeniden
+            // koşmadan geçirir (sahte-yeşil). Bugün TIMEOUT_DIVERT_MAX(2)<AUTO_SOLVE_MAX(6) yüzünden bu dala
+            // ULAŞILMAZ; yine de örtük-tesadüf yerine AÇIK invariant: timeout-divert → gerçek-çözüm (analyzeAndAskError).
             emitChatMessage(
               "system",
               `⚖️ Mahkeme (döngü → suppress): Faz ${n} hatası ${priorCount} denemeye rağmen sürüyordu çünkü ` +
@@ -1409,6 +1505,9 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // Netleştirme-mahkemesi sayacı da sıfırlanmalı (Pillar A): yoksa eski projede CLARIFY_INSPECT_MAX'a
   // ulaşan sayaç yeni projeye TAŞINIR → yeni projenin ilk gerçek netleştirme sorusu sessizce bastırılır.
   _clarifyInspectChain = 0;
+  // Timeout-divert sayacı da sıfırlanmalı (mahkeme minor 2026-07-09): faz-numarasıyla anahtarlı → eski projede TIMEOUT_
+  // DIVERT_MAX'a ulaşan sayaç yeni projeye TAŞINIR → yeni projenin İLK timeout'u yanlışça "tükendi" sayılıp erken escalate olur.
+  timeoutRetried.clear();
   // YZLLM 2026-07-01 (FIX C): model-satırı cache'i sıfırla → yeni projede ilk model-seçim satırı yine görünür.
   resetModelChoiceCache();
   // FIX D (mahkeme): tech-debt son-bulgu deposunu da temizle (proje-değişiminde eski bulgular accept'e sızmasın).
@@ -5178,6 +5277,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // Faz GEÇTİ → iyi ilerlemeyi KİLİTLE: rollback noktasını temizle ki sonraki bir hatanın geri-alması
         // bu başarılı fazı UNDO etmesin (YZLLM: "veri kaybına yol açmayanı tercih ederim").
         disarmRollback();
+        // Timeout-divert sayacını temizle: faz GERÇEKTEN geçti → gelecek bir timeout taze sayımla başlasın (her advance'te
+        // değil, yalnız gerçek tamamlanışta — sonsuz-döngü emniyeti bozulmaz).
+        timeoutRetried.delete(next);
         // Skipped (örn. missing command) akışı kırmaz — phase-N-complete
         // yazılır ki ardışık akış devam etsin. Runner zaten skip event'i
         // (phase-N-skipped) + sade Türkçe mesaj yazmış olur.

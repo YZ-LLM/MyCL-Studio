@@ -182,6 +182,10 @@ entegre eder.
   istenir/durur): yıkıcı işlemler (iş/pipeline iptali), düşük-güvenli/belirsiz onaylar, kalıcı
   model ayarı ve yıkıcı kabuk komutları. Oto-cevabın üst kümesidir (açıkken oto-cevap zorunlu
   açık sayılır). Varsayılan **kapalı** (opt-in); kapalıyken tüm davranış değişmez.
+  Bir gate (test/E2E) **asılır ya da zaman aşımına uğrarsa** MyCL sorunu **atlamaz**: gerçek
+  sebebini teşhis edip (asılan komutu yeniden çalıştırarak, dev-server'ı gözlemleyerek) çözmeye
+  çalışır, çözemezse farklı açılardan orkestra çözümü üretir; yalnız hiç çözemezse dürüstçe durup
+  bildirir (asılmayı "geçti" saymaz — sahte-yeşil yok).
 - **Sızma testi / DAST** — `katana` (gezinme) + `nuclei` ile çalışan uygulama
   aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı
   onaylı; pipeline'da otomatik koşmaz — pentest ağır olduğundan yükü kullanıcı kontrol

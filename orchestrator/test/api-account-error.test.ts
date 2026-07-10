@@ -53,6 +53,34 @@ describe("isEnvironmentError (YZLLM: escalation yalnız PROJE hatasında)", () =
   });
 });
 
+import { isTimeoutHang, isTimeoutHangOnly } from "../src/claude-api.js";
+describe("isTimeoutHangOnly (SAF-asılma = teşhis edilir; sert errno kuyrukta = gerçek env → STOP; YZLLM 2026-07-09)", () => {
+  it("yalnız timeout imzası (errno YOK) → true (belirsiz asılma → teşhis/gerçek-çözüm)", () => {
+    expect(isTimeoutHangOnly("[ENV] command timed out / process killed after 120000ms (no exit code) — Command failed")).toBe(true);
+    expect(isTimeoutHangOnly("[ENV] command timed out / process killed after 120000ms (no exit code) — [WebServer] node:events:502")).toBe(true);
+  });
+  it("timeout imzası + KUYRUKTA sert errno/port → false (gerçek ortam → mevcut STOP korunur)", () => {
+    expect(isTimeoutHangOnly("[ENV] command timed out / process killed after 120000ms — listen EADDRINUSE address already in use :::5173")).toBe(false);
+    expect(isTimeoutHangOnly("[ENV] command timed out / process killed — Cannot allocate memory: ENOMEM")).toBe(false);
+    expect(isTimeoutHangOnly("[ENV] command timed out / process killed — spawn vite ENOENT")).toBe(false);
+  });
+  it("timeout imzası YOK (spawn failed / düz env / proje) → false", () => {
+    expect(isTimeoutHangOnly("[ENV] spawn failed (EAGAIN) — Command failed")).toBe(false);
+    expect(isTimeoutHangOnly("listen EADDRINUSE :::5173")).toBe(false);
+    expect(isTimeoutHangOnly("TypeError: x is not a function")).toBe(false);
+  });
+  it("isTimeoutHang: yalnız timeout/asılma imzasını tanır", () => {
+    expect(isTimeoutHang("[ENV] command timed out / process killed after 60000ms")).toBe(true);
+    expect(isTimeoutHang("command timed out / process killed")).toBe(true);
+    expect(isTimeoutHang("[ENV] spawn failed")).toBe(false);
+    expect(isTimeoutHang("normal test fail")).toBe(false);
+  });
+  it("REGRESYON: isEnvironmentError timeout'u HÂLÂ yakalar (divert-öncesi sınıflandırma değişmez)", () => {
+    expect(isEnvironmentError("[ENV] command timed out / process killed after 120000ms (no exit code)")).toBe(true);
+    expect(isEnvironmentError("[ENV] spawn failed (EAGAIN) — x")).toBe(true);
+  });
+});
+
 import { isSpawnEnvFailure } from "../src/base/mechanical-runner.js";
 describe("isSpawnEnvFailure (testler KOŞMADI = tdd-unverified; fix-döngüsü tetiklenmez)", () => {
   const r = (stderr: string) => ({ code: 1, stdout: "", stderr });
