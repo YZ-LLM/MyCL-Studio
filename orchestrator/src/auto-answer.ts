@@ -153,3 +153,67 @@ export function autoAnswerPick(
   if (suggested_tr === undefined && options_tr.length === 0) return null;
   return suggested_tr ?? options_tr[0]!;
 }
+
+// ── HİÇBİR ŞEY SORMA: kapsanmamış askq'leri orkestra ajanı/mahkeme otonom cevaplasın (YZLLM 2026-07-10) ──
+// SAF çekirdek (index.ts run-loop'undan ayrı, test edilebilir). never-ask'ta emitAskq'ye ULAŞAN (yani kategori-guard'ıyla
+// bypass EDİLMEMİŞ) askq'ler bugün asılı kalıyordu → orkestra ajanı/mahkeme bağlam-farkında cevaplar. Bu helper'lar
+// yıkıcı-seçim korumasını + döngü emniyetini SAF tutar.
+
+/**
+ * SAF: bu askq id-öneki YIKICI / kullanıcı-tetikli mi → never-ask'ta bile otonom cevaplanMAZ (bilinçli korunur).
+ * agent_decision_* = cancel_pipeline (iş/pipeline iptali, geri-alınamaz iş kaybı). dast_confirm_* = 🛡️ Güvenlik Taraması
+ * (kullanıcı butonu, makine yükü + yan etki). Bunlar açık kullanıcı-tetiklidir; otonom ajan seçmemeli.
+ */
+export function isProtectedAskqId(id: string): boolean {
+  return id.startsWith("agent_decision_") || id.startsWith("dast_confirm_");
+}
+
+/**
+ * SAF: bu askq YÜKSEK RİSKLİ / büyük-karar mı → otonom cevaplanır AMA yalnız MAHKEME karar verir (orkestra "hedefi
+ * ilerlet" biası TEHLİKELİ; muhafazakâr-default de yanlış olabilir). restart_consent_* = phase-0 GUARDRAIL 1:
+ * tüm pipeline'ı yeniden başlatan (full-stack/new-iteration) debug çözümü — iş kaybı riski. Mahkeme kararsızsa
+ * otomatik uygulanmaz (kullanıcıya bırakılır). isProtectedAskqId'den farkı: korunmaz (cevaplanır) ama court-first.
+ */
+export function isCourtFirstAskqId(id: string): boolean {
+  return id.startsWith("restart_consent_");
+}
+
+/**
+ * SAF: bu askq never-ask'ta OTONOM cevaplanabilir mi? KULLANICI-ONLY ise HAYIR — (a) id-öneki korumalı (agent_decision_
+ * cancel / dast_confirm_ DAST) VEYA (b) protected bayraklı (forceUserPrompt düşük-güven onay — düz-uuid id, önek taşımaz).
+ * Bu koruma TEK KAYNAK: hem otonom-cevap hook'u (onAutonomousAskq) hem prompt-üreten renderActiveAskqSection aynı kararı verir.
+ */
+export function isAutonomouslyAnswerableAskq(askq: { id: string; protected?: boolean }): boolean {
+  return !isProtectedAskqId(askq.id) && !askq.protected;
+}
+
+/**
+ * SAF: LLM/mahkeme cevabını geçerli seçeneklerden BİRİNE eşle (uydurma yasak) — exact, sonra çift-yön includes; yoksa null.
+ * Motorun ürettiği metin bir seçeneğe birebir/kapsayan biçimde uymazsa null → çağıran mahkemeye/varsayılana düşer.
+ */
+export function matchAnswerToOption(ans: string, options: string[]): string | null {
+  const a = ans.trim();
+  const exact = options.find((o) => o === a);
+  if (exact) return exact;
+  return options.find((o) => o.includes(a) || a.includes(o)) ?? null;
+}
+
+/**
+ * SAF: yıkıcı/vazgeç seçeneklerini ELE — otonom cevap motoru bunları GÖRMESİN (yıkıcı seçim yapısal olarak imkansız).
+ * `index.ts`'teki `filter(o !== "Vazgeç")` deseninin genelleştirmesi. Kalan yoksa [] (çağıran "yalnız-yıkıcı → cevaplama").
+ */
+export function stripDestructiveOptions(options: string[]): string[] {
+  // toLocaleLowerCase("tr"): Türkçe İ→i (ASCII regex "İptal"i kaçırmasın; JS i-flag Unicode İ≠I).
+  return options.filter((o) => !/vazgeç|iptal|cancel|\bsil\b|discard|reddet|❌\s*hayır/.test(o.toLocaleLowerCase("tr")));
+}
+
+/** SAF: hiçbir motor geçerli cevap üretemezse muhafazakâr varsayılan — ilk constructive (yıkıcı-olmayan) seçenek; yoksa null. */
+export function pickConservativeDefault(options: string[]): string | null {
+  const c = stripDestructiveOptions(options);
+  return c.length > 0 ? c[0]! : null;
+}
+
+/** SAF: otonom-cevap döngü emniyeti — art arda otonom-cevap sayısı MAX'ı aştı mı (askq→cevap→yeni-askq sonsuz döngüsünü kır). */
+export function shouldStopAutoAnswer(chain: number, max: number): boolean {
+  return chain >= max;
+}

@@ -192,6 +192,9 @@ export interface ActiveAskqSnapshot {
   multi_select?: boolean;
   /** v15.7 (2026-05-26): Faz 1/2 ana ajanın önerdiği seçenek (TR). UI vurgular. */
   suggested_option?: string;
+  /** YZLLM 2026-07-10: KULLANICI-ONLY (forceUserPrompt gibi düşük-güven/sentezlenmiş onay) → never-ask'ta bile OTONOM
+   * cevaplanMAZ (onAutonomousAskq + renderActiveAskqSection bunu atlar). id-öneki taşımayan korunan askq'ler için. */
+  protected?: boolean;
 }
 
 /**
@@ -368,6 +371,15 @@ export function recordTokenUsage(usage: ClaudeUsage): void {
   }
 }
 
+// HİÇBİR ŞEY SORMA (YZLLM 2026-07-10): otonom-cevap hook. index.ts boot'ta kaydeder; emitAskq HER askq'de çağırır →
+// never-ask'ta kapsanmamış (kategori-guard'ıyla bypass EDİLMEMİŞ, yani buraya ULAŞAN) askq'leri orkestra ajanı/mahkeme
+// cevaplasın (asılı kalmasın). ipc.ts alt-seviye (index.ts'i import etmez) → yalnız snapshot geçer; hook logic index.ts'te.
+// Hook null → BYTE-AYNI (parite). Hook kaydı circular-dep açmaz (index.ts → ipc.ts tek yön).
+let _autonomousAskqHook: ((s: ActiveAskqSnapshot) => void) | null = null;
+export function setAutonomousAskqHook(fn: ((s: ActiveAskqSnapshot) => void) | null): void {
+  _autonomousAskqHook = fn;
+}
+
 export function emitAskq(opts: {
   id: string;
   question: string;
@@ -375,6 +387,8 @@ export function emitAskq(opts: {
   allow_other?: boolean;
   multi_select?: boolean;
   suggested_option?: string;
+  /** YZLLM 2026-07-10: KULLANICI-ONLY (forceUserPrompt) → never-ask otonom-cevap hook'u bunu atlar (bkz. ActiveAskqSnapshot.protected). */
+  protected?: boolean;
 }): void {
   // v15.7 (2026-05-27): Stack push — eski snapshot KORUNUR.
   const snapshot: ActiveAskqSnapshot = {
@@ -384,6 +398,7 @@ export function emitAskq(opts: {
     allow_other: opts.allow_other,
     multi_select: opts.multi_select,
     suggested_option: opts.suggested_option,
+    protected: opts.protected,
   };
   // Aynı id zaten varsa override (idempotent emit guard)
   const existingIdx = askqStack.findIndex((a) => a.id === opts.id);
@@ -398,6 +413,8 @@ export function emitAskq(opts: {
   // süresi hesaplanıp faz süresinden düşülür. Faz-dışı emit'te kova yok → no-op.
   if (activePhaseCost) activePhaseCost.currentAskqEmitTs = Date.now();
   emit("askq", opts);
+  // never-ask otonom-cevap fallback (mod kapalıysa hook yok/erken-return → byte-aynı). En SONDA: snapshot + stack hazır.
+  _autonomousAskqHook?.(snapshot);
 }
 
 export function emitPhaseChanged(

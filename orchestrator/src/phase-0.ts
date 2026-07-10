@@ -769,7 +769,10 @@ export class Phase0Controller {
           ? `🔍 Araştırma, seçtiğin yönü uygulanamaz buldu — bunun yerine öneriyorum: **${chosen.label}**\n${chosen.description}\n\nOnaylıyor musun, yoksa başka bir seçenek mi?`
           : `🔍 **Tespit + önerilen çözüm:** ${chosen.label}\n${chosen.description}\n\n(Otomatik cevap kapalı — otomatik uygulamıyorum; sen seç.)`;
       emitChatMessage("system", reasonMsg + (alternatives ? `\n\nDiğer seçenekler:\n${alternatives}` : ""));
-      const askqId = randomUUID();
+      // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10): pipeline-restart (full-stack/new-iteration) BÜYÜK karar — GUARDRAIL 1'in
+      // "ASLA otomatik" garantisi never-ask'ta da korunmalı. `restart_consent_` prefix'i otonom-cevap motoruna bunu
+      // COURT-FIRST (yalnız mahkeme karar verir; orkestra "hedefi ilerlet" biası YOK; kararsızsa hold) olarak işaretler.
+      const askqId = (restartsPipeline ? "restart_consent_" : "") + randomUUID();
       emitAskq({
         id: askqId,
         question: restartsPipeline

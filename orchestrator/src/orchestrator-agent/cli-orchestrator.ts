@@ -20,7 +20,7 @@ import { runClaudeCli } from "../cli-run.js";
 import { extractLastJsonObject } from "../cli-json.js";
 import { orchestratorModelId, type MyclConfig } from "../config.js";
 import { selectEffortForTask } from "../model-catalog.js";
-import { emitAgentEvent } from "../ipc.js";
+import { emitAgentEvent, type ActiveAskqSnapshot } from "../ipc.js";
 import { log } from "../logger.js";
 import type { State } from "../types.js";
 import { buildOrchestratorSystemPrompt } from "./agent.js";
@@ -112,6 +112,8 @@ export class CliOrchestratorBackend {
     private readonly state: State,
     /** YZLLM 2026-06-16: SORU modu — salt-okunur danışma talimatı (faz tetiklenmez). */
     private readonly questionMode: boolean = false,
+    /** YZLLM 2026-07-10: otonom-cevap — cevaplanmakta olan askq (bağlam getActiveAskq top-of-stack yerine bunu gösterir). */
+    private readonly activeAskq: ActiveAskqSnapshot | null = null,
   ) {}
 
   /**
@@ -134,7 +136,7 @@ export class CliOrchestratorBackend {
       this.config,
       this.state,
       userText,
-      { questionMode: this.questionMode },
+      { questionMode: this.questionMode, activeAskq: this.activeAskq },
     );
     log.info("cli-orchestrator", "respond start", {
       model: modelId,

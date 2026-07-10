@@ -171,6 +171,18 @@ export const OPT_ACCEPT_PERMANENT = "Kabul et — kalıcı, bir daha sorma";
 export const OPT_STOP_MANUAL = "Dur — elle inceleyeceğim";
 
 /**
+ * SAF: bu askq bir GÜVENLİK OVERRIDE'ı (bulguyu kabul edip devam / kalıcı kabul) sunuyor mu? Bu seçenekler "hep insan
+ * kararı" — HİÇBİR ŞEY SORMA modunda bile otonom cevaplanMAZ (feedback_gate_findings_never_assume: güvenlik oto-değil).
+ * emitAskq(protected:true) ile işaretlenir → merkezî otonom-cevap hook'u (onAutonomousAskq) bu askq'yi ATLAR (kullanıcıya kalır).
+ */
+export function askqOffersAcceptOverride(options: AskqOption[]): boolean {
+  return options.some((o) => {
+    const label = typeof o === "string" ? o : o.label;
+    return label === OPT_ACCEPT_CONTINUE || label === OPT_ACCEPT_PERMANENT;
+  });
+}
+
+/**
  * SAF: analiz çıktısından askq seçeneklerini kur (test edilebilir, yan etki yok).
  *
  * İki şekil:
@@ -414,6 +426,8 @@ export function emitBlockingFindingAskq(
     id,
     question: `Faz ${opts.phase} hatası — çözülmeden ilerlenemez. Nasıl ilerleyelim?`,
     options,
+    // Güvenlik override (Kabul et, devam et) sunuluyor → never-ask'ta bile KULLANICI-ONLY (otonom cevaplanamaz).
+    protected: askqOffersAcceptOverride(options),
   });
   return {
     id,
@@ -594,6 +608,7 @@ export async function analyzeAndAskError(
       id,
       question: `Faz ${errCtx.phase}: hata analizi yapılamadı (sağlayıcı tükendi). Ne yapalım?`,
       options,
+      protected: askqOffersAcceptOverride(options), // güvenlik override sunuluyorsa → KULLANICI-ONLY
     });
     await appendAudit(state.project_root, {
       ts: Date.now(),
@@ -790,6 +805,7 @@ export async function analyzeAndAskError(
         ? `Faz ${errCtx.phase} hatası — çözülmeden ilerlenemez. Nasıl ilerleyelim?`
         : `Faz ${errCtx.phase} hatası. Nasıl ilerleyelim?`,
       options,
+      protected: askqOffersAcceptOverride(options), // güvenlik override (Kabul et/kalıcı) → never-ask'ta bile KULLANICI-ONLY
     });
 
     await appendAudit(state.project_root, {

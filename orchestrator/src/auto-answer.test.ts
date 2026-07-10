@@ -3,7 +3,18 @@
 // HİÇBİR ŞEY SORMA (her kategori × foreign/non × onay/clarify → HEP oto, enabled/suppressed'ı AŞAR). classifyQaAskq.
 
 import { describe, expect, it } from "vitest";
-import { decideAutoAnswer, classifyQaAskq, type AutoAnswerCategory } from "./auto-answer.js";
+import {
+  decideAutoAnswer,
+  classifyQaAskq,
+  isProtectedAskqId,
+  isCourtFirstAskqId,
+  isAutonomouslyAnswerableAskq,
+  matchAnswerToOption,
+  stripDestructiveOptions,
+  pickConservativeDefault,
+  shouldStopAutoAnswer,
+  type AutoAnswerCategory,
+} from "./auto-answer.js";
 
 const CATS: AutoAnswerCategory[] = ["safe-flow", "dangerous-write", "user-preference"];
 
@@ -71,5 +82,63 @@ describe("classifyQaAskq (değişmedi — regresyon guard)", () => {
   });
   it("diğer fazlar → safe-flow", () => {
     expect(classifyQaAskq("phase-4", false)).toBe("safe-flow");
+  });
+});
+
+describe("otonom-cevap SAF helper'lar (never-ask kapsanmamış askq → orkestra ajanı/mahkeme; YZLLM 2026-07-10)", () => {
+  it("isProtectedAskqId: yıkıcı iş-iptali + DAST butonu korunur; diğer askq'ler otonom-cevaplanabilir", () => {
+    expect(isProtectedAskqId("agent_decision_abc")).toBe(true); // cancel_pipeline — yıkıcı
+    expect(isProtectedAskqId("dast_confirm_x")).toBe(true); // 🛡️ buton
+    expect(isProtectedAskqId("phase-run-5")).toBe(false);
+    expect(isProtectedAskqId("error_analysis_fallback_1")).toBe(false);
+  });
+
+  it("stripDestructiveOptions: vazgeç/iptal/sil/hayır ele; constructive kalır", () => {
+    expect(stripDestructiveOptions(["✅ Çalıştır", "Vazgeç"])).toEqual(["✅ Çalıştır"]);
+    expect(stripDestructiveOptions(["Uygula", "İptal (uygulama)"])).toEqual(["Uygula"]);
+    expect(stripDestructiveOptions(["❌ Hayır", "Evet, değiştir"])).toEqual(["Evet, değiştir"]);
+    expect(stripDestructiveOptions(["Kaydet", "Sil"])).toEqual(["Kaydet"]);
+    expect(stripDestructiveOptions(["Vazgeç"])).toEqual([]); // yalnız-yıkıcı → boş
+  });
+
+  it("pickConservativeDefault: ilk constructive seçenek; yalnız-yıkıcı → null", () => {
+    expect(pickConservativeDefault(["Devam et", "Yeni iş", "Vazgeç"])).toBe("Devam et");
+    expect(pickConservativeDefault(["İptal"])).toBeNull();
+    expect(pickConservativeDefault([])).toBeNull();
+  });
+
+  it("shouldStopAutoAnswer: MAX'ta döngü emniyeti tetiklenir", () => {
+    expect(shouldStopAutoAnswer(0, 3)).toBe(false);
+    expect(shouldStopAutoAnswer(2, 3)).toBe(false);
+    expect(shouldStopAutoAnswer(3, 3)).toBe(true);
+    expect(shouldStopAutoAnswer(5, 3)).toBe(true);
+  });
+
+  it("isCourtFirstAskqId: restart_consent_ (tüm pipeline'ı yeniden başlatan büyük karar) → yalnız mahkeme; diğerleri değil", () => {
+    expect(isCourtFirstAskqId("restart_consent_abc")).toBe(true); // phase-0 GUARDRAIL 1 (full-stack/new-iteration)
+    expect(isCourtFirstAskqId("phase-run-5")).toBe(false);
+    expect(isCourtFirstAskqId("agent_decision_x")).toBe(false); // korunan ≠ court-first (o hiç cevaplanmaz)
+    expect(isCourtFirstAskqId("error_analysis_fallback_1")).toBe(false);
+  });
+
+  it("isAutonomouslyAnswerableAskq: korunan (id-öneki VEYA protected bayrağı) → false; kapsanmamış normal → true (TEK KAYNAK)", () => {
+    // KULLANICI-ONLY: id-öneki korumalı
+    expect(isAutonomouslyAnswerableAskq({ id: "agent_decision_x" })).toBe(false); // cancel_pipeline
+    expect(isAutonomouslyAnswerableAskq({ id: "dast_confirm_y" })).toBe(false); // DAST butonu
+    // KULLANICI-ONLY: protected bayrağı (forceUserPrompt — düz-uuid id ama korumalı)
+    expect(isAutonomouslyAnswerableAskq({ id: "550e8400-uuid", protected: true })).toBe(false);
+    // Otonom cevaplanabilir: kapsanmamış, önek yok, protected yok
+    expect(isAutonomouslyAnswerableAskq({ id: "phase-run-5" })).toBe(true);
+    expect(isAutonomouslyAnswerableAskq({ id: "error_analysis_fallback_1", protected: false })).toBe(true);
+    // restart_consent (court-first) OTONOM cevaplanabilir (mahkeme karar verir) — korunan değil
+    expect(isAutonomouslyAnswerableAskq({ id: "restart_consent_z" })).toBe(true);
+  });
+
+  it("matchAnswerToOption: exact > çift-yön includes; uymazsa null (uydurma-yasak)", () => {
+    expect(matchAnswerToOption("Devam et", ["Devam et", "Vazgeç"])).toBe("Devam et"); // exact
+    expect(matchAnswerToOption("Devam", ["✅ Devam et", "Vazgeç"])).toBe("✅ Devam et"); // option, cevabı kapsar
+    expect(matchAnswerToOption("Evet, Devam et diyorum", ["Devam et"])).toBe("Devam et"); // cevap option'ı kapsar (harf-duyarlı)
+    expect(matchAnswerToOption("Bambaşka bir şey", ["Devam et", "Yeni iş"])).toBeNull(); // uydurma → null
+    expect(matchAnswerToOption("  Devam et  ", ["Devam et"])).toBe("Devam et"); // trim
   });
 });

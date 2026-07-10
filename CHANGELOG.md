@@ -1,5 +1,25 @@
 ## 2026-07-10
 
+- **feat(otonom): "Hiçbir şey sorma"da asılı kalan soruları orkestra ajanı/mahkeme cevaplasın — korunan istisnalar kod-seviyesinde (YZLLM "sorulan soruları orkestra ajanı cevaplasın"):**
+  Hiçbir şey sorma modu AÇIKKEN kapsanmamış bir askq (ör. `phase-run-*`, `error_analysis_fallback_*`, boot narrator'ın "Devam mı yeni iş
+  mi?" cümlesi) CEVAPLANMADAN asılı kalıyordu. **Artık:** `emitAskq` (tek choke point) sonuna opsiyonel otonom-cevap hook'u
+  (`setAutonomousAskqHook`; hook null → BYTE-AYNI parite) — mod açıkken kapsanmamış askq'yi **BİRİNCİL** orkestra ajanı
+  (`respondAsOrchestrator`, state+audit+iş-kuyruğu bağlamı), **İKİNCİL** mahkeme (`inspectClarify`, fail-closed), **SON ÇARE**
+  muhafazakâr varsayılan (yalnız yıkıcı-olmayan) cevaplar; uydurma-yasak (`matchAnswerToOption` valid-option zorlaması), yıkıcı-seçenek
+  stripping, döngü emniyeti (`_autoAnswerChain`/`AUTO_ANSWER_MAX`, TOCTOU'ya karşı senkron rezerve), her karar LOUD. Boot narrator
+  never-ask'ta "Devam mı yeni iş mi?" KARAR SORUSU üretmez (deklaratif `neverAskNote`); ölü `detectInterruptedPhase1` resume dalı
+  kaldırıldı (upstream zaten resume ediyor). Cevaplanan askq'nin bağlamı `respondAsOrchestrator`'a `activeAskq` override ile
+  geçer (getActiveAskq top-of-stack yerine — eşzamanlı 2. askq'de yanlış-cevap kökü kapandı). **KORUNAN (mod açıkken bile OTONOM
+  cevaplanMAZ) — TEK KAYNAK `isAutonomouslyAnswerableAskq`:** yıkıcı iş-iptali (`agent_decision_`), DAST (`dast_confirm_`),
+  düşük-güven/sentezlenmiş onay (`forceUserPrompt` → yeni `protected` bayrağı), **güvenlik-gate override** ("Kabul et, devam et" /
+  "kalıcı kabul" — error-analysis + Faz 13 emit'leri `askqOffersAcceptOverride` → `protected`; güvenlik oto-değil, kuşkuda İNSAN).
+  Pipeline-restart onayı (full-stack/new-iteration → `restart_consent_`) **COURT-FIRST**: yalnız mahkeme karar verir (orkestra
+  "hedefi ilerlet" bias'ı devre dışı; kararsızsa otomatik uygulamaz, kullanıcıya bırakır) — phase-0 GUARDRAIL 1'in "ASLA otomatik"
+  garantisi korunur. Composer yolunda korunan askq artık "otonom cevapla" talimatı almaz (`renderActiveAskqSection` — cancel_pipeline
+  sessiz-iptal ikinci-yol bypass'ı kapandı). ask_clarify null (yalnız-yıkıcı) durumunda kör ilk-seçenek YOK → netleştirme kullanıcıya
+  yüzeye çıkar (`protected` emit). **Mod KAPALI → hook no-op + tüm kapsanmış akışlar byte-aynı** (parite). **5 tur çapraz-aile
+  mahkemesi** (KATI #12, 14 gerçek bulgu): 3 kritik korunan-askq ikinci-yol bypass (forceUserPrompt/composer-cancel/güvenlik-override)
+  + kritik ask_clarify kör-fallback + kritik phase-0 restart bypass + major TOCTOU/askq-bağlam/narrator-ölü-kod düzeltildi. check yeşil.
 - **fix(otonom): gate-timeout/asılma → durmak YOK; gerçek çözüm + çok-açılı orkestra (YZLLM "MyCL hiçbir sorunu atlamasın"):**
   Hiçbir şey sorma modu AÇIKKEN bir mekanik gate (Faz 10-17, özellikle Faz 16 E2E) komutu zaman aşımına/asılmaya uğrayınca
   pipeline SESSİZCE duruyordu (iş "düştü"; `failPhase`'in `isEnvironmentError` dalı koşulsuz `return`). Canlı: Faz 16 E2E

@@ -13,6 +13,7 @@ import { dirname, resolve } from "node:path";
 import { readAuditLogTail, readDecisions, readHandoffs, readWtf } from "../audit.js";
 import type { HandoffRecord, WtfRecord } from "../audit.js";
 import { log } from "../logger.js";
+import { isNeverAsk, isAutonomouslyAnswerableAskq } from "../auto-answer.js";
 import { peekProjectMap, formatProjectMap } from "../onboarding/project-map.js";
 import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
@@ -399,7 +400,15 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
  */
 function renderActiveAskqSection(askq: ActiveAskqSnapshot | null): string {
   if (!askq) return "";
-  const lines: string[] = ["", "---", "", "## AKTİF ASKQ (kullanıcı askq UI'da, ama composer'dan yazdı)", ""];
+  // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10): otonom-cevap modunda bu askq'yi "cevapla" (composer-mesajı semantiğini override).
+  // KRİTİK (mahkeme 2026-07-10): KORUNAN askq (agent_decision_ cancel / dast_confirm_ DAST / forceUserPrompt=protected) bu
+  // talimatı ALMAZ — aksi halde korumalı askq açıkken composer'dan gelen ALAKASIZ bir mesaj bile LLM'i "otonom cevapla → Evet"
+  // dedirtip pipeline'ı SESSİZCE iptal ettirebilir (korunan-askq garantisinin ikinci-yol bypass'ı). Korunanda eski nötr talimat.
+  const autonomous = isNeverAsk() && isAutonomouslyAnswerableAskq(askq);
+  const header = autonomous
+    ? "## AKTİF ASKQ — HİÇBİR ŞEY SORMA MODU (bu soruyu SEN otonom cevapla)"
+    : "## AKTİF ASKQ (kullanıcı askq UI'da, ama composer'dan yazdı)";
+  const lines: string[] = ["", "---", "", header, ""];
   lines.push(`- **askq_id**: ${askq.id}`);
   lines.push(`- **question** (TR): "${askq.question.slice(0, 300)}"`);
   lines.push("- **options** (TR):");
@@ -409,14 +418,23 @@ function renderActiveAskqSection(askq: ActiveAskqSnapshot | null): string {
     lines.push(`  ${i + 1}. "${label}"`);
   }
   lines.push("");
-  lines.push(
-    "**ÖNEMLİ**: Kullanıcı askq UI yerine composer'dan yazdı — bu mesaj " +
-      "askq cevabı DEĞİL, daha genel bir mesaj/eleştri/soru. Sen:",
-  );
-  lines.push("1. Kullanıcı mesajını yorumla — askq sorusuyla ilgili mi, başka bir şey mi?");
-  lines.push("2. İlgiliyse: açıklama ver, gerekirse 1 kısa soru (`ask_clarify`).");
-  lines.push("3. İlgisizse / yeni konu: `chat` veya uygun action.");
-  lines.push("4. Askq UI'sını CANCEL etme — kullanıcı askq'dan da cevap verebilir.");
+  if (autonomous) {
+    lines.push(
+      "**HİÇBİR ŞEY SORMA**: Kullanıcı yok; bu askq cevapsız kaldı ve SENİN otonom cevaplaman gerekiyor. Proje " +
+        "durumu + iş kuyruğu + geçmişi değerlendir, seçeneklerden EN DOĞRU olanı seç ve `answer_askq` aksiyonuyla ver " +
+        "(`askq_answer` = seçenek metni BİREBİR). Yıkıcı/geri-alınamaz/iptal seçme; işi koruyan + hedefi ilerleten " +
+        "seçeneği tercih et. Askq'yı CANCEL etme.",
+    );
+  } else {
+    lines.push(
+      "**ÖNEMLİ**: Kullanıcı askq UI yerine composer'dan yazdı — bu mesaj " +
+        "askq cevabı DEĞİL, daha genel bir mesaj/eleştri/soru. Sen:",
+    );
+    lines.push("1. Kullanıcı mesajını yorumla — askq sorusuyla ilgili mi, başka bir şey mi?");
+    lines.push("2. İlgiliyse: açıklama ver, gerekirse 1 kısa soru (`ask_clarify`).");
+    lines.push("3. İlgisizse / yeni konu: `chat` veya uygun action.");
+    lines.push("4. Askq UI'sını CANCEL etme — kullanıcı askq'dan da cevap verebilir.");
+  }
   return lines.join("\n");
 }
 
@@ -432,6 +450,10 @@ export async function buildAgentSystemPrompt(
   state: State,
   config: MyclConfig,
   userMessage?: string,
+  // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10): otonom-cevap yolu cevaplanmakta OLAN askq'yi geçirir → renderActiveAskqSection
+  // getActiveAskq() (askqStack TEPESİ; eşzamanlı 2. askq açıksa YANLIŞ askq olabilir) yerine bunu gösterir. Omitilirse
+  // (tüm mevcut çağrılar) eskisi gibi getActiveAskq() → BYTE-AYNI parite.
+  opts?: { activeAskq?: ActiveAskqSnapshot | null },
 ): Promise<string> {
   const staticPart = await loadStaticSystemPrompt();
   // Doğru-karar/recall: userMessage varsa relevance-tabanlı geri-çağırmayı da paralel
@@ -454,7 +476,8 @@ export async function buildAgentSystemPrompt(
     // bu ilkelere TAM uyar (sade Türkçe, varsayım tuzağı, görünür filtre, anti-sycophancy, tek soru/tur...).
     loadCommunicationGuide(),
   ]);
-  const askqSection = renderActiveAskqSection(getActiveAskq());
+  // Override verildiyse (otonom-cevap) cevaplanmakta olan askq'yi göster; yoksa askqStack tepesi (eski davranış).
+  const askqSection = renderActiveAskqSection(opts?.activeAskq ?? getActiveAskq());
   const convSection = renderConversationSection(conv);
   const factsSection = facts?.summary ? `\n\n### Proje gerçekleri\n${facts.summary}` : "";
   // Kalıcı yönergeler BELİRGİN olmalı (kullanıcının çapası) → staticPart'ın hemen ardında, her işte uyulur.

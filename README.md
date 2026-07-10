@@ -176,12 +176,17 @@ entegre eder.
 - **Hiçbir şey sorma (tam otonom)** — composer'daki oto-cevap kutusunun yanındaki ikinci
   kutu. Açıkken MyCL sana **hiç soru sormaz**: onay, netleştirme, faz-kapsamı, UI incelemesi
   (Faz 6) ve tercih kararlarını kendi verir; zor/riskli olanları kullanıcı yerine mahkemeye
-  götürür (her karar sohbette **görünür**). Entegre (yabancı) bir projede var olan kodu
-  değiştiren düzeltmeler, dokunulan mevcut davranışı **göstererek** otomatik uygulanır
-  (sormadan ama görünür). **Koruma devrede kalan istisnalar** (mod açık olsa da yine onayın
-  istenir/durur): yıkıcı işlemler (iş/pipeline iptali), düşük-güvenli/belirsiz onaylar, kalıcı
-  model ayarı ve yıkıcı kabuk komutları. Oto-cevabın üst kümesidir (açıkken oto-cevap zorunlu
-  açık sayılır). Varsayılan **kapalı** (opt-in); kapalıyken tüm davranış değişmez.
+  götürür (her karar sohbette **görünür**). Kapsanmamış (ör. bir faz çalıştırma onayı, hata
+  analizi seçimi) ya da boot'ta "kaldığın yerden devam mı" gibi sorular da **artık asılı
+  kalmaz** — bağlam-farkında orkestra ajanı (üretemezse mahkeme) otomatik cevaplar. Entegre
+  (yabancı) bir projede var olan kodu değiştiren düzeltmeler, dokunulan mevcut davranışı
+  **göstererek** otomatik uygulanır (sormadan ama görünür). **Koruma devrede kalan istisnalar**
+  (mod açık olsa da yine onayın istenir/durur): yıkıcı işlemler (iş/pipeline iptali),
+  düşük-güvenli/belirsiz onaylar, **güvenlik bulgusunu kabul edip devam** (override) kararları,
+  kalıcı model ayarı ve yıkıcı kabuk komutları. Tüm pipeline'ı yeniden başlatan büyük bir
+  düzeltmede kararı yalnız mahkeme verir (kararsızsa sana bırakır). Oto-cevabın üst kümesidir
+  (açıkken oto-cevap zorunlu açık sayılır). Varsayılan **kapalı** (opt-in); kapalıyken tüm
+  davranış değişmez.
   Bir gate (test/E2E) **asılır ya da zaman aşımına uğrarsa** MyCL sorunu **atlamaz**: gerçek
   sebebini teşhis edip (asılan komutu yeniden çalıştırarak, dev-server'ı gözlemleyerek) çözmeye
   çalışır, çözemezse farklı açılardan orkestra çözümü üretir; yalnız hiç çözemezse dürüstçe durup

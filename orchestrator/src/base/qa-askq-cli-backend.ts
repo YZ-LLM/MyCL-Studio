@@ -541,6 +541,9 @@ export class CliQaAskqBackend implements QaAskqBackend {
       options: options_tr,
       allow_other: allowOther,
       suggested_option: suggested_option_tr,
+      // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10): forceUserPrompt (düşük-güven/sentezlenmiş onay) → never-ask'ta bile KULLANICI-ONLY.
+      // Merkezî otonom-cevap hook'u (onAutonomousAskq) bu bayrağı görüp ATLAR; aksi halde düz-uuid id korumasız kalırdı.
+      protected: forceUserPrompt,
     });
     return new Promise<string>((resolve, reject) => {
       this.pendingResolver = resolve;

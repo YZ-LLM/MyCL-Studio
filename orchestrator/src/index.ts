@@ -104,6 +104,8 @@ import {
   getActiveAskq,
   setHistoryRoot,
   takePhaseCost,
+  setAutonomousAskqHook,
+  type ActiveAskqSnapshot,
 } from "./ipc.js";
 import {
   appendHistory,
@@ -119,6 +121,7 @@ import {
   OPT_REANALYZE,
   type PendingErrorAnalysis,
   emitBlockingFindingAskq,
+  askqOffersAcceptOverride,
 } from "./error-analysis.js";
 import {
   type FindingQueue,
@@ -189,7 +192,7 @@ import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
-import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk } from "./auto-answer.js";
+import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk, isAutonomouslyAnswerableAskq, isCourtFirstAskqId, matchAnswerToOption, stripDestructiveOptions, pickConservativeDefault, shouldStopAutoAnswer } from "./auto-answer.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } from "./user-directives.js";
@@ -731,6 +734,7 @@ let _securityNoProgress = 0; // art arda "bulgu azalmadı" deneme sayısı (≥2
 // kaydı tutulur (merdiven öğrenmeye devam etsin); üst-rung yeniden-koşumu YOK.
 async function recordPhaseComplete(n: PhaseId): Promise<void> {
   await recordRungOutcome(n, true);
+  _autoAnswerChain = 0; // faz GERÇEKTEN tamamlandı → otonom-cevap döngü sayacı sıfır (ilerleme var; MAX yanlış-tetiklenmesin).
 }
 
 /**
@@ -811,17 +815,165 @@ async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean, sig?:
     "system",
     `⚠️ Faz ${n}: hata analizi üretilemedi — sessizce durmuyorum. Seçenek: tekrar analiz, ya da iş listesine kaydedip devam.`,
   );
+  if (autoResolve) {
+    // Oto-çözüm: askq UI'a basmadan doğrudan "kaydet + devam" route et. emitAskq'yi ATLA ki merkezî otonom-cevap
+    // hook'u (onAutonomousAskq) AYNI id'yi ikinci kez cevaplamaya kalkmasın (çift-cevap yarışı + boşa LLM turu).
+    await handleAskqAnswer(fbId, OPT_QUEUE).catch((e: unknown) =>
+      log.error("orchestrator", "escalateUnanalyzableError auto-route (queue) failed", e),
+    );
+    return;
+  }
+  // Oto-cevap KAPALI: askq'yı göster. never-ask'ta merkezî hook (güvenli: yalnız REANALYZE/QUEUE) otonom cevaplar; mod-kapalıda kullanıcı.
   emitAskq({
     id: fbId,
     question: `Faz ${n}: hata analizi üretilemedi. Ne yapalım?`,
     options: [OPT_REANALYZE, OPT_QUEUE],
   });
-  if (autoResolve) {
-    await handleAskqAnswer(fbId, OPT_QUEUE).catch((e: unknown) =>
-      log.error("orchestrator", "escalateUnanalyzableError auto-route (queue) failed", e),
+}
+
+// ── HİÇBİR ŞEY SORMA: kapsanmamış askq'yi orkestra ajanı/mahkeme OTONOM cevaplasın (YZLLM 2026-07-10) ──
+// never-ask'ta emitAskq'ye ULAŞAN (kategori-guard'ıyla bypass EDİLMEMİŞ) bir askq asılı kalıyordu → hook (ipc.ts) yakalar →
+// orkestra ajanı (respondAsOrchestrator, zengin bağlam) BİRİNCİL, mahkeme (inspectClarify, fail-closed) İKİNCİL, muhafazakâr
+// varsayılan SON ÇARE. Yıkıcı-seçenek korumalı (id-denylist + option-stripping) + döngü emniyetli. Mod-kapalı → hook no-op.
+const AUTO_ANSWER_MAX = 3;
+let _autoAnswerChain = 0;
+const _autoAnswerInFlight = new Set<string>();
+
+/**
+ * HİÇBİR ŞEY SORMA: asılı kalan bir askq'yi otonom cevapla. BİRİNCİL orkestra ajanı (respondAsOrchestrator — state+audit+
+ * task-queue bağlamı görür), İKİNCİL mahkeme (inspectClarify — bağımsız yargıç, fail-closed), SON ÇARE muhafazakâr varsayılan
+ * (ilk constructive). Yıkıcı seçenekler motora HİÇ gösterilmez (stripDestructiveOptions). Döngü emniyeti + uydurma-yasak
+ * (matchAnswerToOption). LOUD (kullanıcı görüp düzeltebilir). skipCourt: ask_clarify'da mahkeme ZATEN koştu → tekrar çağırma.
+ */
+/**
+ * Otonom cevap SEÇ (route'suz — hem askq-yolu hem ask_clarify-yolu kullanır): BİRİNCİL orkestra ajanı, İKİNCİL mahkeme,
+ * SON ÇARE muhafazakâr varsayılan. Yıkıcı seçenekler motora HİÇ gösterilmez. null = hiç güvenli cevap yok (korunmalı).
+ */
+async function chooseAutonomousAnswer(a: {
+  id?: string;
+  question: string;
+  options: string[];
+  intent?: string;
+  trajectory?: string;
+  skipCourt?: boolean;
+  /** Yüksek riskli (restart_consent): yalnız mahkeme; orkestra "hedefi ilerlet" biası + muhafazakâr-default DEVRE DIŞI. */
+  courtFirst?: boolean;
+}): Promise<string | null> {
+  const cfg = runtime.config;
+  const st = runtime.state;
+  if (!cfg || !st) return null;
+  const constructive = stripDestructiveOptions(a.options);
+  if (constructive.length === 0) return null; // yalnız-yıkıcı → korunmalı
+  const runCourt = async (): Promise<string | null> => {
+    if (!cfg.features.inspector_enabled) return null;
+    try {
+      const ruling = await inspectClarify(cfg, {
+        projectRoot: st.project_root,
+        intent: a.intent ?? st.intent_summary ?? "",
+        trajectory: a.trajectory ?? "otonom askq cevaplama (hiçbir şey sorma)",
+        question: a.question,
+        options: constructive,
+      });
+      if (!ruling.ask && ruling.answer) return matchAnswerToOption(ruling.answer, constructive);
+    } catch (e) {
+      log.warn("orchestrator", "otonom-cevap: mahkeme hata (yutuldu)", { error: String(e) });
+    }
+    return null;
+  };
+  // COURT-FIRST (restart_consent gibi yüksek-riskli / büyük karar): orkestra "hedefi ilerlet" biası TEHLİKELİ (tüm
+  // pipeline'ı sessizce yeniden başlatabilir) → yalnız MAHKEME (tarafsız yargıç). Mahkeme kararsızsa muhafazakâr-default
+  // DEĞİL → null (çağıran LOUD-hold, kararı kullanıcıya bırak). GUARDRAIL 1'in "ASLA otomatik" garantisini korur.
+  if (a.courtFirst) return runCourt();
+  // cevaplanmakta OLAN askq'yi bağlam bölümüne geçir (getActiveAskq top-of-stack yerine — eşzamanlı 2. askq'de yanlış-cevap kökü).
+  // options = constructive (görev metniyle AYNI arındırılmış küme; ham a.options'taki yıkıcı seçenek bölümde gösterilip de
+  // görevde olmayınca ajan onu seçerse matchAnswerToOption null döner → boşa tur — mahkeme minor).
+  const activeAskq: ActiveAskqSnapshot | undefined = a.id
+    ? { id: a.id, question: a.question, options: constructive }
+    : undefined;
+  let answer: string | null = null;
+  // BİRİNCİL — orkestra ajanı (proje durumu + iş kuyruğu + geçmiş bağlamı).
+  try {
+    const prompt =
+      "[OTONOM CEVAP — hiçbir şey sorma modu] Aktif bir soru cevapsız kaldı; proje durumunu, iş kuyruğunu ve geçmişi " +
+      'değerlendirip EN DOĞRU seçeneği "answer_askq" aksiyonuyla ver (askq_answer alanına seçeneği BİREBİR yaz). ' +
+      "Yıkıcı/geri-alınamaz olanı SEÇME; işi koruyan + hedefi ilerleten seçeneği tercih et.\n" +
+      `Soru: "${a.question}"\nSeçenekler:\n${constructive.map((o, i) => `${i + 1}. ${o}`).join("\n")}`;
+    const decision = await respondAsOrchestrator(cfg, st, prompt, { activeAskq });
+    if (decision.action === "answer_askq" && decision.askq_answer) {
+      answer = matchAnswerToOption(decision.askq_answer, constructive);
+    }
+  } catch (e) {
+    log.warn("orchestrator", "otonom-cevap: orkestra ajanı hata (yutuldu → mahkeme)", { error: String(e) });
+  }
+  // İKİNCİL — mahkeme (bağımsız yargıç, fail-closed).
+  if (!answer && !a.skipCourt) answer = await runCourt();
+  // SON ÇARE — muhafazakâr varsayılan (ilk constructive).
+  return answer ?? pickConservativeDefault(a.options);
+}
+
+/** Kapsanmamış bir askq'yi (emitAskq yolu) otonom cevapla + `handleAskqAnswer` ile route et. Döngü emniyetli + LOUD. */
+async function autonomouslyAnswerAskq(a: {
+  id: string;
+  question: string;
+  options: string[];
+  intent?: string;
+  trajectory?: string;
+  skipCourt?: boolean;
+  courtFirst?: boolean;
+}): Promise<void> {
+  try {
+    if (shouldStopAutoAnswer(_autoAnswerChain, AUTO_ANSWER_MAX)) {
+      emitChatMessage(
+        "system",
+        `⚠️ Hiçbir şey sorma: art arda ${_autoAnswerChain} soru otonom cevaplandı ama ilerleme yok — döngü emniyeti, ` +
+          "otonom cevaplamayı durdurdum. Aktif soruyu sen yanıtlayabilirsin.",
+      );
+      return;
+    }
+    // TOCTOU FIX (mahkeme 2026-07-10): sayacı await'ten ÖNCE (senkron) artır → eşzamanlı 2. askq callback'i GÜNCEL
+    // değeri görür. Eskiden artış await SONRASIYDI → iki farklı-id askq aynı (henüz-artmamış) sayacı okuyup MAX'ı
+    // aşabiliyordu (döngü emniyeti sessizce zayıflıyordu). Rezerve; hold (pick=null) da runaway sinyali → geri alma yok.
+    _autoAnswerChain++;
+    const pick = await chooseAutonomousAnswer(a);
+    if (!pick) {
+      emitChatMessage(
+        "system",
+        a.courtFirst
+          ? `⚠️ Hiçbir şey sorma: "${a.question.slice(0, 80)}" tüm pipeline'ı yeniden başlatan BÜYÜK bir karar — otomatik uygulamadım, senin onayını istiyorum.`
+          : `⚠️ Hiçbir şey sorma: "${a.question.slice(0, 80)}" için güvenli cevap üretemedim/yalnız-yıkıcı — korunuyor.`,
+      );
+      return;
+    }
+    emitChatMessage(
+      "system",
+      `🤖 Hiçbir şey sorma: "${a.question.slice(0, 80)}" sorusunu ${a.courtFirst ? "mahkeme" : "orkestra ajanı"} **${pick}** ile otomatik cevapladı.`,
     );
+    await handleAskqAnswer(a.id, pick).catch((e: unknown) =>
+      log.error("orchestrator", "otonom-cevap handleAskqAnswer failed", e),
+    );
+  } finally {
+    _autoAnswerInFlight.delete(a.id);
   }
 }
+
+/** ipc.ts emitAskq hook'u: never-ask'ta kapsanmamış (korunmamış) askq'yi otonom cevaplama motoruna yönlendir (mod-kapalı no-op). */
+function onAutonomousAskq(s: ActiveAskqSnapshot): void {
+  if (!isNeverAsk()) return; // mod-kapalı: byte-aynı parite
+  // KULLANICI-ONLY korumalar (TEK KAYNAK isAutonomouslyAnswerableAskq): id-öneki (agent_decision_ cancel / dast_confirm_
+  // DAST) VEYA protected bayrağı (forceUserPrompt düşük-güven onay). Bunlar never-ask'ta bile otonom cevaplanMAZ.
+  if (!isAutonomouslyAnswerableAskq(s)) return;
+  if (_autoAnswerInFlight.has(s.id)) return; // idempotent emit re-entrancy (aynı-id çift-ateş)
+  _autoAnswerInFlight.add(s.id);
+  const opts = s.options.map((o) => (typeof o === "string" ? o : o.label));
+  // COURT-FIRST (restart_consent): büyük karar → yalnız mahkeme (orkestra bias'ı yok). skipCourt=false (mahkeme ŞART).
+  const courtFirst = isCourtFirstAskqId(s.id);
+  // setImmediate: emitAskq senkron + çoğu controller'ın await-döngüsünden çağrılır → LLM'i emit stack'inde çalıştırma.
+  setImmediate(() => {
+    void autonomouslyAnswerAskq({ id: s.id, question: s.question, options: opts, courtFirst });
+  });
+}
+// emitAskq (ipc.ts) her askq'de bu hook'u çağırır; mod-kapalıyken onAutonomousAskq ilk satırda erken-return → byte-aynı.
+setAutonomousAskqHook(onAutonomousAskq);
 
 /**
  * YZLLM 2026-06-26: "z.ai, her zaman, eğer Claude abonelik VE API yoksa kullanılsın." Claude account-error
@@ -1505,6 +1657,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // Netleştirme-mahkemesi sayacı da sıfırlanmalı (Pillar A): yoksa eski projede CLARIFY_INSPECT_MAX'a
   // ulaşan sayaç yeni projeye TAŞINIR → yeni projenin ilk gerçek netleştirme sorusu sessizce bastırılır.
   _clarifyInspectChain = 0;
+  _autoAnswerChain = 0; // otonom-cevap döngü sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
   // Timeout-divert sayacı da sıfırlanmalı (mahkeme minor 2026-07-09): faz-numarasıyla anahtarlı → eski projede TIMEOUT_
   // DIVERT_MAX'a ulaşan sayaç yeni projeye TAŞINIR → yeni projenin İLK timeout'u yanlışça "tükendi" sayılıp erken escalate olur.
   timeoutRetried.clear();
@@ -1936,6 +2089,19 @@ async function runBootStatusCheck(
   cfg: MyclConfig,
   st: State,
 ): Promise<void> {
+  // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10, mahkeme düzeltmesi): buraya ULAŞILDIYSA yukarıdaki resume yolları (Faz 1/6/2-9)
+  // ZATEN return etti → burada resume edilecek yarıda kalmış iş YOK (eski detectInterruptedPhase1 dalı ÖLÜ koddu +
+  // narrator'ı sessizce atlıyordu = regresyon). Narrator yine ÇALIŞIR (bilgilendirici durum korunur) ama never-ask'ta
+  // "Devam mı yeni iş mi?" gibi KARAR SORUSU üretmez (aşağıdaki neverAskNote matrisi ezer) — otonom modda kullanıcıya
+  // soru yok; mid-iş zaten oto-sürer, yalnız durum bildirir.
+  const neverAskNote = isNeverAsk()
+    ? "\n\n## HİÇBİR ŞEY SORMA MODU AKTİF (üstteki matrisi EZER)\n" +
+      "Kullanıcı 'hiçbir şey sorma' modunu açtı → ona KARAR SORUSU SORMA. 'Devam mı yeni iş mi?', 'ne yapmak " +
+      "istersin?', 'onaylıyor musun?' KESİNLİKLE YASAK. Yarıda kalan iş zaten otomatik kaldığı yerden sürer. " +
+      "Yalnızca: (a) durum temizse reason='boot clean' (sessiz geç); (b) gerçekten yeni bir hedef gerekiyorsa TEK " +
+      "bilgilendirici cümle yaz ('önceki iş tamamlandı/yarıda kaldı; yeni bir hedef verdiğinde başlarım') — soru " +
+      "işaretiyle BİTİRME, seçenek sunma."
+    : "";
   try {
     const decision = await respondAsOrchestrator(
       cfg,
@@ -1978,7 +2144,8 @@ async function runBootStatusCheck(
         "- current_phase=1 + audit boş + iteration_count=1 → reason='boot clean'\n\n" +
         "action='chat' + reason ile 1-2 cümle Türkçe özet. ZORUNLU: " +
         "action='chat', iterasyon numarası söyleme, gelecek söz verme, " +
-        "başka action seçme, phase tetikleme, askq sorma, hafıza önerme.",
+        "başka action seçme, phase tetikleme, askq sorma, hafıza önerme." +
+        neverAskNote,
     );
     if (decision.action === "chat") {
       // Şema reason'ı zorunlu, message_to_user'ı opsiyonel tutar — ajan
@@ -3063,21 +3230,48 @@ async function executeAgentDecision(
       // ask_clarify çevrimi OLMASIN. MAX aşılırsa autoPick YAPMA → LOUD dur (frozen-goal: geç YA DA escalate; görünür
       // duruş, sessiz-döngü değil). Gerçek ilerleme (ask_clarify DIŞI aksiyon) sayacı yukarıda sıfırlar (2868).
       if (isNeverAsk()) {
-        const autoPick = clarifyOptions.find((o) => o !== "Vazgeç") ?? clarifyOptions[0]!;
         _clarifyInspectChain++;
         if (_clarifyInspectChain > CLARIFY_INSPECT_MAX) {
           emitChatMessage(
             "system",
-            `⚠️ Hiçbir şey sorma: art arda ${_clarifyInspectChain} netleştirme çözülemedi — döngü emniyeti için otomatik ilerletmeyi DURDURDUM (son makul cevap: "${autoPick}"). Farklı bir işle sayaç sıfırlanır.`,
+            `⚠️ Hiçbir şey sorma: art arda ${_clarifyInspectChain} netleştirme çözülemedi — döngü emniyeti için otomatik ilerletmeyi DURDURDUM. Farklı bir işle sayaç sıfırlanır.`,
           );
+          return;
+        }
+        // KÖR-ilk-seçenek DEĞİL (YZLLM 2026-07-10): orkestra ajanı bağlam-farkında seçer. Mahkeme ZATEN üstte koştu
+        // (autoAnswerSuggested + inspector_enabled) → skipCourt (çift-mahkeme yok).
+        const pick = await chooseAutonomousAnswer({
+          id: askqId,
+          question: clarifyQuestion,
+          options: clarifyOptions,
+          intent: text,
+          trajectory: decision.reason,
+          skipCourt: true,
+        });
+        if (!pick) {
+          // GÜVENLİ cevap YOK (tüm seçenekler yıkıcı → korunmalı / runtime yok). KÖR fallback YAPMA (mahkeme: eski
+          // `?? fallback` yıkıcı "Sil ve devam et"i seçip çalıştırıyordu → "yalnız-yıkıcı → korunmalı" garantisi kırılmıştı).
+          // Netleştirmeyi kullanıcıya YÜZEYE ÇIKAR (protected → hook otonom cevaplamaz, açık tutar) — güvenlik oto-değil, kuşkuda İNSAN.
+          emitChatMessage(
+            "system",
+            `⚠️ Hiçbir şey sorma: "${clarifyQuestion.slice(0, 80)}" için güvenli otonom cevap üretemedim (yalnız-yıkıcı/belirsiz) — bu netleştirmeyi sana bırakıyorum.`,
+          );
+          emitAskq({
+            id: askqId,
+            question: clarifyQuestion,
+            options: clarifyOptions,
+            multi_select: false,
+            allow_other: true,
+            protected: true,
+          });
           return;
         }
         emitChatMessage(
           "system",
-          `🤖 Hiçbir şey sorma modu: netleştirme sorulmadı — en makul seçenek "${autoPick}" ile ilerliyorum.\n${clarifyQuestion}`,
+          `🤖 Hiçbir şey sorma: netleştirme sorulmadı — orkestra ajanı "${pick}" ile ilerliyor.\n${clarifyQuestion}`,
         );
         setImmediate(() => {
-          void handleUserMessage(autoPick);
+          void handleUserMessage(pick);
         });
         return;
       }
@@ -5280,6 +5474,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // Timeout-divert sayacını temizle: faz GERÇEKTEN geçti → gelecek bir timeout taze sayımla başlasın (her advance'te
         // değil, yalnız gerçek tamamlanışta — sonsuz-döngü emniyeti bozulmaz).
         timeoutRetried.delete(next);
+        _autoAnswerChain = 0; // mekanik faz GERÇEKTEN geçti → otonom-cevap döngü sayacı sıfır (ilerleme).
         // Skipped (örn. missing command) akışı kırmaz — phase-N-complete
         // yazılır ki ardışık akış devam etsin. Runner zaten skip event'i
         // (phase-N-skipped) + sade Türkçe mesaj yazmış olur.
@@ -5578,6 +5773,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             id: fallbackId,
             question: "Faz 13 güvenlik gate'i başarısız. Nasıl ilerleyelim?",
             options: [OPT_ACCEPT_CONTINUE, OPT_REANALYZE],
+            // Güvenlik override (Kabul et, devam et) → never-ask'ta bile KULLANICI-ONLY (hook otonom seçemez).
+            protected: askqOffersAcceptOverride([OPT_ACCEPT_CONTINUE, OPT_REANALYZE]),
           });
         }
         runtime.pendingErrorAnalysis = pending;

@@ -18,6 +18,8 @@ import {
   OPT_ACCEPT_CONTINUE,
   OPT_ACCEPT_PERMANENT,
   OPT_REANALYZE,
+  OPT_SOLVE,
+  askqOffersAcceptOverride,
 } from "./error-analysis.js";
 
 function rec(over: Partial<AnswerMemoryRecord>): AnswerMemoryRecord {
@@ -50,6 +52,19 @@ describe("classifyAnswer", () => {
     expect(classifyAnswer(OPT_ACCEPT_CONTINUE)).toBe("fixed");
     expect(classifyAnswer(OPT_ACCEPT_PERMANENT)).toBe("fixed");
     expect(classifyAnswer(OPT_REANALYZE)).toBe("fixed");
+  });
+});
+
+describe("askqOffersAcceptOverride (güvenlik override → never-ask'ta KULLANICI-ONLY; hook ATLAR)", () => {
+  it("Kabul et, devam et / Kabul et — kalıcı içeren askq → true (protected işaretlenir)", () => {
+    expect(askqOffersAcceptOverride([OPT_SOLVE, OPT_ACCEPT_CONTINUE, OPT_REANALYZE])).toBe(true);
+    expect(askqOffersAcceptOverride([OPT_ACCEPT_PERMANENT, OPT_STOP_MANUAL])).toBe(true);
+    expect(askqOffersAcceptOverride([{ label: OPT_ACCEPT_CONTINUE, value: OPT_ACCEPT_CONTINUE }])).toBe(true); // AskqOption obje şekli
+  });
+  it("yalnız çözüm/kaydet/reanaliz seçenekleri → false (otonom cevaplanabilir, güvenlik override yok)", () => {
+    expect(askqOffersAcceptOverride([OPT_SOLVE, OPT_QUEUE, OPT_REANALYZE])).toBe(false);
+    expect(askqOffersAcceptOverride(["Migration'ı düzelt", OPT_STOP_MANUAL])).toBe(false);
+    expect(askqOffersAcceptOverride([])).toBe(false);
   });
 });
 
