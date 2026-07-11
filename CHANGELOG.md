@@ -1,3 +1,22 @@
+## 2026-07-11
+
+- **feat(advisor): Claude Code "Advisor" (danışman) + "Bağlam Sadeleştirme" (Trim CLAUDE.md) uyarlaması (YZLLM "bu özellikleri ekle"):**
+  İki yeni özellik (kullanıcı seçimi: "Advisor + bağlam sadeleştirme"). **1) Advisor — GÜVENLİ kalite-takviye modu:** strong-ALTI CLI
+  akıl-yürütme ajanları (şu an tasarım fan-out'un ux/security/data/hypothesis rolleri) kritik karar anlarında `claude --advisor
+  <strong>` ile güçlü (Opus) bir danışmana danışır — executor tier'i DEĞİŞMEZ (kaliteyi düşürmez, ek maliyet + ek kalite; kullanıcı
+  "ucuz-akıllı/downgrade" modunu istemedi). SAF `decideAdvisorModel` gate'leri (hepsi gerekli): `advisor_enabled` (opt-in, **default
+  KAPALI** — ek maliyet, kullanıcı kral) + backend=CLI + gerçek Anthropic (z.ai değil) + `claude` ≥ v2.1.98 (`parseClaudeVersion`+
+  `semverGte` probe, fail-safe) + executor tier < strong. **Danışman DAİMA Claude** (`claudeStrongModelId` — kullanıcı strong-tier'a
+  GLM seçse bile `--advisor glm-…` gerçek Claude CLI'ına geçmez → Claude katalog varsayılanına düşer). **Mahkeme/müfettiş BİLEREK
+  hariç** (çapraz-aile Sonnet→Opus bağımsızlığı korunur, KATI #12). Ayarlar → Özellikler toggle + açılınca GÖRÜNÜR durum
+  (`advisorStatusMessage` — aktif mi / neden atlanıyor). Argv `cli-run.ts` (design-fanout'un yolu); **mod KAPALI → byte-aynı** parite.
+  **2) Bağlam Sadeleştirme doktoru — NON-DESTRUCTIVE:** her turda enjekte edilen bağlamı (statik sistem-prompt ~62KB + iletişim
+  rehberi + kullanıcı yönergeleri) ÖLÇER + strong LLM ile "koddan türetilebilir / canlı-bağlamla tekrar / bayat" bölümler için
+  kesim ÖNERİR — hiçbir dosya otomatik silinmez/değişmez (`.mycl/context-trim-report.md` + chat özeti; öneri, kararı kullanıcı verir).
+  Ayarlar → Özellikler "🩺 Bağlamı sadeleştir" butonu (`run_context_trim_doctor` IPC). SAF çekirdek (ölçüm/parse/render) birim-testli;
+  `parseTrimCandidates` düşman LLM çıktısında güvenli ([]). **2 tur çapraz-aile mahkemesi** (KATI #12, 4 bulgu): kritik GLM→advisor
+  regresyonu + yanıltıcı durum-mesajı + ölü kod + write-fail sessizliği düzeltildi; doğrulama turu temiz. check yeşil (1973 test).
+
 ## 2026-07-10
 
 - **feat(otonom): "Hiçbir şey sorma"da asılı kalan soruları orkestra ajanı/mahkeme cevaplasın — korunan istisnalar kod-seviyesinde (YZLLM "sorulan soruları orkestra ajanı cevaplasın"):**

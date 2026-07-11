@@ -213,6 +213,14 @@ export interface FeatureFlags {
    * test-odaklı) yola düşülür. Varsayılan AÇIK (YZLLM 2026-07-07 "varsayılan açık olsun"). `false`: her zaman seri.
    */
   parallel_risk_fixes?: boolean;
+  /**
+   * Advisor (danışman) — YZLLM 2026-07-11 ("Claude Code Advisor'ı ekle"): GÜVENLİ kalite-takviye modu.
+   * `true` iken strong-ALTI CLI reasoning ajanları (mahkeme/müfettiş, tasarım fan-out) `claude --advisor <strong>`
+   * ile güçlü (Opus) bir danışmana karar anlarında danışır — executor tier'i DEĞİŞMEZ (kaliteyi düşürmez, ek maliyet
+   * + ek kalite). Yalnız CLI arka ucu + gerçek Anthropic (z.ai değil) + `claude` ≥ v2.1.98 + strong-altı executor'da
+   * uygulanır; aksi halde sessizce-görünür atlanır (agent normal koşar). `false` (default): davranış değişmez.
+   */
+  advisor_enabled?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -227,6 +235,7 @@ const DEFAULT_FEATURES: FeatureFlags = {
   // ayarlar (DEFAULT_FEATURES spread etmeyenler etkilenmez); gate/fix yollarındaki çağrı flag-arkası.
   inspector_enabled: true,
   phase_contribution_report: true,
+  advisor_enabled: false, // opt-in (ek maliyet — kullanıcı kral); Ayarlar'dan açılır.
 };
 
 /**

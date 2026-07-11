@@ -193,6 +193,8 @@ import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } 
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
 import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk, isAutonomouslyAnswerableAskq, isCourtFirstAskqId, matchAnswerToOption, stripDestructiveOptions, pickConservativeDefault, shouldStopAutoAnswer } from "./auto-answer.js";
+import { advisorStatusMessage } from "./advisor.js";
+import { runContextTrimDoctor } from "./context-trim-doctor.js";
 import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } from "./user-directives.js";
@@ -2596,6 +2598,12 @@ async function handleSaveFeatures(
       log.warn("orchestrator", "config reload after save_features failed", err);
       // Eski config kalır; sonraki çağrı yine çalışır.
     }
+    // Advisor (YZLLM 2026-07-11): toggle değiştiyse GÖRÜNÜR durum (KATI #4) — açtığı danışman gerçekten aktif mi,
+    // değilse NEDEN atlanıyor (claude<2.1.98 / z.ai / API modu). Sessiz değil.
+    if ("advisor_enabled" in features && runtime.config) {
+      const msg = advisorStatusMessage(runtime.config);
+      if (msg) emitChatMessage("system", msg);
+    }
     // Frontend'e güncel feature değerini de geri yolla (toggle confirm).
     try {
       const fresh = await readFeatures();
@@ -2616,6 +2624,25 @@ async function handleReadFeatures(): Promise<void> {
   } catch (err) {
     log.warn("orchestrator", "read_features failed", err);
     emit("features_value", { features: { playwright_enabled: true } });
+  }
+}
+
+/**
+ * Bağlam sadeleştirme doktoru (YZLLM 2026-07-11): enjekte edilen agent bağlamını ÖLÇER + "koddan türetilebilir/tekrar"
+ * bölümler için kesim ÖNERİR (NON-DESTRUCTIVE — .mycl/context-trim-report.md + chat özeti; hiçbir dosya silinmez).
+ */
+async function handleRunContextTrimDoctor(): Promise<void> {
+  if (!runtime.config || !runtime.state) {
+    emitChatMessage("system", "🩺 Bağlam sadeleştirme: önce bir proje aç.");
+    return;
+  }
+  emitChatMessage("system", "🩺 Bağlam analiz ediliyor (enjekte edilen prompt + yönergeler; kesim ÖNERİSİ, otomatik silme yok)…");
+  try {
+    const { summary } = await runContextTrimDoctor(runtime.config, runtime.state.project_root);
+    emitChatMessage("system", summary);
+  } catch (err) {
+    log.error("orchestrator", "context-trim doctor failed", err);
+    emitError("Bağlam sadeleştirme yapılamadı", String(err));
   }
 }
 
@@ -7868,6 +7895,9 @@ ipcRouter.register("save_features", async (data: unknown) => {
 });
 ipcRouter.register("read_features", async () => {
   await handleReadFeatures();
+});
+ipcRouter.register("run_context_trim_doctor", async () => {
+  await handleRunContextTrimDoctor();
 });
 ipcRouter.register("list_phases", () => {
   handleListPhases();

@@ -23,6 +23,7 @@ import {
   type SubagentRole,
 } from "./config.js";
 import { runClaudeCli } from "./cli-run.js";
+import { resolveAdvisorModel } from "./advisor.js";
 import { SUBAGENT_SPAWN_TOOLS } from "./tool-policy.js";
 import { extractKindBlock } from "./cli-json.js";
 import { templatePath } from "./phase-registry.js";
@@ -94,6 +95,10 @@ export async function runReasoningTurn(
       disallowedTools: [...SUBAGENT_SPAWN_TOOLS, "Write", "Edit", "Bash(rm *)", "Bash(git push *)"], // salt-okunur akıl-yürütme: alt-ajan + yazma + yıkıcı Bash yasak
       timeoutMs: 0, // idle-kill KAPALI — Opus max-efor sentezi uzun sessiz düşünür (yanlış-kill önlenir)
       wallClockMs: DESIGN_WALL_CLOCK_MS, // gerçek-hang/runaway 8dk'da kesilir
+      // Advisor (YZLLM 2026-07-11): strong-ALTI fan-out rolleri (ux/security/data/hypothesis) karar anlarında strong
+      // danışmana danışır — kaliteyi düşürmez, karar-anı kalitesini artırır. Gate strong rollerini (architect/verifier/
+      // synthesizer) otomatik atlar (executorTier=strong → null). Bu dal zaten CLI (z.ai değil) → provider gate temiz.
+      advisorModel: resolveAdvisorModel(config, model, "main") ?? undefined,
     });
     if (!res.ok) throw new Error(res.error ?? "cli reasoning failed");
     return res.text.trim();

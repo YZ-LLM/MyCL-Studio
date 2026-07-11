@@ -35,6 +35,9 @@ export interface CliRunOpts {
   disallowedTools?: string[];
   /** "ultracode" → --settings; diğerleri → --effort. */
   effort?: string;
+  /** Advisor (YZLLM 2026-07-11): verilirse `--advisor <modelId>` — executor karar anlarında bu güçlü modele danışır.
+   *  Çağıran `resolveAdvisorModel(config, modelId, role)` ile çözer (gate'ler orada; null → bayrak eklenmez). */
+  advisorModel?: string;
   maxBudgetUsd?: number;
   /** IDLE-timeout: bu süre HİÇ çıktı gelmezse öldür (her olayda sıfırlanır). */
   timeoutMs?: number;
@@ -101,6 +104,11 @@ function buildArgs(opts: CliRunOpts): string[] {
     opts.cwd,
     "--no-session-persistence",
   ];
+  // Advisor (YZLLM 2026-07-11): karar anlarında güçlü danışmana danış. Çağıran gate'leri geçmişse (resolveAdvisorModel)
+  // dolu gelir; yoksa bayrak eklenmez → davranış aynı. (claude ≥ v2.1.98 gerektirir; sürüm gate'i çağırıda.)
+  if (opts.advisorModel) {
+    args.push("--advisor", opts.advisorModel);
+  }
   // SPREAD (kod-analiz): `--allowedTools <tools...>` variadic — her tool AYRI argv olmalı.
   // `join(" ")` boşluk içeren desenleri (örn. `Bash(rm *)`) bozuyordu; cli-session zaten spread.
   if (opts.allowedTools && opts.allowedTools.length > 0) {

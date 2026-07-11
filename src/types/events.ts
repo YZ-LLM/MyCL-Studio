@@ -158,7 +158,7 @@ export interface TaskQueueChangedEvent {
 /** v15.7 (2026-05-25): Feature flags backend'den frontend'e push event. */
 export interface FeaturesValueEvent {
   kind: "features_value";
-  data: { features: { playwright_enabled: boolean; over_engineering_control?: boolean } };
+  data: { features: { playwright_enabled: boolean; over_engineering_control?: boolean; advisor_enabled?: boolean } };
 }
 
 /** v15.11: UI kullanma kılavuzu (.mycl/user-guide.md) içeriği — "Kılavuz"
@@ -582,7 +582,8 @@ export type OrchestratorCommand =
   | { kind: "set_paused"; data: { paused: boolean } }
   | {
       kind: "save_features";
-      data: { playwright_enabled?: boolean; over_engineering_control?: boolean };
+      data: { playwright_enabled?: boolean; over_engineering_control?: boolean; advisor_enabled?: boolean };
     }
   | { kind: "read_features" }
+  | { kind: "run_context_trim_doctor" }
   | { kind: "start_quality_audit"; data: { questions: string } };

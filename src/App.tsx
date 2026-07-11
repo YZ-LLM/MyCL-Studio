@@ -889,9 +889,11 @@ function App() {
   const [features, setFeatures] = useState<{
     playwright_enabled: boolean;
     over_engineering_control?: boolean;
+    advisor_enabled?: boolean;
   }>({
     playwright_enabled: true,
     over_engineering_control: false,
+    advisor_enabled: false,
   });
   // v15.8 (2026-05-30): Main model efor seçimi (CLI backend için). selected_models event'inden gelir.
   const [currentEffort, setCurrentEffort] = useState<string>("max");
@@ -1005,6 +1007,7 @@ function App() {
         setFeatures({
           playwright_enabled: ev.data.features.playwright_enabled,
           over_engineering_control: ev.data.features.over_engineering_control ?? false,
+          advisor_enabled: ev.data.features.advisor_enabled ?? false,
         });
       } else if (ev.kind === "tech_doc") {
         setProjectDoc(ev.data.content);
@@ -1461,6 +1464,9 @@ function App() {
         // v15.8: kısmi toggle — mevcut state'e merge (her checkbox kendi alanını gönderir).
         setFeatures((cur) => ({ ...cur, ...f }));
         void orch.send({ kind: "save_features", data: f });
+      }}
+      onRunContextTrim={() => {
+        void orch.send({ kind: "run_context_trim_doctor" });
       }}
     />
   );

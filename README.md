@@ -205,6 +205,18 @@ entegre eder.
   yüzdesini değerlendirip Türkçe rapor olarak gösterir; düşük-katkılı fazlar
   işaretlenir, kullanıcı gereksizleri kendisi budamaya karar verir (otomatik
   budama yok).
+- **Advisor (danışman)** — Ayarlar → Özellikler'den açılır (varsayılan **kapalı**,
+  opt-in). Açıkken güçlü modelin (Opus) altında koşan CLI akıl-yürütme ajanları
+  (ör. tasarım fan-out'un ux/güvenlik/veri rolleri) kritik karar anlarında güçlü
+  bir **danışmana** danışır — model seviyesi düşmeden karar kalitesi artar (küçük
+  ek maliyet, "ucuz modele büyük-model aklı"). Yalnız Claude Code aboneliği (CLI) +
+  güncel `claude` ile çalışır; z.ai/API modunda ve mahkeme/müfettiş'te (çapraz-aile
+  bağımsızlığı korunur) uygulanmaz. Açtığında durumu (aktif mi / neden atlanıyor)
+  chat'te **görünür** yazar.
+- **Bağlam Sadeleştirme (🩺)** — Ayarlar → Özellikler'deki butonla, ajana her turda
+  enjekte edilen bağlamı (sistem-prompt + yönergeler) ölçer ve "koddan türetilebilir /
+  tekrar eden / bayat" bölümler için kesim **önerir**. Hiçbir şey otomatik silinmez:
+  öneri chat'e + `.mycl/context-trim-report.md` dosyasına yazılır, kararı sen verirsin.
 - **Erişilebilirlik (WCAG) — salt-rapor** — Faz 6 UI incelemesinde, uygulama
   tarayıcıda açıkken çalışan adrese `axe-core` (WCAG 2.1 A/AA) ile bakılır. Bir
   **kapı değildir**: hiçbir fazı bloklamaz, otomatik düzeltme döngüsü tetiklemez —

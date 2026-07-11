@@ -78,11 +78,14 @@ interface Props {
   savingKeys: boolean;
   errorDetail?: string;
   /** v15.7 (2026-05-25): Feature flags */
-  features?: { playwright_enabled: boolean; over_engineering_control?: boolean };
+  features?: { playwright_enabled: boolean; over_engineering_control?: boolean; advisor_enabled?: boolean };
   onSaveFeatures?: (features: {
     playwright_enabled?: boolean;
     over_engineering_control?: boolean;
+    advisor_enabled?: boolean;
   }) => void;
+  /** Bağlam sadeleştirme doktoru: enjekte-bağlamı ölç + kesim öner (non-destructive; chat + .mycl raporu). */
+  onRunContextTrim?: () => void;
   /** v15.8 (2026-05-30): Main model efor seçimi (CLI backend için). */
   effort?: string;
   /** v15.13 (auto-model): mevcut iş-seviyesi model katmanları (seçiciler için). */
@@ -205,6 +208,7 @@ export function Settings({
   errorDetail,
   features,
   onSaveFeatures,
+  onRunContextTrim,
   effort,
   currentModelTiers,
   currentBackends,
@@ -817,6 +821,81 @@ export function Settings({
                   </div>
                 </div>
               </label>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: 12,
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={features?.advisor_enabled ?? false}
+                  onChange={(e) =>
+                    onSaveFeatures?.({ advisor_enabled: e.target.checked })
+                  }
+                  style={{ width: 18, height: 18 }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: "var(--fg-bright)" }}>
+                    🧭 Advisor (danışman)
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--fg-dim)",
+                      marginTop: 2,
+                    }}
+                  >
+                    Açık: strong-altı CLI akıl-yürütme ajanları (tasarım fan-out
+                    gibi) kritik karar anlarında güçlü (Opus) bir danışmana danışır
+                    — model seviyesi düşmeden karar kalitesi artar (küçük ek
+                    maliyet). Yalnız Claude Code aboneliği (CLI) + güncel `claude`
+                    ile çalışır; z.ai/API modunda ve mahkeme/müfettiş’te
+                    (çapraz-aile bağımsızlığı korunur) uygulanmaz. Kapalı:
+                    davranış değişmez.
+                  </div>
+                </div>
+              </label>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: 12,
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => onRunContextTrim?.()}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-elevated)",
+                    color: "var(--fg-bright)",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  🩺 Bağlamı sadeleştir
+                </button>
+                <div style={{ flex: 1, fontSize: 11, color: "var(--fg-dim)" }}>
+                  Ajana her turda enjekte edilen bağlamı (sistem-prompt + yönergeler)
+                  ölçer ve “koddan türetilebilir / tekrar eden” bölümler için kesim
+                  ÖNERİR — hiçbir şey otomatik silinmez; öneri chat’e + bir rapor
+                  dosyasına yazılır, kararı sen verirsin.
+                </div>
+              </div>
 
               {/* v15.8: Claude Code CLI backend artık Modeller sekmesinde rol
                   başına seçilir (her ajan için API / Claude Code Aboneliği).
