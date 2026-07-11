@@ -22,6 +22,7 @@ import {
 } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js";
+import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 import { withDangerousBashDeny } from "./tool-policy.js";
@@ -55,12 +56,8 @@ export interface CliSessionTurnOpts {
   extraEnv?: Record<string, string>;
 }
 
-export interface TokenUsage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_input_tokens: number;
-  cache_creation_input_tokens: number;
-}
+// TokenUsage tanımı cli-json.ts'e taşındı (extractTokenUsage ile tek kaynak); mevcut importçular için re-export.
+export type { TokenUsage } from "./cli-json.js";
 
 export interface CliSessionResult {
   ok: boolean;
@@ -277,17 +274,12 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
         resultIsError = ev.is_error === true || ev.subtype === "error";
         if (resultIsError) resultErrorText = String(ev.result ?? ev.error ?? "");
         if (typeof ev.num_turns === "number") turns = ev.num_turns;
-        const u = ev.usage as Record<string, unknown> | undefined;
+        const u = extractTokenUsage(ev.usage); // tek kaynak: cli-json.ts (4× kopya kaldırıldı)
         if (u) {
-          usage = {
-            input_tokens: Number(u.input_tokens ?? 0),
-            output_tokens: Number(u.output_tokens ?? 0),
-            cache_read_input_tokens: Number(u.cache_read_input_tokens ?? 0),
-            cache_creation_input_tokens: Number(u.cache_creation_input_tokens ?? 0),
-          };
+          usage = u;
           // F1: faz-maliyet kovasını CLI modunda da doldur + gerçek $ + model (kova yoksa no-op).
           const costUsd = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
-          recordTokenUsage({ ...usage, total_cost_usd: costUsd, model: opts.modelId });
+          recordTokenUsage({ ...u, total_cost_usd: costUsd, model: opts.modelId });
         }
       }
     });
@@ -313,9 +305,16 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
       // YZLLM 2026-06-11 "denesin zaten çalışacak": kararı çağrı SONUCUNA göre ver — başardıysa (overage karşıladı)
       // limitleme + eski limiti temizle; gerçekten başarısız + blocked-event görülmüşse ŞİMDİ API'ye geç.
       finalizeCliRateLimit(ok);
+      // PARİTE (mahkeme denetimi 2026-07-11): 529 "Overloaded" transient imzası cli-run.ts'e eklenmiş ama bu "özdeş"
+      // kardeşe yayılmamıştı → session yolundaki 529'lar failPhase'in transient dalını kaçırıp debug'ı boşa koşturuyordu.
+      // cli-run.ts ile birebir: imzayı text/result'tan `error`'a taşı.
+      const fullText = texts.join("");
+      const transientHint = /529|Overloaded|overloaded_error/i.test(`${fullText} ${stderrTail} ${resultErrorText}`)
+        ? " :: API 529 Overloaded (transient — geçici sunucu yükü)"
+        : "";
       done({
         ok,
-        text: texts.join(""),
+        text: fullText,
         toolUses,
         turns,
         usage,
@@ -325,7 +324,8 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
           ? undefined
           : `claude exit=${code}` +
             (resultErrorText ? ` :: ${resultErrorText.slice(0, 300)}` : "") +
-            (stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""),
+            (stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : "") +
+            transientHint,
       });
     });
   });

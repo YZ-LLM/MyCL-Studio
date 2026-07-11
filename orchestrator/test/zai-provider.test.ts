@@ -13,9 +13,7 @@ import {
 import {
   findModel,
   glmModelForTier,
-  catalogForProvider,
   GLM_CATALOG,
-  MODEL_CATALOG,
 } from "../src/model-catalog.js";
 import { resolveLlmClient, resolveCliProvider } from "../src/claude-api.js";
 
@@ -149,9 +147,9 @@ describe("GLM katalog (provider-aware model — ②)", () => {
     }
   });
 
-  it("catalogForProvider: isZai → GLM, değilse Claude; GLM her tier'ı kapsar (fallback'e düşmez)", () => {
-    expect(catalogForProvider(true)).toBe(GLM_CATALOG);
-    expect(catalogForProvider(false)).toBe(MODEL_CATALOG);
+  it("GLM kataloğu her tier'ı kapsar (tier-eşleme fallback'e düşmez)", () => {
+    // (catalogForProvider export'u 2026-07-11 temizliğinde kaldırıldı — yalnız bu test kullanıyordu;
+    //  değerli iddia GLM tier-kapsamıdır, o korunuyor.)
     for (const tier of ["cheap", "balanced", "strong"] as const) {
       expect(GLM_CATALOG.some((m) => m.tier === tier)).toBe(true);
     }

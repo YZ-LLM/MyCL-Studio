@@ -4,7 +4,6 @@ import { describe, expect, it, afterEach } from "vitest";
 import {
   setAutoAnswerSuggested,
   setIntegrateModeSuppression,
-  isIntegrateSuppressed,
   autoAnswerSuggested,
   autoAnswerPick,
   decideAutoAnswer,
@@ -22,7 +21,6 @@ describe("auto-answer · entegre-modu bastırma", () => {
   it("oto-cevap AÇIK + entegre-bastırma AÇIK → suggested=false, pick=null (kullanıcı yanıtlar)", () => {
     setAutoAnswerSuggested(true);
     setIntegrateModeSuppression(true);
-    expect(isIntegrateSuppressed()).toBe(true);
     expect(autoAnswerSuggested()).toBe(false);
     expect(autoAnswerPick(["a", "b"], "a")).toBeNull();
   });

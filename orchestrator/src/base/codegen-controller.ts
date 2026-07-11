@@ -497,7 +497,8 @@ export class CodegenBaseController {
       selected_en =
         (await translate(this.opts.config, selected_tr, "tr-to-en")).text || selected_tr;
     }
-    emitChatMessage("system", `→ Claude'a: ${selected_en}`);
+    // "→ Claude'a: <EN>" echo'su KALDIRILDI (YZLLM 2026-07-11 parite kararı — kullanıcıya anlamsız EN çevirisi;
+    // qa-askq ailesindeki bilinçli UX silmesi tüm askq ailelerine eşitlendi).
     return selected_en;
   }
 

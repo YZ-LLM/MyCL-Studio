@@ -83,10 +83,7 @@ export const GLM_CATALOG: ModelInfo[] = [
   { id: "glm-5-turbo", label: "GLM-5-Turbo", tier: "cheap", contextTokens: 200_000, isOpus: false, blurb: "z.ai hızlı (5 serisi turbo)" },
 ];
 
-/** Provider'a göre katalog (Settings model dropdown'ları + tier-default'ları). */
-export function catalogForProvider(isZai: boolean): ModelInfo[] {
-  return isZai ? GLM_CATALOG : MODEL_CATALOG;
-}
+// (catalogForProvider KALDIRILDI — mahkeme denetimi 2026-07-11: 0 çağıran, ölü export.)
 
 /** id → ModelInfo (Claude + GLM). GLM id'leri artık tanınır → sessiz claude-default landmine'ı önler. */
 export function findModel(id: string): ModelInfo | undefined {
@@ -353,13 +350,4 @@ export function selectEffortForTask(
   return EFFORT_RANK[base] > EFFORT_RANK.high ? "high" : base;
 }
 
-/**
- * GÜVENLİ görünürlük: KULLANILAN modeli (config'ten, override YOK) iş başına gösterir + işin alaka-tier'ını
- * not düşer. Kullanıcı hangi modelin hangi işe gittiğini görür, config'i ezilmez (hız korunur).
- */
-export function formatModelInUse(taskKind: TaskKind, modelId: string): string {
-  const info = findModel(modelId);
-  const label = info?.label ?? modelId;
-  const rel = TASK_RELEVANCE[taskKind];
-  return `🧠 "${taskKind}" işi → **${label}** (bu iş tipi için uygun tier: ${rel.tier}).`;
-}
+// (formatModelInUse KALDIRILDI — mahkeme denetimi 2026-07-11: 0 çağıran, ölü export.)

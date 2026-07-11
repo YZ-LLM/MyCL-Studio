@@ -18,7 +18,7 @@ import {
 } from "./cli-rate-limit.js";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
 import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js";
-import type { TokenUsage } from "./cli-session.js";
+import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 import { withDangerousBashDeny } from "./tool-policy.js";
@@ -247,18 +247,13 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
         resultIsError = ev.is_error === true || ev.subtype === "error";
         if (resultIsError) resultErrorText = String(ev.result ?? ev.error ?? "");
         if (typeof ev.num_turns === "number") turns = ev.num_turns;
-        const u = ev.usage as Record<string, unknown> | undefined;
+        const u = extractTokenUsage(ev.usage); // tek kaynak: cli-json.ts (4× kopya kaldırıldı)
         if (u) {
-          usage = {
-            input_tokens: Number(u.input_tokens ?? 0),
-            output_tokens: Number(u.output_tokens ?? 0),
-            cache_read_input_tokens: Number(u.cache_read_input_tokens ?? 0),
-            cache_creation_input_tokens: Number(u.cache_creation_input_tokens ?? 0),
-          };
+          usage = u;
           // F1: faz-maliyet kovasını CLI modunda da doldur (eskiden yalnız API yolu
           // doldururdu → CLI'da panel boştu) + gerçek $ + model. Aktif kova yoksa no-op.
           const costUsd = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
-          recordTokenUsage({ ...usage, total_cost_usd: costUsd, model: opts.modelId });
+          recordTokenUsage({ ...u, total_cost_usd: costUsd, model: opts.modelId });
         }
       }
     });

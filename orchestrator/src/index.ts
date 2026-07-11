@@ -714,14 +714,13 @@ async function emitVerificationSummary(state: State): Promise<void> {
 // (faz-complete kanca yeri korunur; ileride audit/telemetri için kullanılabilir).
 async function recordRungOutcome(_n: PhaseId, _success: boolean): Promise<void> {}
 
-// Verify-up yükseltme sınırı: faz başına en çok 2 (maliyet emniyeti; merdiven zaten sonlu). İterasyon başında temizlenir.
-// Faz 13 güvenlik oto-çözüm sayacı (Oto-cevap açıkken otomatik fix denemesi sınırı; iterasyon başında sıfırlanır).
-let _securityAutoResolveCount = 0;
+// (_securityAutoResolveCount KALDIRILDI — mahkeme denetimi 2026-07-11: merdiven kaldırılınca MAX kontrolü de gitmişti;
+//  sayaç artırılıyor/sıfırlanıyor ama HİÇBİR kararda okunmuyordu — zombi durum. TEK otorite: security-convergence.ts
+//  bulgu-azalması kırıcısı, aşağıdaki ikili onun kalıcı durumudur.)
 // (CASCADE-GUARD _iterationIsSecurityFix KALDIRILDI 2026-06-22 — Faz 17 otomatik pentest çıkarıldı;
 //  cascade riski yoktu artık. Manuel 🛡️ buton kendi cascade-guard'ını taşımaz, kullanıcı-tetikli.)
 // Yakınsama-kırıcı (YZLLM 2026-06-14: "MyCL'e yakınsama-kırıcı ekle"): güvenlik fix'leri bulguları AZALTMIYORSA
-// sonsuz döngüye girme. _securityAutoResolveCount iterasyon başında sıfırlanır (deep-solution yeni iterasyon açınca
-// cap hiç dolmaz) → bu ikili İTERASYONDAN BAĞIMSIZ kalıcı; yalnız proje açılışında / Faz 13 çözülünce sıfırlanır.
+// sonsuz döngüye girme. Bu ikili İTERASYONDAN BAĞIMSIZ kalıcı; yalnız proje açılışında / Faz 13 çözülünce sıfırlanır.
 let _securityFindingsPrev: number | null = null; // önceki güvenlik denemesindeki toplam bulgu sayısı
 let _securityNoProgress = 0; // art arda "bulgu azalmadı" deneme sayısı (≥2 → yakınsamıyor; mantık security-convergence.ts)
 
@@ -804,11 +803,12 @@ async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean, sig?:
     return;
   }
   const fbId = `error_analysis_fallback_${randomUUID()}`;
+  const fallbackOptions = [OPT_REANALYZE, OPT_QUEUE]; // tek tanım — pending + emitAskq aynı listeyi kullanır (drift olmasın)
   runtime.pendingErrorAnalysis = {
     id: fbId,
     phase: n,
     blocking: true,
-    options: [OPT_REANALYZE, OPT_QUEUE],
+    options: fallbackOptions,
     solutions_tr: [],
     // FIX B (mahkeme): fallback pending'e de sig taşı → sonraki tur PREVIOUS ATTEMPTS hafızası tutarlı kalır.
     sig,
@@ -829,7 +829,7 @@ async function escalateUnanalyzableError(n: PhaseId, autoResolve: boolean, sig?:
   emitAskq({
     id: fbId,
     question: `Faz ${n}: hata analizi üretilemedi. Ne yapalım?`,
-    options: [OPT_REANALYZE, OPT_QUEUE],
+    options: fallbackOptions,
   });
 }
 
@@ -3934,7 +3934,6 @@ async function runDevelopIteration(
     syncNeededPhases(); // yeni iterasyon → kapsam sıfırlandı (Faz 3 tekrar önerecek), vurgulama kalksın
     // v15.6: yeni iterasyon — NDJSON metadata bağlamı update.
     setRecordContext({ iteration: newIter, phase: 1 });
-    _securityAutoResolveCount = 0;
     emitChatMessage(
       "system",
       `🔄 Yeni iterasyon başlıyor (#${newIter}). Eski spec.md/kod referans olarak korunuyor; Claude Faz 1'de Read ile bakabilir.`,
@@ -5658,10 +5657,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         }
         let pending: PendingErrorAnalysis | null = null;
         // YZLLM 2026-06-14: "ASLA elle düzeltme önerme; güvenliği OTOMATİK düzelt." → Oto-cevap açıkken Faz 13 İNSANA
-        // ASLA devretmez. Yakınsama yoksa (bulgular azalmıyorsa) fix'i bir ÜST BASAMAĞA yükseltip otomatik düzeltmeye
-        // DEVAM eder; tepe basamakta da çözülemezse OTOMATİK "kabul et + devam" (LOUD rapor — sessiz değil, bulgular
-        // yutulmaz). _securityAutoResolveCount iterasyonda sıfırlandığı için güvenilmez → esas: basamak + bulgu-azalması
-        // (security-convergence.ts, SAF + test'li). Oto-cevap KAPALIYSA eski blocking-askq (insan kabul/yeniden-analiz).
+        // ASLA devretmez; çözülemezse OTOMATİK "kabul et + devam" (LOUD rapor — sessiz değil, bulgular yutulmaz).
+        // Döngü-kırıcı TEK OTORİTE: security-convergence.ts bulgu-azalması (SAF + test'li; eski _securityAutoResolveCount
+        // zombi sayacı mahkeme denetimi 2026-07-11'de kaldırıldı). Oto-cevap KAPALIYSA blocking-askq (insan kabul/yeniden-analiz).
         const auto = autoAnswerSuggested();
         // ENTEGRE (foreign) opt-in "ajan eminse otomatik düzelt" (YZLLM 2026-07-09): güvenlik-fix'i foreign'de de otomatik
         // uygula — AMA yalnız YAKINSARKEN (converging = bulgular azalıyor → döngü koruması) + EMİN'ken (analyzeAndAskError
@@ -5740,7 +5738,6 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         if (auto) {
           // ELLE DÜZELTME YOK (YZLLM 2026-06-14): otomatik fix varsa uygula; yoksa OTOMATİK "kabul et + devam" (LOUD).
           if (pending?.auto_selected_solution) {
-            _securityAutoResolveCount++;
             runtime.pendingErrorAnalysis = pending;
             // HİÇBİR ŞEY SORMA foreign: uygulamadan ÖNCE dokunulan mevcut davranışı GÖSTER (kullanıcı kararı "göster+oto").
             if (state.origin === "foreign") await emitSecurityFixImpact(pending);
@@ -5773,7 +5770,6 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // (riski otomatik kabul etmez); emin değil/yakınsamıyorsa auto_selected boş → bu dal atlanır → aşağıdaki
         // blocking-askq'ya düşer (kullanıcı KABUL/yeniden-analiz seçer). Non-foreign yukarıdaki `if (auto)` dalıyla işlendi.
         if (autoFixSec && pending?.auto_selected_solution && secStep.converging) {
-          _securityAutoResolveCount++;
           runtime.pendingErrorAnalysis = pending;
           await emitSecurityFixImpact(pending);
           await handleAskqAnswer(pending.id, pending.auto_selected_solution).catch((e: unknown) =>
@@ -5784,11 +5780,12 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // Oto-cevap KAPALI → blocking askq (insan KABUL/yeniden-analiz seçer; "elle DÜZELT" değil).
         if (!pending) {
           const fallbackId = `error_analysis_${randomUUID()}`;
+          const gateOptions = [OPT_ACCEPT_CONTINUE, OPT_REANALYZE]; // tek tanım — pending + emitAskq + protected aynı liste
           pending = {
             id: fallbackId,
             phase: 13,
             blocking: true,
-            options: [OPT_ACCEPT_CONTINUE, OPT_REANALYZE],
+            options: gateOptions,
             solutions_tr: [],
             acceptContinuePhase: 13,
           };
@@ -5799,9 +5796,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           emitAskq({
             id: fallbackId,
             question: "Faz 13 güvenlik gate'i başarısız. Nasıl ilerleyelim?",
-            options: [OPT_ACCEPT_CONTINUE, OPT_REANALYZE],
+            options: gateOptions,
             // Güvenlik override (Kabul et, devam et) → never-ask'ta bile KULLANICI-ONLY (hook otonom seçemez).
-            protected: askqOffersAcceptOverride([OPT_ACCEPT_CONTINUE, OPT_REANALYZE]),
+            protected: askqOffersAcceptOverride(gateOptions),
           });
         }
         runtime.pendingErrorAnalysis = pending;

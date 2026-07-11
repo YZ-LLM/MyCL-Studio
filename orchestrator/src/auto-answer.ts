@@ -101,10 +101,7 @@ export function isNeverAsk(): boolean {
   return _neverAsk;
 }
 
-/** Şu an entegre-bastırma aktif mi (UI'ı bilgilendirmek için). */
-export function isIntegrateSuppressed(): boolean {
-  return _integrateSuppressed;
-}
+// (isIntegrateSuppressed KALDIRILDI — mahkeme denetimi 2026-07-11: 0 çağıran, ölü export.)
 
 /**
  * Kullanıcının GLOBAL oto-cevap tercihi (entegre-bastırmadan BAĞIMSIZ). Foreign'de autoAnswerSuggested() bastırma

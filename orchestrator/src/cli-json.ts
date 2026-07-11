@@ -164,3 +164,26 @@ export function coerceToSchema(
   }
   return { coerced, defaulted };
 }
+
+/** Claude stream-json `result` olayındaki token-usage şekli (4 CLI runner'ın ortak sözleşmesi). */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
+/**
+ * PARİTE (mahkeme denetimi 2026-07-11): bu blok cli-run/cli-session/codegen-cli-backend/persistent-cli-session'da
+ * BİREBİR kopyaydı (4×) → tek saf helper. Nesne değilse undefined (çağıran no-op — davranış birebir korunur).
+ */
+export function extractTokenUsage(raw: unknown): TokenUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const u = raw as Record<string, unknown>;
+  return {
+    input_tokens: Number(u.input_tokens ?? 0),
+    output_tokens: Number(u.output_tokens ?? 0),
+    cache_read_input_tokens: Number(u.cache_read_input_tokens ?? 0),
+    cache_creation_input_tokens: Number(u.cache_creation_input_tokens ?? 0),
+  };
+}

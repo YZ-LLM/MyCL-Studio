@@ -20,6 +20,7 @@ import {
 } from "./cli-rate-limit.js";
 import { appendFile, readFile } from "node:fs/promises";
 import { claudeSpawnEnv, resolveClaudePath } from "./codegen/cli-backend.js";
+import { extractTokenUsage } from "./cli-json.js";
 import { emitChatMessage, recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 import { waitIfPaused } from "./pause.js";
@@ -264,17 +265,9 @@ export class PersistentClaudeSession {
     } else if (type === "result") {
       // Tur bitti. is_error → başarısız.
       const isErr = ev.is_error === true || ev.subtype === "error";
-      const usage = (ev.usage ?? (ev.message as Record<string, unknown> | undefined)?.usage) as
-        | Record<string, number>
-        | undefined;
-      if (usage) {
-        recordTokenUsage({
-          input_tokens: usage.input_tokens ?? 0,
-          output_tokens: usage.output_tokens ?? 0,
-          cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
-          cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
-        });
-      }
+      // tek kaynak: cli-json.extractTokenUsage (4× kopya kaldırıldı); ev.message.usage fallback'i bu runner'a özgü.
+      const u = extractTokenUsage(ev.usage ?? (ev.message as Record<string, unknown> | undefined)?.usage);
+      if (u) recordTokenUsage(u);
       const pend = this.pending;
       this.pending = null;
       const ok = !isErr;

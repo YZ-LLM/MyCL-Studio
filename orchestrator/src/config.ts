@@ -285,8 +285,8 @@ export interface MyclConfig {
   features: FeatureFlags;
   timeouts_ms: {
     translator: number;
-    claude_subprocess_spawn: number;
-    claude_first_event: number;
+    // (claude_subprocess_spawn + claude_first_event KALDIRILDI — mahkeme denetimi 2026-07-11: 0 okuma,
+    //  hiçbir kod bu değerleri kullanmıyordu. Eski config.json'larda kalmış anahtarlar zararsız yok sayılır.)
   };
   /** YZLLM 2026-06-13: kullanıcının kalıcı reddettiği model-upgrade id'leri (bir kez sor, "hayır"ı hatırla). */
   declined_model_upgrades: string[];
@@ -317,8 +317,6 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
 
 const DEFAULT_TIMEOUTS = {
   translator: 30_000,
-  claude_subprocess_spawn: 10_000,
-  claude_first_event: 60_000,
 };
 
 export class ConfigError extends Error {

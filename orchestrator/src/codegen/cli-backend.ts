@@ -43,11 +43,15 @@ import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "../ipc.js";
 import { log } from "../logger.js";
 import { globalConfigDir } from "../paths.js";
 import { dedupePathValue, safeEnv } from "../safe-env.js";
-import { DANGEROUS_BASH_DENY } from "../tool-policy.js";
+import { withDangerousBashDeny } from "../tool-policy.js";
+import { extractTokenUsage } from "../cli-json.js";
 
 /** Tehlikeli bash → CLI --disallowedTools (tek kaynak: tool-policy.DANGEROUS_BASH_DENY).
  * bypassPermissions ile birlikte deny kuralı mode'dan önce → rm/sudo/git-push/chmod/publish bloklu. */
-const DISALLOWED_TOOLS = DANGEROUS_BASH_DENY;
+// PARİTE (mahkeme denetimi 2026-07-11): diğer 3 builder withDangerousBashDeny(...) sarmalayıcısından geçer; burası
+// çıplak sabiti push'luyordu → sarmalayıcı sertleştirilirse codegen sessizce almazdı. Bugün davranış birebir aynı
+// (per-call liste yok → yalnız baseline döner); sarmalayıcıya bağlanmak gelecek sertleştirmeyi otomatik kapsar.
+const DISALLOWED_TOOLS = withDangerousBashDeny(undefined);
 
 /** Codegen'in ihtiyaç duyduğu araçlar (auto-approve allowlist). */
 const ALLOWED_TOOLS = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"];
@@ -449,14 +453,8 @@ export class CliCodegenBackend implements CodegenBackend {
       const isError = ev.is_error === true || ev.subtype === "error";
       const turns = typeof ev.num_turns === "number" ? ev.num_turns : undefined;
       const cost = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
-      const usage = ev.usage as Record<string, unknown> | undefined;
-      if (usage) {
-        const u = {
-          input_tokens: Number(usage.input_tokens ?? 0),
-          output_tokens: Number(usage.output_tokens ?? 0),
-          cache_read_input_tokens: Number(usage.cache_read_input_tokens ?? 0),
-          cache_creation_input_tokens: Number(usage.cache_creation_input_tokens ?? 0),
-        };
+      const u = extractTokenUsage(ev.usage); // tek kaynak: cli-json.ts (4× kopya kaldırıldı)
+      if (u) {
         emitClaudeStream({ sub: "token_usage", usage: u });
         // F1: codegen fazının faz-maliyet kovasını doldur + gerçek $ + model (eskiden
         // cost yalnız loglanıp atılıyordu; kova hiç dolmuyordu). Aktif kova yoksa no-op.

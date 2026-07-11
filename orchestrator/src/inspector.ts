@@ -650,14 +650,8 @@ export async function inspectClarify(
   return r;
 }
 
-/** CheckpointResult'ı insan-okunur tek satıra çevir (gözlem mesajı için). */
-export function formatCheckpoint(r: CheckpointResult): string {
-  if (!r.acted || !r.outcome) return `sus (${r.decision.reason})`;
-  if ("resolution" in r.outcome) {
-    return `tartışma → ${r.outcome.resolution} (${r.outcome.rounds} tur): ${r.outcome.summary}`;
-  }
-  return `${r.outcome.stance}: ${r.outcome.reason}`;
-}
+// (formatCheckpoint KALDIRILDI — mahkeme denetimi 2026-07-11: 0 çağıran, ölü export.
+//  NOT: runInspectorCheckpoint/runScientistsDebate CANLI — inspectGateFinding:552 içeriden çağırır; kesme YOK.)
 
 /** Mahkemenin BAĞLAYICI hükmü → caller akışını değiştirir (gözlem değil). */
 export type MahkemeAction = "proceed" | "suppress" | "escalate";

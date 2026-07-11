@@ -1,5 +1,25 @@
 ## 2026-07-11
 
+- **refactor(sadelik): over-engineering denetimi — parite bug'ları + kopya birleştirme + ölü temizlik (YZLLM "over engineering olan yerleri tespit et"; Fable 5 ↔ Opus 4.8 müzakere listesi):**
+  3-koldan denetim (çekirdek/kopya/özellik-değer) + Opus 4.8 bağımsız mimar müzakeresi → "gerçekten yapılması
+  gerekenler" listesi uygulandı. **(1) Parite bug'ları** (kopyalar sapmıştı): SDK qa-askq `submitAskqAnswer` artık
+  `pendingRejecter`'ı da sıfırlar (4 kopyanın 3'ünde vardı); 529/Overloaded transient-hint `cli-session`'a taşındı
+  (yalnız cli-run'daydı → session yolundaki 529'lar debug'ı boşa koşturuyordu); codegen deny-listesi
+  `withDangerousBashDeny`'dan geçer; **"→ Claude'a:" echo'su tüm ailelerden kaldırıldı** (YZLLM onayı — qa-askq'daki
+  bilinçli UX silmesi production-schema×2 + codegen'e eşitlendi). **(2) CLI↔SDK conformance testi**
+  (`askq-backend-conformance.test.ts`): 4 backend sınıfı aynı askq state-machine sözleşmesini geçmek zorunda —
+  sapma artık kopya-disiplini değil CI hatası (kök çözüm, KATI #6). **(3) Zombi sayaç kaldırıldı**:
+  `_securityAutoResolveCount` artırılıp sıfırlanıyor ama HİÇBİR kararda okunmuyordu; Faz 13 döngü-kırıcının tek
+  otoritesi `security-convergence.ts` (zaten öyleydi — çift-doğruluk kaynağı görünümü temizlendi). **(4) NDJSON
+  usage-extraction tek kaynağa indi**: 4 runner'daki birebir kopya blok → `cli-json.extractTokenUsage` (golden
+  testli); tam runner-birleştirme BİLİNÇLİ yapılmadı (savaşta-sertleşmiş yollar — Opus kararı). **(5)
+  production-schema ortak çekirdeği hoist**: `ProductionSchemaSharedCore` (askq state-machine + askOnce/askApproval +
+  artefakt-yazma + sha256 + sentinel) — %50-overlap çifti tek kaynağa indi, iki ince transport sınıfı kaldı.
+  **(6) Kanıtlı-ölü temizlik**: `formatModelInUse`/`catalogForProvider`/`isIntegrateSuppressed`/`formatCheckpoint`
+  + 2 okunmayan `timeouts_ms` anahtarı silindi. **DÜZELTME (yanlış bulgu geri çekildi)**: inspector
+  "checkpoint monitörü ölü" bulgusu HATALIYDI — `inspectGateFinding` (canlı mahkeme) içeriden çağırıyor; KESİLMEDİ.
+  Bilinçli YAPILMAYANLAR: `advanceToNextPhaseInner` yeniden-yazımı, tam `claude-cli-core`, EDD/relevance/module-parallel
+  kesmesi (yük taşıyor/kullanıcı kararı). check yeşil (2005 test, +32); çapraz-aile mahkemesi temiz (4 mercek, 0 bulgu).
 - **feat(advisor): Claude Code "Advisor" (danışman) + "Bağlam Sadeleştirme" (Trim CLAUDE.md) uyarlaması (YZLLM "bu özellikleri ekle"):**
   İki yeni özellik (kullanıcı seçimi: "Advisor + bağlam sadeleştirme"). **1) Advisor — GÜVENLİ kalite-takviye modu:** strong-ALTI CLI
   akıl-yürütme ajanları (şu an tasarım fan-out'un ux/security/data/hypothesis rolleri) kritik karar anlarında `claude --advisor

@@ -11,36 +11,29 @@
 // Custom tool yok (text-JSON) + dosyayı MyCL yazar → ajana Write izni VERİLMEZ
 // (sadece Read/Grep/Glob/Bash araştırma). Abonelik (cli-session API key enjekte etmez).
 
-import { createHash, randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { MAIN_AGENT_LANGUAGE_RULE } from "../agent-language.js";
-import { appendAudit } from "../audit.js";
 import { coerceToSchema, extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import { runClaudeCliSession, type CliSessionTurnOpts } from "../cli-session.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isApiAccountError, resolveCliProvider } from "../claude-api.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { backendForRole, isAutoMode } from "../config.js";
-import { localizeOptionLabels, t } from "../i18n.js";
-import { emitAskq, emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
-import { autoAnswerPick } from "../auto-answer.js";
-import { runComprehensionGate } from "../spec-comprehension.js";
+import { emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
-import { translate } from "../translator.js";
 import {
   ProductionSchemaBaseController,
+  ProductionSchemaSharedCore,
+  PRODUCTION_ABORT_SENTINEL,
   type ProductionBackend,
   type ProductionOutcome,
   type ProductionRunOpts,
 } from "./production-schema-controller.js";
 
-const ABORT_SENTINEL = Symbol("production-cli-aborted");
+// ABORT_SENTINEL / sha256 / PendingAskq / askq state-machine / askOnce / askApproval / artefakt-yazma:
+// hepsi ORTAK çekirdeğe taşındı (ProductionSchemaSharedCore — mahkeme denetimi 2026-07-11; iki dosyadaki
+// birebir kopyalar sapmaya başlamıştı, tek kaynağa indirildi). Bu dosya yalnız CLI transport'unu taşır.
 const MAX_TURNS = 14; // write + approval + birkaç revize turu
-
-function sha256(s: string): string {
-  return createHash("sha256").update(s, "utf-8").digest("hex");
-}
 
 /** Faz controller'larının verdiği write-tool şemasından CLI çıktı talimatı üret. */
 function buildOutputInstruction(opts: ProductionRunOpts): string {
@@ -69,46 +62,7 @@ RULES: Your ENTIRE answer must be a single JSON block — write NO plain text ou
 before nor after); valid JSON (double quotes, no trailing comma).`;
 }
 
-interface PendingAskq {
-  options_en: string[];
-  options_tr: string[];
-}
-
-export class ProductionSchemaCliBackend implements ProductionBackend {
-  private pendingResolver: ((selected_tr: string) => void) | null = null;
-  private pendingRejecter: ((reason: unknown) => void) | null = null;
-  private currentAskqId: string | null = null;
-  private pendingAskq: PendingAskq | null = null;
-  private aborted = false;
-  private lastArtifactPath: string | null = null;
-  private lastArtifactHash: string | null = null;
-  private lastWriteInput: Record<string, unknown> | null = null;
-
-  constructor(private readonly opts: ProductionRunOpts) {}
-
-  submitAskqAnswer(askqId: string, selected_tr: string): void {
-    if (!this.pendingAskq || this.currentAskqId !== askqId) {
-      emitError("Yanıt geçersiz (soru güncelliğini yitirmiş)", { askqId });
-      return;
-    }
-    const resolver = this.pendingResolver;
-    this.pendingResolver = null;
-    this.pendingRejecter = null;
-    if (resolver) resolver(selected_tr);
-  }
-
-  abort(): void {
-    if (this.aborted) return;
-    this.aborted = true;
-    log.info(this.opts.tag, "cli abort requested");
-    const rejecter = this.pendingRejecter;
-    this.pendingResolver = null;
-    this.pendingRejecter = null;
-    this.pendingAskq = null;
-    this.currentAskqId = null;
-    if (rejecter) rejecter(ABORT_SENTINEL);
-  }
-
+export class ProductionSchemaCliBackend extends ProductionSchemaSharedCore implements ProductionBackend {
   async run(): Promise<ProductionOutcome> {
     const { opts } = this;
     const sessionId = randomUUID();
@@ -230,26 +184,8 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
           userMessage = `Output could not be rendered (${String(err).slice(0, 120)}). Fix the fields to match the schema and write {"kind":"write",...} again.`;
           continue;
         }
-        const hash = sha256(md);
-        const path = join(opts.state.project_root, opts.production.output_artifact_path);
-        await writeFile(path, md, { encoding: "utf-8" });
-        this.lastArtifactPath = path;
-        this.lastArtifactHash = hash;
-        this.lastWriteInput = writeInput;
-        log.info(opts.tag, "cli artifact written", { path, sha256: hash, len: md.length });
-        if (opts.production.artifact_audit_event) {
-          const detail = opts.artifactAuditDetail
-            ? opts.artifactAuditDetail(writeInput, hash)
-            : `sha256=${hash}`;
-          await appendAudit(opts.state.project_root, {
-            ts: Date.now(),
-            phase: opts.phaseId,
-            event: opts.production.artifact_audit_event,
-            caller: "mycl-bridge",
-            detail,
-          });
-        }
-        emitChatMessage("system", `📄 ${path} (sha256: ${hash.slice(0, 12)}…)`);
+        // Ortak çekirdek: sha256 + yaz + audit + 📄 (mahkeme 2026-07-11 — SDK ile tek kaynak).
+        const { path } = await this.writeArtifactToDisk(md, writeInput);
         resume = true;
         userMessage = `Saved: ${path}. Now write ONLY a {"kind":"approval","pitch_en":"..."} block (to request user approval).`;
         continue;
@@ -269,7 +205,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
       try {
         decision = await this.askApproval(pitch_en);
       } catch (err) {
-        if (err === ABORT_SENTINEL) return { kind: "aborted" };
+        if (err === PRODUCTION_ABORT_SENTINEL) return { kind: "aborted" };
         return { kind: "failed", reason: `approval flow failed: ${String(err)}` };
       }
       if (decision === "approve") {
@@ -295,70 +231,7 @@ export class ProductionSchemaCliBackend implements ProductionBackend {
     return { kind: "failed", reason: `${opts.tag}: MAX_TURNS (${MAX_TURNS}) aşıldı` };
   }
 
-  /** Tek askq emit + cevabı bekle (pendingResolver). allowOther=serbest metin ("okudum anladım"). */
-  private async askOnce(question_tr: string, options_tr: string[], allowOther: boolean): Promise<string> {
-    // Oto-cevap (YZLLM 2026-06-15): açıksa askq'yi UI'a göstermeden ilk seçenekle yanıtla →
-    // pipeline takılmaz. askOnce YALNIZ runComprehensionGate'ten (kavrama-ack) → safe-flow (foreign'de de oto).
-    const auto = autoAnswerPick(options_tr, undefined, "safe-flow", { isApproval: true });
-    if (auto !== null) {
-      emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay/ilk seçenek): "${auto}"`);
-      return auto;
-    }
-    const askqId = randomUUID();
-    this.currentAskqId = askqId;
-    this.pendingAskq = { options_en: options_tr, options_tr };
-    emitAskq({ id: askqId, question: question_tr, options: options_tr, allow_other: allowOther });
-    const sel = await new Promise<string>((resolve, reject) => {
-      this.pendingResolver = resolve;
-      this.pendingRejecter = reject;
-    });
-    this.pendingAskq = null;
-    this.currentAskqId = null;
-    return sel;
-  }
-
-  /** SDK base'iyle birebir: Approve/Revise/Cancel askq (i18n + translate). */
-  private async askApproval(pitch_en: string): Promise<"approve" | "revise" | "cancel"> {
-    // #6 deliği (YZLLM): spec'i okumadan onay YOK — CLI modunda da. Paylaşılan kapı (AC yoksa atlar).
-    await runComprehensionGate(this.opts.config, this.opts.state.project_root, this.opts.phaseId, (q, o, a) =>
-      this.askOnce(q, o, a),
-    );
-    const suffixKey = this.opts.production.approval_suffix_key ?? "generic";
-    const options_en = ["Approve", "Revise", "Cancel"];
-    const options_tr = localizeOptionLabels(options_en, "tr");
-    const r = await translate(this.opts.config, pitch_en, "en-to-tr");
-    const question_tr = r.text + t(`askq.approval_suffix.${suffixKey}`, "tr");
-
-    // Oto-cevap (YZLLM 2026-06-15): açıksa onayı UI'a göstermeden ilk seçenekle (Onayla) ver.
-    // Kategori (YZLLM 2026-07-08): Faz 4 spec = safe-flow (foreign'de oto); Faz 7 DB = dangerous-write (foreign'de kullanıcıda).
-    const auto = autoAnswerPick(options_tr, undefined, this.opts.phaseId === 7 ? "dangerous-write" : "safe-flow", {
-      isApproval: true,
-    });
-    let selected_tr: string;
-    if (auto !== null) {
-      emitChatMessage("system", `🤖 Otomatik cevap (otomatik onay): "${auto}"`);
-      selected_tr = auto;
-    } else {
-      const askqId = randomUUID();
-      this.currentAskqId = askqId;
-      this.pendingAskq = { options_en, options_tr };
-      emitAskq({ id: askqId, question: question_tr, options: options_tr, allow_other: false });
-
-      selected_tr = await new Promise<string>((resolve, reject) => {
-        this.pendingResolver = resolve;
-        this.pendingRejecter = reject;
-      });
-      this.pendingAskq = null;
-      this.currentAskqId = null;
-    }
-
-    const trIdx = options_tr.indexOf(selected_tr);
-    const selected_en = trIdx >= 0 ? options_en[trIdx] : selected_tr;
-    emitChatMessage("system", `→ Claude'a: ${selected_en}`);
-    if (/^approve$/i.test(selected_en.trim())) return "approve";
-    if (/^cancel$/i.test(selected_en.trim())) return "cancel";
-    return "revise";
-  }
+  // askOnce/askApproval ORTAK çekirdekte (ProductionSchemaSharedCore — mahkeme denetimi 2026-07-11).
 }
 
 /**

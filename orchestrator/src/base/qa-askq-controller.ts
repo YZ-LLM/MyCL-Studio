@@ -157,6 +157,9 @@ export class QaAskqBaseController implements QaAskqBackend {
     }
     const resolver = this.pendingResolver;
     this.pendingResolver = null;
+    // PARİTE (mahkeme denetimi 2026-07-11): 4 backend kopyasının 3'ü rejecter'ı da sıfırlıyordu, yalnız bu SDK
+    // kopyası atlamıştı (bayat rejecter referansı) — kardeşlerle (qa-askq-cli-backend.ts) birebir eşitlendi.
+    this.pendingRejecter = null;
     if (resolver) resolver(selected_tr);
   }
 
