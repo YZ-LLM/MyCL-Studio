@@ -156,6 +156,7 @@ import { inspectGateFinding, mahkemeRuling, inspectClarify, recordMahkemeLesson,
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { runPhaseContributionReport } from "./phase-contribution.js";
+import { runLayerCostReport } from "./layer-cost-report.js";
 import { extractStockedModules } from "./module-stock.js";
 import { generateGuideShots } from "./guide-shots.js";
 import {
@@ -4705,6 +4706,12 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // Türkçe rapor chat'e basar → kullanıcı gereksiz fazı görüp KENDİ budar. Flag-gated + fail-soft.
       await runPhaseContributionReport(state, cfg).catch((e: unknown) =>
         log.warn("orchestrator", "phase-contribution report failed (non-fatal)", e),
+      );
+      // Katman-Maliyet Raporu (YZLLM 2026-07-12): faz-katkı raporunun katman-düzeyi kardeşi — her doğrulama
+      // katmanının {süre, token, ne-yakaladı} DETERMİNİSTİK (LLM yok) chat'e → kullanıcı pahalı/az-değerli katmanı
+      // görüp KENDİ budar (oto-budama YOK). Flag-gated + fail-soft.
+      await runLayerCostReport(state, cfg).catch((e: unknown) =>
+        log.warn("orchestrator", "layer-cost report failed (non-fatal)", e),
       );
       // YZLLM 2026-06-14: app-içi kılavuzun ekran görüntüleri — .mycl/help-pages.json route'larının ss'leri
       // hedef-app public/docs/guide-shots/'a (dev server ayaktaysa; bayat-temizlikli). updateLivingDocs SONRASI,

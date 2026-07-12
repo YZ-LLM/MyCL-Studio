@@ -205,6 +205,17 @@ entegre eder.
   yüzdesini değerlendirip Türkçe rapor olarak gösterir; düşük-katkılı fazlar
   işaretlenir, kullanıcı gereksizleri kendisi budamaya karar verir (otomatik
   budama yok).
+- **Katman Maliyeti Raporu** — pipeline bitiminde her doğrulama katmanının
+  (mutasyon probu, düşman testi, risk incelemesi, paralel risk-fix, lint/perf/
+  güvenlik/test gate'leri…) o koşuda **ne yaptığını** ve güvenilir ölçülebildiği
+  yerde **ne kadar sürdüğünü** (Faz 9 LLM katmanları için grup-aralığından)
+  **deterministik** (LLM'siz) bir tablo olarak gösterir; ayrıca faz düzeyinde
+  toplam LLM maliyeti (token per-katman kalıcı tutulmadığından faza bölünmez).
+  Rapor **yargı vermez**: tek bir yeşil koşuda "0 bulgu" bir katmanın çalıştığı
+  kanıtıdır, gereksizliği değil (güvenlik/test ağlarının değeri fire etmedikleri
+  koşullardadır) — hangi katmanın gereksiz olduğuna kullanıcı, birçok koşuya
+  bakarak kendisi karar verir (otomatik budama yok). Faz-Katkı Raporu'nun
+  katman-düzeyi kardeşi.
 - **Advisor (danışman)** — Ayarlar → Özellikler'den açılır (varsayılan **kapalı**,
   opt-in). Açıkken güçlü modelin (Opus) altında koşan CLI akıl-yürütme ajanları
   (ör. tasarım fan-out'un ux/güvenlik/veri rolleri) kritik karar anlarında güçlü

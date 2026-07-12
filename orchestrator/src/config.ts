@@ -221,6 +221,12 @@ export interface FeatureFlags {
    * uygulanır; aksi halde sessizce-görünür atlanır (agent normal koşar). `false` (default): davranış değişmez.
    */
   advisor_enabled?: boolean;
+  /**
+   * Katman-Maliyet Raporu (YZLLM 2026-07-12): pipeline-end'de her doğrulama katmanının {süre, token, ne-yakaladı}
+   * DETERMİNİSTİK olarak (LLM yok) chat'e basılır → kullanıcı çok maliyetli/az değerli katmanı görüp KENDİ budar
+   * (otomatik budama YOK). Faz-Katkı Raporu'nun (faz düzeyi) katman-düzeyi kardeşi. Varsayılan AÇIK; sıcak yola dokunmaz.
+   */
+  layer_cost_report?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -236,6 +242,7 @@ const DEFAULT_FEATURES: FeatureFlags = {
   inspector_enabled: true,
   phase_contribution_report: true,
   advisor_enabled: false, // opt-in (ek maliyet — kullanıcı kral); Ayarlar'dan açılır.
+  layer_cost_report: true, // deterministik + ucuz (LLM yok); katman-maliyet görünürlüğü — kullanıcı budamayı KENDİ yapar.
 };
 
 /**

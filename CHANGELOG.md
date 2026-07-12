@@ -1,5 +1,28 @@
 ## 2026-07-12
 
+- **feat(görünürlük): Katman Maliyeti Raporu — pipeline-end'de her doğrulama katmanının ne-yaptığı + (ölçülebildiği yerde) süresi; deterministik (YZLLM "~20 doğrulama katmanının toplam maliyet görünürlüğü"; over-engineering denetimi #7c):**
+  Tek koşuda ~20 bağımsız doğrulama/inceleme katmanı çalışıyor (mutasyon probu, düşman testi, Faz 9 risk incelemesi +
+  paralel risk-fix, lint/simplify/perf/güvenlik/unit/entegrasyon/e2e gate'leri, regresyon guard…) ama toplam maliyeti
+  tek yerde gören görünürlük yoktu. **Artık:** pipeline bitiminde `layer-cost-report.ts` her katmanın koştu-mu / ne-yakaladığını
+  (audit.log gerçek `appendAudit` event adlarından) + güvenilir ölçülebildiği yerde süresini **DETERMİNİSTİK** (LLM YOK)
+  chat'e basar; faz düzeyi toplam LLM maliyeti (token+süre) AYRI bölümde. **Çapraz-aile mahkemesi** (KATI #12; Sonnet
+  4×bul→çürüt, 11 ham → 6 onaylı bulgu) ilk sürümdeki gerçek hataları düzeltti: **(1 CRITICAL)** `lowValue = ran && 0-bulgu`
+  TAM YEŞİL koşuda Güvenlik gate'i dahil HER geçen katmanı "gereksiz olabilir" diye işaretliyordu — tek yeşil koşu gate'in
+  ÇALIŞTIĞI kanıtı, gereksizlik değil ("No false positives" ihlali) → YARGI KALDIRILDI; rapor yalnız gerçeği gösterir +
+  "değer kararı senin, çok koşuya bak; oto-budama yok" notu. **(2)** `groupSpan` yalnız `started` ts'lerini görüyordu
+  (completed `agent_group` taşımaz) → `agent_label` ile bağlandı. **(3/5)** Faz 17 Pentest 2026-06-22'den beri no-op
+  (yalnız 🛡️ manuel buton) → envanterden çıkarıldı (`phase-17-complete` "koştu" değil). **(4)** izole edilemeyen (grup'suz)
+  Faz-8 LLM katmanlarına tüm faz-8 maliyeti (çoğu TDD codegen) atfediliyordu → per-katman token atfı KALDIRILDI (token yalnız
+  faz düzeyinde, "bölünemez" etiketiyle), süre yalnız güvenilir grup-aralığında. **(6)** mekanik satırlarda "Faz N" çift-yazımı
+  düzeltildi. Flag-gated (`layer_cost_report`, varsayılan AÇIK) + fail-soft (asla throw etmez). **2. tur mahkeme**
+  (fix-doğrulama + yeniden-yazımı yeni-hata için tarama) bir **KRİTİK regresyon** yakaladı: raporun temiz-koşuda düşman
+  testi/mutasyon probunu da gösterebilmesi için Faz-8 audit'ine eklediğim tanı-event'leri (`adversarial-test-pass`/
+  `tdd-tests-strong`) `tdd-green`'DEN SONRA yazılıyordu → Faz-8 gate `lastEvent==='tdd-green'` beklediğinden YEŞİL koşu
+  gate'i geçemezdi (fix/scoped koşularda) → **geri alındı** (bu iki katman artık yalnız bir şey BULUNCA raporda görünür;
+  temiz-koşu görünmezliği kabul edilen sınır — güvenlik ağını temiz koşuda "değersiz" göstermeme ilkesiyle de tutarlı).
+  Ayrıca 2. tur: tech-debt satırındaki çift "Faz 8" + emit metnindeki tireli Türkçe bileşikler ("düşman-test"/
+  "per-katman" → "düşman testi"/"katman başına") temizlendi. Sıcak yola (recordTokenUsage) DOKUNULMADI. check yeşil.
+
 - **fix(edd): foreign analizi (EDD) rate-limit/kota'da FAIL-FAST — 3 saat boşa deneme + sahte "analiz-dışı" son buldu (YZLLM canlı "dün geceden beri takıldı"):**
   Canlı (cave5): foreign projede EDD (birim-birim analiz) Anthropic 429 rate-limit'ine RAĞMEN fail-fast yapmadan 65 batch'i
   tek tek ~3 saat deneyip 408 birimi YANLIŞLIKLA "analysis-failed" (kalıcı) işaretledi + UI "çalışıyor" gösterdi (takılma
