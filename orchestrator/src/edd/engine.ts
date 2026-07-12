@@ -24,6 +24,20 @@ import {
   type EddUnitRecord,
 } from "./progress.js";
 import { analyzeUnitBatch, type EddBehaviorRecord } from "./analyzer.js";
+import { isApiAccountError } from "../claude-api.js";
+
+/**
+ * SAF: EDD batch hatası GEÇİCİ sağlayıcı-sınırı mı (rate-limit / kota / kredi)? Öyleyse birim "analiz-dışı" (kalıcı)
+ * işaretlenMEZ ve EDD DURUR (fail-fast) — limit/kredi dönünce resume yeniden dener. YZLLM 2026-07-12 canlı-bug:
+ * EDD 429'a rağmen 3 saat 65 batch'i tek tek deneyip 408 birimi YANLIŞLIKLA "analysis-failed" (kalıcı) işaretledi.
+ */
+export function isEddRateLimited(err: unknown): boolean {
+  const s = String(err instanceof Error ? err.message : err);
+  // NOT: çıplak `429` KULLANMA — kardeş detectCliRateLimit (cli-rate-limit.ts) de bilerek dışlar: bir hata metnindeki
+  // satır no ("file.ts:429") veya JSON pozisyonu ("position 429") gerçek analiz-hatasını yanlışlıkla rate-limit sayar
+  // (mahkeme 2026-07-12). Gerçek rate-limit mesajları zaten "rate limit"/"rate_limit_error"/"too many requests" içerir.
+  return /rate.?limit|rate_limit_error|too many requests|kota|kredi|credit balance/i.test(s) || isApiAccountError(s);
+}
 
 /** Batch başına birim (küçük → agent bol tur/wall-clock; parse güvenilir; resume granülerliği ince). */
 const BATCH_SIZE = 4;
@@ -73,11 +87,17 @@ async function processBatch(
   root: string,
   batch: { unit: string }[],
   absOf: Map<string, string>,
-): Promise<void> {
+): Promise<{ rateLimited: boolean }> {
   let records: EddBehaviorRecord[];
   try {
     records = await analyzeUnitBatch(config, root, batch.map((b) => ({ unit: b.unit, abs: absOf.get(b.unit) ?? "", bytes: 0, analyzable: true })));
   } catch (e) {
+    if (isEddRateLimited(e)) {
+      // Rate-limit/kota GEÇİCİ (kredi/limit dönünce çalışır) → birimleri "analysis-failed" YAPMA (sahte-kalıcı-fail);
+      // pending bırak. Çağıran (runEdd) DURUR → 65 batch boşa denenmez (canlı: 3 saat israf + 408 sahte-fail).
+      log.warn("edd/engine", "batch rate-limit/kota → EDD duracak; birimler pending kalır (resume)", { error: String(e).slice(0, 120) });
+      return { rateLimited: true };
+    }
     log.warn("edd/engine", "batch analiz hatası", { error: String(e), n: batch.length });
     records = [];
   }
@@ -87,14 +107,18 @@ async function processBatch(
     if (rec) await markDone(root, u.unit, absOf, rec);
   }
   const missed = batch.filter((u) => !returned.has(u.unit));
-  if (missed.length === 0) return;
+  if (missed.length === 0) return { rateLimited: false };
   if (batch.length > 1) {
-    for (const u of missed) await processBatch(config, root, [u], absOf); // izole retry
+    for (const u of missed) {
+      const r = await processBatch(config, root, [u], absOf); // izole retry
+      if (r.rateLimited) return { rateLimited: true }; // rate-limit izole-retry'da da fail-fast (yukarı taşı)
+    }
   } else {
-    // Tek birim izole edildi + hâlâ dönmedi → analiz-dışı işaretle (sessiz-pending değil; miss-nothing: görünür flag).
+    // Tek birim izole edildi + hâlâ dönmedi (rate-limit DEĞİL) → analiz-dışı işaretle (sessiz-pending değil; görünür flag).
     await patchEddUnit(root, missed[0].unit, { status: "unanalyzable", reason: "analysis-failed" });
     log.warn("edd/engine", "birim analiz edilemedi (izole+fail) → unanalyzable", { unit: missed[0].unit });
   }
+  return { rateLimited: false };
 }
 
 /**
@@ -125,7 +149,21 @@ async function runEdd(config: MyclConfig, state: State): Promise<void> {
 
   let batchNo = 0;
   for (let i = 0; i < pendingUnits.length; i += BATCH_SIZE) {
-    await processBatch(config, root, pendingUnits.slice(i, i + BATCH_SIZE), absOf);
+    const r = await processBatch(config, root, pendingUnits.slice(i, i + BATCH_SIZE), absOf);
+    if (r.rateLimited) {
+      // FAIL-FAST (YZLLM 2026-07-12 canlı-bug): sağlayıcı rate-limit/kota → 65 batch boşa denenmesin. Kalan birimler
+      // PENDING kalır (sahte "analiz-dışı" yok) → limit/kredi dönünce bir sonraki açılışta kaldığı yerden devam. GÖRÜNÜR.
+      const pr = await readEddProgress(root);
+      const sr = summarizeProgress(pr);
+      await renderEddAnalysis(root, pr);
+      emitChatMessage(
+        "system",
+        `⏸️ EDD durduruldu — sağlayıcı sınırına (rate-limit / kota / kredi) ulaşıldı. ${sr.done}/${sr.total} birim ` +
+          `analiz edildi; kalan ${sr.pending} birim BEKLEMEDE (sahte "analiz-dışı" işaretlenmedi). Limit/kredi dönünce ` +
+          `bir sonraki açılışta kaldığı yerden otomatik devam eder.`,
+      );
+      return;
+    }
     batchNo++;
     // Throttle: her batch değil, ~25 batch'te bir (veya son) → progress + edd-analysis.md render (kısmi kapsam canlı+dürüst).
     if (batchNo % PROGRESS_EVERY === 0 || i + BATCH_SIZE >= pendingUnits.length) {

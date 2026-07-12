@@ -1,3 +1,18 @@
+## 2026-07-12
+
+- **fix(edd): foreign analizi (EDD) rate-limit/kota'da FAIL-FAST — 3 saat boşa deneme + sahte "analiz-dışı" son buldu (YZLLM canlı "dün geceden beri takıldı"):**
+  Canlı (cave5): foreign projede EDD (birim-birim analiz) Anthropic 429 rate-limit'ine RAĞMEN fail-fast yapmadan 65 batch'i
+  tek tek ~3 saat deneyip 408 birimi YANLIŞLIKLA "analysis-failed" (kalıcı) işaretledi + UI "çalışıyor" gösterdi (takılma
+  görünümü). **Artık:** SAF `isEddRateLimited` rate-limit/kota/kredi'yi gerçek analiz-hatasından ayırır (çıplak `429`
+  KULLANMAZ — kardeş `detectCliRateLimit` gibi "file.ts:429" satır-no yanlış-pozitifi yok; "rate limit"/"rate_limit_error"/
+  "too many requests"/kota/kredi + `isApiAccountError`); `processBatch` rate-limit'te birimi işaretlemeden `{rateLimited:true}`
+  döner (izole-retry'da da yukarı taşınır); `runEdd` GÖRÜNÜR "⏸️ EDD durduruldu — sağlayıcı sınırı; kalan BEKLEMEDE; limit/
+  kredi dönünce kaldığı yerden devam" + return (fail-fast). Kalan birimler PENDING kalır → resumable (sahte-kalıcı-fail yok).
+  Gerçek analiz-edilemez birim (parse/binary) HÂLÂ "analysis-failed" (miss-nothing korundu). **NOT (dürüstlük):** ilk teşhisim
+  "boot iş-kuyruğu drain regresyonu" YANLIŞTI — kuyruk gerçekte boştu (`task-queue.jsonl` patch-fold okunmayınca yanlış-pozitif
+  "8 pending"); regresyon yok, boot doğru davrandı. **Çapraz-aile mahkemesi** (KATI #12): major çıplak-`429` yanlış-pozitifi
+  yakalandı + düzeltildi (kardeş helper'ın dokümante ettiği tuzak). check yeşil (2013 test).
+
 ## 2026-07-11
 
 - **refactor(sadelik): over-engineering denetimi — parite bug'ları + kopya birleştirme + ölü temizlik (YZLLM "over engineering olan yerleri tespit et"; Fable 5 ↔ Opus 4.8 müzakere listesi):**
