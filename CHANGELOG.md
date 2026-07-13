@@ -1,5 +1,19 @@
 ## 2026-07-13
 
+- **fix(sahte-yeşil): müfettiş sistematik erişilemezken pipeline HER fazı geçip görevi "tamamlandı" sayıyordu — HİÇBİR ŞEY inşa etmeden (YZLLM canlı cave-7ac855d7 "gerçekten hepsini tamamladı mı?"):**
+  Canlı (foreign, never-ask AÇIK): 6 kuyruk görevi "✅ Tamamlandı" ama forensik (audit + filesystem): **hiçbir şey inşa
+  edilmemiş** (code-edit:0, phase-8-complete:0, test/UI/kod yok, package.json değişmemiş). Kök: müfettiş HER fazda
+  "değerlendirme üretilemedi" (49×, kısmen rate-limit) → `failPhase`'deki "escalate → accept-continue" her düşen fazı
+  (1-9) ~2 saniyede geçip pipeline'ı "done" yaptı. Clarify yolunda devre-kesici (CLARIFY_INSPECT_MAX) VARDI ama bu
+  faz-hatası escalate yolunda YOKTU → kaskat durmadı → sahte-tamamlanma. **Fix:** `_escalateAcceptChain` devre-kesici
+  (yalnız `escalate` sayılır — `suppress`=kanıtlı-false-positive hariç); art arda `ESCALATE_ACCEPT_MAX=3` aşılınca LOUD
+  DUR + `advanceToNextPhase` YOK → görev "done" SAYILMAZ (sahte-yeşil önlenir). Reset **per-iş** (`startNextPendingTask`)
+  + gerçek faz-tamamlanmasında (`recordPhaseComplete`). **Çapraz-aile mahkemesi (KATI #12) 6 bulgu düzeltti** — en
+  önemlisi (major): sayaç kuyruk-drain'de sıfırlanmıyordu → görevler-arası birikip sağlıklı sağlayıcıda 4. işi
+  yanlış-halt ederdi ("occasional tolere" sözleşmesi ihlali) → `startNextPendingTask` reset'i eklendi; + `recordPhaseComplete`
+  reset'i "art arda" semantiğini korur (kaskat ara-tamamlanma üretmez → devre-kesiciyi defeat etmez, mahkeme+elle doğrulandı);
+  + yanıltıcı "kaldığı yerden sürer" mesajı düzeltildi (görev aslında dropped → "yeniden ver"). check yeşil.
+
 - **feat(hafıza): Phase B — cognee kalıcı çapraz-oturum hafıza entegrasyonu (opt-in): remember/recall/forget bilgi grafiği (YZLLM "cognee'yi de ciddi planla" → "kur"):**
   cognee (topoteretes, Apache-2.0): kalıcı bilgi grafiği + vektör hafıza — codegen ajanı `recall` ile geçmiş
   deneyimi (kararlar, ne işe yaradı/patladı) getirir, `remember` ile öğrenir → **koşular arası "hataları tekrarlama"**.

@@ -739,6 +739,8 @@ let _securityNoProgress = 0; // art arda "bulgu azalmadı" deneme sayısı (≥2
 async function recordPhaseComplete(n: PhaseId): Promise<void> {
   await recordRungOutcome(n, true);
   _autoAnswerChain = 0; // faz GERÇEKTEN tamamlandı → otonom-cevap döngü sayacı sıfır (ilerleme var; MAX yanlış-tetiklenmesin).
+  _escalateAcceptChain = 0; // gerçek faz-tamamlanması = müfettiş O fazda çalıştı → escalate 'art arda' semantiği korunur
+  // (kaskat ara-tamamlanma ÜRETMEZ → bu reset devre-kesiciyi defeat etmez; mahkeme onayladı).
 }
 
 /**
@@ -1459,6 +1461,28 @@ async function failPhase(
         // RAPORA/audit'e yazılır (YUTULMAZ), çalışan kod riske atılmaz (oto-fix YOK), faz kabul-devam eder
         // (insan sonra raporu inceler). Faz 13 güvenlik yolundaki kanıtlı desenin genel failPhase'e taşınması.
         mahkemeDiverted = true;
+        // DÖNGÜ EMNİYETİ (YZLLM 2026-07-13, canlı sahte-tamamlanma): "escalate" = müfettiş ÇÖZEMEDİ/erişilemedi
+        // (suppress'ten FARKLI — o kanıtlı false-positive). Art arda escalate-accept = SİSTEMATİK müfettiş-fail
+        // (rate-limit/LLM-fail) → tüm pipeline'ı sahte-"done" yapmadan DÜRÜST DUR. suppress sayılmaz (yalnız escalate).
+        if (ruling.action === "escalate") {
+          _escalateAcceptChain++;
+          if (_escalateAcceptChain > ESCALATE_ACCEPT_MAX) {
+            await appendAuditModule(runtime.state.project_root, {
+              ts: Date.now(),
+              phase: n,
+              event: "escalate-accept-circuit-break",
+              caller: "mycl-orchestrator",
+              detail: `art arda ${_escalateAcceptChain} faz müfettiş-fail escalate → sistematik erişim sorunu; sahte-tamamlanma önlendi (halt)`,
+            }).catch(() => {});
+            emitChatMessage(
+              "system",
+              `⛔ Müfettiş art arda ${_escalateAcceptChain} fazda değerlendirme üretemedi (sistematik erişim sorunu — sağlayıcı ` +
+                `sınırı/anahtar olabilir). Pipeline'ı DURDURDUM: bu iş "tamamlandı" SAYILMADI (sahte-yeşil önlendi). ` +
+                "Sağlayıcı/anahtarı düzeltince işi yeniden ver (kuyruğa tekrar eklenmeli).",
+            );
+            return; // advanceToNextPhase YOK → halt; görev done sayılmaz
+          }
+        }
         await appendAuditModule(runtime.state.project_root, {
           ts: Date.now(),
           phase: n,
@@ -1663,6 +1687,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // ulaşan sayaç yeni projeye TAŞINIR → yeni projenin ilk gerçek netleştirme sorusu sessizce bastırılır.
   _clarifyInspectChain = 0;
   _autoAnswerChain = 0; // otonom-cevap döngü sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
+  _escalateAcceptChain = 0; // escalate-kaskat devre-kesici sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
   // Timeout-divert sayacı da sıfırlanmalı (mahkeme minor 2026-07-09): faz-numarasıyla anahtarlı → eski projede TIMEOUT_
   // DIVERT_MAX'a ulaşan sayaç yeni projeye TAŞINIR → yeni projenin İLK timeout'u yanlışça "tükendi" sayılıp erken escalate olur.
   timeoutRetried.clear();
@@ -3129,6 +3154,12 @@ async function handleUserMessageInner(text: string): Promise<void> {
 // ask_clarify DIŞINDA bir aksiyon (gerçek ilerleme) çalışınca sıfırlanır.
 const CLARIFY_INSPECT_MAX = 2;
 let _clarifyInspectChain = 0;
+// DÖNGÜ EMNİYETİ (YZLLM 2026-07-13, canlı cave-7ac855d7 SAHTE-TAMAMLANMA): müfettiş SİSTEMATİK "değerlendirme üretemedi"
+// (rate-limit/LLM-fail) durumunda failPhase'deki "escalate → accept-continue" HER fazı (1-9) saniyelerde geçip pipeline'ı
+// "done" yapıyordu — HİÇ kod/test/UI yazmadan (code-edit:0) → görev sahte-tamamlandı. Clarify devre-kesicisinin
+// (CLARIFY_INSPECT_MAX) faz-hatası kardeşi: art arda escalate-accept say → MAX'ta DÜRÜST DUR (görevi done sayma).
+const ESCALATE_ACCEPT_MAX = 3;
+let _escalateAcceptChain = 0;
 
 /**
  * v15.5 — Orkestrator agent AgentDecision'ı executeDispatchedIntent'in
@@ -3192,7 +3223,10 @@ async function executeAgentDecision(
   // source of truth; regex shadow check yanlış pozitif riski + audit gürültüsü.
   // Kullanıcı kuralı: "regex güvenilir değil".
   // Netleştirme-mahkemesi döngü-emniyeti: ask_clarify DIŞINDA bir aksiyon = gerçek ilerleme → sayacı sıfırla.
-  if (decision.action !== "ask_clarify") _clarifyInspectChain = 0;
+  if (decision.action !== "ask_clarify") {
+    _clarifyInspectChain = 0;
+    _escalateAcceptChain = 0; // gerçek orkestratör aksiyonu (yeni iş/faz) → escalate-kaskat sayacı sıfır (per-iş devre-kesici).
+  }
   switch (decision.action) {
     case "chat": {
       const msg = decision.message_to_user ?? decision.reason;
@@ -4175,6 +4209,8 @@ async function startNextPendingTask(): Promise<boolean> {
     return false;
   }
   await patchTask(root, next.id, { status: "running" });
+  _escalateAcceptChain = 0; // per-iş escalate bütçesi (mahkeme major: kuyruk-drain 3226/1688 reset'inden GEÇMİYOR →
+  // sayaç görevler-arası birikip sağlıklı sağlayıcıda 4. işi yanlış-halt ederdi; "occasional tolere" sözleşmesi ihlali).
   runtime.currentTaskId = next.id;
   _drainTaskId = next.id; // yeşil-son 'done' kurtarması için (mid-flow drop'a rağmen); yeni iş → üzerine yaz
   await emitQueueChangedFor(root);
