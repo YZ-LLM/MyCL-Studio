@@ -40,6 +40,7 @@ import type { CodegenBackend } from "./backend.js";
 import { killProcessTree } from "../dev-server-launcher.js";
 import { appendAudit } from "../audit.js";
 import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "../ipc.js";
+import { resolveCodebaseMemoryMcpConfig } from "../codebase-memory-setup.js";
 import { log } from "../logger.js";
 import { globalConfigDir } from "../paths.js";
 import { dedupePathValue, safeEnv } from "../safe-env.js";
@@ -200,6 +201,35 @@ export function resolveSkillsDir(): string | null {
 
 /** skills ipucu process başına bir kez gösterilsin (spam yok). */
 let skillsHintShown = false;
+
+/**
+ * codebase-memory-mcp tool-kullanım ipucu (EN — codegen ajanı İngilizce çalışır). Faz system-prompt'una BİRLEŞTİRİLİR
+ * (ayrı ikinci --append-system-prompt DEĞİL — Claude Code'da son-kazanır/overwrite). Yoksa tool'lar görünür ama proaktif
+ * index_repository çağrılmaz → değer realize olmaz.
+ */
+const CODEBASE_MEMORY_HINT =
+  "A codebase-memory MCP server is available (tools: mcp__codebase-memory__index_repository, search_graph, " +
+  "get_architecture, trace_path, semantic_query). To understand existing code STRUCTURE (call chains, imports, " +
+  "routes, dead code), call index_repository(repo_path=<project root>) ONCE, then query these tools INSTEAD of " +
+  "grepping file-by-file — far fewer tokens. Fall back to Read/Grep only if a structural query returns nothing.";
+
+/**
+ * SAF (test edilebilir): codebase-memory-mcp aktifse (cbmCfg!=null) hint'i faz system-prompt'una BİRLEŞTİRİR ve
+ * --mcp-config/--strict-mcp-config arg'larını döndürür. KRİTİK (mahkeme 2026-07-13): hint AYRI bir --append-system-prompt
+ * OLARAK verilmez — Claude Code'da bu bayrak son-kazanır (overwrite) → ikinci bayrak faz talimatını EZERDİ. Bu yüzden
+ * hint TEK --append-system-prompt değerine (systemPrompt) katılır; mcpArgs ASLA --append-system-prompt içermez.
+ * cbmCfg null → systemPrompt değişmez, mcpArgs boş (grep fallback).
+ */
+export function applyCodebaseMemoryArgs(
+  systemPrompt: string,
+  cbmCfg: string | null,
+): { systemPrompt: string; mcpArgs: string[] } {
+  if (!cbmCfg) return { systemPrompt, mcpArgs: [] };
+  return {
+    systemPrompt: `${systemPrompt}\n\n${CODEBASE_MEMORY_HINT}`,
+    mcpArgs: ["--mcp-config", cbmCfg, "--strict-mcp-config"],
+  };
+}
 
 export class CliCodegenBackend implements CodegenBackend {
   private child: ChildProcess | null = null;
@@ -469,13 +499,16 @@ export class CliCodegenBackend implements CodegenBackend {
 
   private buildArgs(effort: string): string[] {
     const { opts } = this;
+    // codebase-memory-mcp opt-in: hint'i faz system-prompt'una BİRLEŞTİR + MCP arg'larını al (SAF helper). AYRI ikinci
+    // --append-system-prompt YOK — Claude Code'da son-kazanır/overwrite → faz talimatını ezerdi (mahkeme CRITICAL 2026-07-13).
+    const cbm = applyCodebaseMemoryArgs(opts.systemPrompt, resolveCodebaseMemoryMcpConfig(opts.config));
     // Faz EN system prompt + EN task — translator zaten EN üretti (mimari sınır).
     // v15.12: user mesajına İngilizce-çıktı hatırlatması (recency, belt-and-suspenders).
     const args: string[] = [
       "-p",
       `${opts.initialUserMessage}\n\n${MAIN_AGENT_LANGUAGE_REMINDER}`,
       "--append-system-prompt",
-      opts.systemPrompt,
+      cbm.systemPrompt,
       "--model",
       opts.modelId,
       "--output-format",
@@ -515,6 +548,11 @@ export class CliCodegenBackend implements CodegenBackend {
     if (skillsDir) {
       args.push("--plugin-dir", skillsDir);
     }
+    // codebase-memory-mcp opt-in (YZLLM 2026-07-13): flag AÇIK + binary kurulu ise MCP server'ını --mcp-config +
+    // --strict-mcp-config ile bağla (deterministik: yalnız MyCL'in config'i; --plugin-dir gibi kullanıcının global
+    // MCP'sine bağımlı DEĞİL). Prompt ipucu YUKARIDA systemPrompt'a birleştirildi (ikinci --append-system-prompt faz
+    // talimatını ezerdi — mahkeme CRITICAL). null → eklenmez (grep fallback; KATI #4 görünür uyarı ensure'da verildi).
+    args.push(...cbm.mcpArgs);
     // v15.11 GÜVENLİK: --settings ile sandbox (+ ultracode) — ajanı proje-root'a hapset.
     args.push(...sandboxSettingsArgs(opts.state.project_root, effort === "ultracode"));
     if (effort && effort !== "ultracode") {

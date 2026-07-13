@@ -129,7 +129,13 @@ Her ajan rolünün backend'i Ayarlar'dan rol başına seçilir:
   (Read/Write/Edit/Bash/Glob/Grep), bash-guard ve path-sandbox ile.
 - **Claude Code CLI** — `claude` komutu kuruluysa o rol bu CLI üzerinden çalışır.
   Seçili olup `claude` bulunmazsa sessizce düşülmez; görünür hata verilir.
-  `~/.mycl/agent-skills` dizini varsa CLI'a `--plugin-dir` ile bağlanır.
+  `~/.mycl/agent-skills` dizini varsa CLI'a `--plugin-dir` ile bağlanır. **Codebase
+  Memory (opt-in)**: Ayarlar'dan `codebase_memory_mcp` açılırsa MyCL
+  [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)'yi (pinli,
+  yerel) kurup CLI codegen ajanına `--mcp-config` ile bağlar — ajan hedef projeyi
+  yapısal bir kod grafiğine (çağrı-zinciri/import/route/ölü-kod) indeksleyip grep
+  yerine çok daha ucuz sorgular. Kurulamazsa görünür uyarı + grep'e düşülür
+  (varsayılan **kapalı**; dış bağımlılık).
 - **Auto** — CLI ile başlar, abonelik kullanım limiti dolunca API'ye geçer, limit
   açılınca CLI'a döner.
 - **Z.AI (GLM)** — o rolün çağrıları, rolün z.ai anahtarıyla Anthropic-uyumlu

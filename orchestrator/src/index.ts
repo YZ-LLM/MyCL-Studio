@@ -151,6 +151,7 @@ import { decideTimeoutDivert, runTimeoutMultiAngle, TIMEOUT_DIVERT_MAX } from ".
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { discoverModelsViaWeb, verifyModelCallable } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
+import { ensureCodebaseMemoryMcp } from "./codebase-memory-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
 import { inspectGateFinding, mahkemeRuling, inspectClarify, recordMahkemeLesson, type MahkemeAction, type MahkemeRuling } from "./inspector.js";
 import { Phase0Controller } from "./phase-0.js";
@@ -2006,6 +2007,15 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
     void ensureAgentSkills().catch((e: unknown) =>
       log.warn("orchestrator", "agent-skills kurulum hatası (non-fatal)", e),
     );
+
+    // codebase-memory-mcp AUTO-KURULUM (YZLLM 2026-07-13): YALNIZ flag AÇIKKEN (opt-in dış bağımlılık) — yoksa pinli
+    // versiyondan arka planda kur → cli-backend --mcp-config ile codegen ajanlarına bağlar (yapısal kod grafiği; grep
+    // yerine ucuz sorgu). Non-blocking, fail görünür (KATI #4: kurulamazsa grep fallback).
+    if (runtime.config?.features.codebase_memory_mcp) {
+      void ensureCodebaseMemoryMcp().catch((e: unknown) =>
+        log.warn("orchestrator", "codebase-memory-mcp kurulum hatası (non-fatal)", e),
+      );
+    }
 
     // Model AUTO-KEŞİF (YZLLM 2026-06-11): LLM WEB'de Anthropic dökümanlarından güncel modelleri bulur → ASLA
     // OTOMATİK UYGULAMAZ (eski davranış kullanıcı ayarını eziyordu = "ondan sonra bozuldu"). Yalnız: yeni GÜÇLÜ

@@ -1,5 +1,25 @@
 ## 2026-07-13
 
+- **feat(hafıza): Phase A — codebase-memory-mcp entegrasyonu (opt-in): codegen ajanlarına YAPISAL kod grafiği, grep yerine ucuz sorgu (YZLLM "bu iki repoyu MyCL'e nasıl entegre ederiz"):**
+  codebase-memory-mcp (DeusData, MIT): hedef projeyi SQLite bilgi grafiğine indeksler (158 tree-sitter grammar + 12 dil LSP
+  tip çözümü) → çağrı-zinciri/import/route/ölü-kod'u deterministik sorgu (dosya-dosya aramaya göre ~%99 token). Argsız çalışınca
+  stdio JSON-RPC MCP server; Claude Code CLI'ye `--mcp-config` ile bağlanır. **Entegrasyon:** `codebase-memory-setup.ts`
+  (`ensureCodebaseMemoryMcp` — PINNED v0.9.0'ı `globalConfigDir()/codebase-memory`'ye npm --prefix ile kurar, global/sudo YOK;
+  npm registry integrity = checksum; skills-setup deseninin ikizi) → `mcp-config.json` yazar → `cli-backend.ts buildArgs`
+  `--plugin-dir` bitişiğine `--mcp-config` + `--append-system-prompt` ipucu (ajan `index_repository(repo_path)` çağırıp
+  yapısal tool'ları grep yerine kullansın). **Flag** `codebase_memory_mcp` **opt-in default KAPALI** (dış bağımlılık;
+  kullanıcı=kral). **Fallback (KATI #4):** kurulamaz/eksikse görünür uyarı + `--mcp-config` EKLENMEZ → ajanlar grep-tabanlı
+  keşfe düşer (sessiz fallback YOK). **Canlı smoke doğrulandı:** npm install (39s) → binary → `initialize` MCP yanıtı geçerli
+  (`serverInfo` v0.9.0 + `tools` capability) → EOF'ta temiz kapanış. Çapraz-platform binary'ler (macOS+Linux, KATI #7).
+  **Çapraz-aile mahkemesi (KATI #12) bir CRITICAL yakaladı** (smoke + benim incelemem KAÇIRMIŞTI — tam da mahkemenin
+  varlık sebebi): MCP ipucunu AYRI ikinci `--append-system-prompt` olarak veriyordum; Claude Code'da bu bayrak
+  SON-KAZANIR (overwrite, append DEĞİL — müfettiş canlı claude 2.1.207'de doğruladı) → flag açılınca ipucu faz
+  system-prompt'unu (codegen kuralları/TDD protokolü) EZİP codegen'i bozardı. **Fix:** ipucu tek `--append-system-prompt`
+  değerine SAF `applyCodebaseMemoryArgs` helper'ıyla birleştirildi (regresyon testi: mcpArgs asla `--append-system-prompt`
+  içermez) + `--strict-mcp-config` (deterministik) + `present` dalı config-yazma hatası artık görünür + supply-chain
+  yorumu dürüstleştirildi (git-SHA'dan zayıf garanti kabul). DERS: bileşeni değil ENTEGRASYON YOLUNU smoke'la.
+  NOT: EDD/relevance derin tüketimi + SDK backend + cognee (Phase B) ayrı increment.
+
 - **fix(ui): "🤖 Model çalışıyor" göstergesi BAYAT kalıyordu — model gerçekte boştayken 17dk "takıldı" görünümü (YZLLM canlı cave5):**
   Foreign proje açılışında MyCL Faz 1'de "Model çalışıyor" 17dk asılı kaldı; forensik (canlı .mycl + ps/lsof): orkestratörde
   **açık model bağlantısı YOK + %0 CPU + son mesaj boot-idle** → model GERÇEKTE çalışmıyordu, yalnız gösterge bayattı. Kök

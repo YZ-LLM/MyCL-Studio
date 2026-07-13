@@ -227,6 +227,13 @@ export interface FeatureFlags {
    * (otomatik budama YOK). Faz-Katkı Raporu'nun (faz düzeyi) katman-düzeyi kardeşi. Varsayılan AÇIK; sıcak yola dokunmaz.
    */
   layer_cost_report?: boolean;
+  /**
+   * codebase-memory-mcp (YZLLM 2026-07-13): hedef-proje YAPISAL kod grafiği (158 tree-sitter + 12 dil LSP) — codegen
+   * ajanları grep yerine deterministik çağrı-zinciri/import/route/ölü-kod sorgular (~%99 token tasarrufu). Stdio MCP
+   * server, Claude Code CLI'ye `--mcp-config` ile bağlanır (yalnız CLI backend; SDK yolu bu yoldan almaz). Opt-in
+   * default KAPALI (dış bağımlılık; kurulamazsa görünür fallback → grep, KATI #4). Kurulum: `ensureCodebaseMemoryMcp`.
+   */
+  codebase_memory_mcp?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -243,6 +250,7 @@ const DEFAULT_FEATURES: FeatureFlags = {
   phase_contribution_report: true,
   advisor_enabled: false, // opt-in (ek maliyet — kullanıcı kral); Ayarlar'dan açılır.
   layer_cost_report: true, // deterministik + ucuz (LLM yok); katman-maliyet görünürlüğü — kullanıcı budamayı KENDİ yapar.
+  codebase_memory_mcp: false, // opt-in (dış bağımlılık: codebase-memory-mcp binary); Ayarlar'dan açılır, kurulamazsa grep fallback.
 };
 
 /**
