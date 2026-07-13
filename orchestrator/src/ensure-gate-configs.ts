@@ -120,6 +120,9 @@ export async function ensureSemgrepIgnore(projectRoot: string): Promise<"written
     "**/bundles/**",
     "**/bower_components/**",
     "**/jspm_packages/**",
+    "# MyCL'in kendi metadata dizini — proje sırlarını (secret/parola/anahtar) analiz notlarında birebir",
+    "# alıntılar; taranırsa self-scan sahte-pozitif üretir (gerçek secret zaten kaynak dosyada raporlu).",
+    ".mycl/",
     "",
   ].join("\n");
   // MAHKEME (2026-07-01, çapraz-aile): `**/vendor/**` + `**/vendors/**` BİLEREK ÇIKARILDI — `src/vendors/stripe.ts`

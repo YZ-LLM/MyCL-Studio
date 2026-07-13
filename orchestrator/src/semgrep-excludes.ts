@@ -6,7 +6,15 @@
 // Kapsam:
 //   - Build çıktısı: .next/dist/build/out/coverage/.turbo/.svelte-kit/.nuxt/target (üretilen kod = proje-borcu DEĞİL).
 //   - Paket/vendor dizini: node_modules, vendor.
-//   - Kendi audit'imiz: mycl-audit* (MyCL'in enjekte ettiği dosyalar).
+//   - Kendi metadata'mız: mycl-audit* (enjekte edilen dosyalar) + .mycl (MyCL'in metadata dizini).
+//     Neden .mycl (YZLLM 2026-07-13, çapraz-aile mahkemesi doğruladı): `.mycl/edd-analysis.md` +
+//     `edd-progress.jsonl` gibi dosyalar EDD analizinde projenin sırlarını (session secret, DB parolası, AES
+//     anahtarı) BİREBİR alıntılar. Taranırsa MyCL kendi notlarını YENİ proje-bulgusu sanır → self-scan
+//     sahte-pozitif: gerçek secret zaten kaynak dosyada (app.js:38) raporlu, `.mycl/` kopyası mükerrer +
+//     MyCL kendi çıktı dosyasını "düzeltemez" → Faz 13 gate kendi metadata'sıyla kırmızıda takılır (convergence
+//     döngüsü). Non-git foreign projede tetiklenir: semgrep `.mycl` dot-dizinine iner (git projesinde .gitignore
+//     atlayabilir). Elemek GÜVENLİ (sahte-yeşil riski YOK): `.mycl` asla kullanıcı kaynağı değil — `mycl-audit*`
+//     ile birebir aynı gerekçe; `vendor`'dan kategorik farklı (o kendi `src/vendors/*`'ı gizleyebilirdi).
 //   - MINIFIED/BUNDLE vendor (YZLLM 2026-07-01): `*.min.js/css`, `*.bundle.js`, `*.chunk.js`, `*.vendor.js`.
 //     Canlı-bug (cave5): `public/assets/js/bundles/ckeditor/*` + TinyMCE gibi üçüncü-taraf bundle'lar KAYNAK
 //     ağacındaydı (build-dir değil) → hiçbir exclude eşleşmiyor → 65 false-positive → Faz 10/13 sahte-sarı.
@@ -16,7 +24,7 @@
 //     (`.min` ekten sonra ` - Copy`/`(1)` gibi ekler alıyor). Nadir yan etki: `minimal.js`/`minimap.js` kaynak dosyası
 //     da eleniyor — .semgrepignore görünür + kullanıcı satırı silebilir (kabul edilebilir denge, YZLLM onayı).
 export const SEMGREP_EXCLUDE_FLAGS =
-  "--exclude='mycl-audit*' --exclude='.next' --exclude='dist' --exclude='build' --exclude='out' " +
+  "--exclude='mycl-audit*' --exclude='.mycl' --exclude='.next' --exclude='dist' --exclude='build' --exclude='out' " +
   "--exclude='coverage' --exclude='.turbo' --exclude='.svelte-kit' --exclude='.nuxt' --exclude='node_modules' " +
   "--exclude='vendor' --exclude='target' --exclude='*.min*.js' --exclude='*.min*.css' --exclude='*.bundle.js' " +
   "--exclude='*.chunk.js' --exclude='*.vendor.js'";
