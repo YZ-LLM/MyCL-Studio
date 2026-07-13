@@ -36,6 +36,16 @@ function formatTs(ts: number): string {
   });
 }
 
+/** İşin GERÇEK süresi (running→done). "kaç dakika sürdü" görünürlüğü (YZLLM 2026-07-13). ~saniyelik süre =
+ *  gerçek iş yapılmadı işareti (sahte-tamamlanmayı gözle yakalamaya yardım eder). started_at yoksa null. */
+function formatDuration(startedAt: number | undefined, completedAt: number): string | null {
+  if (!startedAt || completedAt <= startedAt) return null;
+  const s = Math.round((completedAt - startedAt) / 1000);
+  if (s < 60) return `${s}sn`;
+  const m = Math.floor(s / 60);
+  return s % 60 === 0 ? `${m}dk` : `${m}dk ${s % 60}sn`;
+}
+
 function statusOf(item: TaskQueueItem): TaskStatus {
   return item.status ?? "pending";
 }
@@ -128,7 +138,11 @@ export function TaskQueuePanel({
                   )}
                   <span className="task-queue-item-ts">
                     {isDone && item.completed_at
-                      ? `✓ ${formatTs(item.completed_at)}`
+                      ? `✓ ${formatTs(item.completed_at)}${
+                          formatDuration(item.started_at, item.completed_at)
+                            ? ` · ${formatDuration(item.started_at, item.completed_at)}`
+                            : ""
+                        }`
                       : formatTs(item.ts)}
                   </span>
                 </div>

@@ -141,6 +141,8 @@ export interface TaskQueueItem {
   priority?: number;
   /** Yaşam döngüsü. Yoksa "pending" (geriye-uyumlu). */
   status?: TaskStatus;
+  /** status="running" başlangıç zamanı (ms epoch) — süre = completed_at - started_at. */
+  started_at?: number;
   /** status="done" tamamlanma zamanı (ms epoch) — KİLİT, tekrar uygulanamaz. */
   completed_at?: number;
   /** Kaynak: manuel (İş Ekle) vs auto (çok-problem/Faz-4-sonrası ayrıştırma). */

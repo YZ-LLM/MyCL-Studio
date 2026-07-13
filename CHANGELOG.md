@@ -1,5 +1,11 @@
 ## 2026-07-13
 
+- **feat(ui): kuyruk işinin GERÇEK süresini göster (running→done) — "kaç dakika sürdü" (YZLLM canlı "tamamlanma saatleri + kaç dakika sürdü bilmem lazım"):**
+  Kuyruk item'ı tamamlanma SAATİni gösteriyordu ama SÜREYİ değil. `started_at` (status="running" damgası, `startNextPendingTask`)
+  eklendi → TaskQueuePanel tamamlanmada `✓ HH:MM · Xdk Ysn` gösterir (süre = completed_at - started_at). Geriye-uyumlu
+  (eski işlerde started_at yok → süre gizli). **Yan fayda:** ~saniyelik "biten" iş = gerçek iş yapılmadı işareti (yukarıdaki
+  sahte-tamamlanmayı GÖZLE yakalamaya yardım eder).
+
 - **fix(sahte-yeşil): müfettiş sistematik erişilemezken pipeline HER fazı geçip görevi "tamamlandı" sayıyordu — HİÇBİR ŞEY inşa etmeden (YZLLM canlı cave-7ac855d7 "gerçekten hepsini tamamladı mı?"):**
   Canlı (foreign, never-ask AÇIK): 6 kuyruk görevi "✅ Tamamlandı" ama forensik (audit + filesystem): **hiçbir şey inşa
   edilmemiş** (code-edit:0, phase-8-complete:0, test/UI/kod yok, package.json değişmemiş). Kök: müfettiş HER fazda

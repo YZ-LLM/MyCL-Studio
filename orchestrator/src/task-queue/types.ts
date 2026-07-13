@@ -30,6 +30,8 @@ export interface TaskQueueItem {
   priority?: number;
   /** Yaşam döngüsü. Alan yoksa "pending" sayılır (eski kayıtlarla geriye-uyumlu). */
   status?: TaskStatus;
+  /** status="running" olunca damgalanan başlangıç zamanı (ms epoch). Süre = completed_at - started_at (YZLLM 2026-07-13). */
+  started_at?: number;
   /** status="done" olunca damgalanan tamamlanma zamanı (ms epoch). */
   completed_at?: number;
   /** Kaynak: kullanıcı manuel mi ekledi (manual), çok-problem/Faz-4-sonrası otomatik mi (auto),
@@ -56,6 +58,7 @@ export interface TaskQueuePatch {
   ts: number;
   priority?: number;
   status?: TaskStatus;
+  started_at?: number;
   completed_at?: number;
 }
 

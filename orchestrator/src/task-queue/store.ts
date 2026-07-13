@@ -67,7 +67,7 @@ export async function removeTask(
 export async function patchTask(
   projectRoot: string,
   taskId: string,
-  patch: Pick<TaskQueuePatch, "priority" | "status" | "completed_at">,
+  patch: Pick<TaskQueuePatch, "priority" | "status" | "started_at" | "completed_at">,
 ): Promise<void> {
   const record: TaskQueuePatch = { _patch: taskId, ts: Date.now(), ...patch };
   await appendLine(queuePath(projectRoot), record);
@@ -112,6 +112,7 @@ export async function readTasks(
       if (typeof obj.priority === "number") merged.priority = obj.priority;
       if (typeof obj.status === "string" && TASK_STATUSES.has(obj.status as TaskStatus))
         merged.status = obj.status as TaskStatus;
+      if (typeof obj.started_at === "number") merged.started_at = obj.started_at;
       if (typeof obj.completed_at === "number") merged.completed_at = obj.completed_at;
       patches.set(obj._patch, merged);
       continue;
@@ -126,6 +127,7 @@ export async function readTasks(
       if (typeof obj.priority === "number") item.priority = obj.priority;
       if (typeof obj.status === "string" && TASK_STATUSES.has(obj.status as TaskStatus))
         item.status = obj.status as TaskStatus;
+      if (typeof obj.started_at === "number") item.started_at = obj.started_at;
       if (typeof obj.completed_at === "number") item.completed_at = obj.completed_at;
       if (obj.source === "manual" || obj.source === "auto" || obj.source === "security")
         item.source = obj.source;

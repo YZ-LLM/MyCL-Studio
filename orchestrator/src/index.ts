@@ -4208,7 +4208,7 @@ async function startNextPendingTask(): Promise<boolean> {
     _drainActive = false; // bekleyen iş kalmadı → oturum bitti
     return false;
   }
-  await patchTask(root, next.id, { status: "running" });
+  await patchTask(root, next.id, { status: "running", started_at: Date.now() }); // started_at → süre görünürlüğü (YZLLM 2026-07-13)
   _escalateAcceptChain = 0; // per-iş escalate bütçesi (mahkeme major: kuyruk-drain 3226/1688 reset'inden GEÇMİYOR →
   // sayaç görevler-arası birikip sağlıklı sağlayıcıda 4. işi yanlış-halt ederdi; "occasional tolere" sözleşmesi ihlali).
   runtime.currentTaskId = next.id;
