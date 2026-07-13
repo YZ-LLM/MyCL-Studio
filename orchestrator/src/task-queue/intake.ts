@@ -14,7 +14,7 @@ import { resolveLlmClient } from "../claude-api.js";
 import { extractKindBlock } from "../cli-json.js";
 import { runClaudeCli } from "../cli-run.js";
 import { backendForRole, type MyclConfig } from "../config.js";
-import { emitChatMessage, emitClaudeStream } from "../ipc.js";
+import { emitChatMessage, emitClaudeStream, withClaudeStreamBanner } from "../ipc.js";
 import { log } from "../logger.js";
 import { selectEffortForTask, selectModelForTask } from "../model-catalog.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "../tool-policy.js";
@@ -99,8 +99,10 @@ async function splitTasks(
   const useCli = backendForRole(config, "orchestrator") === "cli";
   let text: string;
   if (useCli) {
-    emitClaudeStream({ sub: "init", text: "cli-task-split", model, cwd: projectRoot });
-    const res = await runClaudeCli({
+    // Banner sızıntısı fix (2026-07-13): init→stop tek primitifte → iş-bölme bittiğinde/patladığında banner temizlenir.
+    const res = await withClaudeStreamBanner(
+      { text: "cli-task-split", model, cwd: projectRoot },
+      () => runClaudeCli({
       systemPrompt: SPLIT_PROMPT,
       userMessage: SPLIT_USER(rawText, pendingTexts),
       modelId: model,
@@ -110,7 +112,8 @@ async function splitTasks(
       effort: selectEffortForTask("verification", config.claude_code_flags.effort),
       onText: (t) => emitClaudeStream({ sub: "text", text: t }),
       timeoutMs: 120_000,
-    });
+      }),
+    );
     if (!res.ok) {
       // CLI iş-bölme başarısız (sessiz-fallback denetimi): sessiz null → caller tek-iş'e düşer ama NEDEN
       // (rate-limit/transient?) kaybolur. log.error ile izlenebilir kıl.

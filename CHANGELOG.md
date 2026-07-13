@@ -1,3 +1,19 @@
+## 2026-07-13
+
+- **fix(ui): "🤖 Model çalışıyor" göstergesi BAYAT kalıyordu — model gerçekte boştayken 17dk "takıldı" görünümü (YZLLM canlı cave5):**
+  Foreign proje açılışında MyCL Faz 1'de "Model çalışıyor" 17dk asılı kaldı; forensik (canlı .mycl + ps/lsof): orkestratörde
+  **açık model bağlantısı YOK + %0 CPU + son mesaj boot-idle** → model GERÇEKTE çalışmıyordu, yalnız gösterge bayattı. Kök
+  (çapraz-aile leak-haritası workflow'u + elle doğrulama): generic banner `claude_stream` `sub:"init"` ile açılıp `sub:"stop"`
+  (veya phase_idle/phase_changed) ile kapanır; ama bazı model-turu yolları `init` yayıp **hiç `stop`/idle yaymıyordu** →
+  banner sonsuza kadar açık kaldı. Suçlular: `edd/analyzer.ts` ('edd-analyze', HER foreign açılışta `maybeRunEdd` → bugünkü
+  kök), `error-analysis.ts`, `task-queue/intake.ts`, `relevance/classifier.ts` (SDK throw + CLI). **Fix (correct-by-construction,
+  KATI #6):** `withClaudeStreamBanner({text,model,cwd}, fn)` primitifi (ipc.ts) — `init` yayar, `fn`'i `try/finally`'de koşar,
+  **`finally`'de `stop` GARANTİ** → sızıntı yapısal imkansız; bare-init leaker'lar buna migrate edildi (classifier SDK'ya
+  throw'da `stop`). App.tsx stop-clear'ı zaten `isGenericClaude`-guarded → aktif spesifik banner'ı (📚/🔍/🛡️) ASLA silmez (yarış
+  yok). App.tsx'teki bayat yorum düzeltildi (token_usage banner'ı kapatmaz — error-analysis yazarını yanıltmıştı). **DERS
+  (yine [[feedback_never_overlook_verify_verdicts]]):** ilk "hiçbir yer stop yaymıyor" iddiam YANLIŞTI — grep'im alt-dizinleri
+  (`base/`,`codegen/`) atlamıştı (5 dosya canlı stop yayıyor); glob kapsamını doğrulamadan iddia etme. check yeşil.
+
 ## 2026-07-12
 
 - **feat(görünürlük): Katman Maliyeti Raporu — pipeline-end'de her doğrulama katmanının ne-yaptığı + (ölçülebildiği yerde) süresi; deterministik (YZLLM "~20 doğrulama katmanının toplam maliyet görünürlüğü"; over-engineering denetimi #7c):**

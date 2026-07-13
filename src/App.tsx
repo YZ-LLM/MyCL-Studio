@@ -597,7 +597,9 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       // Sticky loading banner: gerçek model turn'ü başlıyor. Spesifik
       // emitPhaseRunning ile zaten detaylı banner açıksa (Hata Ara, smoke test)
       // KORUNUR; aksi takdirde generic "🤖 Model çalışıyor" banner açılır.
-      // sub="stop" veya "token_usage" ile bu generic banner kapanır.
+      // Bu generic banner YALNIZ sub="stop" (veya phase_idle/phase_changed) ile kapanır — token_usage
+      // handler'ı (aşağıda) runningBanner'a DOKUNMAZ. Model turu init/stop ile sarılmalı (bkz. orchestrator
+      // withClaudeStreamBanner); aksi halde init yayıp stop yaymayan bir yol banner'ı BAYAT bırakır.
       return {
         ...state,
         ccBanner: {

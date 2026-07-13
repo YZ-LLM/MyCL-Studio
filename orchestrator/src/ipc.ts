@@ -588,6 +588,26 @@ export function emitClaudeStream(opts: {
   }
 }
 
+/**
+ * withClaudeStreamBanner (YZLLM 2026-07-13, çapraz-aile mahkemesi): generic "🤖 Model çalışıyor" banner'ının
+ * init→stop yaşam döngüsünü TEK primitifte sahiplen. Banner semantiği "bir model turu uçuşta" → turu bununla sar,
+ * `finally`'de `sub:"stop"` GARANTİ yayılır → banner sızıntısı YAPISAL imkansız (KATI #6 önden-çöz). App.tsx
+ * stop-clear'ı generic-guarded (isGenericClaude) → aktif bir emitPhaseRunning banner'ını (📚/🔍/🛡️) ASLA silmez
+ * (yarış yok). KULLAN: temizleyicisiz `emitClaudeStream({sub:"init"})` + tur yerine (edd/error-analysis/task-intake).
+ * NOT: canlı bug (2026-07-12 cave5): foreign açılışta EDD init yayıp stop/idle yaymadan bitince banner 17dk bayat kaldı.
+ */
+export async function withClaudeStreamBanner<T>(
+  opts: { text: string; model?: string; cwd?: string },
+  fn: () => Promise<T>,
+): Promise<T> {
+  emitClaudeStream({ sub: "init", text: opts.text, model: opts.model, cwd: opts.cwd });
+  try {
+    return await fn();
+  } finally {
+    emitClaudeStream({ sub: "stop" });
+  }
+}
+
 export function emitError(reason: string, detail?: unknown): void {
   emit("error", { reason, detail });
 }

@@ -18,7 +18,7 @@ import { runTurn, type ToolDef } from "../claude-api.js";
 import { runClaudeCli } from "../cli-run.js";
 import { extractKindBlock, extractLastJsonObject } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
-import { emitClaudeStream } from "../ipc.js";
+import { emitClaudeStream, withClaudeStreamBanner } from "../ipc.js";
 import { log } from "../logger.js";
 import type { Chunk, ScoredChunk } from "./types.js";
 import { RelevanceError } from "./types.js";
@@ -142,6 +142,9 @@ async function scoreBatch(
       },
     );
   } catch (err) {
+    // Banner sızıntısı fix (2026-07-13): runTurn throw'da message_end stop'u (140) atlanır → generic banner bayat
+    // kalırdı. Burada garantile (App.tsx isGenericClaude-guarded → aktif spesifik banner'a dokunmaz).
+    emitClaudeStream({ sub: "stop" });
     throw new RelevanceError(`classifier API failed: ${String(err)}`);
   }
   if (result.usage) {
@@ -302,25 +305,20 @@ async function scoreBatchViaCli(
 
   // Tek deneme: claude'u çağır + parse et. Hata (exit=1/timeout/parse) → RelevanceError.
   const attempt = async (): Promise<ScoredChunk[]> => {
-    const callTs = Date.now();
-    emitClaudeStream({
-      sub: "init",
-      text: "cli-relevance-classifier",
-      model: modelId,
-      turn: 1,
-      max_turns: 1,
-      ts: callTs,
-    });
     let res;
     try {
-      res = await runClaudeCli({
+      // Banner sızıntısı fix (2026-07-13): init→stop tek primitifte → CLI skorlama bittiğinde/patladığında banner temizlenir.
+      res = await withClaudeStreamBanner(
+        { text: "cli-relevance-classifier", model: modelId },
+        () => runClaudeCli({
         // TABAN + CLI text-JSON (tool-mention YOK → çelişki giderildi).
         systemPrompt: SYSTEM_PROMPT_BASE + CLI_JSON_INSTRUCTION,
         userMessage,
         modelId,
         cwd: process.cwd(), // skorlama yalnız intent+chunks metninden — proje erişimi gerekmez
         timeoutMs: 120_000,
-      });
+        }),
+      );
     } catch (err) {
       throw new RelevanceError(`cli classifier failed: ${String(err)}`);
     }

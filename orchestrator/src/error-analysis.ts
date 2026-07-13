@@ -24,7 +24,7 @@ import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { resolveLlmClient, isApiAccountError } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, resolveProvider, zaiKeyForRole, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
-import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream } from "./ipc.js";
+import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream, withClaudeStreamBanner } from "./ipc.js";
 import { describeTouchedForFiles } from "./foreign-write-consent.js";
 import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES, USER_FACING_CLARITY_RULE } from "./agent-language.js";
 import { log } from "./logger.js";
@@ -640,8 +640,10 @@ export async function analyzeAndAskError(
     emitChatMessage("system", "🔎 Hata analiz ediliyor (orkestratör)…");
     let analysisText: string;
     if (useCli) {
-      emitClaudeStream({ sub: "init", text: "cli-error-analysis", model: analysisModel, cwd: state.project_root });
-      const res = await runClaudeCli({
+      // Banner sızıntısı fix (2026-07-13): init→stop tek primitifte → analiz bittiğinde/patladığında banner temizlenir.
+      const res = await withClaudeStreamBanner(
+        { text: "cli-error-analysis", model: analysisModel, cwd: state.project_root },
+        () => runClaudeCli({
         systemPrompt: buildErrorAnalysisPrompt(errCtx, true, factsSummary),
         userMessage: "Inspect the failure and emit the error_analysis JSON block now.",
         modelId: analysisModel,
@@ -662,7 +664,8 @@ export async function analyzeAndAskError(
         // 30dk default wall-clock hang için fazla uzun (canlı 44dk "model çalışıyor" donması). 15dk'ya sık:
         // derin araştırma+düşünme için bol, no-output hang'i 30→15dk'ya yarılar (idle yok, thinking ölmez).
         wallClockMs: 900_000,
-      });
+        }),
+      );
       if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
       if (!res.ok) {
         const et = String(res.error ?? "");

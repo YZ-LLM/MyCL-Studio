@@ -15,7 +15,7 @@ import { runClaudeCli } from "../cli-run.js";
 import { extractKindBlock } from "../cli-json.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "../tool-policy.js";
 import { backendForRole, orchestratorApiKey, orchestratorModelId, type MyclConfig } from "../config.js";
-import { emitClaudeStream } from "../ipc.js";
+import { withClaudeStreamBanner } from "../ipc.js";
 import { log } from "../logger.js";
 import type { SourceUnit } from "./enumerate.js";
 import type { EddBehavior } from "./progress.js";
@@ -143,11 +143,16 @@ export async function analyzeUnitBatch(
   if (units.length === 0) return [];
   const model = orchestratorModelId(config.selected_models);
   const user = buildUserMessage(units);
-  emitClaudeStream({ sub: "init", text: "edd-analyze", model, cwd: projectRoot });
   const useCli = backendForRole(config, "orchestrator") === "cli";
-  const text = useCli
-    ? await runViaCli(projectRoot, model, SYSTEM_PROMPT, user)
-    : await runViaApi(config, projectRoot, model, SYSTEM_PROMPT, user);
+  // Banner sızıntısı fix (2026-07-13): init→stop tek primitifte → EDD bittiğinde/patladığında "Model çalışıyor"
+  // BAYAT kalmaz (canlı cave5 bug'ının kökü: edd init yayıp stop/idle yaymıyordu).
+  const text = await withClaudeStreamBanner(
+    { text: "edd-analyze", model, cwd: projectRoot },
+    () =>
+      useCli
+        ? runViaCli(projectRoot, model, SYSTEM_PROMPT, user)
+        : runViaApi(config, projectRoot, model, SYSTEM_PROMPT, user),
+  );
 
   const block = extractKindBlock(text, ["edd_units"]);
   if (!block || !Array.isArray(block.units)) {
