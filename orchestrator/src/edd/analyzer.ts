@@ -40,6 +40,8 @@ For EACH target unit given, use Read/Grep/Glob to read the file (and its imports
 - dependents_note: who relies on this unit, if apparent (else omit).
 Be concrete + specific to THIS code (name real functions/values). If a unit is pure config/data/docs with no behavior, say so in one short line (empty invariants/side_effects).
 
+SECURITY — never copy secret literals into your output: when a unit hardcodes a secret, API key, password, token, private key, session/signing secret, or connection credential, describe its PRESENCE, kind, and location but write \`<redacted>\` in place of the literal value (e.g. "signs sessions with a hardcoded secret <redacted> (app.js:38)"). Reproduce every OTHER real value normally; redact ONLY secret material. Rationale: your output is written verbatim into MyCL's own notes (.mycl/edd-analysis.md, edd-progress.jsonl) inside the project — copying the literal secret there would duplicate the project's secrets into extra plaintext files (and make security scanners re-flag MyCL's own notes). The behavior contract stays intact without the literal value.
+
 You are READ-ONLY: you cannot write, edit, or run anything. When done, output ONLY one JSON block at the very END and nothing after it:
 {"kind":"edd_units","units":[{"unit":"<exact path from the target list>","what_it_does":"...","invariants":["..."],"side_effects":["..."],"dependents_note":"..."}]}
 Include EVERY target unit exactly once, using the EXACT unit paths from the list. Do NOT invent units not in the list.`;

@@ -19,6 +19,35 @@ const SKIP_DIRS = new Set([
   "error_folder", "__pycache__", "venv", ".venv", "vendor", "coverage",
   ".next", ".nuxt", ".svelte-kit", ".turbo", "bin", "obj", "Pods", "DerivedData",
 ]);
+
+// SIR-DOSYALARI — EDD analiz ETMEZ (YZLLM 2026-07-13, çapraz-aile mahkemesi + skeptik hakem). Neden: EDD yabancı
+// projeyi birim-birim okuyup davranışını .mycl/edd-analysis.md + edd-progress.jsonl'e YAZAR. Bir `.env`/anahtar
+// dosyasını okuyup içeriğini nota alıntılarsa: (a) sır committable `.mycl`'e sızar (git projesinde `.env` gitignore'lu
+// → kaynak taramasında da görünmez), (b) `.mycl` semgrep'ten elendiği için (semgrep-excludes.ts) bu sızıntı MyCL
+// taramasınca da görülmez = KATI#4 sessiz-fallback. Correct-by-construction (KATI#6): sır dosyasını hiç INGEST etme —
+// kaynağında çöz, sonradan redakte etmeye çalışma (LLM-redaksiyon yumuşak + entropi-scrub saf-hex secret'ta çözümsüz:
+// hex entropi tavanı 4.0, git-SHA'dan ayrılamaz). Sır dosyaları zaten "davranış" değil (config/kimlik-bilgisi).
+// MEKANİZMA: sabit DOSYA-ADI deseni (aşağıda), gitignore-parse DEĞİL. DÜRÜST KALAN-RİSK: standart-olmayan adlı
+// gitignore'lu bir sır dosyası (ör. `terraform.tfvars`, `local.settings.json`) bu listede yoksa EDD yine analiz eder →
+// o sınıf için tek savunma increment-2'nin yumuşak LLM-redaksiyonu (tam güvenlik ağı DEĞİL). Tam kapanış için gelecek
+// iş: gerçek gitignore-farkındalığı (`git check-ignore`) → EDD kapsamı = tarama kapsamı. GÖRÜNÜR: analyzable:false + sebep.
+const SECRET_FILE_RE = new RegExp(
+  "^(" +
+    // .env, .env.local, .env.production, .env.example — AMA .env.d.ts/.env.ts/.env.schema.json (kaynak) DEĞİL:
+    // sonek bir kod/veri uzantısıysa (ts/js/json/...) muaf (negatif lookahead); env-adı soneki (local/prod) yakalanır.
+    "\\.env(\\.(?!(ts|tsx|js|jsx|mjs|cjs|json|ya?ml|toml|py|go|rb|java|kt|rs|php|md|html|s?css)$)[a-z0-9_-]+)?" +
+    "|.*\\.(pem|key|p12|pfx|keystore|jks|ppk)" + // özel anahtar / sertifika / keystore
+    "|id_(rsa|dsa|ecdsa|ed25519)(\\.pub)?" + // ssh anahtarları (pub dahil — davranış değil)
+    "|\\.(npmrc|netrc|pgpass|htpasswd)" + // kimlik-bilgisi taşıyan config'ler
+    "|secrets?\\.(json|ya?ml|toml|ini|txt|env)" + // secrets.json / secret.yaml ...
+    "|credentials?\\.(json|ya?ml|ini|txt)" + // credentials.json ... ('credentialService.js' EŞLEŞMEZ — anchored)
+    ")$",
+  "i",
+);
+/** Dosya adı bir sır dosyası mı (EDD ingest etmemeli). Test için export. */
+export function isSecretFile(name: string): boolean {
+  return SECRET_FILE_RE.test(name);
+}
 /** 256KB üstü → too-large (üretilmiş/minified/veri; davranış-analizi anlamsız + bütçe koruması). Faz 4 reconcile +
  *  codegen-note hash'lemesi de bu eşiği kullanır (edd/source-hash) → tek doğruluk kaynağı burada. */
 export const MAX_UNIT_BYTES = 256 * 1024;
@@ -82,6 +111,11 @@ export async function enumerateSourceUnits(projectRoot: string): Promise<SourceU
         continue;
       }
       const unit = relative(projectRoot, full).split(sep).join("/");
+      if (isSecretFile(e.name)) {
+        // Sır dosyası → EDD ingest ETMEZ (içeriğini nota alıntılayıp committable .mycl'e sızdırmasın). Görünür sebep.
+        files.push({ unit, abs: full, bytes: st.size, analyzable: false, reason: "secret-file (sır sızıntısı önleme — EDD analiz etmez)" });
+        continue;
+      }
       if (st.size > MAX_UNIT_BYTES) {
         files.push({ unit, abs: full, bytes: st.size, analyzable: false, reason: `too-large (${Math.round(st.size / 1024)}KB)` });
         continue;
