@@ -7,7 +7,7 @@ import {
   resolveCodebaseMemoryBinary,
   resolveCodebaseMemoryMcpConfig,
 } from "./codebase-memory-setup.js";
-import { applyCodebaseMemoryArgs } from "./codegen/cli-backend.js";
+import { applyMcpServerArgs } from "./codegen/cli-backend.js";
 import type { MyclConfig } from "./config.js";
 
 function cfg(on: boolean): MyclConfig {
@@ -32,22 +32,33 @@ describe("codebase-memory-setup — flag gate + fallback (opt-in)", () => {
   });
 });
 
-describe("applyCodebaseMemoryArgs — hint MERGE, ayrı --append-system-prompt YOK (mahkeme CRITICAL 2026-07-13)", () => {
-  it("cbmCfg null → faz systemPrompt DEĞİŞMEZ, mcpArgs boş (flag kapalı/binary yok → grep fallback)", () => {
-    const r = applyCodebaseMemoryArgs("PHASE_RULES", null);
+describe("applyMcpServerArgs — hint MERGE + TEK --mcp-config (mahkeme CRITICAL 2026-07-13)", () => {
+  it("servers boş → faz systemPrompt DEĞİŞMEZ, mcpArgs boş (grep/hafıza fallback)", () => {
+    const r = applyMcpServerArgs("PHASE_RULES", []);
     expect(r.systemPrompt).toBe("PHASE_RULES");
     expect(r.mcpArgs).toEqual([]);
   });
 
-  it("cbmCfg varsa: hint faz-prompt'una KATILIR (ikisi de KORUNUR) + mcpArgs --mcp-config+--strict", () => {
-    const r = applyCodebaseMemoryArgs("PHASE_RULES", "/p/cfg.json");
-    expect(r.systemPrompt).toContain("PHASE_RULES"); // faz talimatı KAYBOLMAZ
-    expect(r.systemPrompt).toContain("codebase-memory MCP server"); // hint eklendi
-    expect(r.mcpArgs).toEqual(["--mcp-config", "/p/cfg.json", "--strict-mcp-config"]);
+  it("tek server: hint faz-prompt'una KATILIR (faz talimatı KORUNUR) + mcpArgs tek --mcp-config+--strict", () => {
+    const r = applyMcpServerArgs("PHASE_RULES", [{ configPath: "/p/cbm.json", hint: "HINT_CBM" }]);
+    expect(r.systemPrompt).toContain("PHASE_RULES");
+    expect(r.systemPrompt).toContain("HINT_CBM");
+    expect(r.mcpArgs).toEqual(["--mcp-config", "/p/cbm.json", "--strict-mcp-config"]);
+  });
+
+  it("İKİ server (codebase-memory+cognee): HER İKİ config TEK --mcp-config altında (variadic, çift-bayrak YOK) + iki hint", () => {
+    const r = applyMcpServerArgs("PHASE_RULES", [
+      { configPath: "/p/cbm.json", hint: "HINT_CBM" },
+      { configPath: "/p/cognee.json", hint: "HINT_COGNEE" },
+    ]);
+    expect(r.systemPrompt).toContain("HINT_CBM");
+    expect(r.systemPrompt).toContain("HINT_COGNEE");
+    expect(r.mcpArgs).toEqual(["--mcp-config", "/p/cbm.json", "/p/cognee.json", "--strict-mcp-config"]);
+    expect(r.mcpArgs.filter((a) => a === "--mcp-config")).toHaveLength(1); // TEK bayrak (son-kazanır tuzağı yok)
   });
 
   it("KRİTİK REGRESYON: mcpArgs ASLA --append-system-prompt İÇERMEZ (Claude Code son-kazanır → faz talimatını ezerdi)", () => {
-    const r = applyCodebaseMemoryArgs("PHASE_RULES", "/p/cfg.json");
+    const r = applyMcpServerArgs("PHASE_RULES", [{ configPath: "/p/a.json", hint: "H" }]);
     expect(r.mcpArgs).not.toContain("--append-system-prompt");
   });
 });

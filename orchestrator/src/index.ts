@@ -152,6 +152,7 @@ import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { discoverModelsViaWeb, verifyModelCallable } from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { ensureCodebaseMemoryMcp } from "./codebase-memory-setup.js";
+import { ensureCognee } from "./cognee-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
 import { inspectGateFinding, mahkemeRuling, inspectClarify, recordMahkemeLesson, type MahkemeAction, type MahkemeRuling } from "./inspector.js";
 import { Phase0Controller } from "./phase-0.js";
@@ -2014,6 +2015,14 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
     if (runtime.config?.features.codebase_memory_mcp) {
       void ensureCodebaseMemoryMcp().catch((e: unknown) =>
         log.warn("orchestrator", "codebase-memory-mcp kurulum hatası (non-fatal)", e),
+      );
+    }
+    // cognee kalıcı hafıza AUTO-KURULUM (YZLLM 2026-07-13, Phase B): YALNIZ flag AÇIKKEN (opt-in AĞIR dış bağımlılık).
+    // Kaynak-klon+uv sync (dakikalar) arka planda → cli-backend --mcp-config ile remember/recall/forget bağlar. LLM=MyCL
+    // sağlayıcısı. Non-blocking, fail görünür (KATI #4: key/kurulum yoksa cognee devre dışı, MyCL mevcut hafızayla sürer).
+    if (runtime.config?.features.cognee_memory && runtime.state?.project_root) {
+      void ensureCognee(runtime.config, runtime.state.project_root).catch((e: unknown) =>
+        log.warn("orchestrator", "cognee kurulum hatası (non-fatal)", e),
       );
     }
 

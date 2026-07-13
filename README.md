@@ -135,7 +135,14 @@ Her ajan rolünün backend'i Ayarlar'dan rol başına seçilir:
   yerel) kurup CLI codegen ajanına `--mcp-config` ile bağlar — ajan hedef projeyi
   yapısal bir kod grafiğine (çağrı-zinciri/import/route/ölü-kod) indeksleyip grep
   yerine çok daha ucuz sorgular. Kurulamazsa görünür uyarı + grep'e düşülür
-  (varsayılan **kapalı**; dış bağımlılık).
+  (varsayılan **kapalı**; dış bağımlılık). **Cognee kalıcı hafıza (opt-in)**:
+  Ayrıca `cognee_memory` açılırsa MyCL [cognee](https://github.com/topoteretes/cognee)'yi
+  (gömülü SQLite+Kuzu+LanceDB, Docker'sız) kurup codegen ajanına
+  `recall`/`remember`/`forget` bağlar — proje hakkında **koşular arası** kalıcı
+  bilgi (geçmiş kararlar, ne işe yaradı/patladı) tutar, geçmiş hataların
+  tekrarını azaltır. LLM olarak senin sağlayıcını kullanır (Claude/z.ai; ayrı
+  OpenAI anahtarı yok). Ağır (Python kaynak kurulumu); API anahtarı yoksa veya
+  kurulamıyorsa görünür uyarı + devre dışı (varsayılan **kapalı**).
 - **Auto** — CLI ile başlar, abonelik kullanım limiti dolunca API'ye geçer, limit
   açılınca CLI'a döner.
 - **Z.AI (GLM)** — o rolün çağrıları, rolün z.ai anahtarıyla Anthropic-uyumlu

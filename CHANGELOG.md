@@ -1,5 +1,27 @@
 ## 2026-07-13
 
+- **feat(hafıza): Phase B — cognee kalıcı çapraz-oturum hafıza entegrasyonu (opt-in): remember/recall/forget bilgi grafiği (YZLLM "cognee'yi de ciddi planla" → "kur"):**
+  cognee (topoteretes, Apache-2.0): kalıcı bilgi grafiği + vektör hafıza — codegen ajanı `recall` ile geçmiş
+  deneyimi (kararlar, ne işe yaradı/patladı) getirir, `remember` ile öğrenir → **koşular arası "hataları tekrarlama"**.
+  **codebase-memory-mcp'nin (yapısal) semantik-kalıcı kardeşi.** Fizibilite CANLI doğrulandı: **gömülü backend
+  (SQLite+Kuzu+LanceDB, Docker/Postgres YOK)** stdio MCP server olarak koştu (initialize + remember/recall/forget +
+  DB migration'ları dış servissiz). **LLM = MyCL'in KENDİ sağlayıcısı** (cognee LiteLLM kullanır → `LLM_MODEL="anthropic/<model>"`
+  + Claude/z.ai key; z.ai'de `LLM_ENDPOINT=<anthropic base>`; **AYRI OpenAI key YOK** → "sağlayıcı=kral" korunur).
+  **Entegrasyon:** `cognee-setup.ts` (`ensureCognee` — PINNED SHA kaynak-klon + `uv sync --all-extras`; python3+git+uv
+  ön-koşul; idempotent) + `buildCogneeLlmEnv`/`cogneeEmbeddedEnv` + `writeCogneeMcpConfig` (mcpServers: python+server.py+env)
+  → **UNIFIED MCP wire**: `cli-backend.ts` codebase-memory + cognee config'lerini TEK `--mcp-config`'e toplar (variadic;
+  `applyMcpServerArgs` — çift `--mcp-config` bayrağı son-kazanır tuzağına düşmesin, mahkeme dersinin genellemesi) + hint'ler
+  TEK `--append-system-prompt`'a. **Flag** `cognee_memory` **opt-in default KAPALI** (AĞIR: Python kaynak+uv). **Fallback
+  (KATI #4):** python/git/uv yok VEYA kullanılabilir API key yok (salt-abonelik/CLI modu, oauth) → görünür uyarı + cognee
+  bağlanmaz (MyCL mevcut EDD/relevance/karar-hafızasıyla sürer). **Çapraz-aile mahkemesi (KATI #12) 4 bulgu düzeltti:**
+  **(1 MAJOR — sahte-yeşil önlendi)** cognify/recall EMBEDDING'i LLM'den AYRI ister; cognee default'u OpenAI (LLM_API_KEY'i
+  embedding'de kullanır → Anthropic/z.ai embeddings API sunmaz → `remember()` runtime'da patlardı; smoke yalnız stdio+tool'ları
+  test etmişti) → **YEREL fastembed (ONNX) embedder** eklendi (`EMBEDDING_PROVIDER=fastembed` + bge-small-en-v1.5; dış key YOK;
+  **runtime doğrulandı: dummy-key'le 384-dim vektör üretti**); **(2)** DATA_DIRECTORY PROJE-BAZLI izole (global depo çapraz-proje
+  hafıza sızıntısı); **(3)** `resolveCogneeMcpConfig` anahtar-varlığını canlı kontrol eder (bayat config bağlanmasın); **(4)** tmp
+  dizini per-çağrı benzersiz. Unified MCP wire (variadic --mcp-config) mahkemede TEMİZ. NOT: pipeline-end remember / boot recall
+  orkestratör öğrenme-döngüsü ayrı increment; şimdilik codegen ajanına açık.
+
 - **feat(hafıza): Phase A — codebase-memory-mcp entegrasyonu (opt-in): codegen ajanlarına YAPISAL kod grafiği, grep yerine ucuz sorgu (YZLLM "bu iki repoyu MyCL'e nasıl entegre ederiz"):**
   codebase-memory-mcp (DeusData, MIT): hedef projeyi SQLite bilgi grafiğine indeksler (158 tree-sitter grammar + 12 dil LSP
   tip çözümü) → çağrı-zinciri/import/route/ölü-kod'u deterministik sorgu (dosya-dosya aramaya göre ~%99 token). Argsız çalışınca

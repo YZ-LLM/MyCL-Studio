@@ -234,6 +234,13 @@ export interface FeatureFlags {
    * default KAPALI (dış bağımlılık; kurulamazsa görünür fallback → grep, KATI #4). Kurulum: `ensureCodebaseMemoryMcp`.
    */
   codebase_memory_mcp?: boolean;
+  /**
+   * cognee kalıcı çapraz-oturum hafızası (YZLLM 2026-07-13, Phase B): remember/recall/forget bilgi grafiği (gömülü
+   * SQLite+Kuzu+LanceDB, Docker'sız); codegen ajanına --mcp-config ile bağlanır; LLM = MyCL sağlayıcısı (LiteLLM
+   * anthropic/z.ai). Opt-in default KAPALI (AĞIR: kaynak-klon+uv sync; salt-abonelik modunda key yok → görünür
+   * fallback, KATI #4). Kurulum: `ensureCognee`. codebase-memory-mcp'nin (yapısal) semantik-kalıcı kardeşi.
+   */
+  cognee_memory?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -251,6 +258,7 @@ const DEFAULT_FEATURES: FeatureFlags = {
   advisor_enabled: false, // opt-in (ek maliyet — kullanıcı kral); Ayarlar'dan açılır.
   layer_cost_report: true, // deterministik + ucuz (LLM yok); katman-maliyet görünürlüğü — kullanıcı budamayı KENDİ yapar.
   codebase_memory_mcp: false, // opt-in (dış bağımlılık: codebase-memory-mcp binary); Ayarlar'dan açılır, kurulamazsa grep fallback.
+  cognee_memory: false, // opt-in (AĞIR dış bağımlılık: cognee Python kaynak+uv); Ayarlar'dan açılır, key/kurulum yoksa görünür fallback.
 };
 
 /**

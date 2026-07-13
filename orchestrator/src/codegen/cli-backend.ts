@@ -41,6 +41,7 @@ import { killProcessTree } from "../dev-server-launcher.js";
 import { appendAudit } from "../audit.js";
 import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "../ipc.js";
 import { resolveCodebaseMemoryMcpConfig } from "../codebase-memory-setup.js";
+import { resolveCogneeMcpConfig } from "../cognee-setup.js";
 import { log } from "../logger.js";
 import { globalConfigDir } from "../paths.js";
 import { dedupePathValue, safeEnv } from "../safe-env.js";
@@ -214,20 +215,29 @@ const CODEBASE_MEMORY_HINT =
   "grepping file-by-file — far fewer tokens. Fall back to Read/Grep only if a structural query returns nothing.";
 
 /**
- * SAF (test edilebilir): codebase-memory-mcp aktifse (cbmCfg!=null) hint'i faz system-prompt'una BİRLEŞTİRİR ve
- * --mcp-config/--strict-mcp-config arg'larını döndürür. KRİTİK (mahkeme 2026-07-13): hint AYRI bir --append-system-prompt
- * OLARAK verilmez — Claude Code'da bu bayrak son-kazanır (overwrite) → ikinci bayrak faz talimatını EZERDİ. Bu yüzden
- * hint TEK --append-system-prompt değerine (systemPrompt) katılır; mcpArgs ASLA --append-system-prompt içermez.
- * cbmCfg null → systemPrompt değişmez, mcpArgs boş (grep fallback).
+ * cognee kalıcı hafıza tool-kullanım ipucu (EN). Faz system-prompt'una BİRLEŞTİRİLİR (ayrı --append-system-prompt DEĞİL).
  */
-export function applyCodebaseMemoryArgs(
+const COGNEE_HINT =
+  "A cognee persistent-memory MCP server is available (tools: mcp__cognee__recall, mcp__cognee__remember, " +
+  "mcp__cognee__forget). It holds cross-session knowledge about THIS project (past decisions, what worked/failed). " +
+  "BEFORE non-trivial work, call recall(...) to surface relevant prior experience and avoid repeating past mistakes. " +
+  "AFTER a key architectural decision or a fix that resolved a real problem, call remember(...) with a concise note so " +
+  "future sessions learn. Keep remember to genuinely reusable learnings — each call runs entity extraction (not free).";
+
+/**
+ * SAF (test edilebilir): etkin MCP server'larını TEK `--mcp-config`'e toplar + hint'lerini faz system-prompt'una
+ * BİRLEŞTİRİR. KRİTİK (mahkeme 2026-07-13): (1) hint'ler AYRI `--append-system-prompt` OLMAZ — bu bayrak Claude Code'da
+ * son-kazanır (overwrite) → faz talimatını EZERDİ; TEK değere katılır. (2) Çoklu MCP config TEK `--mcp-config` altında
+ * VARIADIC verilir (İKİ ayrı `--mcp-config` bayrağı da son-kazanır tuzağına düşebilir). servers boş → değişmez.
+ */
+export function applyMcpServerArgs(
   systemPrompt: string,
-  cbmCfg: string | null,
+  servers: Array<{ configPath: string; hint: string }>,
 ): { systemPrompt: string; mcpArgs: string[] } {
-  if (!cbmCfg) return { systemPrompt, mcpArgs: [] };
+  if (servers.length === 0) return { systemPrompt, mcpArgs: [] };
   return {
-    systemPrompt: `${systemPrompt}\n\n${CODEBASE_MEMORY_HINT}`,
-    mcpArgs: ["--mcp-config", cbmCfg, "--strict-mcp-config"],
+    systemPrompt: `${systemPrompt}\n\n${servers.map((s) => s.hint).join("\n\n")}`,
+    mcpArgs: ["--mcp-config", ...servers.map((s) => s.configPath), "--strict-mcp-config"],
   };
 }
 
@@ -499,9 +509,14 @@ export class CliCodegenBackend implements CodegenBackend {
 
   private buildArgs(effort: string): string[] {
     const { opts } = this;
-    // codebase-memory-mcp opt-in: hint'i faz system-prompt'una BİRLEŞTİR + MCP arg'larını al (SAF helper). AYRI ikinci
-    // --append-system-prompt YOK — Claude Code'da son-kazanır/overwrite → faz talimatını ezerdi (mahkeme CRITICAL 2026-07-13).
-    const cbm = applyCodebaseMemoryArgs(opts.systemPrompt, resolveCodebaseMemoryMcpConfig(opts.config));
+    // MCP server'ları (opt-in): codebase-memory (yapısal) + cognee (kalıcı hafıza). Hint'ler TEK --append-system-prompt'a,
+    // config'ler TEK --mcp-config'e birleştirilir — çift-bayrak son-kazanır tuzağı YOK (mahkeme CRITICAL 2026-07-13).
+    const mcpServers: Array<{ configPath: string; hint: string }> = [];
+    const cbmCfg = resolveCodebaseMemoryMcpConfig(opts.config);
+    if (cbmCfg) mcpServers.push({ configPath: cbmCfg, hint: CODEBASE_MEMORY_HINT });
+    const cogneeCfg = resolveCogneeMcpConfig(opts.config);
+    if (cogneeCfg) mcpServers.push({ configPath: cogneeCfg, hint: COGNEE_HINT });
+    const cbm = applyMcpServerArgs(opts.systemPrompt, mcpServers);
     // Faz EN system prompt + EN task — translator zaten EN üretti (mimari sınır).
     // v15.12: user mesajına İngilizce-çıktı hatırlatması (recency, belt-and-suspenders).
     const args: string[] = [
