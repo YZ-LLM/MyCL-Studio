@@ -141,7 +141,8 @@ function validatorSystemPrompt(f: DebateFinding): string {
   );
 }
 
-function parseFindings(text: string, axis: string): DebateFinding[] {
+// export: Faz 9 son-savunma parser'ı — şekil-uyuşmazlığında bulguları düşürür; birim-testli (YZLLM 2026-07-14 denetim).
+export function parseFindings(text: string, axis: string): DebateFinding[] {
   const block = extractKindBlock(text, ["findings"]);
   if (!block || !Array.isArray(block.findings)) return [];
   const out: DebateFinding[] = [];

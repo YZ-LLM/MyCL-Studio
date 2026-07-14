@@ -159,6 +159,7 @@ import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { runPhaseContributionReport } from "./phase-contribution.js";
 import { runLayerCostReport } from "./layer-cost-report.js";
+import { specSignalMatches } from "./mechanical-skip-signal.js";
 import { extractStockedModules } from "./module-stock.js";
 import { generateGuideShots } from "./guide-shots.js";
 import {
@@ -4401,33 +4402,8 @@ async function shouldRunMechanical(
     );
     return true;
   }
-  const lower = spec.toLowerCase();
-  if (skip_unless === "has_ui") {
-    // 'web' ÇIKARILDI (mahkeme: library/API spec'lerinde "web browsers/environments" geçer → yanlış UI tetiği;
-    // 'web' has_web_target'a ait, has_ui'ye değil). UI-spesifik terimler eklendi — misclassified-api-with-dashboard
-    // gibi gerçek-UI vakalarını yakalar (pozitif-override rolü). Bu sinyal Faz 5'te yalnız POZİTİF (UI var→koş).
-    return /\b(ui|frontend|görsel|ekran|sayfa|button|react|vue|svelte|angular|dashboard|panel|portal|widget|layout|component|screen|chart)\b/.test(
-      lower,
-    );
-  }
-  if (skip_unless === "has_web_target") {
-    // Sızma testi UI gerektirmez: HTTP sunan her proje (web VEYA API) hedeftir.
-    // UI terimleri + api/sunucu terimleri. Yalnız CLI/library/ml (HTTP yok) → false.
-    return /\b(ui|frontend|görsel|ekran|sayfa|button|web|react|vue|svelte|angular|next|api|rest|endpoint|http|server|sunucu|backend|express|fastapi|flask|django|rails|graphql|swagger|openapi)\b/.test(
-      lower,
-    );
-  }
-  if (skip_unless === "has_nfr") {
-    return /\b(load|performance|throughput|latency|nfr|tps|rps|p95|p99)\b/.test(lower);
-  }
-  if (skip_unless === "has_database") {
-    // NoSQL/ORM/kalıcılık terimleri de eklendi (kod-analiz): yalnız structured has_database
-    // undefined olduğunda heuristic'e düşülür; Mongo/Redis/NoSQL projeleri kaçmasın.
-    return /\b(database|veritabanı|db|prisma|sql|postgres|mysql|sqlite|mongo|mongodb|redis|nosql|orm|persist|persistence|supabase|firestore|dynamodb)\b/.test(
-      lower,
-    );
-  }
-  return true;
+  // Regex sinyal mantığı TEK KAYNAK'ta (mechanical-skip-signal.ts) — SAF + birim-testli (gölge-test yok). Bkz o modül.
+  return specSignalMatches(spec.toLowerCase(), skip_unless);
 }
 
 /**
