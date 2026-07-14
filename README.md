@@ -156,6 +156,15 @@ fan-out**'u kullanabilir; birbirinden bağımsız ≥2 modül varsa **Çoklu Aja
 Seçimi** modülleri izole git worktree'lerinde paralel yazıp ayrı bir adımda
 entegre eder.
 
+MyCL projeyi çalıştırırken (Faz 5'te ya da **"projeyi çalıştır"** komutuyla) alt
+bantta **çalışıyor göstergesi** (spinner) gösterir — takıldı mı diye merak etmezsin.
+Uygulama bağımlı olduğu bir **servise** (MySQL / PostgreSQL / Mongo / Redis) bağlanamayıp
+çökerse MyCL eksik servisi çökme çıktısından tespit eder ve **tamamlamaya çalışır**
+(proje bir `docker-compose` bildiriyorsa `docker compose up -d` ile başlatıp portu
+gerçekten dinliyor mu diye doğrular), sonra dev-server'ı bir kez yeniden dener. Compose
+yoksa jenerik bir hata yerine o servise özel, eyleme dönük bir başlatma rehberi verir.
+Her adım sana sohbette görünür; sessizce atlamaz.
+
 ## Doğrulama ve güvenlik
 
 - **Dürüst hüküm** — akış sonunda mekanik kapılar ve risk incelemesi tek bir

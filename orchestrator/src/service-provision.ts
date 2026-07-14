@@ -11,6 +11,39 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { Socket } from "node:net";
 import { join } from "node:path";
+import { tryDevServerChain, type DevServerChainResult } from "./dev-server-launcher.js";
+import { emitChatMessage } from "./ipc.js";
+
+/**
+ * Dev-server'ı başlat; app bir servise bağlanamayıp çökerse eksik servisi TAMAMLAMAYA çalış (docker-compose) + BİR KEZ
+ * retry. TEK KAYNAK — phase-5 (pipeline) VE intent-router "projeyi çalıştır" komutu bunu kullanır (drift yok). Provision
+ * mesajını KENDİ emit eder (kullanıcıya "X başlatılıyor/başlatılamadı"); audit'i çağıran yapar (faz-özel event adı).
+ * @returns dev-server sonucu (retry sonrası; attempts birleştirilmiş) + provision denendiyse audit-detayı.
+ */
+export async function launchWithProvision(
+  projectRoot: string,
+  candidates: Array<{ cmd: string; ports: number[] }>,
+  timeoutMs: number,
+): Promise<{ result: DevServerChainResult; provisionAudit?: string }> {
+  let result = await tryDevServerChain(projectRoot, candidates, timeoutMs);
+  if (result.ok && result.handle && result.cmd) return { result };
+  const crashOut = result.attempts
+    .map((a) => a.output)
+    .filter((o): o is string => !!o)
+    .join("\n---\n");
+  const pkgDeps = await fs.readFile(join(projectRoot, "package.json"), "utf-8").catch(() => "");
+  const missing = detectMissingService(crashOut, pkgDeps);
+  if (!missing) return { result };
+  const prov = await tryProvisionService(projectRoot, missing);
+  emitChatMessage("system", prov.message);
+  const provisionAudit = `${missing.name}:${missing.port} attempted=${prov.attempted} ok=${prov.ok}`;
+  if (prov.ok) {
+    const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
+    // attempts BİRLEŞTİR (mahkeme feedback_surface_real_error): retry fail ederse GÜNCEL çıktı görünsün.
+    result = { ...retry, attempts: [...result.attempts, ...retry.attempts] };
+  }
+  return { result, provisionAudit };
+}
 
 export interface ServiceDep {
   /** Görünen ad (MySQL/PostgreSQL/...). */

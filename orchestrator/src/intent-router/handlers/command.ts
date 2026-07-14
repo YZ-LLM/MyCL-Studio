@@ -27,10 +27,11 @@ import { type MyclConfig } from "../../config.js";
 import {
   buildDevServerFailMessage,
   openBrowser,
-  tryDevServerChain,
   type DevServerAttempt,
 } from "../../dev-server-launcher.js";
-import { emitChatMessage } from "../../ipc.js";
+import { emitChatMessage, emitPhaseIdle, emitPhaseRunning } from "../../ipc.js";
+import { isNeverAsk } from "../../auto-answer.js";
+import { launchWithProvision } from "../../service-provision.js";
 import { log } from "../../logger.js";
 import { replaceActiveWatcher } from "../../runtime-error-watcher.js";
 import { safeEnv } from "../../safe-env.js";
@@ -619,59 +620,78 @@ async function runDevServer(
     log.warn("command-handler", "vite injection failed (non-fatal)", err);
   }
 
-  const chainResult = await tryDevServerChain(
-    state.project_root,
-    candidates,
-    DEV_SERVER_TIMEOUT_MS,
-  );
-
-  if (!chainResult.ok || !chainResult.handle || !chainResult.cmd) {
-    const last = chainResult.attempts[chainResult.attempts.length - 1];
-    const diagnostic = await buildDevServerFailMessage(
+  // Spinner (YZLLM 2026-07-14, "çalıştığına dair bi spinner falan yok"): dev-server ayağa kalkana (veya fail edene)
+  // kadar alt banda "▶️ Çalıştırılıyor" göster + heartbeat. finally'de HER YOLDA idle → banner asılı kalmaz.
+  emitPhaseRunning("▶️ Proje çalıştırılıyor", `komut: ${cmd}`);
+  try {
+    // launchWithProvision: TEK KAYNAK helper — Faz 5 ile AYNI (drift yok). App bir servise (DB/cache) bağlanamayıp
+    // çökerse eksik servisi tespit eder + docker-compose ile TAMAMLAMAYA çalışır + BİR KEZ retry eder (AKILLI RUN).
+    const { result: chainResult, provisionAudit } = await launchWithProvision(
       state.project_root,
-      last?.reason === "process_died" ? -1 : 0,
-      last?.port ?? expectedPortFor(cmd),
+      candidates,
       DEV_SERVER_TIMEOUT_MS,
     );
-    const attemptsLog = chainResult.attempts
-      .map((a: DevServerAttempt) => `  • \`${a.cmd}\` (port=${a.port}, ${a.reason})`)
-      .join("\n");
+    if (provisionAudit) {
+      await appendAudit(state.project_root, {
+        ts: Date.now(),
+        phase: 5,
+        event: "command-dev-server-provision",
+        caller: "user",
+        detail: provisionAudit,
+      });
+    }
+
+    if (!chainResult.ok || !chainResult.handle || !chainResult.cmd) {
+      const last = chainResult.attempts[chainResult.attempts.length - 1];
+      const diagnostic = await buildDevServerFailMessage(
+        state.project_root,
+        last?.reason === "process_died" ? -1 : 0,
+        last?.port ?? expectedPortFor(cmd),
+        DEV_SERVER_TIMEOUT_MS,
+        isNeverAsk(), // otonom modda "sen çöz + devam et" park talimatı basılmaz (DONMUŞ HEDEF #1)
+      );
+      const attemptsLog = chainResult.attempts
+        .map((a: DevServerAttempt) => `  • \`${a.cmd}\` (port=${a.port}, ${a.reason})`)
+        .join("\n");
+      await appendAudit(state.project_root, {
+        ts: Date.now(),
+        phase: 5,
+        event: "command-dev-server-fail",
+        caller: "user",
+        detail: `cmd="${cmd}" attempts=${chainResult.attempts.length}`,
+      });
+      emitChatMessage(
+        "error",
+        `${diagnostic}\n\nDenenen komutlar (hepsi başarısız):\n${attemptsLog}`,
+      );
+      return;
+    }
+
+    const handle = chainResult.handle;
+    const usedCmd = chainResult.cmd;
+    replaceActiveWatcher({
+      pid: handle.pid,
+      stdout: handle.stdout,
+      stderr: handle.stderr,
+      projectRoot: state.project_root,
+      dbPath: `${state.project_root}/error_folder/mycl_errors.db`,
+      config: _config,
+    });
+    emitChatMessage(
+      "system",
+      `✅ Dev server hazır: http://localhost:${handle.port} (komut=\`${usedCmd}\`). Tarayıcı açılıyor.`,
+    );
+    openBrowser(`http://localhost:${handle.port}`);
     await appendAudit(state.project_root, {
       ts: Date.now(),
       phase: 5,
-      event: "command-dev-server-fail",
+      event: "command-dev-server-start",
       caller: "user",
-      detail: `cmd="${cmd}" attempts=${chainResult.attempts.length}`,
+      detail: `cmd="${usedCmd}" pid=${handle.pid} port=${handle.port} prior_attempts=${chainResult.attempts.length}`,
     });
-    emitChatMessage(
-      "error",
-      `${diagnostic}\n\nDenenen komutlar (hepsi başarısız):\n${attemptsLog}`,
-    );
-    return;
+  } finally {
+    emitPhaseIdle();
   }
-
-  const handle = chainResult.handle;
-  const usedCmd = chainResult.cmd;
-  replaceActiveWatcher({
-    pid: handle.pid,
-    stdout: handle.stdout,
-    stderr: handle.stderr,
-    projectRoot: state.project_root,
-    dbPath: `${state.project_root}/error_folder/mycl_errors.db`,
-    config: _config,
-  });
-  emitChatMessage(
-    "system",
-    `✅ Dev server hazır: http://localhost:${handle.port} (komut=\`${usedCmd}\`). Tarayıcı açılıyor.`,
-  );
-  openBrowser(`http://localhost:${handle.port}`);
-  await appendAudit(state.project_root, {
-    ts: Date.now(),
-    phase: 5,
-    event: "command-dev-server-start",
-    caller: "user",
-    detail: `cmd="${usedCmd}" pid=${handle.pid} port=${handle.port} prior_attempts=${chainResult.attempts.length}`,
-  });
 }
 
 async function runOneShot(state: State, cmd: string): Promise<void> {
