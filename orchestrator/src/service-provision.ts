@@ -231,15 +231,33 @@ export interface InstallResult {
  *  (asılma önleme). phase-5'in kendi install adımıyla TUTARLI (600s); 300s ağır projede yetmeyip erken kesiyordu. */
 const INSTALL_TIMEOUT_MS = 600_000;
 
-/** Kurulum çıktısından ANLAMLI hata özeti (kod + mesaj satırı). Ham son-200-karakter hata KODUNU kesip gizliyordu
- *  (cave: "ENOTEMPTY" kaybolup yalnız yol tail'i görünüyordu). SAF (testli). */
+/**
+ * Kurulum çıktısından ANLAMLI hata özeti: kod + hangi PAKET + GERÇEK sebep satırı. SAF (testli).
+ * Neden (YZLLM cave log'u): ham `.slice(-200)` hata kodunu gizliyordu; eski özet de yalnız "1" gösterip asıl
+ * sebebi (cave: puppeteer@5.5.0 postinstall → "The chromium binary is not available for arm64") kaçırıyordu.
+ * Yaklaşım: `npm/yarn error <...>` satırlarını topla, boilerplate'i (code/syscall/errno/path/dest/command/…) ayır,
+ * ilk İNSAN-OKUR sebep satırını + failed paket adını (path .../node_modules/<pkg>) + kodu birleştir.
+ */
 export function salientInstallError(out: string): string {
-  const code =
-    /(?:npm |yarn |pnpm )?error\s+code\s+([A-Z0-9_]+)/i.exec(out)?.[1] ??
-    /\bcode:\s*['"]?([A-Z0-9_]+)['"]?/i.exec(out)?.[1];
-  const line = /\b([A-Z]{2,}[A-Z0-9]*: [^\n]+)/.exec(out)?.[1];
-  const summary = [code, line].filter(Boolean).join(" — ");
-  return (summary || out.slice(-300)).trim();
+  const errLines = out
+    .split("\n")
+    .map((l) => /^(?:\d+\s+)?(?:npm |yarn |pnpm )?(?:err!?\s+)?error\s+(.*)$/i.exec(l.trim())?.[1]?.trim())
+    .filter((x): x is string => !!x && x.length > 0 && !/^A complete log of this run/i.test(x));
+  if (errLines.length === 0) {
+    // npm-error bloğu yok (farklı yönetici/format) → son 2 anlamlı satır.
+    const tail = out.split("\n").map((l) => l.trim()).filter(Boolean).slice(-2).join(" · ");
+    return (tail || out.slice(-200)).trim().slice(0, 300);
+  }
+  const code = /^code\s+(\S+)/i.exec(errLines.find((l) => /^code\s/i.test(l)) ?? "")?.[1];
+  const pkg = /node_modules[/\\](@[^/\\\s]+[/\\][^/\\\s]+|[^/\\\s]+)/i.exec(
+    errLines.find((l) => /^path\s/i.test(l)) ?? "",
+  )?.[1];
+  // GERÇEK sebep: code/syscall/errno/path/dest/command/signal/stack/gyp boilerplate OLMAYAN ilk anlamlı satır.
+  const reason = errLines.find(
+    (l) => !/^(code|syscall|errno|path|dest|command|signal|verbose|stack|gyp)\b/i.test(l) && l.length > 3,
+  );
+  const summary = [code && `kod ${code}`, pkg && `paket ${pkg}`, reason].filter(Boolean).join(" — ");
+  return (summary || errLines[errLines.length - 1] || out.slice(-300)).trim().slice(0, 300);
 }
 
 /** Kurulum "BOZUK deps dizini" hatası mı (yarım/kesilmiş kurulumun bıraktığı kalıntı — ör. node_modules/.fsevents-XXXX

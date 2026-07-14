@@ -177,10 +177,29 @@ describe("salientInstallError + isCorruptDepsError — cave GERÇEK npm hatası 
     "npm error ENOTEMPTY: directory not empty, rename '.../node_modules/fsevents' -> '.../node_modules/.fsevents-iRgnoUa7'",
   ].join("\n");
 
+  // cave'in İKİNCİ (temiz kurulum sonrası) gerçek hatası: puppeteer@5.5.0 postinstall arm64'te Chromium indiremiyor.
+  // Eski salientInstallError yalnız "1" gösteriyordu (asıl sebep kayıp). npm debug log'undan (npm çıktısı) alındı.
+  const CAVE_PUPPETEER_ERR = [
+    "npm error code 1",
+    "npm error path /Users/Shared/MyCL Projeler/cave-7ac855d7/node_modules/puppeteer",
+    "npm error command failed",
+    "npm error command sh -c node install.js",
+    "npm error The chromium binary is not available for arm64:",
+    "npm error If you are on Ubuntu, you can install with:",
+    "npm error  apt-get install chromium-browser",
+  ].join("\n");
+
   it("salientInstallError: kodu (ENOTEMPTY) çıkarır — ham son-200 karakter değil", () => {
     const s = salientInstallError(CAVE_NPM_ERR);
     expect(s).toContain("ENOTEMPTY");
     expect(s).toContain("directory not empty");
+  });
+  it("salientInstallError: postinstall GERÇEK sebebini + paketi çıkarır (puppeteer arm64) — yalnız '1' değil", () => {
+    const s = salientInstallError(CAVE_PUPPETEER_ERR);
+    expect(s).toContain("puppeteer"); // hangi paket
+    expect(s).toContain("chromium"); // gerçek sebep
+    expect(s).toContain("arm64");
+    expect(s).not.toBe("1"); // eski yararsız çıktı DEĞİL
   });
   it("isCorruptDepsError: ENOTEMPTY → true (temizle+yeniden kur tetikler)", () => {
     expect(isCorruptDepsError(CAVE_NPM_ERR)).toBe(true);
