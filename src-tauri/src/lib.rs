@@ -19,7 +19,7 @@ use orchestrator::{
     send_to_orchestrator, send_to_window, spawn_orchestrator,
     spawn_orchestrator_for_window, OrchestratorState,
 };
-use recent::{add_recent_project, clear_recent_projects, get_recent_projects};
+use recent::{add_recent_project, clear_recent_projects, get_recent_projects, remove_recent_project};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use updater::{apply_update, check_update_status};
 
@@ -118,6 +118,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_recent_projects,
             add_recent_project,
+            remove_recent_project,
             clear_recent_projects,
             spawn_orchestrator,
             send_to_orchestrator,

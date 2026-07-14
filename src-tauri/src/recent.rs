@@ -71,6 +71,15 @@ pub fn add_recent_project(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn remove_recent_project(app: AppHandle, path: String) -> Result<(), String> {
+    // Tek öğeyi son-projeler listesinden çıkar. YALNIZ listeden (recent_projects.json) siler — proje KLASÖRÜNE
+    // DOKUNMAZ (kullanıcı: "sadece UI'da kalksın"). load() fail → caller'a hata (sessiz-gizleme yok).
+    let mut store = load(&app)?;
+    store.paths.retain(|p| p != &path);
+    save(&app, &store)
+}
+
+#[tauri::command]
 pub fn clear_recent_projects(app: AppHandle) -> Result<(), String> {
     // Corrupt JSON sonrası recovery için: kullanıcı listeyi sıfırlayabilir.
     save(&app, &RecentStore::default())

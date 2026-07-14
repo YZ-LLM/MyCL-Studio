@@ -87,6 +87,17 @@ export function Splash({ onProjectSelected }: Props) {
     [onProjectSelected],
   );
 
+  // Son-projeler listesinden tek öğeyi kaldır — YALNIZ listeden (proje klasörüne dokunmaz). UI'ı anında güncelle.
+  const removeRecent = useCallback(async (p: string) => {
+    setError(null); // önceki hata mesajı asılı kalmasın (mahkeme)
+    try {
+      await invoke("remove_recent_project", { path: p });
+      setRecent((prev) => prev.filter((x) => x !== p));
+    } catch (err) {
+      setError(`Listeden kaldırılamadı: ${err}`);
+    }
+  }, []);
+
   return (
     <main className="splash" data-testid="splash">
       <div className="splash-box">
@@ -141,7 +152,7 @@ export function Splash({ onProjectSelected }: Props) {
                       onProjectSelected(p);
                     }}
                   >
-                    <span>{label}</span>
+                    <span className="splash-recent-label">{label}</span>
                     {isIntegrateCopy && !isOpen && (
                       <span className="splash-recent-badge splash-recent-badge-integrate">
                         entegre kopyası
@@ -152,6 +163,18 @@ export function Splash({ onProjectSelected }: Props) {
                         başka pencerede açık
                       </span>
                     )}
+                    <button
+                      type="button"
+                      className="splash-recent-remove"
+                      title="Bu projeyi listeden kaldır (proje klasörü SİLİNMEZ — yalnız listeden çıkar)"
+                      aria-label={`${label} — listeden kaldır`}
+                      onClick={(e) => {
+                        e.stopPropagation(); // öğenin aç-onClick'ini tetikleme
+                        void removeRecent(p);
+                      }}
+                    >
+                      ×
+                    </button>
                   </li>
                 );
               })}

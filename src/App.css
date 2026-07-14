@@ -573,6 +573,9 @@ select:focus {
 }
 
 .splash-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 10px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -586,6 +589,34 @@ select:focus {
 
 .splash-recent-item:hover {
   background: var(--bg-hover);
+}
+
+/* Uzun path/etiket satırı taşırmasın — ellipsis (tam yol tooltip'te). min-width:0 flex ellipsis için şart. */
+.splash-recent-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Son-projeler öğesini listeden kaldır (× — proje klasörüne dokunmaz). Sağa yaslanır. */
+.splash-recent-remove {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted, #8b949e);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
+}
+
+.splash-recent-remove:hover {
+  color: #f85149;
+  background: var(--bg);
 }
 
 /* v15.7 (2026-05-24): İş kuyruğu drawer — sağdan slide-in overlay */
