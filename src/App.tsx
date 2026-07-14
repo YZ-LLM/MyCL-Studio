@@ -1574,6 +1574,7 @@ function App() {
               phases={phasesList}
               currentPhase={mainState.phase}
               maxPhase={mainState.maxPhase}
+              phaseStatus={mainState.phaseStatus}
               disabled={buttonsDisabled}
               onPhaseClick={sendPhaseRunRequest}
               onPhaseNavigate={navigateToPhase}

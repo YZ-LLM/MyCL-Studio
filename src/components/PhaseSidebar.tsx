@@ -5,7 +5,7 @@
 // Sidebar artık sadece faz navigasyonu içerir, tüm 1-17 fazları listelenir.
 
 import { useRef } from "react";
-import type { PhaseId, PhaseSummary } from "../types/events";
+import type { PhaseId, PhaseStatus, PhaseSummary } from "../types/events";
 
 const VISIBLE_PHASES: PhaseId[] = [
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
@@ -33,6 +33,8 @@ interface Props {
   neededPhases?: number[] | null;
   /** Ulaşılan en yüksek pipeline fazı — debug (Faz 0) sırasında "yarım kalan" fazı (⏸️) belirlemek için. */
   maxPhase: PhaseId;
+  /** Mevcut fazın durumu — SON faz tamamlanınca (currentPhase ilerlemez) ✅ göstermek için (yoksa sonsuza dek ▶️). */
+  phaseStatus?: PhaseStatus;
 }
 
 /**
@@ -45,9 +47,15 @@ export function phaseBadge(
   currentPhase: PhaseId,
   gateFailed: boolean,
   maxPhase: PhaseId,
+  currentPhaseStatus?: PhaseStatus,
 ): string {
   if (gateFailed) return "⚠️";
-  if (id === currentPhase) return "▶️"; // çalışan faz (play üçgeni)
+  if (id === currentPhase) {
+    // CURRENT faz: TAMAMLANDIYSA ✅ (özellikle SON faz — pipeline bitince currentPhase ilerlemez → aksi halde
+    // Faz 17 sonsuza dek ▶️ mavi kalırdı; YZLLM 2026-07-14 "iterasyon bitti ama faz 17 yeşil olmamış" bug'ı).
+    // running/waiting → ▶️ (hâlâ çalışıyor/park).
+    return currentPhaseStatus === "complete" ? "✅" : "▶️";
+  }
   const reached = currentPhase === (0 as PhaseId) ? maxPhase : currentPhase;
   if (id < reached) return "✅"; // tamamlandı (yeşil kalır)
   if (id === reached) return "⏸️"; // yarım kaldı (debug'a/Faz 0'a gidildi)
@@ -62,6 +70,7 @@ export function PhaseSidebar({
   onPhaseNavigate,
   gateFailures,
   maxPhase,
+  phaseStatus,
   neededPhases,
 }: Props) {
   const byId = new Map(phases.map((p) => [p.id, p]));
@@ -124,7 +133,7 @@ export function PhaseSidebar({
         {VISIBLE_PHASES.map((id) => {
           const p = byId.get(id);
           const gateFailed = failedSet.has(id);
-          const badge = phaseBadge(id, currentPhase, gateFailed, maxPhase);
+          const badge = phaseBadge(id, currentPhase, gateFailed, maxPhase, phaseStatus);
           const name = p?.name_tr ?? p?.name_en ?? `Faz ${id}`;
           const typeLabel = p?.type ?? "";
           const isCurrent = id === currentPhase;
