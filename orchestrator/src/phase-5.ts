@@ -35,6 +35,7 @@ import {
   readNodeScripts,
 } from "./intent-router/handlers/command.js";
 import { devServerCandidates } from "./dev-server-command.js";
+import { isNeverAsk } from "./auto-answer.js";
 import { emitChatMessage, emitError, emitPhaseRunning } from "./ipc.js";
 import { loadProfile, resolveCommand } from "./profile-loader.js";
 import { applyPrototype, surfacePrototypeModuleSearch } from "./prototype-cache.js";
@@ -382,10 +383,13 @@ export class Phase5Controller {
       // veya pipeline re-run.
       emitChatMessage(
         "system",
-        `⚠ Faz 5 (UI) kod üretemedi: ${outcome.reason}\n\nSeçenekler:\n` +
-          `• Sidebar'dan Faz 5'e tıkla → "✅ Çalıştır" (tekrar dene)\n` +
-          `• Spec'i revize et: composer'a "yeniden tasarla" yaz\n` +
-          `• Manuel UI kodu yaz, sonra Faz 5'i atla (advance ile Faz 7'e geç)`,
+        isNeverAsk()
+          ? // Otonom mod: kullanıcıya "tıkla/revize et/manuel yaz" DEME. failPhase kod hatasını oto-çözer (Faz 0 debug).
+            `⚠ Faz 5 (UI) kod üretemedi: ${outcome.reason} — otonom modda otomatik yeniden değerlendirip çözüyorum (elle müdahale gerekmez).`
+          : `⚠ Faz 5 (UI) kod üretemedi: ${outcome.reason}\n\nSeçenekler:\n` +
+              `• Sidebar'dan Faz 5'e tıkla → "✅ Çalıştır" (tekrar dene)\n` +
+              `• Spec'i revize et: composer'a "yeniden tasarla" yaz\n` +
+              `• Manuel UI kodu yaz, sonra Faz 5'i atla (advance ile Faz 7'e geç)`,
       );
       // state.phase_5_degraded flag — UI gözleminde araç-belirleyici. Mevcut
       // state şemasında yok, ama statePatch ile geçici işaretlenebilir.
@@ -721,6 +725,7 @@ export class Phase5Controller {
         lastAttempt?.reason === "process_died" ? -1 : 0,
         lastAttempt?.port ?? 5173,
         DEV_SERVER_TIMEOUT_MS,
+        isNeverAsk(), // otonom modda "sen çöz + devam et yaz" park talimatı basılmaz (DONMUŞ HEDEF #1)
       );
       const attemptsLog = chainResult.attempts
         .map((a) => `  • \`${a.cmd}\` (port=${a.port}, ${a.reason})`)

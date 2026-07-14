@@ -473,6 +473,9 @@ export async function buildDevServerFailMessage(
   pid: number,
   port: number,
   timeoutMs: number,
+  /** Otonom ("hiçbir şey sorma") mod açık mı — açıksa manuel "sen çöz + 'devam et' yaz" park talimatı BASILMAZ
+   *  (DONMUŞ HEDEF #1: otonom modda kullanıcıya iş bırakma). MyCL failPhase ile oto-çözer veya dürüstçe durur. */
+  neverAsk = false,
 ): Promise<string> {
   // package.json scripts.dev oku — parse fail veya dosya yoksa boş
   let devScript = "";
@@ -529,7 +532,16 @@ export async function buildDevServerFailMessage(
   }
 
   lines.push(``);
-  lines.push(`Sorunu çözdükten sonra MyCL'e **"devam et"** yazın — Faz 5 yeniden başlar.`);
+  if (neverAsk) {
+    // Otonom mod: kullanıcıya "sen çöz" DEME. MyCL failPhase ile ilerler — kod hatasıysa Faz 0 debug oto-çözer;
+    // gerçek ortam bağımlılığıysa (DB/servis çalışmıyor, port dolu) net+dürüst durur. "devam et" beklenmez.
+    lines.push(
+      `🔄 Otonom mod: bu hatayı otomatik ele alıyorum — kod hatasıysa teşhis edip düzeltiyorum; gerçek bir ortam ` +
+        `bağımlılığıysa (DB/servis çalışmıyor, port dolu) net sebebini söyleyip dürüstçe duruyorum. Elle müdahale gerekmez.`,
+    );
+  } else {
+    lines.push(`Sorunu çözdükten sonra MyCL'e **"devam et"** yazın — Faz 5 yeniden başlar.`);
+  }
 
   return lines.join("\n");
 }
