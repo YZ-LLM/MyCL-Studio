@@ -30,11 +30,11 @@ import {
   waitForDevServer,
 } from "./dev-server-launcher.js";
 import {
-  commandsFor,
   detectStack,
   expectedPortsFor,
   readNodeScripts,
 } from "./intent-router/handlers/command.js";
+import { devServerCandidates } from "./dev-server-command.js";
 import { emitChatMessage, emitError, emitPhaseRunning } from "./ipc.js";
 import { loadProfile, resolveCommand } from "./profile-loader.js";
 import { applyPrototype, surfacePrototypeModuleSearch } from "./prototype-cache.js";
@@ -578,7 +578,7 @@ export class Phase5Controller {
     const DEV_SERVER_TIMEOUT_MS = 20_000;
     const stack = detectStack(this.state.project_root);
     const scripts = readNodeScripts(this.state.project_root);
-    const cmds = commandsFor(stack, "run", scripts);
+    const cmds = await devServerCandidates(stack, scripts); // profil `dev` öncelikli (KATI #1; non-Node web-server düzeltmesi)
     if (cmds.length === 0) {
       emitChatMessage(
         "error",

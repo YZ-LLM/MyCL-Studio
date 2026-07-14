@@ -20,12 +20,12 @@ import {
   waitForDevServer,
 } from "./dev-server-launcher.js";
 import {
-  commandsFor,
   detectStack,
   expectedPortsFor,
   NODE_STACKS,
   readNodeScripts,
 } from "./intent-router/handlers/command.js";
+import { devServerCandidates } from "./dev-server-command.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { replaceActiveWatcher } from "./runtime-error-watcher.js";
@@ -176,7 +176,7 @@ export async function restartDevServerForPhase7(
   }
   const stack = detectStack(state.project_root);
   const scripts = readNodeScripts(state.project_root);
-  const cmds = commandsFor(stack, "run", scripts);
+  const cmds = await devServerCandidates(stack, scripts);
   if (cmds.length === 0) {
     return {
       ok: false,
@@ -241,7 +241,7 @@ export async function ensureDevServerForReview(
 ): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number }> {
   const alive =
     state.dev_server_pid !== undefined && isProcessAliveSync(state.dev_server_pid);
-  if (alive) return { ok: true, alreadyAlive: true, port: deriveDevPort(state) };
+  if (alive) return { ok: true, alreadyAlive: true, port: await deriveDevPort(state) };
   const restart = await restartDevServerSimple(state, config);
   return { ok: restart.ok, alreadyAlive: false, port: restart.port };
 }
@@ -251,11 +251,11 @@ export async function ensureDevServerForReview(
  * Stack komutu + script'lerden beklenen portu; bulunamazsa 5173 (yaygın Vite). Erişilebilirlik
  * taraması için URL kurmaya yeter; yanlışsa tarama görünür şekilde "taranamadı" der (blocking değil).
  */
-function deriveDevPort(state: State): number | undefined {
+async function deriveDevPort(state: State): Promise<number | undefined> {
   try {
     const stack = detectStack(state.project_root);
     const scripts = readNodeScripts(state.project_root);
-    const cmd = commandsFor(stack, "run", scripts)[0];
+    const cmd = (await devServerCandidates(stack, scripts))[0];
     if (!cmd) return undefined;
     return expectedPortsFor(cmd, scripts, state.project_root)[0];
   } catch {
@@ -288,7 +288,7 @@ export async function restartDevServerSimple(
   }
   const stack = detectStack(state.project_root);
   const scripts = readNodeScripts(state.project_root);
-  const cmds = commandsFor(stack, "run", scripts);
+  const cmds = await devServerCandidates(stack, scripts);
   if (cmds.length === 0) {
     emitChatMessage(
       "system",

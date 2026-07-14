@@ -24,6 +24,6 @@
     "api": "k6 run loadtest.js",
     "default": null
   },
-  "default_port": 3000,
+  "default_port": 9292,
   "manifest_files": ["Gemfile", "Gemfile.lock"]
 }

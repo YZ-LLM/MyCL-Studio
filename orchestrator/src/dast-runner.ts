@@ -30,11 +30,11 @@ import { join } from "node:path";
 import { appendAudit } from "./audit.js";
 import { killProcessTree, waitForDevServer } from "./dev-server-launcher.js";
 import {
-  commandsFor,
   detectStack,
   expectedPortsFor,
   readNodeScripts,
 } from "./intent-router/handlers/command.js";
+import { devServerCandidates } from "./dev-server-command.js";
 import { log } from "./logger.js";
 import { isProcessAliveSync } from "./process-utils.js";
 import { safeEnv } from "./safe-env.js";
@@ -329,7 +329,7 @@ async function resolveLocalhostTarget(state: State): Promise<string | null> {
   try {
     const stack = detectStack(state.project_root);
     const scripts = readNodeScripts(state.project_root);
-    const cmds = commandsFor(stack, "run", scripts);
+    const cmds = await devServerCandidates(stack, scripts); // profil `dev` öncelikli (KATI #1) → doğru port türetme
     derived = cmds.flatMap((c) =>
       expectedPortsFor(c, scripts, state.project_root),
     );

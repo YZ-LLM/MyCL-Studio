@@ -423,17 +423,23 @@ export function isDevServerCommand(cmd: string): boolean {
 /**
  * Pure: komuta göre beklenen HTTP port'u tahmin et. Framework default'ları:
  * Vite=5173, Next/Rails=3000, Flask=5000, Phoenix=4000, Spring/Vapor=8080,
- * uvicorn/Django/PHP/Laravel/Gunicorn=8000, .NET Kestrel=5000, Puma=9292.
+ * uvicorn/Django/PHP/Laravel/Gunicorn=8000, .NET Kestrel=5000, Puma/Rackup=9292, Deno=8000.
  * `php -S host:N` formatından port okunur. Eşleşme yoksa 8080 fallback.
+ * NOT (YZLLM 2026-07-14): `rackup`/`deno task` eklendi — profil `dev` komutu artık zincire giriyor
+ * (dev-server-command.ts); portları yanlış tahmin edilirse waitForDevServer sağlıklı server'ı öldürür (mahkeme).
  */
 export function expectedPortFor(cmd: string): number {
   const phpPort = /php\s+-S\s+\S*?:(\d+)/.exec(cmd);
   if (phpPort) return parseInt(phpPort[1], 10);
+  // Açık port bayrağı KAZANIR (framework tahmininden önce) — komut portu belirtmişse o hâkim (augmentPortFlag ile aynı desen).
+  const explicitPort = /(?:--port|(?:^|\s)-p)[=\s]+(\d{2,5})\b/.exec(cmd);
+  if (explicitPort) return parseInt(explicitPort[1], 10);
   if (/\b(npx\s+vite|vite(\s|$))/.test(cmd)) return 5173;
   if (/\bnext\s+dev\b/.test(cmd)) return 3000;
   if (/\b(npm|yarn|pnpm|bun)\s+run\s+(dev|start)\b/.test(cmd)) return 5173;
   if (/\b(rails\s+s(erver)?|bundle\s+exec\s+rails)\b/.test(cmd)) return 3000;
-  if (/\bpuma\b/.test(cmd)) return 9292;
+  if (/\b(puma|rackup)\b/.test(cmd)) return 9292;
+  if (/\bdeno\s+task\b/.test(cmd)) return 8000;
   if (/\b(uvicorn|gunicorn|hypercorn|daphne)\b/.test(cmd)) return 8000;
   if (/\bmanage\.py\s+runserver\b/.test(cmd)) return 8000;
   if (/\bflask\s+run\b/.test(cmd)) return 5000;

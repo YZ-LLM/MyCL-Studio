@@ -26,11 +26,11 @@ import { isProcessAliveSync } from "./process-utils.js";
 import { clearHistory } from "./history.js";
 import { save as saveState } from "./state.js";
 import {
-  commandsFor,
   detectStack,
   expectedPortsFor,
   readNodeScripts,
 } from "./intent-router/handlers/command.js";
+import { devServerCandidates } from "./dev-server-command.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { buildCodebaseSnapshot } from "./phase-1-codebase-probe.js";
@@ -217,7 +217,7 @@ async function ensureDevServerAlive(
   // Başlatmayı dene — Phase 5 ile aynı aday-komut zinciri.
   const stack = detectStack(state.project_root);
   const scripts = readNodeScripts(state.project_root);
-  const cmds = commandsFor(stack, "run", scripts);
+  const cmds = await devServerCandidates(stack, scripts); // profil `dev` öncelikli (KATI #1)
   if (cmds.length === 0) return { alive: false };
   const candidates = cmds.map((cmd) => ({
     cmd,

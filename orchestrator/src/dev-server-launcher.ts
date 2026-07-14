@@ -360,7 +360,7 @@ export function augmentPortFlag(
   // Python / Ruby leaf
   if (/(^|\s)(uvicorn|hypercorn)(\s|$)/.test(c)) return `${c} --port ${port}`;
   if (/(^|\s)flask\s+run(\s|$)/.test(c)) return `${c} --port ${port}`;
-  if (/(^|\s)(rails\s+(server|s)|puma)(\s|$)/.test(c)) return `${c} -p ${port}`;
+  if (/(^|\s)(rails\s+(server|s)|puma|rackup)(\s|$)/.test(c)) return `${c} -p ${port}`;
   // Package-manager wrapper (npm run dev / pnpm dev / yarn dev / bun run dev) —
   // alttaki leaf bilinmez; YALNIZ vite-projesinde `-- --port` ile zorla.
   if (/(^|\s)(npm run|pnpm|yarn|bun run)\s+\S+/.test(c))
