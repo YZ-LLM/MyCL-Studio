@@ -37,6 +37,29 @@ describe("buildDevServerFailMessage — otonom mod farkındalığı", () => {
     }
   });
 
+  it("backend/start-tabanlı proje (dev yok, start VAR) → 'npx vite' ÖNERMEZ, backend mesajı verir", async () => {
+    // cave gibi: yalnız start script'i olan Express backend. Eski mesaj alakasız "npx vite" öneriyordu.
+    const dir = await mkProj({ scripts: { start: "node ./bin/www" } });
+    try {
+      const msg = await buildDevServerFailMessage(dir, -1, 5173, 15000, true);
+      expect(msg).toContain("backend/start-tabanlı proje");
+      expect(msg).toContain("npm start");
+      expect(msg).not.toContain("npx vite");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dev de start da yok → mevcut 'npx vite' fallback korunur (geriye-uyumlu)", async () => {
+    const dir = await mkProj({ scripts: {} });
+    try {
+      const msg = await buildDevServerFailMessage(dir, -1, 5173, 15000, true);
+      expect(msg).toContain("npx vite");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("varsayılan (param yok) → neverAsk=false davranışı (geriye-uyumlu)", async () => {
     const dir = await mkProj({ scripts: {} });
     try {

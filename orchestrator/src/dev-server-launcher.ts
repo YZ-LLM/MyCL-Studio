@@ -477,14 +477,16 @@ export async function buildDevServerFailMessage(
    *  (DONMUŞ HEDEF #1: otonom modda kullanıcıya iş bırakma). MyCL failPhase ile oto-çözer veya dürüstçe durur. */
   neverAsk = false,
 ): Promise<string> {
-  // package.json scripts.dev oku — parse fail veya dosya yoksa boş
+  // package.json scripts.dev + scripts.start oku — parse fail veya dosya yoksa boş
   let devScript = "";
+  let startScript = "";
   try {
     const pkgRaw = await fs.readFile(join(projectRoot, "package.json"), "utf-8");
     const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
     devScript = String(pkg.scripts?.dev ?? "");
+    startScript = String(pkg.scripts?.start ?? "");
   } catch {
-    // package.json yok veya bozuk — devScript = ""
+    // package.json yok veya bozuk — boş
   }
   const hasVite = /(^|\s|"|')(vite|next|webpack-dev-server|wmr|astro\s+dev)(\s|$)/.test(devScript);
   const alive = pid > 0 ? isProcessAlive(pid) : false;
@@ -499,7 +501,14 @@ export async function buildDevServerFailMessage(
   lines.push(`package.json "dev" script: \`${devScript || "(yok)"}\``);
   lines.push(``);
 
-  if (!devScript) {
+  if (!devScript && startScript) {
+    // Backend / start-tabanlı proje (dev script YOK ama start VAR — ör. Express `node ./bin/www`). Vite/frontend
+    // önerme ALAKASIZ. Gerçek çöküş nedeni (eksik bağımlılık / çalışmayan servis) yukarıdaki çıktıda + MyCL onu
+    // otomatik tamamlamaya çalıştı (deps kurulumu / servis provision); son söz gerçek hataya yönlendirir.
+    lines.push(`⚠ Bu bir backend/start-tabanlı proje (\`npm start\` → \`${startScript}\`); frontend dev sunucusu yok.`);
+    lines.push(`Çöküş nedeni yukarıdaki çıktıda. Eksik bağımlılık/servis ise MyCL tamamlamayı denedi; kalan engel (ör. app'e özel veritabanı) yukarıda bildirildi.`);
+    lines.push(`Elle görmek için: \`cd ${projectRoot} && npm start\``);
+  } else if (!devScript) {
     lines.push(`⚠ package.json'da "dev" script tanımlı değil veya okunamadı.`);
     lines.push(`Frontend dev için: \`cd ${projectRoot} && npx vite\` veya proje toolchain'ine uygun komut.`);
   } else if (!hasVite) {

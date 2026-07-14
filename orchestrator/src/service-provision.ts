@@ -13,6 +13,9 @@ import { Socket } from "node:net";
 import { join } from "node:path";
 import { tryDevServerChain, type DevServerChainResult } from "./dev-server-launcher.js";
 import { emitChatMessage } from "./ipc.js";
+import { safeEnv } from "./safe-env.js";
+import { loadProfile, resolveCommand } from "./profile-loader.js";
+import type { StackId } from "./types.js";
 
 /**
  * Dev-server'ı başlat; app bir servise bağlanamayıp çökerse eksik servisi TAMAMLAMAYA çalış (docker-compose) + BİR KEZ
@@ -24,25 +27,56 @@ export async function launchWithProvision(
   projectRoot: string,
   candidates: Array<{ cmd: string; ports: number[] }>,
   timeoutMs: number,
+  opts: { stackId?: StackId | null } = {},
 ): Promise<{ result: DevServerChainResult; provisionAudit?: string }> {
   let result = await tryDevServerChain(projectRoot, candidates, timeoutMs);
   if (result.ok && result.handle && result.cmd) return { result };
-  const crashOut = result.attempts
-    .map((a) => a.output)
-    .filter((o): o is string => !!o)
-    .join("\n---\n");
+
+  const crashOf = (r: DevServerChainResult): string =>
+    r.attempts.map((a) => a.output).filter((o): o is string => !!o).join("\n---\n");
+  let crashOut = crashOf(result);
   const pkgDeps = await fs.readFile(join(projectRoot, "package.json"), "utf-8").catch(() => "");
-  const missing = detectMissingService(crashOut, pkgDeps);
-  if (!missing) return { result };
-  const prov = await tryProvisionService(projectRoot, missing);
-  emitChatMessage("system", prov.message);
-  const provisionAudit = `${missing.name}:${missing.port} attempted=${prov.attempted} ok=${prov.ok}`;
-  if (prov.ok) {
-    const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
-    // attempts BİRLEŞTİR (mahkeme feedback_surface_real_error): retry fail ederse GÜNCEL çıktı görünsün.
-    result = { ...retry, attempts: [...result.attempts, ...retry.attempts] };
+  const auditParts: string[] = [];
+
+  // ROUND 1 — EKSİK BAĞIMLILIK (kurulmamış paket). Servis turundan ÖNCE: express/paket yoksa app hiç
+  // başlamaz, DB'ye bağlanma noktasına gelmez. Crash "Cannot find module" imzası taşıyorsa stack'in kurulum
+  // komutuyla TAMAMLA + BİR KEZ retry. Kurulum komutu PROFİLDEN çözülür (KATI #1 — tek kaynak, hardcode YOK;
+  // stackId çağırandan TAZE detectStack ile gelir → greenfield/unknown state.stack tuzağı yok). Foreign projede
+  // deps çoğu zaman kurulmamış olur (phase-5 yalnız create-iterasyonda kurar; "projeyi çalıştır" komutu hiç kurmazdı).
+  if (detectMissingDeps(crashOut, pkgDeps)) {
+    const installCmd = opts.stackId ? resolveCommand(await loadProfile(opts.stackId), "install") : null;
+    if (installCmd) {
+      // Kurulum uzun sürebilir → kullanıcı beklerken NE olduğunu ANINDA görsün (başlarken + bitince).
+      emitChatMessage("system", `📦 Uygulama başlamadı: bağımlılıklar kurulu değil. \`${installCmd}\` ile kuruluyor…`);
+      const inst = await tryInstallDeps(projectRoot, installCmd);
+      if (inst.message) emitChatMessage("system", inst.message);
+      auditParts.push(`deps-install attempted=${inst.attempted} ok=${inst.ok}`);
+      if (inst.ok) {
+        const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
+        result = { ...retry, attempts: [...result.attempts, ...retry.attempts] };
+        if (result.ok && result.handle && result.cmd) {
+          return { result, provisionAudit: auditParts.join("; ") };
+        }
+        // Kurulum başarılı ama app hâlâ çök/timeout — ROUND 2 GÜNCEL crash'i görsün (artık "module yok" değil,
+        // muhtemelen ECONNREFUSED = eksik servis). Bayat "Cannot find module"la servis tespiti yapma.
+        crashOut = crashOf(retry);
+      }
+    }
   }
-  return { result, provisionAudit };
+
+  // ROUND 2 — EKSİK SERVİS (DB/cache). Crash'teki ECONNREFUSED :port → servis; docker-compose ile tamamla veya rehber.
+  const missing = detectMissingService(crashOut, pkgDeps);
+  if (missing) {
+    const prov = await tryProvisionService(projectRoot, missing);
+    emitChatMessage("system", prov.message);
+    auditParts.push(`${missing.name}:${missing.port} attempted=${prov.attempted} ok=${prov.ok}`);
+    if (prov.ok) {
+      const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
+      // attempts BİRLEŞTİR (mahkeme feedback_surface_real_error): retry fail ederse GÜNCEL çıktı görünsün.
+      result = { ...retry, attempts: [...result.attempts, ...retry.attempts] };
+    }
+  }
+  return { result, provisionAudit: auditParts.length ? auditParts.join("; ") : undefined };
 }
 
 export interface ServiceDep {
@@ -101,6 +135,127 @@ export function detectMissingService(crashOutput: string, pkgDepsText: string): 
   const svc = KNOWN_SERVICES.find((s) => s.deps.test(pkgDepsText));
   if (svc) return { name: svc.name, port: svc.port, hint: svc.hint };
   return null;
+}
+
+// Non-node ekosistem "kurulmamış bağımlılık" crash imzaları. MAHKEME (2. tur) uyarısı: yalnız PAKET/BAĞIMLILIK
+// sistemine ÖZGÜ, kesin imzalar tutuldu (genel "dosya/modül bulunamadı" olanlar YEREL-yol typo'sundan ayırt
+// edilemez → yanlış-pozitif). Çıkarılanlar: Ruby `cannot load such file --`, PHP `Failed opening required`,
+// Rust `use of undeclared crate` (hepsi yerel-modül typo'suyla aynı metni verir). Tutulanlar paket-sistemine gömülü.
+const OTHER_STACK_MISSING_DEPS_RE =
+  /ERR_MODULE_NOT_FOUND|ModuleNotFoundError|No module named|Cannot find package\s+['"]|could not determine executable to run|vendor\/autoload|Couldn't resolve the package\s+['"]|no required module provides package/i;
+
+/** Bir bare specifier'ın KÖK paket adı (@scope/name → @scope/name; express/lib/x → express; routes/db → routes). */
+function rootPackageName(spec: string): string {
+  const segs = spec.split("/");
+  return spec.startsWith("@") ? segs.slice(0, 2).join("/") : segs[0];
+}
+
+/** package.json ham metninde bir paket dependencies/devDependencies/peer/optional altında BİLDİRİLMİŞ mi? */
+function isDeclaredDep(pkg: string, pkgDepsText: string): boolean {
+  if (!pkgDepsText) return false;
+  try {
+    const j = JSON.parse(pkgDepsText) as Record<string, Record<string, string> | undefined>;
+    for (const key of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+      if (j[key] && Object.prototype.hasOwnProperty.call(j[key], pkg)) return true;
+    }
+  } catch {
+    /* parse edilemedi → bildirilmemiş say */
+  }
+  return false;
+}
+
+/**
+ * Crash çıktısı KURULMAMIŞ bağımlılık (paket) hatası mı? SAF (testli). Stack-bağımsız imzalar.
+ * Node CJS ("Cannot find module 'X'"): X BARE paket olmalı (./ veya / ile başlayan YEREL yol typo'su install ile
+ * çözülmez) VE (mahkeme yanlış-pozitif fix) X package.json'da BİLDİRİLMİŞ olmalı — `require('routes/db')` gibi `./`
+ * unutulmuş yerel yol bare görünür ama deps değildir → install çözmez. pkgDepsText YOKSA (okunamadı) bare→true (cave
+ * gibi node_modules hiç yok senaryosu için güvenli taraf). ESM/Python/Ruby/PHP/Dart/Go/Rust imzaları zaten specifik.
+ */
+export function detectMissingDeps(crashOutput: string, pkgDepsText = ""): boolean {
+  if (!crashOutput) return false;
+  const m = /Cannot find module\s+['"]([^'"]+)['"]/i.exec(crashOutput);
+  if (m) {
+    const spec = m[1];
+    if (!spec.startsWith(".") && !spec.startsWith("/")) {
+      const root = rootPackageName(spec);
+      if (isDeclaredDep(root, pkgDepsText)) return true; // bildirilmiş paket + kurulu değil → kur
+      if (!pkgDepsText) return true; // package.json okunamadı → bare paketi kurulmamış say (güvenli taraf)
+      // pkgDepsText var ama root bildirilmemiş → yerel-yol typo'su / undeclared → install çözmez (FP önle)
+    }
+  }
+  return OTHER_STACK_MISSING_DEPS_RE.test(crashOutput);
+}
+
+export interface InstallResult {
+  /** Kurulum DENENDİ mi (installCmd boş değildi). */
+  attempted: boolean;
+  /** Başarılı mı (kurulum komutu exit 0). */
+  ok: boolean;
+  /** Kullanıcıya görünür mesaj (boşsa emit edilmez). */
+  message: string;
+}
+
+/** Kurulum çok uzun sürebilir (büyük dep ağacı, native derleme, puppeteer→Chromium indirmesi) — üst sınır
+ *  (asılma önleme). phase-5'in kendi install adımıyla TUTARLI (600s); 300s ağır projede yetmeyip erken kesiyordu. */
+const INSTALL_TIMEOUT_MS = 600_000;
+
+/**
+ * Eksik bağımlılıkları stack'in kurulum komutuyla (installCmd — çağıran profile'dan stack-bağımsız çözer) KUR.
+ * Fail-soft: komut yok/hata/timeout → {ok:false} + görünür mesaj (sessiz fallback YOK). installCmd profilden gelir
+ * (kullanıcı girdisi değil), basit "npm install"/"pip install -r requirements.txt" biçimi → boşlukla ayır (shell yok).
+ */
+export async function tryInstallDeps(projectRoot: string, installCmd: string): Promise<InstallResult> {
+  const parts = installCmd.trim().split(/\s+/).filter(Boolean);
+  const bin = parts[0];
+  if (!bin) return { attempted: false, ok: false, message: "" };
+  const args = parts.slice(1);
+  const r = await new Promise<{ code: number; out: string }>((resolve) => {
+    let out = "";
+    let settled = false;
+    const done = (v: { code: number; out: string }): void => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    // safeEnv (mahkeme CRITICAL): foreign projede `npm install` üçüncü-taraf postinstall = keyfi kod → orkestratörün
+    // TAM env'ini (API anahtarları) child'a SIZDIRMA. Kardeş kod da böyle: phase-5 install + dev-server-launcher.
+    const child = spawn(bin, args, {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...safeEnv(), LC_ALL: "C" },
+    });
+    const CAP = 16 * 1024; // out üst-sınır (mahkeme feedback_resource_careful): gevşek-loglayan kurulum belleği şişirmesin.
+    const append = (d: Buffer): void => {
+      out = (out + d.toString()).slice(-CAP);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* zaten öldü */
+      }
+      done({ code: -2, out: `${out}\n[MyCL: ${installCmd} ${INSTALL_TIMEOUT_MS / 1000}s'i aştı — kesildi]` });
+    }, INSTALL_TIMEOUT_MS);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      done({ code: -1, out: `${out}\n${String(e)}` }); // binary yok (PATH) → fail-soft
+    });
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      done({ code: code ?? -1, out });
+    });
+  });
+  return {
+    attempted: true,
+    ok: r.code === 0,
+    message:
+      r.code === 0
+        ? `📦 Eksik bağımlılıkları \`${installCmd}\` ile kurdum. Dev server'ı yeniden deniyorum.`
+        : `⚠️ \`${installCmd}\` başarısız oldu (${r.out.slice(-200).trim()}). Bağımlılıklar kurulamadı — elle \`${installCmd}\` çalıştırıp tekrar deneyin.`,
+  };
 }
 
 /** Port'a TCP connect ederek servisin kalktığını doğrula (timeoutMs içinde, ~1sn aralıkla dener). */

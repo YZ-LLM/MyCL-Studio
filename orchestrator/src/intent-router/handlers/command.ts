@@ -626,10 +626,14 @@ async function runDevServer(
   try {
     // launchWithProvision: TEK KAYNAK helper — Faz 5 ile AYNI (drift yok). App bir servise (DB/cache) bağlanamayıp
     // çökerse eksik servisi tespit eder + docker-compose ile TAMAMLAMAYA çalışır + BİR KEZ retry eder (AKILLI RUN).
+    // Eksik bağımlılık (kurulmamış paket) crash'inde helper stack'in PROFİL install komutunu (npm/yarn/pip/cargo…)
+    // çözüp kurar. stackId TAZE detectStack'ten (yukarıda) → foreign projede deps çoğu kez kurulu değildir → app
+    // "Cannot find module" ile anında çöker; bu komutla tamamlanır. (KATI #1: komut profilden, hardcode yok.)
     const { result: chainResult, provisionAudit } = await launchWithProvision(
       state.project_root,
       candidates,
       DEV_SERVER_TIMEOUT_MS,
+      { stackId: stack },
     );
     if (provisionAudit) {
       await appendAudit(state.project_root, {

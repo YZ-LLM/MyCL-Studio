@@ -158,12 +158,19 @@ entegre eder.
 
 MyCL projeyi çalıştırırken (Faz 5'te ya da **"projeyi çalıştır"** komutuyla) alt
 bantta **çalışıyor göstergesi** (spinner) gösterir — takıldı mı diye merak etmezsin.
-Uygulama bağımlı olduğu bir **servise** (MySQL / PostgreSQL / Mongo / Redis) bağlanamayıp
-çökerse MyCL eksik servisi çökme çıktısından tespit eder ve **tamamlamaya çalışır**
-(proje bir `docker-compose` bildiriyorsa `docker compose up -d` ile başlatıp portu
-gerçekten dinliyor mu diye doğrular), sonra dev-server'ı bir kez yeniden dener. Compose
-yoksa jenerik bir hata yerine o servise özel, eyleme dönük bir başlatma rehberi verir.
-Her adım sana sohbette görünür; sessizce atlamaz.
+Çalıştırırken **eksik olanı tamamlamaya çalışır** ve her adımı sana söyler:
+
+- **Kurulmamış bağımlılıklar:** app "paket bulunamadı" ile anında çökerse (yabancı projede
+  `node_modules` çoğu zaman kurulu değildir) MyCL stack'in **profil kurulum komutuyla**
+  (npm / yarn / pip / cargo …; hardcode yok) eksik bağımlılıkları kurar ve dev-server'ı bir
+  kez yeniden dener.
+- **Çalışmayan servisler:** app bir **servise** (MySQL / PostgreSQL / Mongo / Redis)
+  bağlanamayıp çökerse MyCL eksik servisi çökme çıktısından tespit eder; proje bir
+  `docker-compose` bildiriyorsa `docker compose up -d` ile başlatıp portu gerçekten dinliyor
+  mu diye doğrular, sonra yeniden dener. Compose yoksa jenerik bir hata yerine o servise özel,
+  eyleme dönük bir başlatma rehberi verir.
+
+Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel veritabanı) dürüstçe söyler.
 
 ## Doğrulama ve güvenlik
 

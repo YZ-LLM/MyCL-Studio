@@ -720,6 +720,10 @@ export class Phase5Controller {
       this.state.project_root,
       candidates,
       DEV_SERVER_TIMEOUT_MS,
+      // create-iterasyonda deps yukarıda zaten kuruldu; stackId emniyet ağı (kurulum atlandı/kısmî kaldıysa
+      // "Cannot find module" crash'inde helper profil install'ıyla tamamlar). Deps kuruluysa detectMissingDeps=false
+      // → no-op. stackId TAZE detectStack'ten (satır 583) → greenfield'de state.stack=unknown tuzağına düşmez.
+      { stackId: stack },
     );
     if (provisionAudit) {
       await appendAudit(this.state.project_root, {
