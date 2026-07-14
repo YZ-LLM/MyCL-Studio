@@ -2418,7 +2418,7 @@ async function handleTaskQueueRemove({ id }: { id: string }): Promise<void> {
  * YZLLM 2026-07-03: bir YARIM-kalmış fazdan resume — boot-resume bloğu (unbound) + kuyruk-güdümlü orphan resume
  * (bound: taskId) bu PAYLAŞIMLI mantığı kullanır. Gövde eski boot-resume satır-içinden BYTE-EŞDEĞER çıkarıldı
  * (spec-yok→Faz 4 fallback + ensurePendingIterationDir + "📍 Faz N yarıda kalmıştı" mesajı + advanceToNextPhase(phaseId-1)).
- * taskId verilirse orphan işi bu resume'a bağlar → Faz 17'de onTaskMaybeComplete 'done' damgalar + kalan pending'ler drain.
+ * taskId verilirse orphan işi bu resume'a bağlar → Faz 17'de onTaskMaybeComplete 'done' (veya deliverable yoksa 'dropped') damgalar + kalan pending'ler drain.
  */
 async function resumeInterruptedPhase(
   phaseId: PhaseId,
@@ -4252,6 +4252,20 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   runtime.currentTaskId = null;
   _drainTaskId = null;
   if (!doneId) return; // kuyruk-dışı iterasyon (resume/doğrudan develop) → no-op
+  // SAHTE-TAMAMLANMA KİLİT KORUMASI (YZLLM 2026-07-14, güvenilirlik denetimi): deliverable YOKSA görevi 'done'
+  // (KİLİTLİ, "tekrar uygulanamaz") DAMGALAMA. emitVerificationSummary aynı hasDeliverable sinyaliyle "boş build →
+  // YEŞİL DEĞİL" uyarısını basıyor; task-queue makine-durumu o uyarıyla TUTARLI olmalı — yoksa kuyruk "Tamamlandı"
+  // gösterir, retry edilmez, sıradaki iş başlar (sahte-tamamlanma; kullanıcının en büyük korkusu). Boş-build → 'dropped'
+  // (UI'da "Yeniden Ekle" görünür → kullanıcı sorunu çözüp yeniden gönderebilir). Bkz MEMORY project_faz5_skip_false_green.
+  if (!(await hasDeliverable(projectRoot))) {
+    await patchTask(projectRoot, doneId, { status: "dropped" });
+    await emitQueueChangedFor(projectRoot);
+    emitChatMessage(
+      "system",
+      "⛔ İş 'Tamamlandı' DAMGALANMADI — boş build (hiç uygulama/kaynak dosyası üretilmedi). 'Düştü' olarak işaretlendi; sorunu çözüp yeniden gönderebilirsin.",
+    );
+    return;
+  }
   await patchTask(projectRoot, doneId, { status: "done", completed_at: Date.now() });
   await emitQueueChangedFor(projectRoot);
 }

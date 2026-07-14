@@ -451,10 +451,20 @@ const NON_DELIVERABLE_TOP = new Set([
  * Boş-build sahte-yeşil koruması için: deliverable yoksa koşu YEŞİL sayılamaz. Fail-safe: erişim hatası →
  * TRUE (okunamayan dizinde gerçek build'i yanlışlıkla FAIL etme; guard yalnız BARİZ boş projeyi yakalar).
  */
+// Meşru dot-dizin deliverable'ları (CI/CD, git-hook, editor/dev-container config) — MyCL metadata DEĞİL, kullanıcı
+// çıktısı. Sayılır ki "yalnız .github/.husky üreten" meşru config görevi yanlışlıkla boş-build sanılıp 'dropped'
+// olmasın (YZLLM 2026-07-14, mahkeme: FP azaltırken FN açma). NOT: dar-kalan-edge — yalnız gevşek dot-DOSYA üreten
+// görev (`.eslintrc` tek başına, dizinsiz) hâlâ sayılmaz; nadir + kullanıcı yeniden gönderebilir (kabul edilen denge).
+const DELIVERABLE_DOTDIRS = new Set([".github", ".husky", ".vscode", ".circleci", ".gitlab", ".devcontainer"]);
+
 export async function hasDeliverable(projectRoot: string): Promise<boolean> {
   try {
     const entries = await fs.readdir(projectRoot, { withFileTypes: true });
-    return entries.some((e) => !e.name.startsWith(".") && !NON_DELIVERABLE_TOP.has(e.name));
+    return entries.some(
+      (e) =>
+        (!e.name.startsWith(".") && !NON_DELIVERABLE_TOP.has(e.name)) ||
+        (e.isDirectory() && DELIVERABLE_DOTDIRS.has(e.name)),
+    );
   } catch (e) {
     log.warn("phase-1-probe", "hasDeliverable: proje kökü okunamadı → true (boş-build guard'ı atlanır)", { error: String(e) });
     return true;

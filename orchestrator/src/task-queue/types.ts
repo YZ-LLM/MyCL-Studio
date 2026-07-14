@@ -12,7 +12,9 @@
  *  - pending : kuyrukta, henüz işlenmedi.
  *  - running : şu an Faz 1'den itibaren işleniyor.
  *  - done    : tamamlandı (Faz 4 sonrasına geçip pipeline'ı bitirdi) → KİLİTLİ, tekrar uygulanamaz.
- *  - dropped : erken fazlar (1-4) gürültü/uygulanamaz buldu → Faz 4'ü geçemedi.
+ *  - dropped : (a) erken fazlar (1-4) gürültü/uygulanamaz buldu → Faz 4'ü geçemedi, VEYA (b) pipeline sonuna ulaştı
+ *              ama DELIVERABLE ÜRETMEDİ (boş-build → 'done' KİLİDİ yerine 'dropped'; sahte-tamamlanma önleme, 2026-07-14).
+ *              İki durumda da UI "Yeniden Ekle" gösterir → kullanıcı sorunu çözüp yeniden gönderebilir.
  */
 export type TaskStatus = "pending" | "running" | "done" | "dropped";
 
