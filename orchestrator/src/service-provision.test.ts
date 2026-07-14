@@ -6,6 +6,9 @@ import {
   detectMissingService,
   detectMissingDeps,
   depsDirNeedsInstall,
+  salientInstallError,
+  isCorruptDepsError,
+  safeDepsDirTarget,
   findComposeFile,
 } from "./service-provision.js";
 
@@ -160,6 +163,49 @@ describe("depsDirNeedsInstall — PROAKTİF, STACK-BAĞIMSIZ deps kontrolü (cra
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("salientInstallError + isCorruptDepsError — cave GERÇEK npm hatası (ENOTEMPTY)", () => {
+  // cave çalıştırıldığında npm'in ürettiği GERÇEK hata (npm debug log'undan — npm çıktısı, cave kaynağı değil).
+  const CAVE_NPM_ERR = [
+    "npm error code ENOTEMPTY",
+    "npm error syscall rename",
+    "npm error path /Users/Shared/MyCL Projeler/cave-7ac855d7/node_modules/fsevents",
+    "npm error dest /Users/Shared/MyCL Projeler/cave-7ac855d7/node_modules/.fsevents-iRgnoUa7",
+    "npm error errno -66",
+    "npm error ENOTEMPTY: directory not empty, rename '.../node_modules/fsevents' -> '.../node_modules/.fsevents-iRgnoUa7'",
+  ].join("\n");
+
+  it("salientInstallError: kodu (ENOTEMPTY) çıkarır — ham son-200 karakter değil", () => {
+    const s = salientInstallError(CAVE_NPM_ERR);
+    expect(s).toContain("ENOTEMPTY");
+    expect(s).toContain("directory not empty");
+  });
+  it("isCorruptDepsError: ENOTEMPTY → true (temizle+yeniden kur tetikler)", () => {
+    expect(isCorruptDepsError(CAVE_NPM_ERR)).toBe(true);
+  });
+  it("isCorruptDepsError: EEXIST → true", () => {
+    expect(isCorruptDepsError("npm error code EEXIST\nnpm error EEXIST: file already exists")).toBe(true);
+  });
+  it("isCorruptDepsError: ağ/registry hatası (ETARGET/ENOTFOUND) → false (temizleme YOK)", () => {
+    expect(isCorruptDepsError("npm error code ETARGET\nnpm error notarget No matching version")).toBe(false);
+    expect(isCorruptDepsError("npm error code ENOTFOUND\nnpm error network request failed")).toBe(false);
+  });
+  it("salientInstallError: kod yoksa son parçaya düşer (boş değil)", () => {
+    expect(salientInstallError("bir şeyler ters gitti, detay yok").length).toBeGreaterThan(0);
+  });
+  it("safeDepsDirTarget: normal deps_dir'ler güvenli → kök-içi mutlak yol döner", () => {
+    for (const d of ["node_modules", "vendor", ".dart_tool", "deps", "node_modules/"]) {
+      const t = safeDepsDirTarget("/proj/root", d);
+      expect(t).not.toBeNull();
+      expect(t!.startsWith("/proj/root/")).toBe(true);
+    }
+  });
+  it("safeDepsDirTarget: FELAKET senaryoları → null (proje kökü ASLA silinmez)", () => {
+    // Kritik: "./" ve "././" mahkemenin bulduğu kaçamak — resolve normalize eder → kök → null.
+    for (const d of ["", "  ", ".", "./", "././", "..", "/", "/etc", "../..", "a/../..", "node_modules/../..", null, undefined])
+      expect(safeDepsDirTarget("/proj/root", d)).toBeNull();
   });
 });
 

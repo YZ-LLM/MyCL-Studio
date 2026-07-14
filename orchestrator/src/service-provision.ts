@@ -10,7 +10,7 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { Socket } from "node:net";
-import { join } from "node:path";
+import { join, resolve, relative, isAbsolute } from "node:path";
 import { tryDevServerChain, type DevServerChainResult } from "./dev-server-launcher.js";
 import { emitChatMessage } from "./ipc.js";
 import { safeEnv } from "./safe-env.js";
@@ -42,7 +42,8 @@ export async function launchWithProvision(
   const runInstall = async (startMsg: string): Promise<boolean> => {
     if (!installCmd) return false;
     emitChatMessage("system", startMsg); // kullanıcı beklerken NE olduğunu ANINDA görsün (başlarken + bitince).
-    const inst = await tryInstallDeps(projectRoot, installCmd);
+    // depsDir geçir → kurulum "bozuk dizin" (ENOTEMPTY, yarım kurulum kalıntısı) ile düşerse temizle+yeniden kur.
+    const inst = await tryInstallDeps(projectRoot, installCmd, { depsDir });
     if (inst.message) emitChatMessage("system", inst.message);
     auditParts.push(`deps-install attempted=${inst.attempted} ok=${inst.ok}`);
     return inst.ok;
@@ -230,62 +231,124 @@ export interface InstallResult {
  *  (asılma önleme). phase-5'in kendi install adımıyla TUTARLI (600s); 300s ağır projede yetmeyip erken kesiyordu. */
 const INSTALL_TIMEOUT_MS = 600_000;
 
+/** Kurulum çıktısından ANLAMLI hata özeti (kod + mesaj satırı). Ham son-200-karakter hata KODUNU kesip gizliyordu
+ *  (cave: "ENOTEMPTY" kaybolup yalnız yol tail'i görünüyordu). SAF (testli). */
+export function salientInstallError(out: string): string {
+  const code =
+    /(?:npm |yarn |pnpm )?error\s+code\s+([A-Z0-9_]+)/i.exec(out)?.[1] ??
+    /\bcode:\s*['"]?([A-Z0-9_]+)['"]?/i.exec(out)?.[1];
+  const line = /\b([A-Z]{2,}[A-Z0-9]*: [^\n]+)/.exec(out)?.[1];
+  const summary = [code, line].filter(Boolean).join(" — ");
+  return (summary || out.slice(-300)).trim();
+}
+
+/** Kurulum "BOZUK deps dizini" hatası mı (yarım/kesilmiş kurulumun bıraktığı kalıntı — ör. node_modules/.fsevents-XXXX
+ *  rename ENOTEMPTY)? Bu durumda deps dizinini TEMİZLEYİP yeniden kurmak çözer. SAF (testli). DAR tutuldu (mahkeme):
+ *  yalnız paket-yöneticisinin reify aşamasındaki kesin bozuk-dizin kodları (ENOTEMPTY/EEXIST) — genel "already exists"
+ *  / ENOTDIR alakasız kurulum hatalarında (postinstall dosya çakışması vb.) gereksiz temizleme tetiklemesin. */
+export function isCorruptDepsError(out: string): boolean {
+  return /\bENOTEMPTY\b|\bEEXIST\b|directory not empty/i.test(out);
+}
+
+/**
+ * deps_dir'i proje köküne göre çöz + SİLMEK için güvenli mi doğrula. Kök'ün KENDİSİ veya kök DIŞI → null (ASLA silme).
+ * `resolve` trailing-slash/"."/".."/mutlak yolları normalize eder → `""`, `"."`, `"./"`, `"././"`, `".."`, `"/etc"`,
+ * `"a/../.."` gibi FELAKET kaçamaklarının HEPSİ kapanır (mahkeme: eski `join`+string kontrolü "./" biçimini kaçırıp
+ * proje kökünü siliyordu). deps_dir profilden gelir (güvenilir) ama felaket geri-dönülemez → correct-by-construction.
+ * SAF (testli). @returns silinecek güvenli mutlak yol, ya da güvensizse null.
+ */
+export function safeDepsDirTarget(projectRoot: string, depsDir: string | null | undefined): string | null {
+  if (!depsDir || !depsDir.trim()) return null;
+  const target = resolve(projectRoot, depsDir);
+  const rel = relative(projectRoot, target);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null; // kök veya kök-dışı → güvensiz
+  return target;
+}
+
 /**
  * Eksik bağımlılıkları stack'in kurulum komutuyla (installCmd — çağıran profile'dan stack-bağımsız çözer) KUR.
- * Fail-soft: komut yok/hata/timeout → {ok:false} + görünür mesaj (sessiz fallback YOK). installCmd profilden gelir
- * (kullanıcı girdisi değil), basit "npm install"/"pip install -r requirements.txt" biçimi → boşlukla ayır (shell yok).
+ * Fail-soft: komut yok/hata/timeout → {ok:false} + görünür ANLAMLI hata (sessiz fallback YOK). installCmd profilden
+ * gelir (kullanıcı girdisi değil), basit "npm install" biçimi → boşlukla ayır (shell yok).
+ * KURTARMA (YZLLM cave log'u — ENOTEMPTY rename): kurulum "bozuk deps dizini" (yarım kalmış kurulum kalıntısı) ile
+ * düşerse ve depsDir biliniyorsa (profilden) dizini TEMİZLE + BİR KEZ yeniden kur. deps_dir yeniden üretilebilir
+ * (kaynak değil) → güvenli; stack-bağımsız (dizin adı çağırandan). Temizleme görünür (KATI #4).
  */
-export async function tryInstallDeps(projectRoot: string, installCmd: string): Promise<InstallResult> {
+export async function tryInstallDeps(
+  projectRoot: string,
+  installCmd: string,
+  opts: { depsDir?: string | null } = {},
+): Promise<InstallResult> {
   const parts = installCmd.trim().split(/\s+/).filter(Boolean);
   const bin = parts[0];
   if (!bin) return { attempted: false, ok: false, message: "" };
   const args = parts.slice(1);
-  const r = await new Promise<{ code: number; out: string }>((resolve) => {
-    let out = "";
-    let settled = false;
-    const done = (v: { code: number; out: string }): void => {
-      if (!settled) {
-        settled = true;
-        resolve(v);
-      }
-    };
-    // safeEnv (mahkeme CRITICAL): foreign projede `npm install` üçüncü-taraf postinstall = keyfi kod → orkestratörün
-    // TAM env'ini (API anahtarları) child'a SIZDIRMA. Kardeş kod da böyle: phase-5 install + dev-server-launcher.
-    const child = spawn(bin, args, {
-      cwd: projectRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...safeEnv(), LC_ALL: "C" },
+
+  const runOnce = (): Promise<{ code: number; out: string }> =>
+    new Promise((resolve) => {
+      let out = "";
+      let settled = false;
+      const done = (v: { code: number; out: string }): void => {
+        if (!settled) {
+          settled = true;
+          resolve(v);
+        }
+      };
+      // safeEnv (mahkeme CRITICAL): foreign projede `npm install` üçüncü-taraf postinstall = keyfi kod → orkestratörün
+      // TAM env'ini (API anahtarları) child'a SIZDIRMA. Kardeş kod da böyle: phase-5 install + dev-server-launcher.
+      const child = spawn(bin, args, {
+        cwd: projectRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...safeEnv(), LC_ALL: "C" },
+      });
+      const CAP = 16 * 1024; // out üst-sınır (mahkeme feedback_resource_careful): gevşek-loglayan kurulum belleği şişirmesin.
+      const append = (d: Buffer): void => {
+        out = (out + d.toString()).slice(-CAP);
+      };
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* zaten öldü */
+        }
+        done({ code: -2, out: `${out}\n[MyCL: ${installCmd} ${INSTALL_TIMEOUT_MS / 1000}s'i aştı — kesildi]` });
+      }, INSTALL_TIMEOUT_MS);
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        done({ code: -1, out: `${out}\n${String(e)}` }); // binary yok (PATH) → fail-soft
+      });
+      child.stdout.on("data", append);
+      child.stderr.on("data", append);
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        done({ code: code ?? -1, out });
+      });
     });
-    const CAP = 16 * 1024; // out üst-sınır (mahkeme feedback_resource_careful): gevşek-loglayan kurulum belleği şişirmesin.
-    const append = (d: Buffer): void => {
-      out = (out + d.toString()).slice(-CAP);
-    };
-    const timer = setTimeout(() => {
+
+  let r = await runOnce();
+  // KURTARMA: bozuk deps dizini (yarım kurulum kalıntısı) → temizle + BİR KEZ yeniden kur. safeDepsDirTarget felaket
+  // yolları (kök/"."/"./"/".."/mutlak) null döner → asla proje kökünü silmeyiz (correct-by-construction güvenlik rayı).
+  if (r.code !== 0 && isCorruptDepsError(r.out)) {
+    const target = safeDepsDirTarget(projectRoot, opts.depsDir);
+    if (target) {
+      emitChatMessage(
+        "system",
+        `🧹 \`${opts.depsDir}\` bozuk görünüyor (yarım kalmış kurulum kalıntısı) — temizleyip yeniden kuruyorum…`,
+      );
       try {
-        child.kill("SIGKILL");
+        await fs.rm(target, { recursive: true, force: true });
+        r = await runOnce();
       } catch {
-        /* zaten öldü */
+        /* silinemezse yeni kurulum denenmez; ilk hata görünür kalır (sessiz atlamıyoruz) */
       }
-      done({ code: -2, out: `${out}\n[MyCL: ${installCmd} ${INSTALL_TIMEOUT_MS / 1000}s'i aştı — kesildi]` });
-    }, INSTALL_TIMEOUT_MS);
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      done({ code: -1, out: `${out}\n${String(e)}` }); // binary yok (PATH) → fail-soft
-    });
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      done({ code: code ?? -1, out });
-    });
-  });
+    }
+  }
   return {
     attempted: true,
     ok: r.code === 0,
     message:
       r.code === 0
         ? `📦 Eksik bağımlılıkları \`${installCmd}\` ile kurdum. Dev server'ı yeniden deniyorum.`
-        : `⚠️ \`${installCmd}\` başarısız oldu (${r.out.slice(-200).trim()}). Bağımlılıklar kurulamadı — elle \`${installCmd}\` çalıştırıp tekrar deneyin.`,
+        : `⚠️ \`${installCmd}\` başarısız oldu (${salientInstallError(r.out)}). Bağımlılıklar kurulamadı — elle \`${installCmd}\` çalıştırıp tekrar deneyin.`,
   };
 }
 
