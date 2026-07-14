@@ -36,6 +36,7 @@ import {
 } from "./intent-router/handlers/command.js";
 import { devServerCandidates } from "./dev-server-command.js";
 import { isNeverAsk } from "./auto-answer.js";
+import { detectMissingService, tryProvisionService } from "./service-provision.js";
 import { emitChatMessage, emitError, emitPhaseRunning } from "./ipc.js";
 import { loadProfile, resolveCommand } from "./profile-loader.js";
 import { applyPrototype, surfacePrototypeModuleSearch } from "./prototype-cache.js";
@@ -712,11 +713,40 @@ export class Phase5Controller {
       "system",
       `Dev server başlatılıyor — aday komut(lar): ${cmds.map((c) => `\`${c}\``).join(", ")}…`,
     );
-    const chainResult = await tryDevServerChain(
+    let chainResult = await tryDevServerChain(
       this.state.project_root,
       candidates,
       DEV_SERVER_TIMEOUT_MS,
     );
+    // AKILLI RUN (YZLLM 2026-07-14, "MyCL stack'i biliyor; eksik olanı tamamlamaya çalışmalı ve bana söylemeli"):
+    // app bir servise (DB/cache) bağlanamayıp çöktüyse (ECONNREFUSED) → eksik servisi TESPİT ET + TAMAMLAMAYA çalış
+    // (proje docker-compose bildirmişse `docker compose up -d`) + dev-server'ı BİR KEZ retry. Compose yoksa spesifik
+    // rehber. Her adım kullanıcıya söylenir. Başarılı retry → aşağıdaki success yoluna düşer (park yok).
+    if (!chainResult.ok || !chainResult.handle || !chainResult.cmd) {
+      const crashOut = chainResult.attempts
+        .map((a) => a.output)
+        .filter((o): o is string => !!o)
+        .join("\n---\n");
+      const pkgDepsText = await readFile(join(this.state.project_root, "package.json"), "utf-8").catch(() => "");
+      const missing = detectMissingService(crashOut, pkgDepsText);
+      if (missing) {
+        const prov = await tryProvisionService(this.state.project_root, missing);
+        emitChatMessage("system", prov.message);
+        await appendAudit(this.state.project_root, {
+          ts: Date.now(),
+          phase: 5,
+          event: "phase-5-service-provision",
+          caller: "mycl-orchestrator",
+          detail: `${missing.name}:${missing.port} attempted=${prov.attempted} ok=${prov.ok}`,
+        });
+        if (prov.ok) {
+          const retry = await tryDevServerChain(this.state.project_root, candidates, DEV_SERVER_TIMEOUT_MS);
+          // attempts'i BİRLEŞTİR (mahkeme feedback_surface_real_error): retry başarılıysa success yoluna düşer; retry de
+          // fail ederse fail-handling GÜNCEL (provision-sonrası) gerçek çıktıyı görsün — provision-öncesi bayat ECONNREFUSED değil.
+          chainResult = { ...retry, attempts: [...chainResult.attempts, ...retry.attempts] };
+        }
+      }
+    }
     if (!chainResult.ok || !chainResult.handle || !chainResult.cmd) {
       const lastAttempt =
         chainResult.attempts[chainResult.attempts.length - 1];
