@@ -31,5 +31,9 @@
     "default": null
   },
   "default_port": 5173,
-  "manifest_files": ["package.json", "yarn.lock"]
+  "manifest_files": [
+    "package.json",
+    "yarn.lock"
+  ],
+  "deps_dir": "node_modules"
 }

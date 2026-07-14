@@ -25,5 +25,9 @@
     "default": null
   },
   "default_port": 8000,
-  "manifest_files": ["composer.json", "composer.lock"]
+  "manifest_files": [
+    "composer.json",
+    "composer.lock"
+  ],
+  "deps_dir": "vendor"
 }

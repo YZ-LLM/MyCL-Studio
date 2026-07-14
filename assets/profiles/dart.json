@@ -24,5 +24,9 @@
     "default": null
   },
   "default_port": 8080,
-  "manifest_files": ["pubspec.yaml", "pubspec.lock"]
+  "manifest_files": [
+    "pubspec.yaml",
+    "pubspec.lock"
+  ],
+  "deps_dir": ".dart_tool"
 }

@@ -31,5 +31,9 @@
     "default": null
   },
   "default_port": 3000,
-  "manifest_files": ["package.json", "bun.lockb"]
+  "manifest_files": [
+    "package.json",
+    "bun.lockb"
+  ],
+  "deps_dir": "node_modules"
 }

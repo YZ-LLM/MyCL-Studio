@@ -23,12 +23,30 @@ Yeni bir katı kural konuşulduğunda buraya ekle (tek doğruluk kaynağı budur
 7. **Çapraz-platform = macOS + Linux.** Windows kapsam dışı; araç eksikse görünür + fail-closed.
 8. **Faz 5 sonrası uygulama AÇILIR.** UI kurulduktan sonra MyCL uygulamayı ÇALIŞTIRIR (dev server +
    tarayıcı) — inceleme/kullanıcı için ayakta olmalı; sessizce geçmez.
-9. **Faz 6 HER ZAMAN kullanıcıdan inceleme ister.** UI'lı projede (skip_ui_phases=false) Faz 6 ASLA
-   atlanmaz/oto-geçilmez; uygulamayı açıp kullanıcı UI'yi inceleyip karar verene kadar park eder
-   (kullanıcı sürer; spec-keyword heuristiğiyle skip YASAK).
+9. **Faz 6 HER ZAMAN kullanıcıdan inceleme ister — "hiçbir şey sorma" modu DIŞINDA.** UI'lı projede
+   (skip_ui_phases=false) Faz 6 ASLA atlanmaz/oto-geçilmez; uygulamayı açıp kullanıcı UI'yi inceleyip
+   karar verene kadar park eder (kullanıcı sürer; spec-keyword heuristiğiyle skip YASAK). TEK İSTİSNA:
+   "hiçbir şey sorma" (tam otonom) modu AÇIKKEN Faz 6 otomatik geçilir (a11y/görsel rapor gösterilir);
+   mod KAPALI varsayılanda bu kural aynen geçerli.
 10. **README güncel kalsın.** Kullanıcıya görünür bir özellik/davranış değiştiğinde README'yi AYNI
     değişiklikte güncelle ve push'la — README hiçbir zaman bayat kalmasın (özellikler tek bakışta doğru
     görünsün). Saf-iç fix'te (test/CI/refactor) README değişmez ama her seferinde "değişti mi?" diye bak.
+11. **Kullanıcıya 1-2 cümle sade Türkçe.** Kullanıcıya bir şey söyleyeceğin zaman yanıt 1-2 cümle, sade
+    Türkçe olsun — uzun açıklama/jargon/parantez-örneği yığma. (Detaylı rapor/plan istenirse o ayrı; bu
+    kural sohbet yanıtları içindir.)
+12. **Her konuda mahkeme kur.** Önemli her iş/karar için çapraz-aile öz-denetim mahkemesini (Sonnet 4.6
+    müfettiş paneli) kur — "emin olmak" demek mahkemeden geçirmek demektir. Yalnız bariz-mekanik/sohbet
+    turlarında atlanır; kuşkuda kur. Mahkemeye kullanıcının GERÇEK ilke metni (bu dosyadaki katı kurallar +
+    `~/.claude/CLAUDE.md` tasarım/iletişim ilkeleri + ilgili bellek) SABİT girdi olarak verilir — hangi ilkeyi
+    göstereceğini SEN seçip ÖZETLEME; seçim/özet kendi kör-noktanı geri sızdırır (mahkemenin amacı o filtreden kaçmak).
+13. **Hedef projeye YALNIZ MyCL dokunur; BEN yalnız MyCL koduna dokunurum.** Kullanıcının hedef projelerine
+    (cave, cave5, arcelik… — MyCL'in geliştirdiği/koştuğu projeler) BEN müdahale ETMEM: onları çalıştırmam,
+    komut koşmam, dosyalarını değiştirmem, `node_modules`/deps'lerini elle kurup incelemem. Bir MyCL bug'ını
+    teşhis ederken hedef projeyi BEN koşup gözlemlemem — MyCL'in KENDİ yakaladığı kanıttan (audit/log/
+    `attempt.output`/`.mycl/`) muhakeme ederim; eksik bilgi varsa MyCL'i o bilgiyi YAKALAYACAK/YÜZEYE
+    ÇIKARACAK şekilde düzeltirim. "Projeyi çalıştırmak/incelemek üzereyim" = SERT DUR noktası → dur, yeniden
+    yönlen. Fix'lerimi hedef projeye karşı DEĞİL, birim testleriyle (tmpdir/mock) doğrularım. (Ben MyCL
+    kaynağını geliştiririm; projeyle etkileşim MyCL'in runtime işidir — bu #5'in dokunma-sınırı hâli.)
 
 ## Geliştirme sonrası gate (DEĞİŞMEZ KURAL)
 

@@ -34,8 +34,11 @@ export async function launchWithProvision(
   const pkgDeps = await fs.readFile(join(projectRoot, "package.json"), "utf-8").catch(() => "");
   const auditParts: string[] = [];
 
-  // Kurulum komutu PROFİLDEN — TEK KAYNAK (KATI #1, hardcode YOK); stackId çağırandan TAZE detectStack ile gelir.
-  const installCmd = opts.stackId ? resolveCommand(await loadProfile(opts.stackId), "install") : null;
+  // Kurulum komutu + deps dizini PROFİLDEN — TEK KAYNAK (KATI #1, hardcode YOK; stack-bağımsız). stackId çağırandan
+  // TAZE detectStack ile gelir. Global cache kullanan stack'ler (python/go/rust) deps_dir bildirmez → proaktif atlanır.
+  const profile = opts.stackId ? await loadProfile(opts.stackId) : null;
+  const installCmd = resolveCommand(profile, "install");
+  const depsDir = profile?.deps_dir ?? null;
   const runInstall = async (startMsg: string): Promise<boolean> => {
     if (!installCmd) return false;
     emitChatMessage("system", startMsg); // kullanıcı beklerken NE olduğunu ANINDA görsün (başlarken + bitince).
@@ -45,12 +48,12 @@ export async function launchWithProvision(
     return inst.ok;
   };
 
-  // PROAKTİF (KATI #6 correct-by-construction, YZLLM: "bunu MyCL tespit etmeliydi"): app'i çalıştırmadan ÖNCE
-  // deps kurulu mu diye BAK — node_modules yok / kısmi (bildirilen bir runtime paket eksik) ise KUR. Crash'i BEKLEME.
-  // MyCL stack'i biliyor; "node_modules eksik → kur" elle forensic değil, deterministik dosya kontrolü.
+  // PROAKTİF (KATI #6 correct-by-construction, YZLLM: "bunu MyCL tespit etmeliydi" + "stack-bağımsız olmalı"):
+  // app'i çalıştırmadan ÖNCE deps kurulu mu diye BAK — profilin deps_dir'i (node_modules/vendor/.dart_tool…) yok
+  // ya da boşsa KUR. Crash'i BEKLEME. Dizin ADI profilden gelir (stack-bağımsız); dizin yoksa deps hiç kurulmamıştır.
   let depsHandled = false;
-  if (installCmd && (await nodeDepsUninstalled(projectRoot, pkgDeps))) {
-    await runInstall(`📦 Bağımlılıklar kurulu değil (node_modules eksik) — \`${installCmd}\` ile kuruyorum…`);
+  if (installCmd && depsDir && (await depsDirNeedsInstall(projectRoot, depsDir))) {
+    await runInstall(`📦 Bağımlılıklar kurulu değil (\`${depsDir}\` yok/boş) — \`${installCmd}\` ile kuruyorum…`);
     depsHandled = true; // kurulum denendi (başarılı ya da değil) → aşağıdaki reaktif tur TEKRAR kurmasın.
   }
 
@@ -198,29 +201,20 @@ export function detectMissingDeps(crashOutput: string, pkgDepsText = ""): boolea
 }
 
 /**
- * PROAKTİF deps kontrolü (KATI #6): node projesi çalıştırılmadan ÖNCE bağımlılıkları kurulu mu? package.json runtime
- * `dependencies` bildiriyorsa `node_modules`'te HEPSİ var mı? Yoksa (node_modules hiç yok / kısmi — cave: yalnız
- * fsevents kurulu, express yok) → true (kur). Yalnız `dependencies` kontrol edilir: optional/peer prod-install veya
- * platform-özel (fsevents Linux'ta yok) paketler yanlış "eksik" tetiklemesin. package.json yoksa/parse edilemezse
- * false (node değil / kurulacak şey yok → reaktif yol devrede). fs yan etkili (SAF değil).
+ * PROAKTİF deps kontrolü (KATI #6 + #1 stack-bağımsız): profilin deps_dir'i (node_modules/vendor/.dart_tool…) proje
+ * kökünde YOK ya da BOŞ (hiç gerçek paket girdisi yok — yalnız `.bin`/`.cache` gibi nokta-girdiler) mu? → true (kur).
+ * Dizin adı ÇAĞIRANDAN (profilden) gelir; MyCL kodu "node_modules" HARDCODE etmez. Bu "hiç kurulmamış" (taze klon /
+ * npm-install-koşulmamış) durumunu crash'ten ÖNCE yakalar. Kısmi/bozuk kurulumu (dizin var, gerçek girdi var ama
+ * eksik) reaktif yol (detectMissingDeps, crash imzası) yakalar — o stack-format'ından bağımsız. fs yan etkili.
  */
-export async function nodeDepsUninstalled(projectRoot: string, pkgDepsText: string): Promise<boolean> {
-  if (!pkgDepsText) return false;
-  let deps: string[];
+export async function depsDirNeedsInstall(projectRoot: string, depsDir: string): Promise<boolean> {
+  let entries: string[];
   try {
-    const j = JSON.parse(pkgDepsText) as { dependencies?: Record<string, string> };
-    deps = Object.keys(j.dependencies ?? {});
+    entries = await fs.readdir(join(projectRoot, depsDir));
   } catch {
-    return false;
+    return true; // dizin yok → deps hiç kurulmamış
   }
-  if (deps.length === 0) return false;
-  const nm = join(projectRoot, "node_modules");
-  const exists = (p: string): Promise<boolean> => fs.access(p).then(() => true).catch(() => false);
-  if (!(await exists(nm))) return true; // node_modules hiç yok → kesin eksik
-  for (const d of deps) {
-    if (!(await exists(join(nm, ...d.split("/"))))) return true; // bildirilen bir runtime paket eksik → kısmi kurulum
-  }
-  return false;
+  return entries.filter((e) => !e.startsWith(".")).length === 0; // yalnız nokta-girdiler → gerçek paket yok
 }
 
 export interface InstallResult {

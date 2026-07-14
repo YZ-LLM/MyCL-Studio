@@ -68,6 +68,10 @@ export interface StackProfile {
   manifest_files?: string[];
   /** Frontend build tool tespiti için ipuçları (vite|webpack|next|astro|esbuild). */
   build_tool?: string;
+  /** Bağımlılıkların YEREL kurulduğu dizin (proje köküne göre): node→"node_modules", php→"vendor",
+   *  dart→".dart_tool", elixir→"deps". PROAKTİF deps kontrolü bunu kullanır (crash'ten önce: dizin yok/boşsa kur).
+   *  Global cache kullanan stack'ler (python/go/rust) bunu BİLDİRMEZ → yalnız reaktif yol (KATI #1: bilgi profilde). */
+  deps_dir?: string;
 }
 
 /**

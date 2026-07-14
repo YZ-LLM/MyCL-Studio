@@ -25,5 +25,9 @@
     "default": null
   },
   "default_port": 4000,
-  "manifest_files": ["mix.exs", "mix.lock"]
+  "manifest_files": [
+    "mix.exs",
+    "mix.lock"
+  ],
+  "deps_dir": "deps"
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   detectMissingService,
   detectMissingDeps,
-  nodeDepsUninstalled,
+  depsDirNeedsInstall,
   findComposeFile,
 } from "./service-provision.js";
 
@@ -112,53 +112,54 @@ describe("detectMissingDeps — kurulmamış bağımlılık crash imzası", () =
   });
 });
 
-describe("nodeDepsUninstalled — PROAKTİF deps kontrolü (crash'ten önce)", () => {
-  const mkProj = async (pkg: object, nmPkgs: string[] = []): Promise<string> => {
+describe("depsDirNeedsInstall — PROAKTİF, STACK-BAĞIMSIZ deps kontrolü (crash'ten önce, deps_dir profilden)", () => {
+  const mkProj = async (depsDir: string | null, entries: string[] = []): Promise<string> => {
     const dir = await fs.mkdtemp(join(tmpdir(), "deps-"));
-    await fs.writeFile(join(dir, "package.json"), JSON.stringify(pkg));
-    for (const p of nmPkgs) {
-      const seg = p.split("/");
-      await fs.mkdir(join(dir, "node_modules", ...seg), { recursive: true });
+    if (depsDir) {
+      for (const e of entries) await fs.mkdir(join(dir, depsDir, ...e.split("/")), { recursive: true });
+      if (entries.length === 0) await fs.mkdir(join(dir, depsDir), { recursive: true }); // boş dizin oluştur
     }
     return dir;
   };
-  it("cave senaryosu: express bildirilmiş, node_modules'te yalnız fsevents → true (kur)", async () => {
-    const dir = await mkProj({ dependencies: { express: "^4", mysql2: "^3" } }, ["fsevents"]);
+  it("deps_dir (node_modules) hiç yok → true (kur)", async () => {
+    const dir = await mkProj(null);
     try {
-      expect(await nodeDepsUninstalled(dir, JSON.stringify({ dependencies: { express: "^4", mysql2: "^3" } }))).toBe(
-        true,
-      );
+      expect(await depsDirNeedsInstall(dir, "node_modules")).toBe(true);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-  it("node_modules hiç yok + deps bildirilmiş → true", async () => {
-    const dir = await mkProj({ dependencies: { express: "^4" } }, []);
+  it("deps_dir var ama BOŞ (yalnız nokta-girdi .bin) → true (gerçek paket yok)", async () => {
+    const dir = await mkProj("node_modules", [".bin"]);
     try {
-      expect(await nodeDepsUninstalled(dir, JSON.stringify({ dependencies: { express: "^4" } }))).toBe(true);
+      expect(await depsDirNeedsInstall(dir, "node_modules")).toBe(true);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-  it("tüm runtime deps node_modules'te VAR (scoped dahil) → false (kurma)", async () => {
-    const pkg = { dependencies: { express: "^4", "@scope/pkg": "^1" } };
-    const dir = await mkProj(pkg, ["express", "@scope/pkg"]);
+  it("deps_dir gerçek paket içeriyor (express) → false (kurma)", async () => {
+    const dir = await mkProj("node_modules", ["express", ".bin"]);
     try {
-      expect(await nodeDepsUninstalled(dir, JSON.stringify(pkg))).toBe(false);
+      expect(await depsDirNeedsInstall(dir, "node_modules")).toBe(false);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-  it("hiç dependencies yok → false (kurulacak şey yok)", async () => {
-    const dir = await mkProj({ scripts: { start: "node x" } }, []);
+  it("stack-bağımsız: php vendor dizini yok → true", async () => {
+    const dir = await mkProj(null);
     try {
-      expect(await nodeDepsUninstalled(dir, JSON.stringify({ scripts: { start: "node x" } }))).toBe(false);
+      expect(await depsDirNeedsInstall(dir, "vendor")).toBe(true);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-  it("package.json yok/boş → false (node değil → reaktif yol devrede)", async () => {
-    expect(await nodeDepsUninstalled("/nonexistent", "")).toBe(false);
+  it("dart .dart_tool gerçek paket içeriyor → false", async () => {
+    const dir = await mkProj(".dart_tool", ["package_config.json"]);
+    try {
+      expect(await depsDirNeedsInstall(dir, ".dart_tool")).toBe(false);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

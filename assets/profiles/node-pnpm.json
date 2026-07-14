@@ -31,5 +31,9 @@
     "default": null
   },
   "default_port": 5173,
-  "manifest_files": ["package.json", "pnpm-lock.yaml"]
+  "manifest_files": [
+    "package.json",
+    "pnpm-lock.yaml"
+  ],
+  "deps_dir": "node_modules"
 }
