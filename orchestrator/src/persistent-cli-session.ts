@@ -324,7 +324,15 @@ export class PersistentClaudeSession {
     }
     if (effort && effort !== this.curEffort && effort !== "ultracode") {
       if (await this.sendControl({ subtype: "apply_flag_settings", settings: { effort } })) this.curEffort = effort;
-      else log.error("persistent-cli", "apply_flag_settings(effort) BAŞARISIZ — eski efor sürüyor", { wanted: effort, current: this.curEffort });
+      else {
+        // YÜK-TAŞIYAN sapma (sessiz-fallback denetimi): eskalasyon merdiveni efor'a dayanır; sessizce uygulanmazsa
+        // oturum düşük eforda devam eder ("daha derin düşün" istendi ama olmadı) → set_model dalıyla SİMETRİK: GÖRÜNÜR kıl.
+        log.error("persistent-cli", "apply_flag_settings(effort) BAŞARISIZ — eski efor sürüyor", { wanted: effort, current: this.curEffort });
+        emitChatMessage(
+          "system",
+          `⚠️ Efor ayarı (${effort}) uygulanamadı — oturum mevcut efor (${this.curEffort}) ile devam ediyor; akıl yürütme derinliği beklenenden düşük olabilir.`,
+        );
+      }
     }
   }
 

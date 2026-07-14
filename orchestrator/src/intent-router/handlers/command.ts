@@ -384,6 +384,10 @@ export function deriveCommand(
   if (!kind) return null;
   const stack = detectStack(projectRoot);
   if (stack === "unknown") return null;
+  // NOT (YZLLM 2026-07-14 denetim): chat lint/build komutu commandFor'dan (go vet/phpcs) geliyor; gate profil'den
+  // (golangci-lint/phpstan) → ikili-kaynak drift VAR. Profil-öncelik denendi ama Node script-tespiti kaybı (script'siz
+  // projede "Missing script") + dart/Flutter profil-uyumsuzluğu regresyonu açtı → GERİ ALINDI. Doğru fix: profilleri
+  // doğrula (dart), Node script-tespitini koru, runOneShot'a isMissingCommand ekle — ayrı dikkatli pass.
   const scripts = NODE_STACKS.has(stack) ? readNodeScripts(projectRoot) : {};
   return commandFor(stack, kind, scripts);
 }
@@ -412,7 +416,7 @@ export function isDevServerCommand(cmd: string): boolean {
   return (
     /\b((npm|yarn|pnpm|bun)\s+run\s+(dev|start)|npx\s+vite|vite(\s|$)|next\s+dev|webpack-dev-server)\b/.test(cmd) ||
     /\b(uvicorn|gunicorn|hypercorn|daphne|flask\s+run|manage\.py\s+runserver)\b/.test(cmd) ||
-    /\b(rails\s+s(erver)?|bundle\s+exec\s+(rails|puma)|puma)\b/.test(cmd) ||
+    /\b(rails\s+s(erver)?|bundle\s+exec\s+(rails|puma|rackup)|puma|rackup)\b/.test(cmd) ||
     /\b(php\s+-S|artisan\s+serve)\b/.test(cmd) ||
     /\bmix\s+phx\.server\b/.test(cmd) ||
     /\b(spring-boot:run|bootRun)\b/.test(cmd) ||

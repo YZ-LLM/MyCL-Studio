@@ -15,7 +15,7 @@ import { appendAudit, appendHandoff, readAuditLogTail, readAcceptedFindings } fr
 import { currentSpecPath, currentSpecRelPath } from "./devs-paths.js";
 import { isMissingCommand, isSpawnEnvFailure, resolveMechanicalCmd } from "./base/mechanical-runner.js";
 import { probeTestValidity } from "./test-validity.js";
-import { runAdversarialTester } from "./adversarial-test.js";
+import { runAdversarialTester, type AdversarialResult } from "./adversarial-test.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
@@ -1154,14 +1154,36 @@ export class Phase8Controller {
       );
     } else if (r.checked && r.caught) {
       emitChatMessage("system", `✅ Test geçerliliği: testler bozulan davranışı yakaladı (${r.file}) — koruma gerçek.`);
+    } else {
+      // !checked: prob KOŞAMADI (mutate-edilebilir dosya yok / okunamadı / geçerli mutasyon üretilemedi / prob hatası).
+      // "🧬 başlıyor" ilan edildi ama sessiz kalırsa kullanıcı geçerliliğin doğrulandığını SANIR → GÖRÜNÜR kıl (KATI#4).
+      // NOT: audit event YAZILMAZ — bu blok tdd-green SONRASI koşuyor (runIntegrityAnchor:1124); phase-8 audit'ine
+      // tanı-event'i eklemek gate'in `lastEvent==="tdd-green"` kontrolünü kırar (layer-cost-report:55-58 aynı kararı
+      // belgeliyor). Görünürlük yalnız chat mesajıyla (kullanıcı görür; gate akışı temiz kalır).
+      emitChatMessage(
+        "system",
+        `ℹ️ Test geçerliliği probu KOŞMADI (${r.note}) — testlerin bozulan davranışı GERÇEKTEN yakaladığı bu koşuda doğrulanmadı.`,
+      );
     }
     // Bağımsız düşman-test yazarı (Özellik #2): kodu yazandan AYRI ajan kodu kırmaya çalışır (taraflı-test riski).
     // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): bayrakla kapatılabilir (default AÇIK). Kapalı = "hızlı mod" — 2. tam
     // ajan koşmaz (kuyruğu kısaltır; güven-sağlamlaştırma güvencesi düşer). Anchor + mutation-probe yine korunur.
     if (this.config.features.adversarial_tester !== false) {
-      await runAdversarialTester(this.state, this.config).catch((e: unknown) =>
-        log.warn("phase-8", "adversarial tester failed", e),
-      );
+      // Sonuç TÜKETİLİR (sessiz-fallback denetimi): eskiden dönüş atılıyor, yalnız fırlatılan hata log'a düşüyordu →
+      // ajan koşup verdict üretemezse (ran:false) "başlıyor" mesajından sonra SESSİZLİK → güven katmanı sessizce çöker,
+      // "yeşil" hüküm ayakta kalır. ran:false → GÖRÜNÜR + audit (KATI#4). ran:true kendi görünür çıktısını verir.
+      const adv = await runAdversarialTester(this.state, this.config).catch((e: unknown): AdversarialResult => {
+        log.warn("phase-8", "adversarial tester failed", e);
+        return { ran: false, note: `hata: ${String(e).slice(0, 120)}` };
+      });
+      if (!adv.ran) {
+        // audit event YAZILMAZ (yukarıdaki !checked ile aynı gerekçe: tdd-green sonrası phase-8 tanı-event'i gate'i kırar).
+        // Görünürlük chat mesajıyla (KATI#4). API-modda adversarial CLI gerektirir → ran:false yaygın; sessiz kalmasın.
+        emitChatMessage(
+          "system",
+          `ℹ️ Bağımsız düşman testi KOŞMADI (${adv.note}) — kod bağımsız bir kırma denemesiyle bu koşuda doğrulanmadı.`,
+        );
+      }
     } else {
       emitChatMessage("system", "⏭️ Düşman testi kapalı (hızlı mod) — atlandı (anchor + mutasyon-probu yine koşuyor).");
     }
