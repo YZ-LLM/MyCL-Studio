@@ -29,38 +29,49 @@ export async function launchWithProvision(
   timeoutMs: number,
   opts: { stackId?: StackId | null } = {},
 ): Promise<{ result: DevServerChainResult; provisionAudit?: string }> {
-  let result = await tryDevServerChain(projectRoot, candidates, timeoutMs);
-  if (result.ok && result.handle && result.cmd) return { result };
-
   const crashOf = (r: DevServerChainResult): string =>
     r.attempts.map((a) => a.output).filter((o): o is string => !!o).join("\n---\n");
-  let crashOut = crashOf(result);
   const pkgDeps = await fs.readFile(join(projectRoot, "package.json"), "utf-8").catch(() => "");
   const auditParts: string[] = [];
 
-  // ROUND 1 — EKSİK BAĞIMLILIK (kurulmamış paket). Servis turundan ÖNCE: express/paket yoksa app hiç
-  // başlamaz, DB'ye bağlanma noktasına gelmez. Crash "Cannot find module" imzası taşıyorsa stack'in kurulum
-  // komutuyla TAMAMLA + BİR KEZ retry. Kurulum komutu PROFİLDEN çözülür (KATI #1 — tek kaynak, hardcode YOK;
-  // stackId çağırandan TAZE detectStack ile gelir → greenfield/unknown state.stack tuzağı yok). Foreign projede
-  // deps çoğu zaman kurulmamış olur (phase-5 yalnız create-iterasyonda kurar; "projeyi çalıştır" komutu hiç kurmazdı).
-  if (detectMissingDeps(crashOut, pkgDeps)) {
-    const installCmd = opts.stackId ? resolveCommand(await loadProfile(opts.stackId), "install") : null;
-    if (installCmd) {
-      // Kurulum uzun sürebilir → kullanıcı beklerken NE olduğunu ANINDA görsün (başlarken + bitince).
-      emitChatMessage("system", `📦 Uygulama başlamadı: bağımlılıklar kurulu değil. \`${installCmd}\` ile kuruluyor…`);
-      const inst = await tryInstallDeps(projectRoot, installCmd);
-      if (inst.message) emitChatMessage("system", inst.message);
-      auditParts.push(`deps-install attempted=${inst.attempted} ok=${inst.ok}`);
-      if (inst.ok) {
-        const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
-        result = { ...retry, attempts: [...result.attempts, ...retry.attempts] };
-        if (result.ok && result.handle && result.cmd) {
-          return { result, provisionAudit: auditParts.join("; ") };
-        }
-        // Kurulum başarılı ama app hâlâ çök/timeout — ROUND 2 GÜNCEL crash'i görsün (artık "module yok" değil,
-        // muhtemelen ECONNREFUSED = eksik servis). Bayat "Cannot find module"la servis tespiti yapma.
-        crashOut = crashOf(retry);
+  // Kurulum komutu PROFİLDEN — TEK KAYNAK (KATI #1, hardcode YOK); stackId çağırandan TAZE detectStack ile gelir.
+  const installCmd = opts.stackId ? resolveCommand(await loadProfile(opts.stackId), "install") : null;
+  const runInstall = async (startMsg: string): Promise<boolean> => {
+    if (!installCmd) return false;
+    emitChatMessage("system", startMsg); // kullanıcı beklerken NE olduğunu ANINDA görsün (başlarken + bitince).
+    const inst = await tryInstallDeps(projectRoot, installCmd);
+    if (inst.message) emitChatMessage("system", inst.message);
+    auditParts.push(`deps-install attempted=${inst.attempted} ok=${inst.ok}`);
+    return inst.ok;
+  };
+
+  // PROAKTİF (KATI #6 correct-by-construction, YZLLM: "bunu MyCL tespit etmeliydi"): app'i çalıştırmadan ÖNCE
+  // deps kurulu mu diye BAK — node_modules yok / kısmi (bildirilen bir runtime paket eksik) ise KUR. Crash'i BEKLEME.
+  // MyCL stack'i biliyor; "node_modules eksik → kur" elle forensic değil, deterministik dosya kontrolü.
+  let depsHandled = false;
+  if (installCmd && (await nodeDepsUninstalled(projectRoot, pkgDeps))) {
+    await runInstall(`📦 Bağımlılıklar kurulu değil (node_modules eksik) — \`${installCmd}\` ile kuruyorum…`);
+    depsHandled = true; // kurulum denendi (başarılı ya da değil) → aşağıdaki reaktif tur TEKRAR kurmasın.
+  }
+
+  let result = await tryDevServerChain(projectRoot, candidates, timeoutMs);
+  if (result.ok && result.handle && result.cmd) {
+    return { result, provisionAudit: auditParts.length ? auditParts.join("; ") : undefined };
+  }
+  let crashOut = crashOf(result);
+
+  // REAKTİF FALLBACK — proaktif YAKALAMADIYSA (non-node stack; ya da node_modules "dolu görünüp" runtime'da bir
+  // paket eksikse) crash "Cannot find module"/eşdeğer imzasından tespit + kur + BİR KEZ retry. Servisten ÖNCE.
+  if (!depsHandled && detectMissingDeps(crashOut, pkgDeps)) {
+    const ok = await runInstall(`📦 Uygulama başlamadı: bağımlılıklar kurulu değil. \`${installCmd}\` ile kuruluyor…`);
+    if (ok) {
+      const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
+      result = { ...retry, attempts: [...result.attempts, ...retry.attempts] };
+      if (result.ok && result.handle && result.cmd) {
+        return { result, provisionAudit: auditParts.join("; ") };
       }
+      // Kurulum ok ama app hâlâ çök/timeout — ROUND 2 GÜNCEL crash'i görsün (bayat "module yok" değil).
+      crashOut = crashOf(retry);
     }
   }
 
@@ -184,6 +195,32 @@ export function detectMissingDeps(crashOutput: string, pkgDepsText = ""): boolea
     }
   }
   return OTHER_STACK_MISSING_DEPS_RE.test(crashOutput);
+}
+
+/**
+ * PROAKTİF deps kontrolü (KATI #6): node projesi çalıştırılmadan ÖNCE bağımlılıkları kurulu mu? package.json runtime
+ * `dependencies` bildiriyorsa `node_modules`'te HEPSİ var mı? Yoksa (node_modules hiç yok / kısmi — cave: yalnız
+ * fsevents kurulu, express yok) → true (kur). Yalnız `dependencies` kontrol edilir: optional/peer prod-install veya
+ * platform-özel (fsevents Linux'ta yok) paketler yanlış "eksik" tetiklemesin. package.json yoksa/parse edilemezse
+ * false (node değil / kurulacak şey yok → reaktif yol devrede). fs yan etkili (SAF değil).
+ */
+export async function nodeDepsUninstalled(projectRoot: string, pkgDepsText: string): Promise<boolean> {
+  if (!pkgDepsText) return false;
+  let deps: string[];
+  try {
+    const j = JSON.parse(pkgDepsText) as { dependencies?: Record<string, string> };
+    deps = Object.keys(j.dependencies ?? {});
+  } catch {
+    return false;
+  }
+  if (deps.length === 0) return false;
+  const nm = join(projectRoot, "node_modules");
+  const exists = (p: string): Promise<boolean> => fs.access(p).then(() => true).catch(() => false);
+  if (!(await exists(nm))) return true; // node_modules hiç yok → kesin eksik
+  for (const d of deps) {
+    if (!(await exists(join(nm, ...d.split("/"))))) return true; // bildirilen bir runtime paket eksik → kısmi kurulum
+  }
+  return false;
 }
 
 export interface InstallResult {

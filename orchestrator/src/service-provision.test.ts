@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectMissingService, detectMissingDeps, findComposeFile } from "./service-provision.js";
+import {
+  detectMissingService,
+  detectMissingDeps,
+  nodeDepsUninstalled,
+  findComposeFile,
+} from "./service-provision.js";
 
 // "MyCL eksik olanı tamamlamaya çalışmalı" — app bir servise bağlanamayıp çöktüğünde MyCL o servisi tespit edip
 // başlatmayı denemeli. Bu testler TESPİT mantığını kilitler (docker provision'ı entegrasyon; burada saf tespit).
@@ -104,6 +109,56 @@ describe("detectMissingDeps — kurulmamış bağımlılık crash imzası", () =
   });
   it("boş crash → false", () => {
     expect(detectMissingDeps("")).toBe(false);
+  });
+});
+
+describe("nodeDepsUninstalled — PROAKTİF deps kontrolü (crash'ten önce)", () => {
+  const mkProj = async (pkg: object, nmPkgs: string[] = []): Promise<string> => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "deps-"));
+    await fs.writeFile(join(dir, "package.json"), JSON.stringify(pkg));
+    for (const p of nmPkgs) {
+      const seg = p.split("/");
+      await fs.mkdir(join(dir, "node_modules", ...seg), { recursive: true });
+    }
+    return dir;
+  };
+  it("cave senaryosu: express bildirilmiş, node_modules'te yalnız fsevents → true (kur)", async () => {
+    const dir = await mkProj({ dependencies: { express: "^4", mysql2: "^3" } }, ["fsevents"]);
+    try {
+      expect(await nodeDepsUninstalled(dir, JSON.stringify({ dependencies: { express: "^4", mysql2: "^3" } }))).toBe(
+        true,
+      );
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+  it("node_modules hiç yok + deps bildirilmiş → true", async () => {
+    const dir = await mkProj({ dependencies: { express: "^4" } }, []);
+    try {
+      expect(await nodeDepsUninstalled(dir, JSON.stringify({ dependencies: { express: "^4" } }))).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+  it("tüm runtime deps node_modules'te VAR (scoped dahil) → false (kurma)", async () => {
+    const pkg = { dependencies: { express: "^4", "@scope/pkg": "^1" } };
+    const dir = await mkProj(pkg, ["express", "@scope/pkg"]);
+    try {
+      expect(await nodeDepsUninstalled(dir, JSON.stringify(pkg))).toBe(false);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+  it("hiç dependencies yok → false (kurulacak şey yok)", async () => {
+    const dir = await mkProj({ scripts: { start: "node x" } }, []);
+    try {
+      expect(await nodeDepsUninstalled(dir, JSON.stringify({ scripts: { start: "node x" } }))).toBe(false);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+  it("package.json yok/boş → false (node değil → reaktif yol devrede)", async () => {
+    expect(await nodeDepsUninstalled("/nonexistent", "")).toBe(false);
   });
 });
 
