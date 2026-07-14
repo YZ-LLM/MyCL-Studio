@@ -11,6 +11,7 @@ import { promises as fs } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { buildReverseImportGraph } from "../fix/dep-graph/index.js";
+import { listIgnoredUntrackedFiles } from "../git.js";
 import { log } from "../logger.js";
 
 // dep-graph SKIP_DIRS + build/çıktı dizinleri (dil-agnostik gürültü). Nokta-dizinler ayrıca elenir.
@@ -48,6 +49,7 @@ const SECRET_FILE_RE = new RegExp(
 export function isSecretFile(name: string): boolean {
   return SECRET_FILE_RE.test(name);
 }
+
 /** 256KB üstü → too-large (üretilmiş/minified/veri; davranış-analizi anlamsız + bütçe koruması). Faz 4 reconcile +
  *  codegen-note hash'lemesi de bu eşiği kullanır (edd/source-hash) → tek doğruluk kaynağı burada. */
 export const MAX_UNIT_BYTES = 256 * 1024;
@@ -128,6 +130,22 @@ export async function enumerateSourceUnits(projectRoot: string): Promise<SourceU
     }
   }
   await walk(projectRoot);
+
+  // Gitignore-farkındalık: EDD kapsamı ≈ güvenlik tarama kapsamı. GERÇEKTEN dışlanan (untracked+ignored) dosya
+  // (committable değil + davranış değil) EDD ingest ETMEZ → standart-olmayan adlı gitignore'lu sır dosyasının .mycl'e
+  // sızması kapanır. Fail-soft: git yok / non-git → null → filtre atlanır (SECRET_FILE_RE denylist + kaynak-tarama yine
+  // geçerli). YAKLAŞIK (dürüst kalan-risk): alt-modül içi gitignore'lu dosya git standart ls-files'ında görünmez → EDD
+  // analiz edebilir; ayrıca `.semgrepignore` bundle/vendor globları EDD SKIP_DIRS'inde yok → EDD semgrep'ten hafif GENİŞ
+  // (over-scan, sızıntı değil). GÖRÜNÜR: analyzable:false + sebep.
+  const ignored = (await listIgnoredUntrackedFiles(projectRoot)) ?? new Set<string>();
+  if (ignored.size > 0) {
+    for (const f of files) {
+      if (f.analyzable && ignored.has(f.unit)) {
+        f.analyzable = false;
+        f.reason = "gitignored (EDD kapsamı = güvenlik tarama kapsamı; committable değil)";
+      }
+    }
+  }
 
   // Blast-radius sırası: dep-graph importedBy (merkezi = önce). Grafik yoksa yol-bazlı stabil sıra.
   let rank: Map<string, number> | null = null;

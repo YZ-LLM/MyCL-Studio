@@ -90,6 +90,29 @@ export async function isGitRepo(projectRoot: string): Promise<boolean> {
 }
 
 /**
+ * GERÇEKTEN dışlanan (untracked + ignored) dosya yollarını döner: `git ls-files -o -i --exclude-standard -z`.
+ * Yollar projectRoot'a relative (cwd tabanı), POSIX ayraç, git'in verdiği biçimde. `-z`: NUL-ayraç (boşluk/unicode güvenli).
+ *
+ * `check-ignore` DEĞİL: check-ignore bir yolun ignore-PATTERN'e uyup uymadığını söyler → tracked-committed ama pattern-
+ * eşleşen dosyayı da "ignored" der (yanlış-atlama); `ls-files -o -i` yalnız GERÇEKTEN dışlananı (untracked+ignored) verir →
+ * tracked-ama-pattern-eşleşen (force-add'li) DÖNMEZ → semgrep de onu tarar, EDD de analiz etmeli (kapsam = tarama kapsamı).
+ * KALAN-RİSK (dürüst): alt-modül içeriği git'in standart `ls-files`'ında kapsanmaz → alt-modül içi gitignore'lu dosya
+ * bu kümede yok (nadir; SECRET_FILE_RE + LLM-redaksiyon o sınıf için kalan savunma).
+ *
+ * @returns dışlanan yollar kümesi; git yok / non-git / hata → `null` (BİLİNMİYOR — çağıran fail-soft karar verir:
+ *          enumerate filtrelemeyi atlar, reconcile canlanmayı atlar; "boş küme" ile karıştırılmamalı).
+ */
+export async function listIgnoredUntrackedFiles(projectRoot: string): Promise<Set<string> | null> {
+  try {
+    const r = await runGit(projectRoot, ["ls-files", "-o", "-i", "--exclude-standard", "-z"]);
+    if (r.code !== 0) return null; // non-git (128) / hata → bilinmiyor
+    return new Set(r.stdout.split("\0").filter((s) => s.length > 0));
+  } catch {
+    return null; // git binary yok (spawn ENOENT) → bilinmiyor
+  }
+}
+
+/**
  * Son N commit'i kronolojik tersine (newest first) döndür. Format:
  * `git log -<limit> --format=%H%x09%ct%x09%s` → her satır SHA<TAB>unix_ts<TAB>subject.
  */

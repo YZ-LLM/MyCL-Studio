@@ -12,6 +12,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { MyclConfig } from "../config.js";
 import type { State } from "../types.js";
+import { listIgnoredUntrackedFiles } from "../git.js";
 import { emitChatMessage } from "../ipc.js";
 import { log } from "../logger.js";
 import { enumerateSourceUnits } from "./enumerate.js";
@@ -203,12 +204,32 @@ export async function reconcileEddStaleness(
   root: string,
 ): Promise<{ invalidated: number; deleted: number; tooLarge: number; revived: number }> {
   const byUnit = await readEddProgress(root);
+  // Güncel GERÇEKTEN dışlanan (untracked+ignored) küme — gitignored canlanma için. null = git yok/bilinmiyor → canlanma
+  // ATLA (git-down'da "artık ignore değil" ÇIKARIMI yapma; yoksa git kapalıyken tüm gitignored-secret'lar yanlış canlanır).
+  const ignoredNow = await listIgnoredUntrackedFiles(root);
   let invalidated = 0;
   let deleted = 0;
   let tooLarge = 0;
   let revived = 0;
   for (const rec of byUnit.values()) {
     const abs = join(root, ...rec.unit.split("/"));
+
+    // Gitignored CANLANMA: dosya artık dışlanmıyorsa (un-ignore + tracked → semgrep artık tarar, EDD de analiz etmeli)
+    // yeniden analiz kuyruğuna. Yalnız git KESİN cevap verdiyse (ignoredNow !== null) + dosya normalse. Deleted/too-large
+    // canlanma deseninin ikizi (tutarlılık): EDD kapsamı = tarama kapsamı invaryantı zamanla da korunur.
+    if (
+      rec.status === "unanalyzable" &&
+      rec.reason?.startsWith("gitignored") &&
+      ignoredNow !== null &&
+      !ignoredNow.has(rec.unit)
+    ) {
+      const h = await safeSourceHash(abs);
+      if (!h.gone && !h.tooLarge && h.hash !== undefined) {
+        await patchEddUnit(root, rec.unit, { status: "pending" });
+        revived++;
+      }
+      continue;
+    }
 
     // REVIVE (mahkeme minor): reconcile'ın işaretlediği unanalyzable birim dosyası geri geldi/normalleşti → pending
     // (yeniden analiz). Yalnız reconcile-kaynaklı sebepler (ilk-enumerate binary/too-large kalıcıdır, dokunma).
