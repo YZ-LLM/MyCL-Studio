@@ -38,6 +38,21 @@ describe("orchestrator-agent/decision · parseAgentDecision", () => {
     expect(r.target_phase).toBe(14);
   });
 
+  it("valid run_project (yalnız action+reason, target_phase YOK) parse", () => {
+    // YZLLM 2026-07-15: "çalıştır" niyeti → run_project (var olan app'i başlat; UI codegen değil). Parametresiz.
+    const r = parseAgentDecision({
+      action: "run_project",
+      reason: "Projeyi çalıştırıyorum.",
+    });
+    expect(r.action).toBe("run_project");
+    expect(r.target_phase).toBeUndefined();
+  });
+
+  it("run_project şema enum'unda (VALID_ACTIONS'tan türetilir)", () => {
+    const actionEnum = (DECIDE_ACTION_TOOL_SCHEMA.properties.action as { enum: string[] }).enum;
+    expect(actionEnum).toContain("run_project");
+  });
+
   it("run_phase target_phase eksikse THROW", () => {
     expect(() =>
       parseAgentDecision({ action: "run_phase", reason: "x" }),
@@ -116,8 +131,8 @@ describe("orchestrator-agent/decision · DECIDE_ACTION_TOOL_SCHEMA", () => {
     expect(DECIDE_ACTION_TOOL_SCHEMA.required).toEqual(["action", "reason"]);
   });
 
-  it("action enum exactly 14 değer (v15.8 +verify_feature)", () => {
-    expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toHaveLength(14);
+  it("action enum exactly 15 değer (2026-07-15 +run_project)", () => {
+    expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toHaveLength(15);
     expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toContain(
       "save_memory_proposal",
     );
@@ -129,6 +144,9 @@ describe("orchestrator-agent/decision · DECIDE_ACTION_TOOL_SCHEMA", () => {
     );
     expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toContain(
       "verify_feature",
+    );
+    expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toContain(
+      "run_project",
     );
   });
 

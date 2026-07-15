@@ -3383,6 +3383,15 @@ async function executeAgentDecision(
       await emitPhaseRunAskq(decision.target_phase, true);
       return;
     }
+    case "run_project": {
+      // VAR OLAN/kurulu uygulamayı ÇALIŞTIR — dev-server başlat (▶ butonun deterministik yolu: handleCommandDirect →
+      // runDevServer → launchWithProvision, deps kurulum/kurtarma/servis dahil). UI codegen (run_phase 5) DEĞİL →
+      // state.current_phase değişmez + non-consequential (kör-nokta merceği bu istekte KOŞMAZ; "çalıştır=Faz5" karmaşası
+      // biter). silent: sahte user-history + çelişkili "kuyruğa alındı" mesajını bastırır (redirectForeignRunToDevServer deseni).
+      emitChatMessage("system", "▶️ Projeyi çalıştırıyorum…");
+      await handleCommandDirect(text, "run", { silent: true });
+      return;
+    }
     case "approve_ui":
     case "revise_ui":
     case "resume_pipeline":

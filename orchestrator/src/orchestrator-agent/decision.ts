@@ -12,6 +12,10 @@ export type AgentAction =
   | "ask_clarify"
   /** Belirli phase'i tetikle (target_phase ile). */
   | "run_phase"
+  /** YZLLM 2026-07-15: VAR OLAN/kurulu uygulamayı ÇALIŞTIR — dev-server başlat (▶ butonun deterministik yolu).
+   *  UI codegen DEĞİL (run_phase 5 ile eşitleme). Parametre taşımaz. state.current_phase değiştirmez; non-consequential
+   *  (kör-nokta merceği koşmaz). "çalıştır / projeyi çalıştır / dev-server başlat / aç" niyeti bunu seçer. */
+  | "run_project"
   /** Phase 6 → 7 onayı. */
   | "approve_ui"
   /** Phase 6 → pending_ui_tweak + Phase 5. */
@@ -111,6 +115,7 @@ const VALID_ACTIONS: ReadonlySet<AgentAction> = new Set<AgentAction>([
   "chat",
   "ask_clarify",
   "run_phase",
+  "run_project",
   "approve_ui",
   "revise_ui",
   "cancel_pipeline",
@@ -326,7 +331,7 @@ export const DECIDE_ACTION_TOOL_SCHEMA = {
       type: "string",
       enum: Array.from(VALID_ACTIONS),
       description:
-        "Sonraki aksiyon. chat=sadece sohbet, ask_clarify=tek soru, run_phase=belirli faz tetikle, approve_ui=Phase 6 onay, revise_ui=Phase 6 değişiklik, cancel_pipeline=durdur, resume_pipeline=devam, develop_new_or_iter=YENİ özellik kur VEYA mevcut özelliği GELİŞTİR/DEĞİŞTİR (yeni davranış/gereksinim ekle — ortada bir BOZUKLUK YOK) → Faz 1'den tam pipeline; ilk fazlar (1-4) gürültüyü temizler+işin özünü/çevresel faktörleri bulur. debug_triage=var olan bir şey BOZUK/çalışmıyor — kullanıcının bildirdiği HER hata/regresyon/'bozuldu'/'çalışmıyor'/'açılmıyor'/'500'/'hata veriyor'/'düzelt' talebi VE pipeline-içi gate-hatası iç-takibi → Faz 0 HIZLI-ŞERİT (kök neden bul + hedefli faza dispatch; tam pipeline'ı YENİDEN BAŞLATMA, onay sorma). YZLLM kuralı 2026-06-18 (DEĞİŞMEZ): BOZUK olanı ONARMAK → HER ZAMAN debug_triage fast-path; YENİ/değişiklik geliştirme → develop_new_or_iter (Faz 1'den). Ayraç 'bozuk mu?': 'çalışmıyor/bozuldu/hata' sinyali varsa HER ZAMAN debug_triage, set_optional_phases=opsiyonel faz scope'u set et (Faz 1 sonrası), answer_askq=aktif askq'ya programatik cevap (kullanıcı composer'dan askq'ya cevap yazdı), verify_feature=SPESİFİK bir özelliği gerçekten test et (o özellik için hedefli E2E testi yaz+çalıştır; 'X özelliğini test et' istekleri — genel 'tüm testleri çalıştır' DEĞİL, o run_phase 16), fallback_to_classifier=klasik Haiku classifier'a bırak.",
+        "Sonraki aksiyon. chat=sadece sohbet, ask_clarify=tek soru, run_phase=belirli faz tetikle, run_project=VAR OLAN/kurulu uygulamayı ÇALIŞTIR (dev-server başlat — 'çalıştır/projeyi çalıştır/dev-server başlat/aç' niyeti; UI codegen DEĞİL, run_phase 5 ile eşitleme; parametre yok), approve_ui=Phase 6 onay, revise_ui=Phase 6 değişiklik, cancel_pipeline=durdur, resume_pipeline=devam, develop_new_or_iter=YENİ özellik kur VEYA mevcut özelliği GELİŞTİR/DEĞİŞTİR (yeni davranış/gereksinim ekle — ortada bir BOZUKLUK YOK) → Faz 1'den tam pipeline; ilk fazlar (1-4) gürültüyü temizler+işin özünü/çevresel faktörleri bulur. debug_triage=var olan bir şey BOZUK/çalışmıyor — kullanıcının bildirdiği HER hata/regresyon/'bozuldu'/'çalışmıyor'/'açılmıyor'/'500'/'hata veriyor'/'düzelt' talebi VE pipeline-içi gate-hatası iç-takibi → Faz 0 HIZLI-ŞERİT (kök neden bul + hedefli faza dispatch; tam pipeline'ı YENİDEN BAŞLATMA, onay sorma). YZLLM kuralı 2026-06-18 (DEĞİŞMEZ): BOZUK olanı ONARMAK → HER ZAMAN debug_triage fast-path; YENİ/değişiklik geliştirme → develop_new_or_iter (Faz 1'den). Ayraç 'bozuk mu?': 'çalışmıyor/bozuldu/hata' sinyali varsa HER ZAMAN debug_triage, set_optional_phases=opsiyonel faz scope'u set et (Faz 1 sonrası), answer_askq=aktif askq'ya programatik cevap (kullanıcı composer'dan askq'ya cevap yazdı), verify_feature=SPESİFİK bir özelliği gerçekten test et (o özellik için hedefli E2E testi yaz+çalıştır; 'X özelliğini test et' istekleri — genel 'tüm testleri çalıştır' DEĞİL, o run_phase 16), fallback_to_classifier=klasik Haiku classifier'a bırak.",
     },
     reason: {
       type: "string",

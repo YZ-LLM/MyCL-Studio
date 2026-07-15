@@ -86,6 +86,10 @@ export function decisionIsConsequential(decision: AgentDecision): boolean {
       return true;
     case "run_phase":
       return phaseIsConsequential(decision.target_phase);
+    case "run_project":
+      // VAR OLAN uygulamayı çalıştır (dev-server) — kod/şema ÜRETMEZ, geri-alınabilir (server kapatılır) → consequential
+      // DEĞİL. Operasyonel istek → kör-nokta merceği KOŞMAZ (default zaten false; okunabilirlik + test için açık).
+      return false;
     default:
       // chat / ask_clarify / approve_ui / revise_ui / resume_pipeline / verify_feature /
       // save_memory_proposal / set_optional_phases / answer_askq / fallback → trivial.

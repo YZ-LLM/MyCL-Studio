@@ -78,6 +78,22 @@ describe("decisionIsConsequential", () => {
     expect(decisionIsConsequential(dec("run_phase", 14))).toBe(false);
     expect(decisionIsConsequential(dec("run_phase"))).toBe(false);
   });
+  it("run_project (var olan app'i çalıştır) → false (operasyonel; kör-nokta merceği KOŞMAZ)", () => {
+    // YZLLM 2026-07-15: "çalıştır" artık run_project → non-consequential → mercek bu istekte tetiklenmez.
+    expect(decisionIsConsequential(dec("run_project"))).toBe(false);
+  });
+});
+
+describe("run_project → gate 'skip-trivial' (mercek koşmaz — her bayrakta)", () => {
+  it("consequential VE always bayraklarında NON-consequential → skip-trivial", () => {
+    const cons = decisionIsConsequential(dec("run_project")); // false
+    expect(blindspotLensDecision({ lensFlag: "consequential", isConsequential: cons, isReversible: false })).toBe(
+      "skip-trivial",
+    );
+    expect(blindspotLensDecision({ lensFlag: "always", isConsequential: cons, isReversible: false })).toBe(
+      "skip-trivial",
+    );
+  });
 });
 
 describe("specIsConsequential (mercek frekans gate — YZLLM 2026-06-16 perf)", () => {

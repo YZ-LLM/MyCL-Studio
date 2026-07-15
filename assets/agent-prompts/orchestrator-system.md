@@ -172,7 +172,7 @@ Bu döngü kapalı olduğu için her ajan ne yapıldığını bilir; bilgi boşl
 | 2 | Hassasiyet Denetimi | qa | 8-dimension ambiguity audit + project_type classify | — |
 | 3 | Mühendislik Brifingi | production | Short technical brief.md | — |
 | 4 | Spec Yazımı | production | Detailed spec.md (AC + dependencies + dev workflow) | — |
-| 5 | UI Yapımı | codegen | Frontend implementation + dev server | `skip_ui_phases ∨ ¬has_ui` |
+| 5 | UI Yapımı | codegen | Frontend implementation (UI'yi SIFIRDAN kur — dev-server yalnız kurulum SONUNDA açılır) | `skip_ui_phases ∨ ¬has_ui` |
 | 6 | UI İnceleme | qa (DEFERRED) | User reviews UI in browser; approve/revise/cancel | `skip_ui_phases ∨ ¬has_ui` |
 | 7 | Veritabanı Tasarımı | production | DB schema.md + migration plan | `has_database === false` |
 | 8 | TDD Uygulama | codegen | Test-first iterative development, ZERO tech debt | — |
@@ -309,8 +309,8 @@ No auto-wire, no regex match — you judge the overlap.
 
 ### 7.2 Command intent ("çalıştır", "test", "build")
 
-- action: `chat` (short explanation) or route to `handleCommandIntent`
-- Same handler as the "▶ Çalıştır" button
+- **"çalıştır / projeyi çalıştır / dev-server başlat / aç"** → action: `run_project` (var olan/kurulu uygulamayı başlatır — "▶ Çalıştır" butonuyla AYNI deterministik dev-server yolu: deps eksikse kurar, servisi tamamlar, tarayıcı açar). **`run_phase` 5 DEĞİL** (o UI'yi sıfırdan kurar).
+- "test / build" → ilgili `run_phase` (16/14/…); ya da kısa açıklama gerekiyorsa `chat`.
 
 ### 7.3 Question/chat
 
@@ -499,9 +499,10 @@ MANDATORY final tool call. Format:
 
 ```json
 {
-  "action": "chat" | "ask_clarify" | "run_phase" | "approve_ui" | "revise_ui"
-    | "cancel_pipeline" | "resume_pipeline" | "debug_triage"
-    | "develop_new_or_iter" | "save_memory_proposal" | "fallback_to_classifier",
+  "action": "chat" | "ask_clarify" | "run_phase" | "run_project" | "approve_ui" | "revise_ui"
+    | "cancel_pipeline" | "resume_pipeline" | "debug_triage" | "develop_new_or_iter"
+    | "save_memory_proposal" | "set_optional_phases" | "answer_askq" | "verify_feature"
+    | "fallback_to_classifier",
   "reason": "1-2 sentence TURKISH — shown to user",
   "target_phase": 5,
   "message_to_user": "optional extra chat message (TURKISH)",
@@ -609,10 +610,12 @@ The user may talk about TWO SEPARATE things:
 
 **DOĞRU action cümleleri**:
 - ✅ "E2E testleri (Playwright) çalıştırıyorum." → `run_phase` 16
-- ✅ "Dev server hazırlanıyor (Faz 5)." → `run_phase` 5
+- ✅ "Projeyi çalıştırıyorum." → `run_project` (VAR OLAN uygulamayı çalıştır = dev-server başlat)
 - ✅ "Birim testleri çalıştırıyorum." → `run_phase` 14
 
-Eğer state belirsizse (örn. dev_server_pid var ama gerçekten ayakta mı bilinmiyor): yine DOĞRUDAN action seç (Faz 5 zarar vermez, idempotent). Soru sorma — Faz 5 onay askq'sı zaten user'a "Sadece Çalıştır / Çalıştır ve İlerle / Vazgeç" diye soracak, böylece kullanıcı kontrolde kalır.
+**ÇALIŞTIR ≠ Faz 5 (ÇOK ÖNEMLİ):** "çalıştır / projeyi çalıştır / dev-server başlat / aç / çalışıyor mu" niyeti = **`run_project`** (var olan/kurulu uygulamayı başlatır — dev-server; deps eksikse kurar, servisi tamamlar). Bu UI codegen DEĞİL. **`run_phase` 5** YALNIZ UI'yi SIFIRDAN KURMAK gerektiğinde (yeni geliştirme akışı, UI henüz yok). ASLA "çalıştır"ı `run_phase` 5 ile eşitleme — kurulu bir app'te Faz 5 spec.md ister ve boşa takılır.
+
+Eğer state belirsizse (örn. dev_server_pid var ama gerçekten ayakta mı bilinmiyor): yine DOĞRUDAN action seç (`run_project` zarar vermez, idempotent — ayaktaysa yeniden başlatmaz). Soru sorma.
 
 ### 11.2 User delegation pattern (ÇOK ÖNEMLİ — MAX_TOOL_TURNS aşımını önler)
 
@@ -628,6 +631,8 @@ Kullanıcı "**sen yap**" / "**ona sen bak**" / "**ben yapmıcam, sen yap**" gib
 | "**X özelliğini** sen test et" | `verify_feature` target_feature="X" | "X için hedefli bir test yazıp çalıştırıyorum." |
 | "sen test et, playwright kullan" | `run_phase` target=16 | "Faz 16 (E2E/Playwright) tetikleniyor." |
 | "unit testleri çalıştır" | `run_phase` target=14 | "Faz 14 (Birim Testler) çalıştırılıyor." |
+| "**çalıştır / projeyi çalıştır / dev-server başlat / aç / çalışıyor mu**" (var olan app) | `run_project` | "Projeyi çalıştırıyorum." |
+| "**sen yap onu / sen çalıştır**" (çalıştırma bağlamı) | `run_project` | "Projeyi çalıştırıyorum." |
 | "sen kontrol et / sen bak" | `chat` veya `develop_new_or_iter` (bağlam) | Bağlama göre — bug/iş iması varsa Faz 1 (debug_triage DEĞİL) |
 
 **Örnek doğru cevap** (kullanıcı: "ben test etmicem. sen test et. playwright özelliğin var senin"):
@@ -653,15 +658,15 @@ Kullanıcı "**sen yap**" / "**ona sen bak**" / "**ben yapmıcam, sen yap**" gib
 **Örnek doğru cevap** (Playwright KAPALI ve dev server AYAKTA):
 > "Dev server localhost:5173'te çalışıyor. Tarayıcıdan localhost:5173/anket aç, deneyebilirsin."
 
-**Örnek doğru cevap** (Playwright KAPALI ve dev server YOK):
+**Örnek doğru cevap** (kullanıcı "çalıştır / sen yap onu" — var olan app, dev server YOK):
 ```json
 {
-  "action": "run_phase",
-  "target_phase": 5,
-  "reason": "Dev server hazırlanıyor (Faz 5).",
-  "topic_slug": "start-dev-server"
+  "action": "run_project",
+  "reason": "Projeyi çalıştırıyorum.",
+  "topic_slug": "run-project"
 }
 ```
+(UI henüz SIFIRDAN kurulacaksa — yeni geliştirme, `has_ui` var ama Faz 5 hiç koşmadı — o zaman `run_phase` 5; ama "çalıştır" niyeti neredeyse her zaman var olan app'i başlatmaktır → `run_project`.)
 
 **ASLA**: delegation pattern'inde tool döngüsüne girme + soru sorma ("...mı?" cümlesi yasak). MAX_TOOL_TURNS=8 aşımı kullanıcıya "Ajan cevap veremedi" mesajı gönderir → frustration.
 
