@@ -565,6 +565,10 @@ interface FailReasonHolder {
   // YZLLM 2026-06-12: fail model+efor tırmanmasıyla düzelebilir mi? false → tırmanma (climb) BOŞA (örn. saf
   // AC-etiketleme/kapsama: kod doğru, model gücü çözmez). Tanımsız → eski davranış (tırmanabilir). Faz 8 set eder.
   lastFailEscalatable?: boolean;
+  // YZLLM 2026-07-15 (faz-seviyesi döngü-kırıcı): bu fail'de test takımı YEŞİL mi (yalnız method/kalite-gate
+  // blokladı — repro-first/AC/tech-debt gibi; testler kırmızı/bozuk DEĞİL)? Faz 8 set eder. Döngü-kırıcı never-ask
+  // oto-kabul'ü YALNIZ true iken yapar (bozuk kodu sessizce "tamam" saymaz). Tanımsız → güvensiz (park).
+  lastFailSuiteGreen?: boolean;
   // 4c (çift-inceleme dedup, YZLLM zaman-kaybı planı): gate-loop mahkemesi bu bulguyu ZATEN inceleyip escalate
   // ettiyse + outcome DEĞİŞMEDİYSE (fixRan=false) → failPhase aynı bulguyu YENİDEN incelemesin (redundant Sonnet
   // agentik pass + Bash repro). #1'in hükmü buraya taşınır; failPhase reuse eder. YALNIZ escalate taşınır
@@ -626,6 +630,13 @@ const timeoutRetried = new Map<PhaseId, number>();
 // dön (normal loop-guard/analiz devralır). Bellekte, sig-başına; taze karar (Hook B) sayacı sıfırlar.
 const RECALL_AUTO_MAX = 3;
 const recallAutoCount = new Map<string, number>();
+// FAZ-SEVİYESİ DÖNGÜ-KIRICI (YZLLM 2026-07-15, cave 60-döngü): mevcut backstop'lar (recallAutoCount per-imza;
+// _escalateAcceptChain her faz-tamamlanmasında reset) hata-İMZASI drift edince (tech-debt stderr tur-tur değişir)
+// döngüyü kaçırıyor. Bu SAF faz-sayacı — imzadan/moddan bağımsız: bir faz PHASE_LOOP_MAX kez arka arkaya gate-fail
+// ederse döngü var demektir → görünür kabul/park kararı (sessiz recall→Faz0 çevrimi yerine). Reset YALNIZ gerçek
+// faz-tamamlanmasında (recordPhaseComplete / accept / yeni-proje). Ortam/timeout/abort fail'i buraya ulaşmadan return eder.
+const PHASE_LOOP_MAX = 3;
+const gateFailStreak = new Map<PhaseId, number>();
 
 /** FIX B: kullanıcının/otonun bu hata-imzası için seçtiği çözümü kaydet → sonraki analizde "denendi, tekrarlama". */
 function recordSolutionChoice(phase: PhaseId, sig: string, solution: string): void {
@@ -742,6 +753,53 @@ async function recordPhaseComplete(n: PhaseId): Promise<void> {
   _autoAnswerChain = 0; // faz GERÇEKTEN tamamlandı → otonom-cevap döngü sayacı sıfır (ilerleme var; MAX yanlış-tetiklenmesin).
   _escalateAcceptChain = 0; // gerçek faz-tamamlanması = müfettiş O fazda çalıştı → escalate 'art arda' semantiği korunur
   // (kaskat ara-tamamlanma ÜRETMEZ → bu reset devre-kesiciyi defeat etmez; mahkeme onayladı).
+  gateFailStreak.delete(n); // gerçek tamamlanma → faz-seviyesi döngü sayacı sıfır (ardışık-fail semantiği korunur).
+}
+
+/**
+ * FAZ-SEVİYESİ DÖNGÜ-KIRICI oto-kabul (never-ask + testler YEŞİL): bir faz PHASE_LOOP_MAX kez arka arkaya gate-fail
+ * etti ama test takımı yeşil (yalnız method/kalite-gate blokladı) → KULLANICI SEÇİMİ = otomatik kabul + ilerle.
+ * Gate-fail'e neden olan tech-debt bulgularını (varsa) accepted-findings'e yaz → kapı bir daha işaretlemez (döngü
+ * İMZADAN BAĞIMSIZ kalıcı kırılır) + `phase-N-complete` (detail `accepted_after_loop` → verdict PARTIAL, çıplak
+ * PASS DEĞİL) + advance. GÖRÜNÜR (çağıran mesaj basar) — sessiz sahte-yeşil değil.
+ */
+async function autoAcceptPhaseAfterLoop(p: PhaseId): Promise<void> {
+  if (!runtime.state) return;
+  const findings = getLastTechDebtFindings(runtime.state.project_root);
+  const seen = new Set<string>();
+  for (const f of findings) {
+    const key = acceptedFindingKey(f.file, f.category, f.excerpt);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await appendAcceptedFinding(runtime.state.project_root, {
+      ts: Date.now(),
+      scope: "tech-debt",
+      file: f.file,
+      category: f.category,
+      snippet: f.excerpt,
+      reason: `Faz ${p} döngü-kırıcı: test yeşil, otomatik kabul (accepted_after_loop)`,
+    }).catch((e) => log.warn("orchestrator", "loop-accept finding write fail", e));
+  }
+  gateFailStreak.delete(p);
+  // MAHKEME CRITICAL fix: phase-complete detail'i TAM OLARAK "soft_complete_after_fail" olmalı — computeVerdict
+  // (harness-verdict.ts:97) yalnız BU string'i soft-fail sayıp verdict'i PARTIAL yapar. Başka detail → PASS →
+  // "tüm gate'ler yeşil" sahte-yeşili + modül-stok/prototip'e "temiz" sızıntısı. Bilgi (accepted_after_loop) AYRI
+  // event'te (phase-loop-break-accept) — denetim izi kaybolmaz, ama verdict dürüstçe PARTIAL ("mükemmel değil").
+  await appendAuditModule(runtime.state.project_root, {
+    ts: Date.now(),
+    phase: p,
+    event: `phase-${p}-complete`,
+    caller: "mycl-orchestrator",
+    detail: "soft_complete_after_fail",
+  }).catch((e) => log.warn("orchestrator", "loop-accept complete audit fail", e));
+  await appendAuditModule(runtime.state.project_root, {
+    ts: Date.now(),
+    phase: p,
+    event: "phase-loop-break-accept",
+    caller: "mycl-orchestrator",
+    detail: `accepted_after_loop suite_green findings=${seen.size}`,
+  }).catch((e) => log.warn("orchestrator", "loop-accept info audit fail", e));
+  await advanceToNextPhase(p);
 }
 
 /**
@@ -1336,12 +1394,72 @@ async function failPhase(
   // döngü-kıran: AYNI imza AUTO_SOLVE_MAX kez denendiyse yine sor (sahte-yeşil/sonsuz-döngü önleme).
   const otoCevap = autoAnswerSuggested();
   const sig = failSignature(n, ctrl);
+  // FAZ-SEVİYESİ DÖNGÜ-KIRICI (YZLLM 2026-07-15, cave 60-döngü): saf faz-sayacı — imzadan/moddan bağımsız.
+  // sig drift edince (tech-debt stderr tur-tur değişir) per-imza backstop'lar (recallAutoCount/_escalateAcceptChain)
+  // döngüyü kaçırıyordu. forceFresh (recall re-entry) çift saymasın. Ortam/abort/API/qa fail'i yukarıda RETURN etti
+  // (sayılmaz); timeout-divert return ETMEZ ama TIMEOUT_DIVERT_MAX=2 ile sınırlı → tek başına eşiğe (3) ULAŞAMAZ,
+  // yalnız gerçek gate-fail'lerle birlikte katkı verir (haklı: asılıp+fail eden faz da döngüdür). Eşik aşılınca:
+  // never-ask+testler-yeşil → oto-kabul (kullanıcı seçimi); never-ask+testler-kırmızı → dürüst park; manuel → görünür
+  // kabul/dur seçenekleri (sessiz recall→Faz0 çevrimini ATLA).
+  let looped = false;
+  if (!opts?.forceFresh && runtime.state) {
+    const streak = (gateFailStreak.get(n) ?? 0) + 1;
+    gateFailStreak.set(n, streak);
+    if (streak >= PHASE_LOOP_MAX) {
+      looped = true;
+      gateFailStreak.delete(n); // devre bir kez ateşlensin (kabul/park sonrası taze başlasın)
+      await appendAuditModule(runtime.state.project_root, {
+        ts: Date.now(),
+        phase: n,
+        event: "phase-loop-break",
+        caller: "mycl-orchestrator",
+        detail: `${streak} ardışık gate-fail; suiteGreen=${ctrl?.lastFailSuiteGreen ?? "?"} sig=${sig.slice(0, 80)}`,
+      }).catch(() => {});
+      const suiteGreen = ctrl?.lastFailSuiteGreen === true;
+      if (otoCevap && suiteGreen) {
+        // never-ask + testler YEŞİL (yalnız method/kalite-gate blokladı) → KULLANICI SEÇİMİ: oto-kabul + ilerle.
+        // GÖRÜNÜR + PARTIAL (autoAcceptPhaseAfterLoop accepted-findings yazar + phase-complete + advance) — sessiz PASS DEĞİL.
+        emitChatMessage(
+          "system",
+          `⚠️ Faz ${n} art arda ${streak} kez aynı kapıdan geçemedi ama test takımı YEŞİL — otomatik kabul edip ` +
+            `ilerliyorum. Bu iş "mükemmel" sayılmaz (PARTIAL; denetim izi: phase-loop-break).`,
+        );
+        await autoAcceptPhaseAfterLoop(n);
+        return;
+      }
+      if (otoCevap && !suiteGreen) {
+        // never-ask AMA testler kırmızı/bozuk → oto-kabul ETME (bozuk kodu sessizce "tamam" saymak çıtayı düşürür).
+        // İş listesine dürüstçe park + GÖRÜNÜR dur (KATI #4; DONMUŞ HEDEF — atlamıyoruz, sessizce geçmiyoruz).
+        await appendTask(runtime.state.project_root, {
+          id: randomUUID(),
+          ts: Date.now(),
+          text: `Faz ${n} art arda ${streak} kez geçemedi + testler yeşil değil (elle incele): ${(ctrl?.lastFailReason ?? "").slice(0, 200)}`,
+          status: "pending",
+          source: "manual",
+        }).catch((e) => log.warn("orchestrator", "loop-break park task fail", e));
+        emitChatMessage(
+          "system",
+          `⛔ Faz ${n} art arda ${streak} kez geçemedi VE test takımı yeşil değil (kod bozuk olabilir) — otomatik ` +
+            `tekrarı durdurdum. Sessizce "tamam" saymıyorum (çıta düşmez); iş listesine yazdım, elle inceleyip devam et.`,
+        );
+        return;
+      }
+      // MANUEL mod → görünür kabul/dur: loopExhausted → error-analysis askq OPT_ACCEPT_PERMANENT+OPT_STOP_MANUAL sunar.
+      // Sessiz recall→Faz0 çevrimini ATLA (aşağıdaki recall bloğu `!looped` ile atlanır).
+      errCtx.loopExhausted = true;
+      emitChatMessage(
+        "system",
+        `⚠️ Faz ${n} art arda ${streak} kez aynı kapıdan geçemedi — otomatik tekrarı durdurdum; "kalıcı kabul et / ` +
+          `elle incele" seçeneklerini sunuyorum.`,
+      );
+    }
+  }
   // ── CEVAP-HATIRLAMA MERDİVENİ (YZLLM 2026-07-03): MANUEL modda (oto-cevap kapalı) aynı hata-imzası yine
   // geldiyse kullanıcının önceki cevabını hatırla → Kademe 3 (onaylı) oto-uygula, yoksa Kademe 2 "aynısını
   // kullanayım mı?" onayı. Oto-cevap AÇIKKEN atlanır → mevcut auto-resolve/loop-guard (priorSolutions ile
   // farklı yaklaşım dener) sahiplenir; recall onu kısa devre yaptırıp aynı çözümü tekrarlatmamalı. forceFresh
-  // (Kademe 2 "Hayır") → recall bir kez atlanır (sonsuz onay döngüsü olmaz).
-  if (!otoCevap && !opts?.forceFresh && runtime.state) {
+  // (Kademe 2 "Hayır") → recall bir kez atlanır (sonsuz onay döngüsü olmaz). looped → recall ATLA (döngü kır).
+  if (!otoCevap && !opts?.forceFresh && !looped && runtime.state) {
     const recalled = await recallAnswer(runtime.state.project_root, sig).catch(() => null);
     if (recalled) {
       const apply = () => applyRecalledErrorAnswer(n, sig, recalled);
@@ -1692,6 +1810,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // Timeout-divert sayacı da sıfırlanmalı (mahkeme minor 2026-07-09): faz-numarasıyla anahtarlı → eski projede TIMEOUT_
   // DIVERT_MAX'a ulaşan sayaç yeni projeye TAŞINIR → yeni projenin İLK timeout'u yanlışça "tükendi" sayılıp erken escalate olur.
   timeoutRetried.clear();
+  gateFailStreak.clear(); // faz-seviyesi döngü sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
   // YZLLM 2026-07-01 (FIX C): model-satırı cache'i sıfırla → yeni projede ilk model-seçim satırı yine görünür.
   resetModelChoiceCache();
   // FIX D (mahkeme): tech-debt son-bulgu deposunu da temizle (proje-değişiminde eski bulgular accept'e sızmasın).
@@ -3969,6 +4088,7 @@ async function runDevelopIteration(
     // v15.7 (2026-05-27): pending_backend_fix + pending_migrations +
     // pending_diagnostic da reset listesine alındı (R2-01 QC bulgusu) — yeni
     // alanlar eklenince listenin tutarlı genişlemesi gerekiyor.
+    gateFailStreak.clear(); // MAHKEME fix: yeni iterasyon → önceki iterasyonun parklı faz-döngü sayaçları taşınmasın.
     runtime.state = {
       ...runtime.state,
       current_phase: 1,
@@ -4450,6 +4570,10 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
   // çağrısı _pipelineDepth++'a kadar senkron" invariant'ı korunur; aşağıdaki saveState await'i guard'ı
   // boşa düşürmesin).
   _pipelineDepth++;
+  // MAHKEME fix (reset-kapsam boşluğu): faz `from` ilerliyor (tamamlandı/kabul/mahkeme-suppress/autofix — TÜM advance
+  // yolları buradan geçer) → faz-seviyesi döngü sayacını sıfırla. Kanonik tek-nokta: dağınık explicit reset'lerin
+  // kaçırdığı yolları (ör. mahkeme-suppress advanceToNextPhase(n)) da kapsar → stale streak → erken-tetik YOK.
+  gateFailStreak.delete(from);
   try {
     // Yeniden-inceleme round-4 #1/#3/#5 (YAPISAL): Faz 6 inceleme parkından İLERİ
     // herhangi bir faza geçişte park bayrağını TEMİZLE. approve_ui / run_phase /
@@ -5708,6 +5832,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
                 caller: "mycl-orchestrator",
                 detail: "gate_autofix_resolved",
               });
+              gateFailStreak.delete(13); // gate kendi içinde çözüldü (ilerleme) → döngü sayacı sıfır.
               emitChatMessage("system", "✅ Faz 13 kendi içinde düzeltildi — güvenlik geçti (Faz 8'e dönülmedi).");
               _securityFindingsPrev = null; // yakınsama-kırıcı sıfırla (güvenlik çözüldü)
               _securityNoProgress = 0;
@@ -5981,6 +6106,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               caller: "mycl-orchestrator",
               detail: "gate_autofix_resolved",
             });
+            gateFailStreak.delete(next); // gate kendi içinde çözüldü (ilerleme) → döngü sayacı sıfır.
             emitChatMessage("system", `✅ Faz ${next} kendi içinde düzeltildi — geçti.`);
             // YZLLM 2026-06-12: Faz 8 SONRASI (≥9) bir gate düzeltmesi kodu değiştirdi → testleri bozmuş olabilir.
             // Regresyon guard: tüm testleri yeniden koş; kırmızıysa bu faz fail'e döner (sessiz bozulma engellenir).
@@ -6622,6 +6748,7 @@ export async function handleAskqAnswer(
         "system",
         `⚠️ Faz ${p} güvenlik bulgusu kullanıcı tarafından kabul edildi — akış devam ediyor (bu iş "mükemmel" sayılmaz).`,
       );
+      gateFailStreak.delete(p); // kabul = faz kapandı → döngü sayacı sıfır (sonraki iterasyon taze).
       await advanceToNextPhase(p);
       return;
     }
@@ -6667,6 +6794,7 @@ export async function handleAskqAnswer(
           : `✅ Bulgu kabul edildi — akış devam ediyor. (Kalıcı işaretlenebilir tech-debt bulgusu bulunamadı; ` +
               `sonraki iterasyonda aynı gate tekrar çıkarsa gerçek bir sorun olabilir.)`,
       );
+      gateFailStreak.delete(p); // kalıcı kabul = faz kapandı → döngü sayacı sıfır.
       await advanceToNextPhase(p);
       return;
     }

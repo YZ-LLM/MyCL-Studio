@@ -24,7 +24,7 @@ import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
-import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, type FixSnapshot } from "./fix-snapshot.js";
+import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, changedFilesVsSnapshot, type FixSnapshot } from "./fix-snapshot.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
 import {
   readBehaviorBaseline,
@@ -258,6 +258,9 @@ export class Phase8Controller {
   // YZLLM 2026-06-12: gate-fail model+efor tırmanmasıyla düzelebilir mi? Saf AC-kapsama/etiketleme fail'i
   // (kod doğru, testler AC-id'siz) model gücüyle çözülmez → false → failPhase tırmanmaz. Gerçek kod-fail'i → true.
   public lastFailEscalatable?: boolean;
+  /** YZLLM 2026-07-15 (faz-seviyesi döngü-kırıcı): gate-fail'de test takımı YEŞİL miydi (yalnız repro-first/AC gibi
+   *  method-gate blokladı; testler kırmızı DEĞİL)? Döngü-kırıcı never-ask oto-kabul'ü yalnız true iken yapar. */
+  public lastFailSuiteGreen?: boolean;
   /** v15.7 (2026-05-27): Faz 7'den gelen pending migration not — initialMessage'a eklenir. */
   private pendingMigrationNote = "";
   /** v15.7 (2026-05-27): Phase 0 D2 backend-only fix routing'ten gelen plan. */
@@ -764,6 +767,18 @@ export class Phase8Controller {
       } catch {
         reproRequired = true; // belirsizse güvenli taraf: repro iste
       }
+    } else if (this.isFixMode && this.fixSnapshot?.method === "copy") {
+      // KÖK FIX (YZLLM 2026-07-15, cave döngüsü): git-checkpoint YOK (foreign/copy/non-git → checkpointRef=null) ama
+      // copy-yedek VAR → değişen dosyaları İÇERİK-farkıyla türet → repro-first muafiyetleri (test-only/config-only)
+      // git ile AYNI çalışsın (parity; imkansız-repro döngüsü kırılır). changedFilesVsSnapshot null (okuma güvenilmez)
+      // → changedForRepro null kalır + reproRequired DOKUNULMAZ (fail-safe = repro zorunlu; muafiyet yalnız GÜVENİLİR
+      // değişiklik-listesinde düşer, eksik listeyle yanlış "test-only" YOK).
+      try {
+        changedForRepro = await changedFilesVsSnapshot(this.fixSnapshot, this.state.project_root);
+        if (changedForRepro && !reproRequired) reproRequired = changedForRepro.some((f) => !isCosmeticFile(f));
+      } catch {
+        reproRequired = true; // belirsizse güvenli taraf: repro iste
+      }
     }
     // GÖREV-SINIFI-DUYARLI escape (YZLLM gate-fix #1, 2026-06-19): değişiklik STATIC-ONLY ise (tip-only/
     // ölü-kod/re-export — eklenen runtime statement YOK + yeni prod dosyası YOK) runtime kırmızı→yeşil
@@ -908,6 +923,13 @@ export class Phase8Controller {
     // YZLLM 2026-06-12 (#2): kod-fail olsa bile AYNI regresyon tekrar ettiyse model gücü çözmüyor →
     // escalatable=false → failPhase tırmanmaz (7-basamak boş yakma yerine durup yaklaşımı sorgulatır).
     this.lastFailEscalatable = codeQualityFail && !this.regressionRepeated;
+    // YZLLM 2026-07-15 (döngü-kırıcı, MAHKEME CRITICAL fix): oto-kabul GÜVENLİ mi? = testler GERÇEKTEN yeşil
+    // (final suite koştu + son olay yeşil + yeterli yeşil) VE repro-first TATMİN (reproOk). reproOk ŞART:
+    // repro-testsiz gerçek backend fix'i (worker kırmızı→yeşil yazmadan doğrudan geçen test yazdı) oto-kabul
+    // edilirse tam da gate'in önlediği sahte-yeşil olur → o durumda lastFailSuiteGreen=false → never-ask PARK eder.
+    // true kalınca fail YALNIZ debt/AC-etiketleme gate'idir (kabul-edilebilir, accepted-findings/PARTIAL ile görünür).
+    this.lastFailSuiteGreen =
+      finalSuiteRun && lastEvent === "tdd-green" && greens >= minGreens && reproOk;
     await this.rollbackFixIfNeeded();
     // ③ Structured handoff (Missions): başarısız devir — durum + neden + keşfedilen (takip zemini).
     try {

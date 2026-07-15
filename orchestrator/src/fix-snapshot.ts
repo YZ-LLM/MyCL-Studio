@@ -2,7 +2,7 @@
 // darboğazda devam etsin" → otonom düzeltme GÜVENLİ olmalı). Git deposunda checkpoint (ucuz); git YOKSA kaynak
 // ağacını `.mycl/backups/<ts>/`'a kopyalar (node_modules vb. hariç). Yanlış oto-düzeltme geri alınabilir.
 
-import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { createCheckpoint, restoreCheckpoint } from "./git.js";
 import { emitChatMessage } from "./ipc.js";
@@ -122,6 +122,109 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
     disarmRollback();
     return { method: "none" };
   }
+}
+
+/** İçerik-karşılaştırmada tam-oku üst sınırı — büyük dosyada boyut-farkına düş (bellek koruması). */
+const CHANGED_DIFF_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Copy-snapshot'a göre DEĞİŞEN (eklenen/değişen/silinen) prod-relative dosya yollarını hesapla — git-ref GEREKMEZ.
+ * Neden (YZLLM 2026-07-15, cave döngüsü): repro-first muafiyetlerinin change-detection'ı YALNIZ git-ref'ten
+ * türüyordu → foreign/copy/non-git projede `checkpointRef=null` → değişen dosya belirlenemeyip muafiyetler atlanıyor
+ * → imkansız-repro döngüsü. Bu, copy-yedek ile projeyi İÇERİK-farkıyla karşılaştırır (Bash/sed dahil her aracı
+ * yakalar; git parity). `method!=="copy" || !dir` → null (çağıran git yolunu korur). Herhangi bir okuma hatasında
+ * (izin/IO) NULL döner (FAIL-SAFE: eksik listeyle "test-only" sanıp repro'yu yanlışlıkla düşürme; repro zorunlu kalır).
+ * EXCLUDE_TOP (node_modules/.git/.mycl/dist…) atlanır. SAF-değil (fs). Proje-relative yol döner.
+ */
+export async function changedFilesVsSnapshot(
+  snap: FixSnapshot,
+  projectRoot: string,
+): Promise<string[] | null> {
+  if (snap.method !== "copy" || !snap.dir) return null;
+  const backupDir = snap.dir;
+  const changed = new Set<string>();
+  const isEnoent = (e: unknown): boolean => (e as { code?: string })?.code === "ENOENT";
+
+  const sameContent = async (aPath: string, bPath: string): Promise<boolean> => {
+    const [aSt, bSt] = await Promise.all([stat(aPath), stat(bPath)]);
+    if (aSt.size !== bSt.size) return false; // boyut farkı → kesin değişti
+    // MAHKEME fix (fake-green önleme): aynı-boyut + BÜYÜK dosya içeriği okunmadan "değişmedi" SAYILMAZ (aynı boyutta
+    // sabit-genişlik değişiklik — "100"→"200", ">"→"<" — kaçardı → yanlış test-only muafiyeti). İçerik doğrulanamıyorsa
+    // "değişti" say (güvenli taraf: repro zorunlu kalır). 8MB+ tek prod kaynak dosyası nadir; false-pozitif zararsız (repro ister).
+    if (aSt.size > CHANGED_DIFF_MAX_BYTES) return false;
+    const [aBuf, bBuf] = await Promise.all([readFile(aPath), readFile(bPath)]);
+    return aBuf.equals(bBuf);
+  };
+
+  // backup → project: DEĞİŞEN (içerik) + SİLİNEN. `false` dönerse okuma güvenilmez → caller null.
+  const walkBackup = async (relDir: string): Promise<boolean> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(join(backupDir, relDir), { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const e of entries) {
+      if (!relDir && EXCLUDE_TOP.has(e.name)) continue;
+      const rel = relDir ? join(relDir, e.name) : e.name;
+      // MAHKEME fix (symlink under-report): readdir'da symlink isFile()=isDirectory()=false → eskiden sessizce
+      // atlanıyordu (retarget/ekle/sil GÖRÜNMEZ → yanlış test-only muafiyeti). "değişti" say (güvenli taraf).
+      if (e.isSymbolicLink()) {
+        changed.add(rel);
+        continue;
+      }
+      if (e.isDirectory()) {
+        if (!(await walkBackup(rel))) return false;
+        continue;
+      }
+      if (!e.isFile()) continue;
+      try {
+        if (!(await sameContent(join(backupDir, rel), join(projectRoot, rel)))) changed.add(rel);
+      } catch (err) {
+        if (isEnoent(err)) {
+          changed.add(rel); // projede yok → SİLİNDİ
+        } else {
+          return false; // izin/IO hatası → güvenilmez
+        }
+      }
+    }
+    return true;
+  };
+  // project → backup: EKLENEN (yeni) dosyalar.
+  const walkProject = async (relDir: string): Promise<boolean> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(join(projectRoot, relDir), { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const e of entries) {
+      if (!relDir && EXCLUDE_TOP.has(e.name)) continue;
+      const rel = relDir ? join(relDir, e.name) : e.name;
+      // MAHKEME fix (symlink under-report): readdir'da symlink isFile()=isDirectory()=false → eskiden sessizce
+      // atlanıyordu (retarget/ekle/sil GÖRÜNMEZ → yanlış test-only muafiyeti). "değişti" say (güvenli taraf).
+      if (e.isSymbolicLink()) {
+        changed.add(rel);
+        continue;
+      }
+      if (e.isDirectory()) {
+        if (!(await walkProject(rel))) return false;
+        continue;
+      }
+      if (!e.isFile()) continue;
+      try {
+        await stat(join(backupDir, rel));
+      } catch (err) {
+        if (isEnoent(err)) changed.add(rel); // backup'ta yok → EKLENDİ
+        else return false;
+      }
+    }
+    return true;
+  };
+
+  if (!(await walkBackup(""))) return null;
+  if (!(await walkProject(""))) return null;
+  return [...changed];
 }
 
 /**

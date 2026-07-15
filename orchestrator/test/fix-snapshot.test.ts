@@ -9,6 +9,7 @@ import {
   peekRollback,
   disarmRollback,
   pruneProjectBackups,
+  changedFilesVsSnapshot,
 } from "../src/fix-snapshot.js";
 
 describe("snapshotBeforeAutofix (git yoksa .mycl/backups kopya)", () => {
@@ -144,5 +145,82 @@ describe("pruneProjectBackups — proje başına son N yedek (YZLLM 2026-06-27)"
     const removed = await pruneProjectBackups(root, "projA", 3);
     expect(removed).toEqual([]);
     expect(existsSync(join(root, "projA-autofix-1"))).toBe(true);
+  });
+});
+
+describe("changedFilesVsSnapshot — git'siz kopya-diff (repro-first muafiyet change-detection)", () => {
+  let backup: string;
+  let proj: string;
+  beforeEach(async () => {
+    backup = await mkdtemp(join(tmpdir(), "mycl-bk-"));
+    proj = await mkdtemp(join(tmpdir(), "mycl-pr-"));
+  });
+  afterEach(async () => {
+    await rm(backup, { recursive: true, force: true });
+    await rm(proj, { recursive: true, force: true });
+  });
+
+  it("method!=='copy' → null (çağıran git yolunu korur)", async () => {
+    expect(await changedFilesVsSnapshot({ method: "git", ref: "abc" }, proj)).toBeNull();
+    expect(await changedFilesVsSnapshot({ method: "none" }, proj)).toBeNull();
+    expect(await changedFilesVsSnapshot({ method: "copy" }, proj)).toBeNull(); // dir yok
+  });
+
+  it("DEĞİŞEN (içerik) dosyayı yakalar; DEĞİŞMEYENİ değil", async () => {
+    await writeFile(join(backup, "package.json"), '{"scripts":{"dev":"node x"}}');
+    await writeFile(join(proj, "package.json"), '{"scripts":{"dev":"node x --watch"}}'); // değişti
+    await writeFile(join(backup, "app.js"), "const a=1;");
+    await writeFile(join(proj, "app.js"), "const a=1;"); // aynı
+    const changed = await changedFilesVsSnapshot({ method: "copy", dir: backup }, proj);
+    expect(changed).toEqual(["package.json"]);
+  });
+
+  it("EKLENEN (projede var, backup'ta yok) + SİLİNEN (backup'ta var, projede yok) yakalar", async () => {
+    await writeFile(join(backup, "old.js"), "x"); // silinecek
+    await writeFile(join(proj, "new.js"), "y"); // eklendi
+    const changed = await changedFilesVsSnapshot({ method: "copy", dir: backup }, proj);
+    expect(new Set(changed)).toEqual(new Set(["old.js", "new.js"]));
+  });
+
+  it("EXCLUDE_TOP (node_modules) top-level dizinini yok sayar", async () => {
+    await mkdir(join(backup, "node_modules"), { recursive: true });
+    await writeFile(join(backup, "node_modules", "x.js"), "a");
+    await mkdir(join(proj, "node_modules"), { recursive: true });
+    await writeFile(join(proj, "node_modules", "x.js"), "DEĞİŞTİ"); // node_modules değişti ama sayılmamalı
+    await writeFile(join(backup, "src.js"), "s");
+    await writeFile(join(proj, "src.js"), "s");
+    const changed = await changedFilesVsSnapshot({ method: "copy", dir: backup }, proj);
+    expect(changed).toEqual([]); // yalnız node_modules değişti → yok sayıldı
+  });
+
+  it("alt-dizin (nested) değişikliğini proje-relative yol olarak döner", async () => {
+    await mkdir(join(backup, "routes"), { recursive: true });
+    await writeFile(join(backup, "routes", "db.js"), "old");
+    await mkdir(join(proj, "routes"), { recursive: true });
+    await writeFile(join(proj, "routes", "db.js"), "new");
+    const changed = await changedFilesVsSnapshot({ method: "copy", dir: backup }, proj);
+    expect(changed).toEqual([join("routes", "db.js")]);
+  });
+
+  it("backup dizini okunamıyorsa → null (FAIL-SAFE: eksik listeyle yanlış muafiyet YOK)", async () => {
+    const changed = await changedFilesVsSnapshot({ method: "copy", dir: join(backup, "yok-dizin") }, proj);
+    expect(changed).toBeNull();
+  });
+
+  it("hiçbir değişiklik yok → [] (boş liste, null DEĞİL)", async () => {
+    await writeFile(join(backup, "a.js"), "same");
+    await writeFile(join(proj, "a.js"), "same");
+    const changed = await changedFilesVsSnapshot({ method: "copy", dir: backup }, proj);
+    expect(changed).toEqual([]);
+  });
+
+  it("MAHKEME fix: symlink 'değişti' sayılır (under-report yok — görünmez retarget/ekle YOK)", async () => {
+    const { symlink } = await import("node:fs/promises");
+    await writeFile(join(proj, "target.js"), "t");
+    await symlink(join(proj, "target.js"), join(proj, "link.js")); // projede symlink var, backup'ta yok
+    await writeFile(join(backup, "target.js"), "t");
+    const changed = await changedFilesVsSnapshot({ method: "copy", dir: backup }, proj);
+    // link.js symlink → 'changed' say (isProdPath değerlendirmesi çağırana kalır; sessizce atlanmaz).
+    expect(changed).toContain("link.js");
   });
 });
