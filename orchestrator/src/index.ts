@@ -2779,18 +2779,20 @@ async function handleReadSelectedModels(): Promise<void> {
 async function handleCommandDirect(
   text: string,
   intentKind: "run" | "test" | "build" | "install" | "lint",
+  opts: { silent?: boolean } = {},
 ): Promise<void> {
   log.info("orchestrator", "command_direct", {
     text_len: text.length,
     intent_kind: intentKind,
+    silent: opts.silent ?? false,
   });
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
     return;
   }
-  // History persistence: user mesajını yaz (frontend setMainState ile UI'ya
-  // optimistic eklenmiştir).
-  if (runtime.state.project_root) {
+  // History persistence: user mesajını yaz (frontend setMainState ile UI'ya optimistic eklenmiştir).
+  // silent=iç yönlendirme → kullanıcı bunu YAZMADI (sahte "role:user" mesajı geçmişe yazma).
+  if (runtime.state.project_root && !opts.silent) {
     appendHistory(runtime.state.project_root, {
       ts: Date.now(),
       kind: "chat_message",
@@ -2802,7 +2804,7 @@ async function handleCommandDirect(
   // YZLLM 2026-06-12: busy iken DÜŞÜRME (eski "komut bekletildi" + return = kayıp). command_direct
   // paralel-değil (shared pipeline'a dokunur) → kuyruğa al; faz/orkestratör boşa çıkınca sırayla işlenir.
   // submit() boşsa hemen çalıştırır (gövdeyi await eder), meşgulse sıraya alıp görünür bilgilendirir.
-  await commandDirectQueue.submit({ text, intentKind });
+  await commandDirectQueue.submit({ text, intentKind, silent: opts.silent });
 }
 
 /**
@@ -2864,20 +2866,27 @@ let _pipelineDepth = 0;
 const commandDirectQueue = new SerialWorkQueue<{
   text: string;
   intentKind: "run" | "test" | "build" | "install" | "lint";
+  /** İç yönlendirme (ör. foreign-run redirect) → kuyruğa alma/kuyruktan alma mesajlarını BASTIR (kullanıcı zaten
+   *  net bir "çalıştırıyorum" mesajı gördü; "kuyruğa alındı — çalışan iş bitince" ONU YALANLAR). */
+  silent?: boolean;
 }>({
   isExternallyBusy: () =>
     runtime.controller !== null || _handlingUserMessage || _pipelineDepth > 0,
   exec: ({ text, intentKind }) => runCommandDirectBody(text, intentKind),
-  onEnqueue: (_item, position) =>
+  onEnqueue: (item, position) => {
+    if (item.silent) return;
     emitChatMessage(
       "system",
       `🧾 İş kuyruğa alındı (sıra ${position}) — çalışan iş bitince işlenecek.`,
-    ),
-  onResume: (item, remaining) =>
+    );
+  },
+  onResume: (item, remaining) => {
+    if (item.silent) return;
     emitChatMessage(
       "system",
       `▶️ Kuyruktan alındı, işleniyor: "${item.text.slice(0, 40)}"${remaining > 0 ? ` (kalan ${remaining})` : ""}.`,
-    ),
+    );
+  },
 });
 
 /** Çalışan fazı/işi kullanıcı yönlendirmesi nedeniyle durdurmak için (failPhase analizini atlatır). */
@@ -7107,6 +7116,28 @@ function phaseLabelTR(phaseId: number, spec: PhaseSpec): string {
   return `Faz ${phaseId}`;
 }
 
+/**
+ * Foreign proje + Faz 5 (orkestratörün "çalıştır" niyeti eşlemesi) + `.mycl/spec.md` YOK = "var olan uygulamayı
+ * ÇALIŞTIR" (UI codegen DEĞİL). Foreign proje EDD ile entegre olur, Faz 4 spec.md YAZMAZ → Faz 5 codegen'in ön
+ * koşulu (spec) hiç yoktur → eskiden "önce Faz 4'ü tamamla" DEAD-END'i (hiçbir şey çalışmazdı — log teşhisi). Bunun
+ * yerine dev-server başlatma yoluna (handleCommandDirect run — deps kurulum/kurtarma/servis dahil) SESSİZCE (silent:
+ * çelişkili kuyruk mesajı yok) YÖNLENDİR. @returns true → yönlendirildi (çağıran RETURN etmeli). (YZLLM 2026-07-15)
+ */
+async function redirectForeignRunToDevServer(phaseId: number): Promise<boolean> {
+  if (phaseId !== 5 || !runtime.state || runtime.state.origin !== "foreign") return false;
+  const specMdPath = currentSpecPath(runtime.state);
+  const hasSpec = await import("node:fs/promises").then((m) =>
+    m.access(specMdPath).then(() => true).catch(() => false),
+  );
+  if (hasSpec) return false; // spec VAR → gerçek UI-build iterasyonu (redirect etme, normal Faz 5 codegen)
+  emitChatMessage(
+    "system",
+    "▶️ Bu yabancı proje zaten kurulu (UI-kurma fazı gerekmez) — çalıştırıyorum…",
+  );
+  await handleCommandDirect("projeyi çalıştır", "run", { silent: true });
+  return true;
+}
+
 async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<void> {
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
@@ -7152,6 +7183,9 @@ async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<voi
   // Faz TR etiketi i18n'den (ortak yardımcı)
   const label = phaseLabelTR(phaseId, spec);
   if (directRun) {
+    // Foreign proje "çalıştır" niyeti Faz 5 (UI codegen) diye eşlendiyse ama app zaten kurulu → dev-server'a yönlendir
+    // (yanıltıcı "🚀 Faz 5 çalıştırılıyor" mesajını da ATLA — hiç UI kurmuyoruz). Log teşhisli fix.
+    if (await redirectForeignRunToDevServer(phaseId)) return;
     // Agent ZATEN run_phase kararı verdi (kullanıcı "çalıştır" dedi) = AÇIK NİYET →
     // gereksiz onay askq'sı YOK (kardeş aksiyonlar approve_ui/resume_pipeline ile
     // tutarlı; v15.6 "açık niyete askq sorma" prensibi — YZLLM 2026-06-13: "zaten
@@ -7201,6 +7235,10 @@ async function handleRunPhase(
     emitError(`Faz ${phaseId} spec yok`, null);
     return;
   }
+
+  // Foreign proje "çalıştır" → Faz 5 codegen değil, var olan app'i çalıştır (askq/sidebar yolu; directRun yolu
+  // emitPhaseRunAskq'ta zaten yakalandı). Yönlendirdiyse burada bitir.
+  if (await redirectForeignRunToDevServer(phaseId)) return;
 
   // Spec dependency kontrolü — defansif
   if ([4, 5, 6, 7, 9, 10].includes(phaseId)) {
