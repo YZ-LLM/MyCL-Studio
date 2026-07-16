@@ -18,6 +18,10 @@
  */
 export type TaskStatus = "pending" | "running" | "done" | "dropped";
 
+/** İş kaynağı — kim/ne ekledi. Yeni kaynak eklerken TASK_SOURCES setine de ekle
+ *  (store.ts okuma doğrulaması oradan yürür; unutulursa kaynak sessizce düşerdi). */
+export type TaskSource = "manual" | "auto" | "security" | "full-test" | "maintenance" | "plan";
+
 export interface TaskQueueItem {
   /** UUID v4 — silme tombstone bağlamak için. */
   id: string;
@@ -37,8 +41,10 @@ export interface TaskQueueItem {
   /** status="done" olunca damgalanan tamamlanma zamanı (ms epoch). */
   completed_at?: number;
   /** Kaynak: kullanıcı manuel mi ekledi (manual), çok-problem/Faz-4-sonrası otomatik mi (auto),
-   *  yoksa güvenlik/sızma-testi bulgusu mu (security = "sistem işi", YZLLM 2026-06-19). */
-  source?: "manual" | "auto" | "security";
+   *  güvenlik/sızma-testi bulgusu mu (security = "sistem işi", YZLLM 2026-06-19),
+   *  Full Test bulgusu mu (full-test), bakım turu bulgusu mu (maintenance),
+   *  yoksa plan modu adımı mı (plan) — 2026-07-16. */
+  source?: TaskSource;
   /** YZLLM 2026-06-19: güvenlik/pentest sistem-işi bu fazdan BAŞLAR (niyet bulgudan türetildiği için
    *  Faz 1/2 atlanır → genelde 3=Mühendislik Brifingi). Yoksa normal akış (Faz 1). */
   from_phase?: number;
@@ -70,6 +76,16 @@ export const TASK_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
   "running",
   "done",
   "dropped",
+]);
+
+/** Geçerli kaynak değerleri — store.ts okuma doğrulaması buradan (tek kaynak). */
+export const TASK_SOURCES: ReadonlySet<TaskSource> = new Set<TaskSource>([
+  "manual",
+  "auto",
+  "security",
+  "full-test",
+  "maintenance",
+  "plan",
 ]);
 
 export class TaskQueueError extends Error {

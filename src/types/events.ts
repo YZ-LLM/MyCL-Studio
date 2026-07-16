@@ -145,8 +145,9 @@ export interface TaskQueueItem {
   started_at?: number;
   /** status="done" tamamlanma zamanı (ms epoch) — KİLİT, tekrar uygulanamaz. */
   completed_at?: number;
-  /** Kaynak: manuel (İş Ekle) vs auto (çok-problem/Faz-4-sonrası ayrıştırma). */
-  source?: "manual" | "auto";
+  /** Kaynak: manuel (İş Ekle), auto (çok-problem ayrıştırma), security (güvenlik bulgusu),
+   *  full-test (Full Test bulgusu), maintenance (bakım turu bulgusu), plan (plan modu adımı). */
+  source?: "manual" | "auto" | "security" | "full-test" | "maintenance" | "plan";
 }
 export interface TaskQueueLoadedEvent {
   kind: "task_queue_loaded";

@@ -9,11 +9,13 @@ import { open as openSync } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { enrichRecord } from "../record-context.js";
 import {
+  TASK_SOURCES,
   TASK_STATUSES,
   TaskQueueError,
   type TaskQueueItem,
   type TaskQueuePatch,
   type TaskQueueTombstone,
+  type TaskSource,
   type TaskStatus,
 } from "./types.js";
 
@@ -129,8 +131,8 @@ export async function readTasks(
         item.status = obj.status as TaskStatus;
       if (typeof obj.started_at === "number") item.started_at = obj.started_at;
       if (typeof obj.completed_at === "number") item.completed_at = obj.completed_at;
-      if (obj.source === "manual" || obj.source === "auto" || obj.source === "security")
-        item.source = obj.source;
+      if (typeof obj.source === "string" && TASK_SOURCES.has(obj.source as TaskSource))
+        item.source = obj.source as TaskSource;
       if (typeof obj.from_phase === "number") item.from_phase = obj.from_phase;
       items.push(item);
     }

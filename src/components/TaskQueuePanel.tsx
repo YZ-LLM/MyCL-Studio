@@ -57,6 +57,14 @@ const STATUS_BADGE: Record<TaskStatus, string> = {
   dropped: "⏹️ Düştü",
 };
 
+// Sistem kaynaklı işler görünür etiket taşır (KATI #4 görünürlük); manual/auto etiketlenmez (gürültü olmasın).
+const SOURCE_BADGE: Partial<Record<NonNullable<TaskQueueItem["source"]>, string>> = {
+  security: "🛡️ Güvenlik",
+  "full-test": "🧪 Full Test",
+  maintenance: "🔧 Bakım",
+  plan: "🗺️ Plan",
+};
+
 // Sıralama: işleniyor → bekleyen (öncelik) → tamamlanan (en son üstte) → düşen.
 const STATUS_ORDER: Record<TaskStatus, number> = {
   running: 0,
@@ -134,6 +142,11 @@ export function TaskQueuePanel({
                   {item.priority !== undefined && !isDone && (
                     <span className="task-queue-priority" title="Öncelik (1=en yüksek)">
                       ⚑ {item.priority}
+                    </span>
+                  )}
+                  {item.source && SOURCE_BADGE[item.source] && (
+                    <span className="task-queue-source" title="İşin kaynağı">
+                      {SOURCE_BADGE[item.source]}
                     </span>
                   )}
                   <span className="task-queue-item-ts">
