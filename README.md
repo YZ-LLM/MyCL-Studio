@@ -284,12 +284,14 @@ ana ajan sıfırdan değil çalışan baseline üzerine geliştirir.
 Proje tek bir dile bağlı değil. Manifest dosyalarından (`package.json`,
 `pyproject.toml`, `Cargo.toml`, `go.mod` vb.) projenin stack'i tespit edilir ve
 [assets/profiles/](assets/profiles/) altındaki eşleşen profil seçilir. Bir profil,
-stack'i komutlara (lint / test / build / performans), dev-server portuna ve
-manifest dosyalarına eşler — mekanik fazlar (10–17) bu stack-özel komutları
-çalıştırır.
+stack'i komutlara (çalıştır / kur / lint / test / build / performans), dev-server
+portuna, manifest dosyalarına ve eksik-bağımlılık crash imzalarına eşler — hem
+sohbet komutları hem mekanik fazlar (10–17) bu stack-özel komutları TEK kaynaktan
+(profilden) çözer.
 
-Mevcut **18 stack profili**: Node (npm, yarn, pnpm, bun), Python (pip, poetry, uv),
-Rust, Go, Ruby, PHP, .NET, Dart, Elixir, Swift, Maven, Gradle, Deno. Ayrıca proje
+Mevcut **19 stack profili**: Node (npm, yarn, pnpm, bun), Python (pip, poetry, uv),
+Rust, Go, Ruby, PHP, .NET, Dart, Flutter, Elixir, Swift, Maven, Gradle, Deno
+(Flutter, `pubspec.yaml` içeriğinden saf Dart'tan ayrı algılanır). Ayrıca proje
 **tipi** (web / cli / library / api / ml / game / desktop / mobile) sınıflandırılır;
 bu, hangi test fazlarının (E2E, sızma testi) uygulanacağını belirler.
 
@@ -434,7 +436,8 @@ orchestrator/
 assets/
   templates/          # faz başına İngilizce system prompt şablonları
   agent-prompts/      # orchestrator system prompt
-  profiles/           # 18 stack profili (komut + port + manifest eşlemesi)
+  profiles/           # 19 stack profili (komut + port + manifest + deps imza eşlemesi)
+  provision/          # runtime servis tablosu (services.json: port + imza + ipucu)
   i18n/               # tr.json + en.json
   security-rules/     # güvenlik kuralları
 ```
