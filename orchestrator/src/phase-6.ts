@@ -15,6 +15,7 @@
 // Phase 6 context'inde işlenir (classifier currentPhase=6 ile çağrılır).
 
 import { formatA11yReport, runAccessibilityScan } from "./accessibility-scan.js";
+import { captureAndCompare, formatVisualReport } from "./visual-regression.js";
 import { appendAudit } from "./audit.js";
 import type { MyclConfig } from "./config.js";
 import { emitChatMessage } from "./ipc.js";
@@ -22,6 +23,31 @@ import { log } from "./logger.js";
 import type { PhaseDeps } from "./phase-deps.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import type { State } from "./types.js";
+
+/**
+ * Görsel önce/sonra raporunu kur (SALT-RAPOR; ASLA throw etmez — a11y deseni). Önceki Faz 6
+ * tabanıyla piksel karşılaştırır; "hiçbir şey sorma" modunda kullanıcı gözünün emniyet ağı.
+ * Taban terfisi advanceToNextPhase(6)'da (onay/oto-geçiş) — burada yalnız çekim + rapor.
+ */
+async function buildVisualReport(state: State, port: number | undefined): Promise<string> {
+  try {
+    const url = `http://localhost:${port ?? 5173}`;
+    const result = await captureAndCompare(url, state.project_root);
+    await appendAudit(state.project_root, {
+      ts: Date.now(),
+      phase: 6,
+      event: result.ran ? "visual-diff" : "visual-diff-skipped",
+      caller: "mycl-orchestrator",
+      detail: result.ran
+        ? `baseline=${result.baselineExisted} routes=${result.diffs.length} changed=${result.diffs.filter((d) => d.status !== "unchanged").length}`
+        : (result.skippedReason ?? "").slice(0, 120),
+    }).catch(() => {});
+    return formatVisualReport(result);
+  } catch (err) {
+    log.warn("phase-6", "görsel karşılaştırma raporu kurulamadı (non-fatal)", { error: String(err) });
+    return "🖼️ **Görsel karşılaştırma:** yapılamadı (beklenmedik hata; incelemeyi engellemez).";
+  }
+}
 
 /**
  * Erişilebilirlik raporunu kur (SALT-RAPOR; ASLA throw etmez → inceleme akışını bozmaz).
@@ -97,11 +123,15 @@ export class Phase6Controller {
     // Mahkeme kararı: GATE DEĞİL (false-positive→tıkanma riski) → bilgi olarak incelemeye eklenir, oto-fix yok,
     // hiçbir şeyi bloklamaz. Hata olursa görünür "taranamadı" (sessiz değil). Bütünüyle best-effort.
     const a11yReport = await buildA11yReport(this.state, dev.port);
+    // 🖼️ Görsel önce/sonra (iterasyonlar arası) SALT-RAPOR — aynı desen; never-ask'ta da görünür.
+    const visualReport = await buildVisualReport(this.state, dev.port);
 
     emitChatMessage(
       "system",
       "👀 **Faz 6: UI İncelemesi** — Uygulama tarayıcıda açıldı.\n\n" +
         a11yReport +
+        "\n\n" +
+        visualReport +
         "\n\nUI'yi inceledikten sonra composer'a yaz:\n" +
         "• Beğendiysen → `tamam` / `devam et` / `onayla` → Faz 7'e geçeriz.\n" +
         "• Değişiklik istiyorsan → ne istediğini doğal cümleyle yaz (örn. _\"butonun rengini koyulaştır\"_) → Faz 5'da uygulanır.\n" +

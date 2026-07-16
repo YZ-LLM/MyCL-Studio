@@ -162,6 +162,7 @@ import { runLayerCostReport } from "./layer-cost-report.js";
 import { specSignalMatches } from "./mechanical-skip-signal.js";
 import { extractStockedModules } from "./module-stock.js";
 import { generateGuideShots } from "./guide-shots.js";
+import { promoteVisualBaseline } from "./visual-regression.js";
 import {
   setRuntimeHttpTarget,
   startRuntimeHttpServer,
@@ -4575,6 +4576,12 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
   // kaçırdığı yolları (ör. mahkeme-suppress advanceToNextPhase(n)) da kapsar → stale streak → erken-tetik YOK.
   gateFailStreak.delete(from);
   try {
+    // Görsel taban terfisi (2026-07-16): Faz 6 GEÇİLDİ (onay veya never-ask oto-geçiş — tüm advance
+    // yolları burası) → bu iterasyonun görüntüleri yeni taban olur; pending yoksa no-op. revise_ui
+    // advance ETMEDİĞİ için eski taban korunur (doğru: onaylanmamış görünüm taban olmaz).
+    if (from === 6 && runtime.state?.project_root) {
+      await promoteVisualBaseline(runtime.state.project_root);
+    }
     // Yeniden-inceleme round-4 #1/#3/#5 (YAPISAL): Faz 6 inceleme parkından İLERİ
     // herhangi bir faza geçişte park bayrağını TEMİZLE. approve_ui / run_phase /
     // resume_pipeline / restartPhase1WithIntent hepsi pipeline'ı buradan ilerletir →

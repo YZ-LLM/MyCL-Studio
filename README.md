@@ -264,6 +264,12 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   öne çıkar; karar kullanıcının). Hedef stack'ten bağımsızdır (MyCL'in kendi
   Playwright + axe'ı URL'e vurur); araç/erişim hatası "taranamadı" diye **görünür**
   şekilde geçer (sessiz "temiz" yok).
+- **Görsel önce/sonra karşılaştırması — salt-rapor** — Faz 6'da rotaların ekran
+  görüntüleri çekilir ve bir önceki Faz 6'da görülüp devam edilen görüntülerle
+  piksel bazında karşılaştırılır; kayda değer değişim, yeni rota ve **boş görünen
+  sayfa** uyarısı incelemenin yanında raporlanır. "Hiçbir şey sorma" modunda Faz 6
+  otomatik geçilse bile bu rapor görünür — görsel bozulma gözden kaçmaz. Kapı
+  değildir; karşılaştırılamazsa nedeniyle birlikte **görünür** şekilde geçer.
 - **Mimari Karar Kayıtları (ADR)** — MyCL projenin gerçek mimari kararlarını
   (kimlik doğrulama stratejisi, veri deposu seçimi, güvenlik ödünleşimleri…)
   `.mycl/decisions/ADR-NNNN-*.md` altında MADR formatında tutar. Kayıtlar gerçek

@@ -16,11 +16,14 @@
     "@anthropic-ai/sdk": "^0.102.0",
     "axe-core": "^4.12.1",
     "csp_evaluator": "^1.1.8",
+    "pixelmatch": "^7.2.0",
     "playwright": "^1.60.0",
+    "pngjs": "^7.0.0",
     "typescript": "~5.8.3"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
+    "@types/pngjs": "^6.0.5",
     "vitest": "^4.1.6"
   }
 }
