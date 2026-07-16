@@ -132,7 +132,7 @@ describe("orchestrator-agent/decision · DECIDE_ACTION_TOOL_SCHEMA", () => {
   });
 
   it("action enum exactly 15 değer (2026-07-15 +run_project)", () => {
-    expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toHaveLength(15);
+    expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toHaveLength(16);
     expect(DECIDE_ACTION_TOOL_SCHEMA.properties.action.enum).toContain(
       "save_memory_proposal",
     );

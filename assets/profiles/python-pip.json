@@ -13,7 +13,9 @@
     "perf": null,
     "security": "pip-audit",
     "integration": "pytest tests/integration/",
-    "run": "python main.py"
+    "run": "python main.py",
+    "outdated": "pip list --outdated",
+    "update": null
   },
   "e2e_by_project_type": {
     "web": "pytest --headed",

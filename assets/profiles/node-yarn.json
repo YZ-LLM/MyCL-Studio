@@ -12,7 +12,9 @@
     "simplify": "npx --no-install ts-prune --error",
     "perf": "yarn perf",
     "security": "yarn npm audit",
-    "integration": "yarn test:integration"
+    "integration": "yarn test:integration",
+    "outdated": "yarn outdated",
+    "update": "yarn upgrade"
   },
   "e2e_by_project_type": {
     "web": "yarn playwright test --headed",

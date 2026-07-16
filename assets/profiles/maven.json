@@ -10,7 +10,9 @@
     "simplify": null,
     "perf": null,
     "security": "mvn org.owasp:dependency-check-maven:check",
-    "integration": "mvn verify"
+    "integration": "mvn verify",
+    "outdated": "mvn versions:display-dependency-updates",
+    "update": null
   },
   "e2e_by_project_type": {
     "web": "mvn test -Dtest='*E2ETest'",

@@ -11,7 +11,9 @@
     "perf": null,
     "security": "./gradlew dependencyCheckAnalyze",
     "integration": "./gradlew integrationTest",
-    "run": "./gradlew run"
+    "run": "./gradlew run",
+    "outdated": null,
+    "update": null
   },
   "e2e_by_project_type": {
     "web": "./gradlew e2eTest",

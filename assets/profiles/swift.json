@@ -11,7 +11,9 @@
     "perf": null,
     "security": null,
     "integration": "swift test --filter Integration",
-    "run": "swift run"
+    "run": "swift run",
+    "outdated": null,
+    "update": "swift package update"
   },
   "e2e_by_project_type": {
     "web": null,

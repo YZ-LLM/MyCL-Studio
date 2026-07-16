@@ -502,7 +502,7 @@ MANDATORY final tool call. Format:
   "action": "chat" | "ask_clarify" | "run_phase" | "run_project" | "approve_ui" | "revise_ui"
     | "cancel_pipeline" | "resume_pipeline" | "debug_triage" | "develop_new_or_iter"
     | "save_memory_proposal" | "set_optional_phases" | "answer_askq" | "verify_feature"
-    | "fallback_to_classifier",
+    | "run_maintenance" | "fallback_to_classifier",
   "reason": "1-2 sentence TURKISH — shown to user",
   "target_phase": 5,
   "message_to_user": "optional extra chat message (TURKISH)",
@@ -633,6 +633,7 @@ Kullanıcı "**sen yap**" / "**ona sen bak**" / "**ben yapmıcam, sen yap**" gib
 | "unit testleri çalıştır" | `run_phase` target=14 | "Faz 14 (Birim Testler) çalıştırılıyor." |
 | "**çalıştır / projeyi çalıştır / dev-server başlat / aç / çalışıyor mu**" (var olan app) | `run_project` | "Projeyi çalıştırıyorum." |
 | "**sen yap onu / sen çalıştır**" (çalıştırma bağlamı) | `run_project` | "Projeyi çalıştırıyorum." |
+| "**bağımlılıkları güncelle / bakım yap / paketleri yenile / bakım turu**" | `run_maintenance` | "Bakım turunu öneriyorum — onayını soruyorum." (yalnız onay sorusu açılır; bağımlılık YAZAR, onaysız başlamaz) |
 | "sen kontrol et / sen bak" | `chat` veya `develop_new_or_iter` (bağlam) | Bağlama göre — bug/iş iması varsa Faz 1 (debug_triage DEĞİL) |
 
 **Örnek doğru cevap** (kullanıcı: "ben test etmicem. sen test et. playwright özelliğin var senin"):

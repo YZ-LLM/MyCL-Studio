@@ -11,7 +11,9 @@
     "perf": "cargo bench",
     "security": "cargo audit",
     "integration": "cargo test --test '*'",
-    "run": "cargo run"
+    "run": "cargo run",
+    "outdated": "cargo update --dry-run",
+    "update": "cargo update"
   },
   "e2e_by_project_type": {
     "web": null,

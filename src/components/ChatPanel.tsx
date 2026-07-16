@@ -249,6 +249,8 @@ interface Props {
   onDastClick?: () => void;
   onFullTestClick?: () => void;
   fullTestRunning?: boolean;
+  onMaintenanceClick?: () => void;
+  maintenanceRunning?: boolean;
   /** WP4 DAST: tarama sürüyor mu — buton spinner + disabled (çift-tetik koruması). */
   dastRunning?: boolean;
   /** YZLLM 2026-06-17: o anki iş — ChatPanel başlığında "Tümünü kopyala" yanında gösterilir. */
@@ -282,6 +284,8 @@ export function ChatPanel({
   dastRunning,
   onFullTestClick,
   fullTestRunning,
+  onMaintenanceClick,
+  maintenanceRunning,
   currentJob,
   onShowCode,
 }: Props) {
@@ -745,6 +749,44 @@ export function ChatPanel({
                 <span
                   className="agent-busy-spinner"
                   aria-label="test çalışıyor"
+                  style={{
+                    display: "inline-block",
+                    marginLeft: 6,
+                    width: 10,
+                    height: 10,
+                    border: "2px solid var(--fg-dim)",
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    verticalAlign: "middle",
+                    animation: "mycl-spin 0.8s linear infinite",
+                  }}
+                />
+              )}
+            </span>
+          </button>
+        )}
+        {/* 🔧 Bakım Turu (2026-07-16): bağımlılık güncelle + tara + Full Test — buton
+            backend onay askq'ı açar (doğrudan koşmaz; bağımlılık YAZAR → onay şart). */}
+        {onMaintenanceClick && (
+          <button
+            type="button"
+            className="intent-pill"
+            data-testid="intent-maintenance"
+            onClick={onMaintenanceClick}
+            disabled={maintenanceRunning}
+            title={
+              maintenanceRunning
+                ? "Bakım turu sürüyor…"
+                : "Bağımlılıkları güvenle güncelle + güvenlik taraması + Full Test — önce açıklar + onay sorar"
+            }
+          >
+            <span className="intent-pill-emoji" aria-hidden>🔧</span>
+            <span className="intent-pill-label">
+              Bakım
+              {maintenanceRunning && (
+                <span
+                  className="agent-busy-spinner"
+                  aria-label="bakım çalışıyor"
                   style={{
                     display: "inline-block",
                     marginLeft: 6,

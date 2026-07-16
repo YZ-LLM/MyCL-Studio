@@ -1047,6 +1047,11 @@ function App() {
     void orch.send({ kind: "run_full_test" });
   };
 
+  // 🔧 Bakım Turu (2026-07-16): buton → backend açıklama+onay askq'ı açar (doğrudan koşmaz).
+  const sendRunMaintenance = () => {
+    void orch.send({ kind: "run_maintenance" });
+  };
+
   const handleSaveApiKeys = (
     translator: string,
     main: string,
@@ -1613,6 +1618,8 @@ function App() {
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
           onFullTestClick={sendRunFullTest}
           fullTestRunning={mainState.runningBanner?.label === "🧪 Full Test"}
+          onMaintenanceClick={sendRunMaintenance}
+          maintenanceRunning={mainState.runningBanner?.label === "🔧 Bakım Turu"}
           onShowCode={(ref) => setCodeModal({ open: true, codeRef: ref })}
         />
         {activeRightPanel && (

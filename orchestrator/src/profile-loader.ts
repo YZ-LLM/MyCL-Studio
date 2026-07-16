@@ -26,6 +26,11 @@ export type ProfileCommandKey =
   // python main.py). `dev` web dev-server'dır; ikisi ayrı niyettir. Profilde
   // run yoksa caller dev'e düşer (commandFor).
   | "run"
+  // Bakım turu (2026-07-16): `outdated` SALT-RAPOR (exit-1 + çıktı = "güncelleme
+  // var", araç hatası DEĞİL); `update` YALNIZ manifest-aralığı içi muhafazakâr
+  // güncelleme (major bump YOK). null/yok = görünür "bu stack'te desteklenmiyor".
+  | "outdated"
+  | "update"
   | "build"
   | "test"
   | "lint"

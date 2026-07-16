@@ -10,7 +10,9 @@
     "simplify": null,
     "perf": null,
     "security": null,
-    "integration": "deno test --allow-all tests/integration/"
+    "integration": "deno test --allow-all tests/integration/",
+    "outdated": "deno outdated",
+    "update": "deno outdated --update"
   },
   "e2e_by_project_type": {
     "web": "deno test --allow-all tests/e2e/",

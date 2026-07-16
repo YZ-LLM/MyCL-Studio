@@ -12,7 +12,9 @@
     "simplify": "bunx ts-prune --error",
     "perf": "bun run perf",
     "security": "bun pm audit",
-    "integration": "bun run test:integration"
+    "integration": "bun run test:integration",
+    "outdated": "bun outdated",
+    "update": "bun update"
   },
   "e2e_by_project_type": {
     "web": "bunx playwright test --headed",

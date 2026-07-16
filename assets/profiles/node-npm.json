@@ -12,7 +12,9 @@
     "simplify": "npx --no-install ts-prune --error",
     "perf": "npm run perf",
     "security": "npm audit --omit=dev --audit-level=high",
-    "integration": "npm run --silent test:integration"
+    "integration": "npm run --silent test:integration",
+    "outdated": "npm outdated",
+    "update": "npm update"
   },
   "e2e_by_project_type": {
     "web": "npx --no-install playwright test --headed",

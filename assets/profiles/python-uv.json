@@ -13,7 +13,9 @@
     "perf": null,
     "security": "uv run pip-audit",
     "integration": "uv run pytest tests/integration/",
-    "run": "uv run python main.py"
+    "run": "uv run python main.py",
+    "outdated": "uv pip list --outdated",
+    "update": "uv sync --upgrade"
   },
   "e2e_by_project_type": {
     "web": "uv run pytest --headed",

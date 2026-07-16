@@ -13,7 +13,9 @@
     "perf": null,
     "security": "poetry run pip-audit",
     "integration": "poetry run pytest tests/integration/",
-    "run": "poetry run python main.py"
+    "run": "poetry run python main.py",
+    "outdated": "poetry show --outdated",
+    "update": "poetry update"
   },
   "e2e_by_project_type": {
     "web": "poetry run pytest --headed",

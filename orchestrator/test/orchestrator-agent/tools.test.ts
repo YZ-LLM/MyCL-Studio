@@ -147,13 +147,13 @@ describe("orchestrator-agent/tools · AGENT_TOOLS shape", () => {
     }
   });
 
-  it("decide_action enum 15 action içerir (2026-07-15 +run_project)", () => {
+  it("decide_action enum 16 action içerir (2026-07-16 +run_maintenance)", () => {
     const decide = AGENT_TOOLS.find((t) => t.name === "decide_action");
     expect(decide).toBeDefined();
     const schema = decide!.input_schema as {
       properties: { action: { enum: string[] } };
     };
-    expect(schema.properties.action.enum).toHaveLength(15);
+    expect(schema.properties.action.enum).toHaveLength(16);
     expect(schema.properties.action.enum).toContain("approve_ui");
     expect(schema.properties.action.enum).toContain("debug_triage");
     expect(schema.properties.action.enum).toContain("fallback_to_classifier");

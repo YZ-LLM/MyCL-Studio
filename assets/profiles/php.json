@@ -11,7 +11,9 @@
     "perf": null,
     "security": "composer audit",
     "integration": "vendor/bin/phpunit --testsuite=integration",
-    "run": "php -S localhost:8000"
+    "run": "php -S localhost:8000",
+    "outdated": "composer outdated --direct",
+    "update": "composer update"
   },
   "e2e_by_project_type": {
     "web": "vendor/bin/codecept run acceptance",

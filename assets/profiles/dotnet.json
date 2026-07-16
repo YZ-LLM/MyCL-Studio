@@ -11,7 +11,9 @@
     "perf": null,
     "security": "dotnet list package --vulnerable --include-transitive",
     "integration": "dotnet test --filter Category=Integration",
-    "run": "dotnet run"
+    "run": "dotnet run",
+    "outdated": "dotnet list package --outdated",
+    "update": null
   },
   "e2e_by_project_type": {
     "web": "dotnet test --filter Category=E2E",

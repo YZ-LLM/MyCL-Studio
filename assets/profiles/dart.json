@@ -11,7 +11,9 @@
     "perf": null,
     "security": null,
     "integration": "dart test test/integration/",
-    "run": "dart run"
+    "run": "dart run",
+    "outdated": "dart pub outdated",
+    "update": "dart pub upgrade"
   },
   "e2e_by_project_type": {
     "web": null,

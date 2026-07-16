@@ -179,6 +179,7 @@ import { Phase5Controller } from "./phase-5.js";
 import { Phase6Controller } from "./phase-6.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import { runFullTest, formatFullTestReport, fixTasksFromReport } from "./full-test.js";
+import { runMaintenance, formatMaintenanceReport } from "./maintenance.js";
 import { Phase7Controller } from "./phase-7.js";
 import { Phase8Controller } from "./phase-8.js";
 import { Phase9Controller } from "./phase-9.js";
@@ -311,6 +312,8 @@ interface OrchestratorRuntime {
   pendingDast: { askqId: string } | null;
   /** 🧪 Full Test onayı bekliyor (2026-07-16) — DAST deseni: askq onaysız koşum imkânsız. */
   pendingFullTest: { askqId: string } | null;
+  /** 🔧 Bakım Turu onayı bekliyor (2026-07-16) — aynı desen (bağımlılık YAZAR → onay şart). */
+  pendingMaintenance: { askqId: string } | null;
   // İş kuyruğu (YZLLM 2026-06-14): şu an Faz 1'den işlenen kuyruk işinin id'si.
   // pipeline-end bunu "done"+tarih ile damgalar + sıradaki bekleyen işi başlatır.
   // null → kuyruk-dışı iterasyon (örn. resume) ya da çalışan iş yok.
@@ -343,6 +346,7 @@ const runtime: OrchestratorRuntime = {
   findingQueue: null,
   pendingDast: null,
   pendingFullTest: null,
+  pendingMaintenance: null,
   currentTaskId: null,
   lastPhase1Intent: null,
   pendingAnswerReuse: null,
@@ -354,6 +358,8 @@ const DAST_START_LABEL = "🛡️ Başlat";
 const DAST_RUNNING_LABEL = "🛡️ Güvenlik Taraması (DAST)";
 const FULL_TEST_START_LABEL = "🧪 Başlat";
 const FULL_TEST_RUNNING_LABEL = "🧪 Full Test";
+const MAINTENANCE_START_LABEL = "🔧 Başlat";
+const MAINTENANCE_RUNNING_LABEL = "🔧 Bakım Turu";
 
 /**
  * TEST-ONLY seam (v15.8): runtime.state/config'i set eder + history root bağlar,
@@ -370,6 +376,7 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.findingQueue = null;
   runtime.pendingDast = null;
   runtime.pendingFullTest = null;
+  runtime.pendingMaintenance = null;
   runtime.pendingAnswerReuse = null;
   setHistoryRoot(state.project_root);
   setAgentTraceRoot(state.project_root);
@@ -3519,6 +3526,12 @@ async function executeAgentDecision(
       await handleCommandDirect(text, "run", { silent: true });
       return;
     }
+    case "run_maintenance": {
+      // 🔧 Bakım Turu (2026-07-16): sohbet niyeti de BUTONLA AYNI onay askq'suna düşer —
+      // bağımlılık YAZAN işlem onaysız başlayamaz (korumalı id; never-ask bile oto-onaylayamaz).
+      await handleRunMaintenanceRequest();
+      return;
+    }
     case "approve_ui":
     case "revise_ui":
     case "resume_pipeline":
@@ -4281,6 +4294,7 @@ function isPipelineParked(): boolean {
     runtime.pendingMemoryProposal !== null ||
     runtime.pendingDast !== null ||
     runtime.pendingFullTest !== null ||
+    runtime.pendingMaintenance !== null ||
     Boolean(runtime.state?.pending_ui_tweak) ||
     Boolean(runtime.state?.pending_diagnostic) ||
     Boolean(runtime.state?.pending_ui_review) // Faz 6 deferred UI-incelemesi (askq'sız park)
@@ -6379,6 +6393,39 @@ async function handleRunFullTestRequest(): Promise<void> {
   });
 }
 
+/**
+ * 🔧 Bakım Turu buton/sohbet handler'ı (2026-07-16) — DAST deseni: SADECE açıklama + onay askq'ı
+ * açar (bağımlılık YAZAN bir işlem — onay şart; sohbetten gelen run_maintenance aksiyonu da buraya
+ * düşer, onayı ASLA baypas edemez). Koşum yalnız handleAskqAnswer pendingMaintenance dalında.
+ */
+async function handleRunMaintenanceRequest(): Promise<void> {
+  if (!runtime.state) {
+    emitChatMessage("error", "Önce bir proje aç — bakım turu için bir proje gerekli.");
+    return;
+  }
+  if (runtime.pendingMaintenance) {
+    emitChatMessage("system", "Zaten bir bakım turu onayı bekleniyor.");
+    return;
+  }
+  const askqId = `maintenance_confirm_${randomUUID()}`;
+  runtime.pendingMaintenance = { askqId };
+  emitChatMessage(
+    "assistant",
+    "🔧 **Bakım Turu**: önce güncel olmayan bağımlılıklar raporlanır; güvenliyse (kaydedilmemiş " +
+      "değişiklik yoksa) bağımlılıklar mevcut sürüm aralığı içinde **muhafazakârca** güncellenir " +
+      "(büyük sürüm atlaması yapılmaz), ardından güvenlik taramaları koşar ve **her zaman Full Test** " +
+      "ile biter (birim + entegrasyon + Playwright + rota taraması). Sorunlar iş kuyruğuna düzeltme " +
+      "işi olarak eklenir; güncelleme öncesi duruma dönüş noktası raporda verilir. Başlatayım mı?",
+  );
+  emitAskq({
+    id: askqId,
+    question: "Bakım turu (bağımlılık güncelleme + tarama + Full Test) başlasın mı?",
+    options: [MAINTENANCE_START_LABEL, "İptal"],
+    allow_other: false,
+    multi_select: false,
+  });
+}
+
 export async function handleAskqAnswer(
   id: string,
   selected: string | string[],
@@ -6661,6 +6708,74 @@ export async function handleAskqAnswer(
       }
     } catch (err) {
       emitChatMessage("error", `Full Test başarısız: ${String(err).slice(0, 200)}`);
+    } finally {
+      emitPhaseIdle();
+    }
+    return;
+  }
+
+  // 🔧 Bakım Turu onayı (2026-07-16) — Full Test dalının ikizi. Bakım motoru bulguları
+  // burada kuyruğa döker (audit/SAST/Full Test), rapor + Full Test raporu tek mesajda.
+  if (runtime.pendingMaintenance && runtime.pendingMaintenance.askqId === id) {
+    runtime.pendingMaintenance = null;
+    const sel = (Array.isArray(selected) ? selected[0] : selected) ?? "";
+    if (sel !== MAINTENANCE_START_LABEL) {
+      emitChatMessage("system", "Bakım turu iptal edildi.");
+      return;
+    }
+    if (!runtime.state) {
+      emitChatMessage("error", "Proje kapandı — bakım turu yapılamadı.");
+      return;
+    }
+    const st = runtime.state;
+    emitPhaseRunning(MAINTENANCE_RUNNING_LABEL, "güncelle + tara + Full Test");
+    try {
+      await appendAuditModule(st.project_root, {
+        ts: Date.now(),
+        phase: st.current_phase,
+        event: "maintenance-run-start",
+        caller: "user",
+      }).catch(() => {});
+      const report = await runMaintenance(st, {
+        ensureDevServer: async () => {
+          if (!runtime.config) return { ok: false };
+          const dev = await ensureDevServerForReview(st, runtime.config);
+          return { ok: dev.ok, port: dev.port };
+        },
+        ensureE2E: () => ensurePlaywrightForPhase16(st),
+      });
+      const ok = report.fullTest.ok && !report.auditRed && report.sastFindings.length === 0;
+      emitChatMessage(
+        ok ? "system" : "error",
+        `${formatMaintenanceReport(report)}\n\n${formatFullTestReport(report.fullTest)}`,
+      );
+      await appendAuditModule(st.project_root, {
+        ts: Date.now(),
+        phase: st.current_phase,
+        event: ok ? "maintenance-run-complete" : "maintenance-run-failed",
+        caller: "mycl-orchestrator",
+        detail: report.sections.map((s) => `${s.id}=${s.status}`).join(" ") + ` fulltest=${report.fullTest.ok}`,
+      }).catch(() => {});
+      // Bulgular → kuyruk (source:"maintenance"): audit kırmızı + SAST etiketleri + Full Test düşenleri.
+      if (report.auditRed) {
+        await enqueueSystemFixTask(
+          st.project_root,
+          "Bağımlılık zafiyetlerini gider — bakım turu güncellemesi sonrası audit hâlâ eşik üstü zafiyet bildiriyor. Paketleri güvenli sürüme taşı; tarama temiz geçsin.",
+          "maintenance",
+        );
+      }
+      for (const label of report.sastFindings) {
+        await enqueueSystemFixTask(
+          st.project_root,
+          `SAST güvenlik bulgularını gider (semgrep ${label}). Bulguları audit'ten oku, kök nedeni düzelt; yeniden tara temiz olsun.`,
+          "maintenance",
+        );
+      }
+      for (const text of fixTasksFromReport(report.fullTest)) {
+        await enqueueSystemFixTask(st.project_root, `Bakım turu sonrası ${text}`, "maintenance");
+      }
+    } catch (err) {
+      emitChatMessage("error", `Bakım turu başarısız: ${String(err).slice(0, 200)}`);
     } finally {
       emitPhaseIdle();
     }
@@ -8156,6 +8271,10 @@ ipcRouter.register("askq_answer", async (data: unknown) => {
 // pendingFullTest dalında (DAST deseni — onay baypası imkânsız).
 ipcRouter.register("run_full_test", async () => {
   await handleRunFullTestRequest();
+});
+// 🔧 Bakım Turu (2026-07-16): aynı desen — buton onay askq'ı açar.
+ipcRouter.register("run_maintenance", async () => {
+  await handleRunMaintenanceRequest();
 });
 ipcRouter.register("save_api_keys", async (data: unknown) => {
   await handleSaveApiKeys(data as Partial<ApiKeys>);

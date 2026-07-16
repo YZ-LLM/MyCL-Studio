@@ -11,7 +11,9 @@
     "perf": null,
     "security": "bundle exec bundler-audit check --update",
     "integration": "bundle exec rspec spec/integration/",
-    "run": "bundle exec ruby main.rb"
+    "run": "bundle exec ruby main.rb",
+    "outdated": "bundle outdated",
+    "update": "bundle update"
   },
   "e2e_by_project_type": {
     "web": "bundle exec rspec spec/system/",

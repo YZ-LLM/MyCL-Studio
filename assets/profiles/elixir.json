@@ -11,7 +11,9 @@
     "perf": null,
     "security": "mix deps.audit",
     "integration": "mix test --only integration",
-    "run": "mix run --no-halt"
+    "run": "mix run --no-halt",
+    "outdated": "mix hex.outdated",
+    "update": "mix deps.update --all"
   },
   "e2e_by_project_type": {
     "web": "mix test --only e2e",

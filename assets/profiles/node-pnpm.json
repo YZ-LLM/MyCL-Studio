@@ -12,7 +12,9 @@
     "simplify": "pnpm dlx ts-prune --error",
     "perf": "pnpm perf",
     "security": "pnpm audit --prod --audit-level=high",
-    "integration": "pnpm test:integration"
+    "integration": "pnpm test:integration",
+    "outdated": "pnpm outdated",
+    "update": "pnpm update"
   },
   "e2e_by_project_type": {
     "web": "pnpm exec playwright test --headed",

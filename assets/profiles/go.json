@@ -11,7 +11,9 @@
     "perf": "go test -bench=. ./...",
     "security": "govulncheck ./...",
     "integration": "go test -tags=integration ./...",
-    "run": "go run ."
+    "run": "go run .",
+    "outdated": "go list -m -u all",
+    "update": "go get -u ./... && go mod tidy"
   },
   "e2e_by_project_type": {
     "web": null,
