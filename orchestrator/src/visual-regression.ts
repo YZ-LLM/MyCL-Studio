@@ -26,7 +26,11 @@ import { sanitizeRouteForFile } from "./guide-shots.js";
 const BASELINE_DIR_REL = join(".mycl", "visual-baseline");
 const PENDING_DIR_REL = join(".mycl", "visual-pending");
 const VIEWPORT = { width: 1280, height: 720 };
-const SHOT_TIMEOUT_MS = 20_000;
+// MAHKEME (2026-07-16): rota başına kısa timeout + TOPLAM bütçe — kırık rotalar Faz 6
+// mesajını dakikalarca geciktirmesin (guide-shots 8sn/rota emsali). Bütçe aşılınca
+// kalan rotalar GÖRÜNÜR "atlandı" olur (sessiz değil).
+const SHOT_TIMEOUT_MS = 8_000;
+const TOTAL_BUDGET_MS = 45_000;
 /** Sayfanın ilk boyamadan sonra oturması için kısa bekleme (animasyon/font titremesini azaltır). */
 const SETTLE_MS = 400;
 /** Bu oranın üstü "değişti" satırı olarak tek tek listelenir (altı toplamda özetlenir). */
@@ -119,8 +123,15 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
     const raw = JSON.parse(await fs.readFile(join(projectRoot, ".mycl", "help-pages.json"), "utf-8")) as unknown;
     const fromDocs = routesFromHelpPages(raw);
     if (fromDocs.length > 0) routes = fromDocs;
-  } catch {
-    /* help-pages yok/bozuk → kök "/" ile devam (rapor yine değerli) */
+  } catch (e) {
+    // errno-AYRIMI (guide-shots/living-docs konvansiyonu): ENOENT = help-pages yok (meşru
+    // → kök "/" ile devam). Parse-hatası/EACCES = bozuk/erişilemez → GÖRÜNÜR uyarı (rota
+    // kapsamı sessizce daralmasın), yine "/" ile devam (rapor kısmi de olsa değerli).
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.warn("visual-regression", "help-pages.json okunamadı/bozuk — yalnız kök rota karşılaştırılıyor", {
+        error: String(e),
+      });
+    }
   }
 
   let chromium: typeof import("playwright").chromium;
@@ -147,7 +158,13 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
     const page = await browser.newPage({ viewport: VIEWPORT });
     await fs.rm(pendingDir, { recursive: true, force: true });
     await fs.mkdir(pendingDir, { recursive: true });
+    const startedAt = Date.now();
     for (const route of routes) {
+      if (Date.now() - startedAt > TOTAL_BUDGET_MS) {
+        // Toplam bütçe aşıldı → kalan rotalar GÖRÜNÜR atlanır (Faz 6 mesajı gecikmesin).
+        diffs.push({ route, status: "error", errorReason: "süre bütçesi aşıldı — bu tur atlandı" });
+        continue;
+      }
       try {
         await page.goto(new URL(route, url).toString(), {
           waitUntil: "domcontentloaded",
@@ -192,13 +209,31 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
 export async function promoteVisualBaseline(projectRoot: string): Promise<void> {
   const pendingDir = join(projectRoot, PENDING_DIR_REL);
   const baselineDir = join(projectRoot, BASELINE_DIR_REL);
+  const backupDir = `${baselineDir}.old`;
   try {
     const entries = await fs.readdir(pendingDir).catch(() => [] as string[]);
     if (!entries.some((f) => f.endsWith(".png"))) return; // pending yok → no-op
-    await fs.rm(baselineDir, { recursive: true, force: true });
-    await fs.rename(pendingDir, baselineDir);
+    // MAHKEME (2026-07-16) SWAP deseni: eski tabanı SİLMEDEN önce kenara taşı — rename
+    // ortada başarısız olursa eski taban GERİ KONUR (görsel geçmiş kaybolmaz).
+    await fs.rm(backupDir, { recursive: true, force: true });
+    let hadBaseline = false;
+    try {
+      await fs.rename(baselineDir, backupDir);
+      hadBaseline = true;
+    } catch {
+      /* taban yoktu (ilk terfi) */
+    }
+    try {
+      await fs.rename(pendingDir, baselineDir);
+      await fs.rm(backupDir, { recursive: true, force: true });
+    } catch (err) {
+      if (hadBaseline) await fs.rename(backupDir, baselineDir).catch(() => {});
+      log.warn("visual-regression", "taban terfi edilemedi — eski taban geri kondu; sonraki karşılaştırma eski tabana göre olur", {
+        error: String(err),
+      });
+    }
   } catch (err) {
-    log.warn("visual-regression", "taban terfi edilemedi (sonraki karşılaştırma eski tabana göre olur)", {
+    log.warn("visual-regression", "taban terfi edilemedi (sonraki karşılaştırma mevcut tabana göre olur)", {
       error: String(err),
     });
   }
