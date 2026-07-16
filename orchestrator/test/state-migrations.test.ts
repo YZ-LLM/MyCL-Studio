@@ -134,7 +134,8 @@ describe("state-migrations", () => {
       updated_at: 1,
     };
     const migrated = await applyMigrations(v3State, projectRoot, statePath, undefined);
-    expect(migrated.schema_version).toBe(4);
+    // Zincir CURRENT'a kadar koşar (v5 dahil); v4'ün niyeti no-op olması.
+    expect(migrated.schema_version).toBe(CURRENT_SCHEMA_VERSION);
     // no-op: ui_complexity atanmaz (undefined → Faz 5 paneli KOŞAR = regresyon-güvenli).
     expect(migrated.ui_complexity).toBeUndefined();
     // diğer alanlar değişmez (current_phase 5 zaten v3 formatında → dokunulmaz).
@@ -142,9 +143,43 @@ describe("state-migrations", () => {
     expect(migrated.session_id).toBe("v3-session");
   });
 
-  it("getMigratorVersions v4 migrator'ı içerir", () => {
+  it("getMigratorVersions v4 + v5 migrator'larını içerir", () => {
     expect(getMigratorVersions()).toContain(4);
-    expect(CURRENT_SCHEMA_VERSION).toBe(4);
+    expect(getMigratorVersions()).toContain(5);
+    expect(CURRENT_SCHEMA_VERSION).toBe(5);
+  });
+
+  it("v4 → v5: stack 'dart' + Flutter pubspec → 'flutter' olarak yeniden algılanır", async () => {
+    await fs.writeFile(
+      join(projectRoot, "pubspec.yaml"),
+      "name: app\ndependencies:\n  flutter:\n    sdk: flutter\n",
+    );
+    const v4State = {
+      schema_version: 4,
+      stack: "dart" as const,
+      session_id: "v4-session",
+      project_root: projectRoot,
+      created_at: 1,
+      updated_at: 1,
+    };
+    const migrated = await applyMigrations(v4State, projectRoot, statePath, undefined);
+    expect(migrated.schema_version).toBe(5);
+    expect(migrated.stack).toBe("flutter");
+  });
+
+  it("v4 → v5: stack 'dart' + saf Dart pubspec → 'dart' kalır; diğer stack'ler dokunulmaz", async () => {
+    await fs.writeFile(join(projectRoot, "pubspec.yaml"), "name: app\ndependencies:\n  http: ^1.0.0\n");
+    const dartState = {
+      schema_version: 4,
+      stack: "dart" as const,
+      session_id: "s",
+      project_root: projectRoot,
+      created_at: 1,
+      updated_at: 1,
+    };
+    expect((await applyMigrations(dartState, projectRoot, statePath, undefined)).stack).toBe("dart");
+    const nodeState = { ...dartState, stack: "node-npm" as const };
+    expect((await applyMigrations(nodeState, projectRoot, statePath, undefined)).stack).toBe("node-npm");
   });
 
   it("applyMigrations creates backup when migrating real file", async () => {

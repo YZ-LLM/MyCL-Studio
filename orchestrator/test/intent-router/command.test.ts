@@ -67,10 +67,17 @@ describe("intent-router/command · commandFor (pure stack → command map)", () 
     expect(commandFor("maven", "test")).toBe("mvn test");
     expect(commandFor("gradle", "build")).toBe("./gradlew build");
     expect(commandFor("elixir", "install")).toBe("mix deps.get");
-    expect(commandFor("dart", "run")).toBe("flutter run");
     expect(commandFor("swift", "build")).toBe("swift build");
     expect(commandFor("dotnet", "test")).toBe("dotnet test");
     expect(commandFor("deno", "test")).toBe("deno test");
+  });
+
+  it("dart vs flutter — ayrı stack'ler, ayrı komutlar (2026-07-16 drift kökü)", () => {
+    expect(commandFor("dart", "run")).toBe("dart run");
+    expect(commandFor("dart", "test")).toBe("dart test");
+    expect(commandFor("flutter", "run")).toBe("flutter run");
+    expect(commandFor("flutter", "test")).toBe("flutter test");
+    expect(commandFor("flutter", "install")).toBe("flutter pub get");
   });
 
   it("unknown stack → null", () => {
@@ -118,6 +125,16 @@ describe("intent-router/command · detectStack + deriveCommand (FS integration)"
     writeFileSync(join(tmpRoot, "pyproject.toml"), "[project]\nname=\"x\"");
     writeFileSync(join(tmpRoot, "uv.lock"), "");
     expect(detectStack(tmpRoot)).toBe("python-uv");
+  });
+
+  it("pubspec.yaml + sdk: flutter → flutter; saf pubspec → dart (içerik koklaması)", () => {
+    writeFileSync(
+      join(tmpRoot, "pubspec.yaml"),
+      "name: app\ndependencies:\n  flutter:\n    sdk: flutter\n",
+    );
+    expect(detectStack(tmpRoot)).toBe("flutter");
+    writeFileSync(join(tmpRoot, "pubspec.yaml"), "name: app\ndependencies:\n  http: ^1.0.0\n");
+    expect(detectStack(tmpRoot)).toBe("dart");
   });
 
   it("requirements.txt → python-pip", () => {

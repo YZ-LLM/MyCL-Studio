@@ -1,0 +1,34 @@
+{
+  "stack_id": "flutter",
+  "commands": {
+    "install": "flutter pub get",
+    "dev": "flutter run",
+    "run": "flutter run",
+    "build": "flutter build apk",
+    "test": "flutter test",
+    "lint": "flutter analyze",
+    "lint_fix": "dart fix --apply",
+    "simplify": null,
+    "perf": null,
+    "security": null,
+    "integration": "flutter test integration_test"
+  },
+  "e2e_by_project_type": {
+    "web": "flutter test integration_test",
+    "api": null,
+    "cli": null,
+    "library": null,
+    "mobile": "flutter test integration_test",
+    "default": null
+  },
+  "load_by_project_type": {
+    "default": null
+  },
+  "default_port": 8080,
+  "manifest_files": [
+    "pubspec.yaml",
+    "pubspec.lock"
+  ],
+  "deps_dir": ".dart_tool",
+  "missing_deps_signatures": ["Couldn't resolve the package\\s+['\"]"]
+}

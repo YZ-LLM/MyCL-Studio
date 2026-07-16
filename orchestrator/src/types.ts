@@ -29,6 +29,7 @@ export type StackId =
   | "gradle"
   | "elixir"
   | "dart"
+  | "flutter"
   | "swift"
   | "dotnet"
   | "unknown";
@@ -55,6 +56,7 @@ export const ALL_STACK_IDS = [
   "gradle",
   "elixir",
   "dart",
+  "flutter",
   "swift",
   "dotnet",
 ] as const satisfies readonly StackId[];

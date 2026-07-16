@@ -97,7 +97,18 @@ export function detectStack(projectRoot: string): StackId {
   if (has("pom.xml")) return "maven";
   if (has("build.gradle") || has("build.gradle.kts")) return "gradle";
   if (has("mix.exs")) return "elixir";
-  if (has("pubspec.yaml")) return "dart";
+  if (has("pubspec.yaml")) {
+    // Flutter vs saf Dart — pubspec içeriğinden ayrılır (pyproject [tool.*] emsali).
+    // Flutter projesinde `sdk: flutter` satırı bulunur; komut seti tamamen farklı
+    // (flutter run/test ≠ dart run/test). Okunamazsa saf dart varsay.
+    try {
+      const content = readFileSync(join(projectRoot, "pubspec.yaml"), "utf8");
+      if (/^\s*sdk:\s*flutter\s*$/m.test(content)) return "flutter";
+    } catch {
+      // okuyamadıysak saf dart varsayalım
+    }
+    return "dart";
+  }
   if (has("Package.swift")) return "swift";
   if (hasFileWithExts(projectRoot, [".csproj", ".sln", ".fsproj"])) return "dotnet";
   return "unknown";
@@ -271,6 +282,15 @@ export function commandFor(
         lint: "mix credo",
       }[intentKind];
     case "dart":
+      // Saf Dart — flutter komutları artık ayrı "flutter" stack'inde (2026-07-16).
+      return {
+        run: "dart run",
+        test: "dart test",
+        build: "dart compile exe bin/main.dart",
+        install: "dart pub get",
+        lint: "dart analyze",
+      }[intentKind];
+    case "flutter":
       return {
         run: "flutter run",
         test: "flutter test",

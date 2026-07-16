@@ -21,7 +21,7 @@ import { detectStack } from "./intent-router/handlers/command.js";
 import type { PhaseId, State } from "./types.js";
 
 /** Mevcut şema versiyonu. Yeni migrator eklendiğinde bump. */
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /** Saf migrator imzası — input state'in shallow copy'sini döndürür. */
 type Migrator = (state: Partial<State>, projectRoot: string) => Partial<State>;
@@ -103,6 +103,18 @@ const MIGRATORS: Record<number, Migrator> = {
   4: (state) => ({
     ...state,
     schema_version: 4,
+  }),
+  /**
+   * v4 → v5 (2026-07-16): "flutter" ayrı StackId oldu (dart drift'inin kökü —
+   * eski tek "dart" stack'i Flutter projelerine de dart komutları veriyordu).
+   * Mevcut state'te stack "dart" ise pubspec içeriğinden yeniden algıla
+   * (deterministik; Flutter projesi → "flutter", saf Dart aynen kalır).
+   * Diğer stack'ler dokunulmaz.
+   */
+  5: (state, projectRoot) => ({
+    ...state,
+    stack: state.stack === "dart" ? detectStack(projectRoot) : state.stack,
+    schema_version: 5,
   }),
 };
 

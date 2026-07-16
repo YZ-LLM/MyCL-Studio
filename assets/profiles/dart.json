@@ -13,11 +13,11 @@
     "integration": "dart test test/integration/"
   },
   "e2e_by_project_type": {
-    "web": "flutter test integration_test",
+    "web": null,
     "api": null,
     "cli": null,
     "library": null,
-    "mobile": "flutter test integration_test",
+    "mobile": null,
     "default": null
   },
   "load_by_project_type": {
