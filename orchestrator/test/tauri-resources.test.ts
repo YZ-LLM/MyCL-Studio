@@ -33,6 +33,11 @@ describe("tauri bundle resources — MyCL öz-araçları + kural dosyaları pake
     expect(resources).toContain("../assets/quality-rules/**/*");
   });
 
+  it("provision servis tablosu (services.json) resources'ta", () => {
+    // provision-services.ts runtime'da okur; bundle'da yoksa loadKnownServices THROW eder (görünür ama gereksiz).
+    expect(resources).toContain("../assets/provision/**/*");
+  });
+
   it("orchestrator dist + node_modules (öz-araç bağımlılıkları, örn. csp_evaluator) hâlâ bundle'da", () => {
     expect(resources).toContain("../orchestrator/dist/**/*");
     expect(resources).toContain("../orchestrator/node_modules/**/*");

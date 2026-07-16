@@ -15,6 +15,7 @@ import { tryDevServerChain, type DevServerChainResult } from "./dev-server-launc
 import { emitChatMessage } from "./ipc.js";
 import { safeEnv } from "./safe-env.js";
 import { loadProfile, resolveCommand } from "./profile-loader.js";
+import { loadKnownServices, type KnownService } from "./provision-services.js";
 import type { StackId } from "./types.js";
 
 /**
@@ -80,7 +81,11 @@ export async function launchWithProvision(
   }
 
   // ROUND 2 — EKSİK SERVİS (DB/cache). Crash'teki ECONNREFUSED :port → servis; docker-compose ile tamamla veya rehber.
-  const missing = detectMissingService(crashOut, pkgDeps);
+  // Tablo VERİ dosyasından (services.json — yok/bozuksa THROW, görünür; KATI #4); imza eşleşmesi stack'in KENDİ
+  // manifestleri üzerinde (profil manifest_files; profil yoksa package.json = eski davranış).
+  const services = await loadKnownServices();
+  const manifestText = profile ? await readManifestText(projectRoot, profile.manifest_files) : pkgDeps;
+  const missing = detectMissingService(crashOut, manifestText, services);
   if (missing) {
     const prov = await tryProvisionService(projectRoot, missing);
     emitChatMessage("system", prov.message);
@@ -103,19 +108,15 @@ export interface ServiceDep {
   hint: string;
 }
 
-/** Bilinen servis portları + package.json bağımlılık imzaları. */
-const KNOWN_SERVICES: { port: number; name: string; deps: RegExp; hint: string }[] = [
-  { port: 3306, name: "MySQL", deps: /\bmysql2?\b/, hint: "MySQL 3306'da çalışmalı (ör. `docker run -p 3306:3306 mysql` veya `brew services start mysql`)" },
-  { port: 5432, name: "PostgreSQL", deps: /\b(pg|postgres|sequelize|typeorm|prisma)\b/, hint: "PostgreSQL 5432'de çalışmalı (ör. `docker run -p 5432:5432 postgres` veya `brew services start postgresql`)" },
-  { port: 27017, name: "MongoDB", deps: /\b(mongodb|mongoose)\b/, hint: "MongoDB 27017'de çalışmalı (ör. `docker run -p 27017:27017 mongo`)" },
-  { port: 6379, name: "Redis", deps: /\b(redis|ioredis)\b/, hint: "Redis 6379'da çalışmalı (ör. `docker run -p 6379:6379 redis`)" },
-  { port: 9200, name: "Elasticsearch", deps: /\b(elasticsearch|@elastic)\b/, hint: "Elasticsearch 9200'de çalışmalı" },
-];
+// Servis tablosu (port/imza/ipucu) 2026-07-16'da assets/provision/services.json'a
+// taşındı (generic: yeni servis = veri düzenlemesi, kod değişikliği değil; imzalar
+// artık çok ekosistemli — pymysql/psycopg2/go-sql-driver dahil). provision-services.ts yükler.
 
 /**
- * Crash çıktısı + package.json bağımlılıklarından EKSİK servisi tespit et. SAF (testli).
+ * Crash çıktısı + manifest metninden (profil manifest_files birleşimi) EKSİK servisi tespit et. SAF (testli).
  * Öncelik: crash'teki `ECONNREFUSED ...:<port>` (kesin kanıt) → o porta ait servis. Yoksa null.
- * (package.json imzası tek başına YETMEZ — servis çalışıyor olabilir; yalnız crash+port kesin eksikliği gösterir.)
+ * (Manifest imzası tek başına YETMEZ — servis çalışıyor olabilir; yalnız crash+port kesin eksikliği gösterir.)
+ * `services` tablosu ÇAĞIRANDAN enjekte edilir (loadKnownServices) → fonksiyon saf/testli kalır.
  */
 /** Kod-hatası imzaları (uncaught exception) — bunlar servis-hatası DEĞİL, Faz 0 debug'a gitmeli. */
 const CODE_ERR_RE = /\b(TypeError|ReferenceError|SyntaxError|RangeError|is not a function|is not defined)\b|Cannot read propert/gi;
@@ -129,7 +130,11 @@ function lastMatchIndex(re: RegExp, s: string): number {
   return last;
 }
 
-export function detectMissingService(crashOutput: string, pkgDepsText: string): ServiceDep | null {
+export function detectMissingService(
+  crashOutput: string,
+  manifestText: string,
+  services: readonly KnownService[],
+): ServiceDep | null {
   if (!crashOutput) return null;
   // YANLIŞ-POZİTİF önleme (mahkeme): eski/kurtarılmış "ECONNREFUSED ... now connected" log'u ölümcül-hata SANMA.
   // ÖLÜMCÜL hata (process'i öldüren, çıktının SONUNDAKI uncaught exception) bağlantı-hatası MI yoksa kod-hatası MI?
@@ -142,14 +147,52 @@ export function detectMissingService(crashOutput: string, pkgDepsText: string): 
   const conn = /(ECONNREFUSED|ETIMEDOUT)[^\n]*?:(\d{2,5})\b/i.exec(crashOutput.slice(lastConn));
   const portFromCrash = conn ? parseInt(conn[2], 10) : null;
   if (portFromCrash) {
-    const svc = KNOWN_SERVICES.find((s) => s.port === portFromCrash);
+    const svc = services.find((s) => s.port === portFromCrash);
     if (svc) return { name: svc.name, port: svc.port, hint: svc.hint };
     return { name: `servis (port ${portFromCrash})`, port: portFromCrash, hint: `Port ${portFromCrash}'daki servis çalışmıyor — başlatın` };
   }
-  // Port okunamadı → package.json imzasından en olası servisi tahmin et.
-  const svc = KNOWN_SERVICES.find((s) => s.deps.test(pkgDepsText));
+  // Port okunamadı → manifest imzasından en olası servisi tahmin et.
+  const svc = services.find((s) => s.deps.some((re) => re.test(manifestText)));
   if (svc) return { name: svc.name, port: svc.port, hint: svc.hint };
   return null;
+}
+
+/** Manifest dosyası başına okuma sınırı — dev lock/manifest dosyası belleği şişirmesin. */
+const MANIFEST_READ_MAX = 128 * 1024;
+
+/**
+ * Servis imza eşleşmesi için manifest METNİ — profilin `manifest_files` girdilerinin
+ * birleşimi (requirements.txt / composer.json / go.mod / *.csproj…). Eski davranış yalnız
+ * package.json okuyordu → imzalar non-Node stack'lerde HİÇ eşleşmiyordu; artık stack'in
+ * kendi manifestleri taranır (generic). Basit `*.ext` glob'u desteklenir (dotnet *.csproj).
+ * Profil yoksa package.json'a düşer (eski davranış aynen). Okunamayan dosya atlanır
+ * (manifest OPSİYONEL zenginleştirme; asıl kanıt crash çıktısı).
+ */
+export async function readManifestText(
+  projectRoot: string,
+  manifestFiles: readonly string[] | undefined,
+): Promise<string> {
+  const names = manifestFiles && manifestFiles.length > 0 ? manifestFiles : ["package.json"];
+  const parts: string[] = [];
+  for (const name of names) {
+    if (name.startsWith("*")) {
+      const suffix = name.slice(1); // "*.csproj" → ".csproj"
+      let entries: string[] = [];
+      try {
+        entries = await fs.readdir(projectRoot);
+      } catch {
+        continue;
+      }
+      for (const e of entries.filter((f) => f.endsWith(suffix))) {
+        const txt = await fs.readFile(join(projectRoot, e), "utf-8").catch(() => "");
+        if (txt) parts.push(txt.slice(0, MANIFEST_READ_MAX));
+      }
+    } else {
+      const txt = await fs.readFile(join(projectRoot, name), "utf-8").catch(() => "");
+      if (txt) parts.push(txt.slice(0, MANIFEST_READ_MAX));
+    }
+  }
+  return parts.join("\n");
 }
 
 // Non-node ekosistem "kurulmamış bağımlılık" crash imzaları. MAHKEME (2. tur) uyarısı: yalnız PAKET/BAĞIMLILIK

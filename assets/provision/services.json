@@ -1,0 +1,32 @@
+[
+  {
+    "port": 3306,
+    "name": "MySQL",
+    "dep_signatures": ["\\bmysql2?\\b", "\\bpymysql\\b", "\\bmysqlclient\\b", "\\bpdo_mysql\\b", "go-sql-driver/mysql", "\\bmysql-connector\\b"],
+    "hint": "MySQL 3306'da çalışmalı (ör. `docker run -p 3306:3306 mysql` veya `brew services start mysql`)"
+  },
+  {
+    "port": 5432,
+    "name": "PostgreSQL",
+    "dep_signatures": ["\\b(pg|postgres|sequelize|typeorm|prisma)\\b", "\\bpsycopg2?\\b", "\\bpdo_pgsql\\b", "lib/pq", "jackc/pgx"],
+    "hint": "PostgreSQL 5432'de çalışmalı (ör. `docker run -p 5432:5432 postgres` veya `brew services start postgresql`)"
+  },
+  {
+    "port": 27017,
+    "name": "MongoDB",
+    "dep_signatures": ["\\b(mongodb|mongoose)\\b", "\\bpymongo\\b", "mongo-driver"],
+    "hint": "MongoDB 27017'de çalışmalı (ör. `docker run -p 27017:27017 mongo`)"
+  },
+  {
+    "port": 6379,
+    "name": "Redis",
+    "dep_signatures": ["\\b(redis|ioredis)\\b"],
+    "hint": "Redis 6379'da çalışmalı (ör. `docker run -p 6379:6379 redis`)"
+  },
+  {
+    "port": 9200,
+    "name": "Elasticsearch",
+    "dep_signatures": ["\\b(elasticsearch|@elastic)\\b"],
+    "hint": "Elasticsearch 9200'de çalışmalı"
+  }
+]

@@ -48,6 +48,14 @@ export function profilePath(name: string): string {
   return join(ASSETS_ROOT, "profiles", name);
 }
 
+/**
+ * v16 (2026-07-16): `assets/provision/<name>` yolu. Runtime servis tablosu
+ * (services.json — port/imza/ipucu) buradan okunur (provision-services.ts).
+ */
+export function provisionPath(name: string): string {
+  return join(ASSETS_ROOT, "provision", name);
+}
+
 
 /**
  * Güvenlik-baseline gömülü araçları (örn. csp-check.mjs) orchestrator KÖKÜNDE
