@@ -175,6 +175,37 @@ export function nonRuntimeProdExempt(changed: string[] | null): boolean {
   return changed.every((f) => !isRuntimeProdFile(f));
 }
 
+/**
+ * SAF (MAHKEME FIX A2, 2026-07-16): static-only KANIT diff'ine girecek dosyalar — test ve
+ * kozmetik HARİÇ her değişen dosya. Kaynak-uzantısız ama davranış taşıyan dosyalar
+ * (data.json, .sql, .sh, Dockerfile…) kanıtta KALIR: içlerindeki değişiklik static-safe
+ * çıkmayacağı için muafiyeti bozar (kuşkuda repro iste). Test dosyası dışlanır (kasıtlı
+ * delta: test'e eklenen runtime satır prod kanıtını bozmasın); kozmetik tanımı gereği
+ * mantık taşımaz (COSMETIC_EXTS).
+ */
+export function staticProofPaths(changed: readonly string[]): string[] {
+  return changed.filter((f) => !isTestPath(f) && !isCosmeticFile(f));
+}
+
+/**
+ * SAF (MAHKEME FIX A3, 2026-07-16): unified diff'te GERÇEKTEN görünen dosya yolları —
+ * `--- a/<p>` / `+++ b/<p>` başlıklarından parse edilir. Eski `diff.includes(path)`
+ * substring kontrolü, dosya adı bir yorum SATIRININ İÇİNDE metin olarak geçtiğinde
+ * yanılıyordu (yeni untracked prod dosyası "diff'te var" sanılıp static muafiyeti
+ * sızdırabilirdi). /dev/null (eklenen/silinen taraf) yok sayılır.
+ */
+export function filesInUnifiedDiff(unifiedDiff: string): Set<string> {
+  const files = new Set<string>();
+  for (const line of unifiedDiff.split("\n")) {
+    let p: string | null = null;
+    if (line.startsWith("--- a/")) p = line.slice(6);
+    else if (line.startsWith("+++ b/")) p = line.slice(6);
+    else if (line.startsWith("--- ") || line.startsWith("+++ ")) continue; // /dev/null vb.
+    if (p && p !== "/dev/null") files.add(p.trim());
+  }
+  return files;
+}
+
 const TEST_CMD_PATTERNS: RegExp[] = [
   /\bnpm\s+(test|t)\b/,
   /\bpnpm\s+(test|t)\b/,
@@ -744,9 +775,12 @@ export class Phase8Controller {
     // tek kurala indi — repro zorunlu ⇔ değişenler içinde static olduğu KANITLANAMAYAN en az bir
     // RUNTIME PROD dosyası var (isRuntimeProdFile = kaynak uzantı + !test + !kök-build-config).
     //  - runtime prod YOK (test/config/kozmetik/manifest/feature karışımı dahil) → repro imkansız/anlamsız → muaf.
-    //  - runtime prod VAR + git checkpoint → diff runtime-prod dosyalara DARALTILMIŞ static-only kanıtı denenir
-    //    (tip-only/ölü-kod; test dosyasına eklenen runtime satır prod kanıtını artık bozmaz). Untracked yeni
-    //    prod dosyası diff'te görünmez → static sayılmaz (güvenli taraf).
+    //  - runtime prod VAR + git checkpoint → static-only kanıtı denenir. MAHKEME FIX (A2): kanıt diff'i
+    //    yalnız runtime-prod'a DEĞİL, test+kozmetik DIŞINDAKİ TÜM değişen dosyalara bakar (staticProofPaths) —
+    //    kaynak-uzantısız ama davranış taşıyan dosya (data.json/.sql/.sh…) kanıtı bozar, muafiyet düşmez.
+    //    (Kasıtlı delta korunur: test dosyasına eklenen runtime satır prod kanıtını bozmaz; kozmetik tanımı
+    //    gereği mantık taşımaz.) Untracked yeni dosya diff'te görünmez → static sayılmaz (güvenli taraf;
+    //    MAHKEME FIX A3: kontrol substring değil, diff dosya-başlıklarının parse'ı — filesInUnifiedDiff).
     //  - copy yolunda satır-diff kanıtı yok → runtime prod değiştiyse repro AYNEN zorunlu (fail-safe).
     // changedForRepro null (tespit güvenilmez) → HİÇ muafiyet yok (fail-safe). Suite-green (tddOk) +
     // tech-debt + AC-coverage kontrolleri AYNEN kalır → gate ZAYIFLAMAZ.
@@ -756,11 +790,12 @@ export class Phase8Controller {
         exemptCategory = "runtime-prod-değişikliği-yok";
       } else if (this.checkpointRef) {
         try {
-          const runtimeProd = changedForRepro.filter(isRuntimeProdFile);
-          const diff = await getDiffSinceRef(this.state.project_root, this.checkpointRef, runtimeProd);
-          // Yeni (untracked) prod dosyası diff'te görünmez → static-only sayma (olası runtime kod).
-          const hasNewProdFile = runtimeProd.some((f) => !diff.includes(f));
-          if (diff && !hasNewProdFile && isStaticOnlyChange(diff)) exemptCategory = "static-only";
+          const evidencePaths = staticProofPaths(changedForRepro);
+          const diff = await getDiffSinceRef(this.state.project_root, this.checkpointRef, evidencePaths);
+          const diffFiles = filesInUnifiedDiff(diff);
+          // Kanıt kümesindeki dosya diff'te YOKSA yeni (untracked) dosyadır → olası runtime kod, static sayma.
+          const hasNewFile = evidencePaths.some((f) => !diffFiles.has(f));
+          if (diff && !hasNewFile && isStaticOnlyChange(diff)) exemptCategory = "static-only";
         } catch {
           /* belirsizse reproRequired aynı kalır (güvenli taraf) */
         }

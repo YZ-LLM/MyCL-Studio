@@ -403,4 +403,37 @@ describe("git · getDiffSinceRef paths filtresi (Faz 8 runtime-prod'a daraltılm
     expect(await getDiffSinceRef(dir, head, ["../escape.ts"])).toBe("");
     expect(await getDiffSinceRef(dir, head, ["a/../../escape.ts"])).toBe("");
   });
+
+  it("MAHKEME FIX D: [slug] gibi glob karakterli yol LITERAL yorumlanır (ilgisiz dosya sızmaz)", async () => {
+    await mkdirP(join(dir, "app", "[slug]"), { recursive: true });
+    await mkdirP(join(dir, "app", "s"), { recursive: true });
+    await writeFile(join(dir, "app", "[slug]", "page.tsx"), "export type P = 1;\n");
+    await writeFile(join(dir, "app", "s", "page.tsx"), "export const other = 1;\n");
+    spawnSync("git", ["add", "."], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "routes"], { cwd: dir, stdio: "ignore" });
+    const base = (await getRecentCommits(dir, 1))[0].sha;
+    await writeFile(join(dir, "app", "[slug]", "page.tsx"), "export type P = 2;\n");
+    await writeFile(join(dir, "app", "s", "page.tsx"), "export const other = 2;\n");
+    const diff = await getDiffSinceRef(dir, base, ["app/[slug]/page.tsx"]);
+    expect(diff).toContain("[slug]");
+    expect(diff).not.toContain("app/s/page.tsx"); // pathspec glob sızıntısı YOK
+  });
+
+  it("MAHKEME FIX A2 uçtan uca: type-only .ts + davranış değiştiren .json → static kanıt DÜŞMEZ", async () => {
+    // Senaryo (mahkeme reprodüksiyonu): fix hem src/handler.ts'e static-safe satır ekliyor
+    // hem src/data.json'da davranış değiştiriyor. Kanıt diff'i data.json'u İÇERMELİ ki
+    // isStaticOnlyChange false dönsün (muafiyet sızmasın).
+    await mkdirP(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "handler.ts"), "export const h = 1;\n");
+    await writeFile(join(dir, "src", "data.json"), '{ "featureXEnabled": false }\n');
+    spawnSync("git", ["add", "."], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "seed2"], { cwd: dir, stdio: "ignore" });
+    const base = (await getRecentCommits(dir, 1))[0].sha;
+    await writeFile(join(dir, "src", "handler.ts"), "export const h = 1;\nexport type X = number;\n");
+    await writeFile(join(dir, "src", "data.json"), '{ "featureXEnabled": true }\n');
+    // staticProofPaths davranışı: data.json test/kozmetik DEĞİL → kanıt kümesinde.
+    const diff = await getDiffSinceRef(dir, base, ["src/handler.ts", "src/data.json"]);
+    expect(diff).toContain("data.json");
+    expect(diff).toContain('"featureXEnabled": true');
+  });
 });

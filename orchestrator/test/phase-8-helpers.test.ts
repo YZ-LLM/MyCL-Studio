@@ -8,9 +8,11 @@ import {
   isProdPath,
   isStaticOnlyChange,
   isStaticSafeAddedLine,
+  filesInUnifiedDiff,
   isTestCommand,
   isTestPath,
   nonRuntimeProdExempt,
+  staticProofPaths,
 } from "../src/phase-8.js";
 
 describe("isStaticSafeAddedLine (Faz 8 repro gate-fix #1 — eklenen satır runtime mı)", () => {
@@ -292,5 +294,50 @@ describe("nonRuntimeProdExempt — TEK generic repro muafiyeti (eski üç görev
     expect(nonRuntimeProdExempt(["app/Kernel.php"])).toBe(false);
     expect(nonRuntimeProdExempt(["lib/main.dart"])).toBe(false);
     expect(nonRuntimeProdExempt(["Services/Auth.cs"])).toBe(false);
+  });
+});
+
+describe("staticProofPaths — static kanıt diff'ine girecek dosyalar (MAHKEME FIX A2)", () => {
+  it("kaynak-uzantısız ama davranış taşıyan dosyalar (json/sql/sh) kanıtta KALIR", () => {
+    expect(staticProofPaths(["src/app.ts", "src/data.json", "db/init.sql", "run.sh"])).toEqual([
+      "src/app.ts",
+      "src/data.json",
+      "db/init.sql",
+      "run.sh",
+    ]);
+  });
+  it("test ve kozmetik dosyalar dışlanır (kasıtlı delta)", () => {
+    expect(staticProofPaths(["src/app.ts", "src/app.test.ts", "style.css"])).toEqual(["src/app.ts"]);
+  });
+  it("kök build-config kanıtta KALIR (config satırı static-safe değilse muafiyeti bozar)", () => {
+    expect(staticProofPaths(["src/app.ts", "playwright.config.ts"])).toEqual([
+      "src/app.ts",
+      "playwright.config.ts",
+    ]);
+  });
+});
+
+describe("filesInUnifiedDiff — diff dosya başlıkları parse (MAHKEME FIX A3)", () => {
+  it("+++/--- başlıklarından dosyaları toplar; İÇERİKTE geçen dosya adına aldanmaz", () => {
+    const diff = [
+      "diff --git a/src/index.ts b/src/index.ts",
+      "--- a/src/index.ts",
+      "+++ b/src/index.ts",
+      "@@ -1,0 +2 @@",
+      "+// moved duplicate logic into src/newModule.ts",
+    ].join("\n");
+    const files = filesInUnifiedDiff(diff);
+    expect(files.has("src/index.ts")).toBe(true);
+    // Eski substring kontrolünün yanıldığı yer: yorum içindeki ad DOSYA değildir.
+    expect(files.has("src/newModule.ts")).toBe(false);
+  });
+  it("/dev/null (yeni/silinen dosya tarafı) yok sayılır; silinen dosya --- a/ ile görünür", () => {
+    const diff = ["--- a/old.ts", "+++ /dev/null", "@@ -1 +0,0 @@", "-const x = 1;"].join("\n");
+    const files = filesInUnifiedDiff(diff);
+    expect(files.has("old.ts")).toBe(true);
+    expect(files.has("/dev/null")).toBe(false);
+  });
+  it("boş diff → boş küme", () => {
+    expect(filesInUnifiedDiff("").size).toBe(0);
   });
 });

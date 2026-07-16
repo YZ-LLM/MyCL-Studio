@@ -32,6 +32,9 @@ export function hasSourceExt(p: string): boolean {
 // (phase-8'in eski listesi bunun alt kümesiydi; birleşim = bu liste).
 // Dizin desenleri (^|/) ile çapalı: git-göreli yollarda baştaki eğik çizgi yok —
 // eski /\/tests\// deseni kök seviyedeki `tests/foo.py`yu sessiz kaçırıyordu.
+// BİLİNÇLİ SINIR (mahkeme 2026-07-16): `tests/`/`spec/` dizininde GERÇEK prod kodu
+// barındıran nadir proje bu sınıflandırmada "test" sayılır (repro muafiyeti kolaylaşır) —
+// kuşkuda-test tercihi; suite-green + AC + tech-debt guard'ları o durumda da aynen çalışır.
 const TEST_PATH_PATTERNS: RegExp[] = [
   /\.test\.[tj]sx?$/,
   /\.spec\.[tj]sx?$/,

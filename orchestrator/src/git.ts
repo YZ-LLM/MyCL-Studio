@@ -472,6 +472,9 @@ export async function getChangedFiles(
  * `paths` (opsiyonel): diff'i bu GÖRELİ yollara daraltır (`--` sonrası → seçenek
  * enjeksiyonu imkansız). Mutlak veya `..` içeren yol = güvenilmez girdi → ""
  * (fail-safe: caller static-only sayamaz, repro zorunlu kalır).
+ * MAHKEME FIX (D, 2026-07-16): `--literal-pathspecs` — Next.js tarzı `[slug]`
+ * dizin adları git pathspec glob'u olarak yorumlanıp İLGİSİZ dosyaları
+ * (`app/s/page.tsx`) diff'e katıyordu; literal mod glob yorumunu kapatır.
  */
 export async function getDiffSinceRef(
   projectRoot: string,
@@ -488,6 +491,7 @@ export async function getDiffSinceRef(
       });
       return "";
     }
+    args.unshift("--literal-pathspecs"); // global bayrak — alt komuttan ÖNCE gelmeli
     args.push(...paths);
   }
   const r = await runGit(projectRoot, args).catch(() => null);
