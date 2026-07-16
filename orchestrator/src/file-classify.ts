@@ -30,14 +30,16 @@ export function hasSourceExt(p: string): boolean {
 
 // Test/spec dosya desenleri — tech-debt-scanner'daki üst kümenin taşınmış hâli
 // (phase-8'in eski listesi bunun alt kümesiydi; birleşim = bu liste).
+// Dizin desenleri (^|/) ile çapalı: git-göreli yollarda baştaki eğik çizgi yok —
+// eski /\/tests\// deseni kök seviyedeki `tests/foo.py`yu sessiz kaçırıyordu.
 const TEST_PATH_PATTERNS: RegExp[] = [
   /\.test\.[tj]sx?$/,
   /\.spec\.[tj]sx?$/,
   /_test\.(py|go|rs)$/,
   /test_.*\.py$/,
-  /\/__tests__\//,
-  /\/tests?\//,
-  /\/spec\//,
+  /(^|\/)__tests__\//,
+  /(^|\/)tests?\//,
+  /(^|\/)spec\//,
 ];
 
 /** Yol test/spec dosyası mı. node_modules → false (zaten elenir). */

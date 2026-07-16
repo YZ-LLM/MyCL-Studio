@@ -57,6 +57,16 @@ describe("isTestPath (birleşim = tech-debt-scanner üst kümesi)", () => {
     expect(isTestPath("node_modules/x/foo.test.ts")).toBe(false);
     expect(isTestPath("src/app.ts")).toBe(false);
   });
+
+  it("ÇAPALAMA: kök seviye tests/ ve spec/ de test sayılır (git-göreli yolda baş eğik çizgi yok)", () => {
+    expect(isTestPath("tests/foo.py")).toBe(true);
+    expect(isTestPath("test/foo.ts")).toBe(true);
+    expect(isTestPath("spec/foo.rb")).toBe(true);
+    expect(isTestPath("__tests__/foo.ts")).toBe(true);
+    // "protests/" gibi içeren-ama-eşit-olmayan dizin adları YANLIŞ eşleşmez
+    expect(isTestPath("protests/foo.ts")).toBe(false);
+    expect(isTestPath("contest/foo.ts")).toBe(false);
+  });
 });
 
 describe("isProdPath (kaynak uzantı + !test)", () => {
