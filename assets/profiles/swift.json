@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": null,
     "security": null,
-    "integration": "swift test --filter Integration"
+    "integration": "swift test --filter Integration",
+    "run": "swift run"
   },
   "e2e_by_project_type": {
     "web": null,
@@ -25,5 +26,7 @@
     "default": null
   },
   "default_port": 8080,
-  "manifest_files": ["Package.swift"]
+  "manifest_files": [
+    "Package.swift"
+  ]
 }

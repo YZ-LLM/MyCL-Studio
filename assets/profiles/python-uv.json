@@ -12,7 +12,8 @@
     "simplify": null,
     "perf": null,
     "security": "uv run pip-audit",
-    "integration": "uv run pytest tests/integration/"
+    "integration": "uv run pytest tests/integration/",
+    "run": "uv run python main.py"
   },
   "e2e_by_project_type": {
     "web": "uv run pytest --headed",
@@ -28,5 +29,8 @@
     "default": null
   },
   "default_port": 8000,
-  "manifest_files": ["pyproject.toml", "uv.lock"]
+  "manifest_files": [
+    "pyproject.toml",
+    "uv.lock"
+  ]
 }

@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": "go test -bench=. ./...",
     "security": "govulncheck ./...",
-    "integration": "go test -tags=integration ./..."
+    "integration": "go test -tags=integration ./...",
+    "run": "go run ."
   },
   "e2e_by_project_type": {
     "web": null,
@@ -25,5 +26,8 @@
     "default": null
   },
   "default_port": 8080,
-  "manifest_files": ["go.mod", "go.sum"]
+  "manifest_files": [
+    "go.mod",
+    "go.sum"
+  ]
 }

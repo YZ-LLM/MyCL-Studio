@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": null,
     "security": "./gradlew dependencyCheckAnalyze",
-    "integration": "./gradlew integrationTest"
+    "integration": "./gradlew integrationTest",
+    "run": "./gradlew run"
   },
   "e2e_by_project_type": {
     "web": "./gradlew e2eTest",
@@ -25,5 +26,9 @@
     "default": null
   },
   "default_port": 8080,
-  "manifest_files": ["build.gradle", "build.gradle.kts", "settings.gradle"]
+  "manifest_files": [
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle"
+  ]
 }

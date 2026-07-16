@@ -32,6 +32,7 @@ import {
 import { emitChatMessage, emitPhaseIdle, emitPhaseRunning } from "../../ipc.js";
 import { isNeverAsk } from "../../auto-answer.js";
 import { launchWithProvision } from "../../service-provision.js";
+import { loadProfile, resolveCommand } from "../../profile-loader.js";
 import { log } from "../../logger.js";
 import { replaceActiveWatcher } from "../../runtime-error-watcher.js";
 import { safeEnv } from "../../safe-env.js";
@@ -178,145 +179,29 @@ export function detectFullStackScripts(
 }
 
 /**
- * Pure: stack + niyet → komut string. Node stack'leri için package.json
- * scripts'i opsiyonel argüman olarak enjekte edilir; o sayede dev/start script
- * adı bulunabilir. Stack için niyet desteklenmiyorsa null.
+ * Stack + niyet → komut string. TEK KAYNAK PROFİL (KATI #1; 2026-07-16 —
+ * eski 19-case hardcode switch silindi, profillerle gerçek drift taşıyordu).
+ *
+ * Node stack'leri İSTİSNA — profile gitmez: `nodeCommand` proje package.json
+ * script'lerinden türetir (MEKANİZMA: proje manifest gerçeği > profil
+ * varsayılanı; 2026-07-14 dersi — profil-öncelik denemesi Node'u bozmuştu).
+ *
+ * "run" niyeti profil `run` (generic çalıştır) → yoksa `dev` (web dev-server)
+ * sırasıyla çözülür. Profil yoksa null → caller GÖRÜNÜR "anlayamadım" mesajı
+ * verir (KATI #4: sessiz uydurma yok).
  */
-export function commandFor(
+export async function commandFor(
   stack: StackId,
   intentKind: CommandIntentKind,
   nodeScripts: Record<string, string> = {},
-): string | null {
-  switch (stack) {
-    case "node-npm":
-    case "node-yarn":
-    case "node-pnpm":
-    case "node-bun":
-      return nodeCommand(stack, intentKind, nodeScripts);
-    case "deno":
-      return {
-        run: "deno task dev",
-        test: "deno test",
-        build: "deno task build",
-        install: "deno cache --reload .",
-        lint: "deno lint",
-      }[intentKind];
-    case "rust":
-      return {
-        run: "cargo run",
-        test: "cargo test",
-        build: "cargo build",
-        install: "cargo fetch",
-        lint: "cargo clippy",
-      }[intentKind];
-    case "python-poetry":
-      return {
-        run: "poetry run python main.py",
-        test: "poetry run pytest",
-        build: null,
-        install: "poetry install",
-        lint: "poetry run ruff check .",
-      }[intentKind];
-    case "python-uv":
-      return {
-        run: "uv run python main.py",
-        test: "uv run pytest",
-        build: null,
-        install: "uv sync",
-        lint: "uv run ruff check .",
-      }[intentKind];
-    case "python-pip":
-      return {
-        run: "python main.py",
-        test: "pytest",
-        build: null,
-        install: "pip install -r requirements.txt",
-        lint: "ruff check .",
-      }[intentKind];
-    case "go":
-      return {
-        run: "go run .",
-        test: "go test ./...",
-        build: "go build ./...",
-        install: "go mod download",
-        lint: "go vet ./...",
-      }[intentKind];
-    case "ruby":
-      return {
-        run: "bundle exec ruby main.rb",
-        test: "bundle exec rspec",
-        build: null,
-        install: "bundle install",
-        lint: "bundle exec rubocop",
-      }[intentKind];
-    case "php":
-      return {
-        run: "php -S localhost:8000",
-        test: "vendor/bin/phpunit",
-        build: null,
-        install: "composer install",
-        lint: "vendor/bin/phpcs",
-      }[intentKind];
-    case "maven":
-      return {
-        run: "mvn spring-boot:run",
-        test: "mvn test",
-        build: "mvn package",
-        install: "mvn install",
-        lint: "mvn checkstyle:check",
-      }[intentKind];
-    case "gradle":
-      return {
-        run: "./gradlew run",
-        test: "./gradlew test",
-        build: "./gradlew build",
-        install: "./gradlew build",
-        lint: "./gradlew check",
-      }[intentKind];
-    case "elixir":
-      return {
-        run: "mix run --no-halt",
-        test: "mix test",
-        build: "mix compile",
-        install: "mix deps.get",
-        lint: "mix credo",
-      }[intentKind];
-    case "dart":
-      // Saf Dart — flutter komutları artık ayrı "flutter" stack'inde (2026-07-16).
-      return {
-        run: "dart run",
-        test: "dart test",
-        build: "dart compile exe bin/main.dart",
-        install: "dart pub get",
-        lint: "dart analyze",
-      }[intentKind];
-    case "flutter":
-      return {
-        run: "flutter run",
-        test: "flutter test",
-        build: "flutter build apk",
-        install: "flutter pub get",
-        lint: "flutter analyze",
-      }[intentKind];
-    case "swift":
-      return {
-        run: "swift run",
-        test: "swift test",
-        build: "swift build",
-        install: "swift package resolve",
-        lint: null,
-      }[intentKind];
-    case "dotnet":
-      return {
-        run: "dotnet run",
-        test: "dotnet test",
-        build: "dotnet build",
-        install: "dotnet restore",
-        lint: "dotnet format --verify-no-changes",
-      }[intentKind];
-    case "unknown":
-      return null;
+): Promise<string | null> {
+  if (stack === "unknown") return null;
+  if (NODE_STACKS.has(stack)) return nodeCommand(stack, intentKind, nodeScripts);
+  const profile = await loadProfile(stack);
+  if (intentKind === "run") {
+    return resolveCommand(profile, "run") ?? resolveCommand(profile, "dev");
   }
+  return resolveCommand(profile, intentKind);
 }
 
 function nodeCommand(
@@ -357,12 +242,12 @@ function nodeCommand(
  * Bun stack için `npx` → `bunx`. Sadece `run` intent için chain genişletilir;
  * diğer intent'ler tek komut döner.
  */
-export function commandsFor(
+export async function commandsFor(
   stack: StackId,
   intentKind: CommandIntentKind,
   nodeScripts: Record<string, string> = {},
-): string[] {
-  const primary = commandFor(stack, intentKind, nodeScripts);
+): Promise<string[]> {
+  const primary = await commandFor(stack, intentKind, nodeScripts);
   if (!primary) return [];
   if (intentKind !== "run") return [primary];
   if (!NODE_STACKS.has(stack)) return [primary];
@@ -396,19 +281,18 @@ export function commandsFor(
  * v15.7 (2026-05-27): Regex `detectIntentKind` kaldırıldı; caller `kind`
  * vermek zorunda (UI butonu veya LLM agent extracted_command'ı).
  */
-export function deriveCommand(
+export async function deriveCommand(
   projectRoot: string,
   kind: CommandIntentKind | null,
   hint?: string,
-): string | null {
+): Promise<string | null> {
   if (hint && hint.trim().length > 0) return hint.trim();
   if (!kind) return null;
   const stack = detectStack(projectRoot);
   if (stack === "unknown") return null;
-  // NOT (YZLLM 2026-07-14 denetim): chat lint/build komutu commandFor'dan (go vet/phpcs) geliyor; gate profil'den
-  // (golangci-lint/phpstan) → ikili-kaynak drift VAR. Profil-öncelik denendi ama Node script-tespiti kaybı (script'siz
-  // projede "Missing script") + dart/Flutter profil-uyumsuzluğu regresyonu açtı → GERİ ALINDI. Doğru fix: profilleri
-  // doğrula (dart), Node script-tespitini koru, runOneShot'a isMissingCommand ekle — ayrı dikkatli pass.
+  // 2026-07-16: hardcode switch silindi — chat komutları da GATE'lerle aynı profillerden
+  // çözülür (ikili-kaynak drift'i kökten kapandı; 2026-07-14 denetim notunun istediği fix).
+  // Node script-tespiti KORUNDU (commandFor içindeki nodeCommand yolu).
   const scripts = NODE_STACKS.has(stack) ? readNodeScripts(projectRoot) : {};
   return commandFor(stack, kind, scripts);
 }
@@ -540,7 +424,7 @@ export async function handleCommandIntent(
   });
 
   const kind: CommandIntentKind | null = intent.intent_kind ?? null;
-  const cmd = deriveCommand(
+  const cmd = await deriveCommand(
     state.project_root,
     kind,
     intent.extracted_command,
@@ -615,7 +499,7 @@ async function runDevServer(
   const stack = detectStack(state.project_root);
   const scripts = NODE_STACKS.has(stack) ? readNodeScripts(state.project_root) : {};
   let chainCmds = NODE_STACKS.has(stack)
-    ? commandsFor(stack, "run", scripts)
+    ? await commandsFor(stack, "run", scripts)
     : [cmd];
   // Eğer caller'dan gelen cmd chain'in head'i değilse, başa al (kullanıcı
   // explicit script seçmiş olabilir).

@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": "cargo bench",
     "security": "cargo audit",
-    "integration": "cargo test --test '*'"
+    "integration": "cargo test --test '*'",
+    "run": "cargo run"
   },
   "e2e_by_project_type": {
     "web": null,
@@ -27,5 +28,8 @@
     "default": null
   },
   "default_port": 8080,
-  "manifest_files": ["Cargo.toml", "Cargo.lock"]
+  "manifest_files": [
+    "Cargo.toml",
+    "Cargo.lock"
+  ]
 }

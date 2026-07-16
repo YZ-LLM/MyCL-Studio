@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": null,
     "security": "bundle exec bundler-audit check --update",
-    "integration": "bundle exec rspec spec/integration/"
+    "integration": "bundle exec rspec spec/integration/",
+    "run": "bundle exec ruby main.rb"
   },
   "e2e_by_project_type": {
     "web": "bundle exec rspec spec/system/",
@@ -25,5 +26,8 @@
     "default": null
   },
   "default_port": 9292,
-  "manifest_files": ["Gemfile", "Gemfile.lock"]
+  "manifest_files": [
+    "Gemfile",
+    "Gemfile.lock"
+  ]
 }

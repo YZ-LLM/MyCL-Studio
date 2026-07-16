@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": null,
     "security": "mix deps.audit",
-    "integration": "mix test --only integration"
+    "integration": "mix test --only integration",
+    "run": "mix run --no-halt"
   },
   "e2e_by_project_type": {
     "web": "mix test --only e2e",

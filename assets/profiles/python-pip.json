@@ -12,7 +12,8 @@
     "simplify": null,
     "perf": null,
     "security": "pip-audit",
-    "integration": "pytest tests/integration/"
+    "integration": "pytest tests/integration/",
+    "run": "python main.py"
   },
   "e2e_by_project_type": {
     "web": "pytest --headed",
@@ -28,5 +29,8 @@
     "default": null
   },
   "default_port": 8000,
-  "manifest_files": ["requirements.txt", "pyproject.toml"]
+  "manifest_files": [
+    "requirements.txt",
+    "pyproject.toml"
+  ]
 }

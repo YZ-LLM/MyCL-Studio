@@ -1,7 +1,7 @@
 {
   "stack_id": "deno",
   "commands": {
-    "install": "deno cache --reload deno.json",
+    "install": "deno install",
     "dev": "deno task dev",
     "build": "deno task build",
     "test": "deno test",
@@ -25,5 +25,8 @@
     "default": null
   },
   "default_port": 8000,
-  "manifest_files": ["deno.json", "deno.jsonc"]
+  "manifest_files": [
+    "deno.json",
+    "deno.jsonc"
+  ]
 }

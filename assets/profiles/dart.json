@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": null,
     "security": null,
-    "integration": "dart test test/integration/"
+    "integration": "dart test test/integration/",
+    "run": "dart run"
   },
   "e2e_by_project_type": {
     "web": null,

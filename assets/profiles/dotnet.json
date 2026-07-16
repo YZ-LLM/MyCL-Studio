@@ -10,7 +10,8 @@
     "simplify": null,
     "perf": null,
     "security": "dotnet list package --vulnerable --include-transitive",
-    "integration": "dotnet test --filter Category=Integration"
+    "integration": "dotnet test --filter Category=Integration",
+    "run": "dotnet run"
   },
   "e2e_by_project_type": {
     "web": "dotnet test --filter Category=E2E",
@@ -26,5 +27,9 @@
     "default": null
   },
   "default_port": 5000,
-  "manifest_files": ["*.csproj", "*.sln", "*.fsproj"]
+  "manifest_files": [
+    "*.csproj",
+    "*.sln",
+    "*.fsproj"
+  ]
 }

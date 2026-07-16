@@ -25,7 +25,7 @@ describe("devServerCandidates — profil `dev` öncelikli (dev-server profil byp
   it("Node (node-npm): commandsFor AYNEN — profil prepend YOK (script-tespiti zengin, dokunulmaz)", async () => {
     const scripts = { dev: "vite", build: "vite build" };
     const cmds = await devServerCandidates("node-npm", scripts);
-    expect(cmds).toEqual(commandsFor("node-npm", "run", scripts)); // birebir aynı
+    expect(cmds).toEqual(await commandsFor("node-npm", "run", scripts)); // birebir aynı
   });
 
   it("expectedPortFor uyumu: uvicorn komutunun portu 8000 → probe doğru portu yoklar", async () => {

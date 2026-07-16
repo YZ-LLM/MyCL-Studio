@@ -15,75 +15,136 @@ import {
 // belirlenip caller'a verilir. Eski "regex parse text" testleri silindi;
 // `deriveCommand` artık explicit `kind` parametresi alır.
 
-describe("intent-router/command · commandFor (pure stack → command map)", () => {
-  it("Node npm: install/test default + dev script var", () => {
-    expect(commandFor("node-npm", "install")).toBe("npm install");
-    expect(commandFor("node-npm", "test")).toBe("npm test");
-    expect(commandFor("node-npm", "run", { dev: "vite" })).toBe("npm run dev");
-    expect(commandFor("node-npm", "run", { start: "node server" })).toBe("npm run start");
-    expect(commandFor("node-npm", "run")).toBeNull();
-    expect(commandFor("node-npm", "build", { build: "tsc" })).toBe("npm run build");
-    expect(commandFor("node-npm", "build")).toBeNull();
-    expect(commandFor("node-npm", "lint", { lint: "eslint ." })).toBe("npm run lint");
+describe("intent-router/command · commandFor (Node: script-tespiti; diğerleri: PROFİL tek kaynak)", () => {
+  it("Node npm: install/test default + dev script var (nodeCommand MEKANİZMASI — profil değil)", async () => {
+    expect(await commandFor("node-npm", "install")).toBe("npm install");
+    expect(await commandFor("node-npm", "test")).toBe("npm test");
+    expect(await commandFor("node-npm", "run", { dev: "vite" })).toBe("npm run dev");
+    expect(await commandFor("node-npm", "run", { start: "node server" })).toBe("npm run start");
+    expect(await commandFor("node-npm", "run")).toBeNull();
+    expect(await commandFor("node-npm", "build", { build: "tsc" })).toBe("npm run build");
+    expect(await commandFor("node-npm", "build")).toBeNull();
+    expect(await commandFor("node-npm", "lint", { lint: "eslint ." })).toBe("npm run lint");
   });
 
-  it("Node yarn/pnpm/bun: paket yöneticisi doğru prefix", () => {
-    expect(commandFor("node-yarn", "install")).toBe("yarn install");
-    expect(commandFor("node-yarn", "test")).toBe("yarn test");
-    expect(commandFor("node-yarn", "run", { dev: "x" })).toBe("yarn run dev");
-    expect(commandFor("node-pnpm", "install")).toBe("pnpm install");
-    expect(commandFor("node-pnpm", "test")).toBe("pnpm test");
-    expect(commandFor("node-bun", "install")).toBe("bun install");
-    expect(commandFor("node-bun", "test")).toBe("bun run test");
+  it("Node yarn/pnpm/bun: paket yöneticisi doğru prefix (2026-07-14 dersi: bu yol DOKUNULMAZ)", async () => {
+    expect(await commandFor("node-yarn", "install")).toBe("yarn install");
+    expect(await commandFor("node-yarn", "test")).toBe("yarn test");
+    expect(await commandFor("node-yarn", "run", { dev: "x" })).toBe("yarn run dev");
+    expect(await commandFor("node-pnpm", "install")).toBe("pnpm install");
+    expect(await commandFor("node-pnpm", "test")).toBe("pnpm test");
+    expect(await commandFor("node-bun", "install")).toBe("bun install");
+    expect(await commandFor("node-bun", "test")).toBe("bun run test");
   });
 
-  it("Rust", () => {
-    expect(commandFor("rust", "run")).toBe("cargo run");
-    expect(commandFor("rust", "test")).toBe("cargo test");
-    expect(commandFor("rust", "build")).toBe("cargo build");
-    expect(commandFor("rust", "install")).toBe("cargo fetch");
-    expect(commandFor("rust", "lint")).toBe("cargo clippy");
+  it("Rust (profil kanonik: build --release, clippy -D warnings)", async () => {
+    expect(await commandFor("rust", "run")).toBe("cargo run");
+    expect(await commandFor("rust", "test")).toBe("cargo test");
+    expect(await commandFor("rust", "build")).toBe("cargo build --release");
+    expect(await commandFor("rust", "install")).toBe("cargo fetch");
+    expect(await commandFor("rust", "lint")).toBe("cargo clippy -- -D warnings");
   });
 
-  it("Python (poetry/uv/pip)", () => {
-    expect(commandFor("python-poetry", "install")).toBe("poetry install");
-    expect(commandFor("python-poetry", "test")).toBe("poetry run pytest");
-    expect(commandFor("python-uv", "install")).toBe("uv sync");
-    expect(commandFor("python-uv", "test")).toBe("uv run pytest");
-    expect(commandFor("python-pip", "install")).toBe("pip install -r requirements.txt");
-    expect(commandFor("python-pip", "test")).toBe("pytest");
+  it("Python (poetry/uv/pip) — run generic, dev'e düşmez", async () => {
+    expect(await commandFor("python-poetry", "install")).toBe("poetry install");
+    expect(await commandFor("python-poetry", "test")).toBe("poetry run pytest");
+    expect(await commandFor("python-uv", "install")).toBe("uv sync");
+    expect(await commandFor("python-uv", "test")).toBe("uv run pytest");
+    expect(await commandFor("python-pip", "install")).toBe("pip install -r requirements.txt");
+    expect(await commandFor("python-pip", "test")).toBe("pytest");
+    expect(await commandFor("python-pip", "run")).toBe("python main.py");
   });
 
-  it("Go", () => {
-    expect(commandFor("go", "run")).toBe("go run .");
-    expect(commandFor("go", "test")).toBe("go test ./...");
-    expect(commandFor("go", "build")).toBe("go build ./...");
-    expect(commandFor("go", "install")).toBe("go mod download");
+  it("Go", async () => {
+    expect(await commandFor("go", "run")).toBe("go run .");
+    expect(await commandFor("go", "test")).toBe("go test ./...");
+    expect(await commandFor("go", "build")).toBe("go build ./...");
+    expect(await commandFor("go", "install")).toBe("go mod download");
   });
 
-  it("Ruby / PHP / Maven / Gradle / Elixir / Dart / Swift / .NET / Deno", () => {
-    expect(commandFor("ruby", "install")).toBe("bundle install");
-    expect(commandFor("php", "install")).toBe("composer install");
-    expect(commandFor("maven", "test")).toBe("mvn test");
-    expect(commandFor("gradle", "build")).toBe("./gradlew build");
-    expect(commandFor("elixir", "install")).toBe("mix deps.get");
-    expect(commandFor("swift", "build")).toBe("swift build");
-    expect(commandFor("dotnet", "test")).toBe("dotnet test");
-    expect(commandFor("deno", "test")).toBe("deno test");
+  it("Ruby / PHP / Maven / Gradle / Elixir / Swift / .NET / Deno (profil kanonik değerler)", async () => {
+    expect(await commandFor("ruby", "install")).toBe("bundle install");
+    expect(await commandFor("php", "install")).toBe("composer install");
+    expect(await commandFor("maven", "test")).toBe("mvn test");
+    expect(await commandFor("maven", "install")).toBe("mvn install -DskipTests");
+    expect(await commandFor("gradle", "build")).toBe("./gradlew build -x test");
+    expect(await commandFor("gradle", "install")).toBe("./gradlew dependencies");
+    expect(await commandFor("elixir", "install")).toBe("mix deps.get");
+    expect(await commandFor("swift", "build")).toBe("swift build");
+    expect(await commandFor("dotnet", "test")).toBe("dotnet test");
+    expect(await commandFor("deno", "test")).toBe("deno test");
+    // deno install: eski switch "deno cache --reload ." ve eski profil "... deno.json"
+    // İKİSİ DE geçersiz çağrıydı → Deno 2 kanoniği
+    expect(await commandFor("deno", "install")).toBe("deno install");
   });
 
-  it("dart vs flutter — ayrı stack'ler, ayrı komutlar (2026-07-16 drift kökü)", () => {
-    expect(commandFor("dart", "run")).toBe("dart run");
-    expect(commandFor("dart", "test")).toBe("dart test");
-    expect(commandFor("flutter", "run")).toBe("flutter run");
-    expect(commandFor("flutter", "test")).toBe("flutter test");
-    expect(commandFor("flutter", "install")).toBe("flutter pub get");
+  it("run niyeti: profil run yoksa dev'e düşer (maven/deno)", async () => {
+    expect(await commandFor("maven", "run")).toBe("mvn spring-boot:run");
+    expect(await commandFor("deno", "run")).toBe("deno task dev");
   });
 
-  it("unknown stack → null", () => {
-    expect(commandFor("unknown", "run")).toBeNull();
-    expect(commandFor("unknown", "test")).toBeNull();
+  it("dart vs flutter — ayrı stack'ler, ayrı komutlar (2026-07-16 drift kökü)", async () => {
+    expect(await commandFor("dart", "run")).toBe("dart run");
+    expect(await commandFor("dart", "test")).toBe("dart test");
+    expect(await commandFor("flutter", "run")).toBe("flutter run");
+    expect(await commandFor("flutter", "test")).toBe("flutter test");
+    expect(await commandFor("flutter", "install")).toBe("flutter pub get");
   });
+
+  it("unknown stack → null", async () => {
+    expect(await commandFor("unknown", "run")).toBeNull();
+    expect(await commandFor("unknown", "test")).toBeNull();
+  });
+});
+
+describe("intent-router/command · eski switch değerleri uygunluk tablosu (anti-drift korkuluğu)", () => {
+  // 2026-07-16: 19-case hardcode switch silindi → tek kaynak profil. Bu tablo SİLİNEN
+  // switch'in değerlerini fixture olarak DONDURUR; kasıtlı farklar beyaz listede.
+  // Bir profil değeri istemeden değişirse (ne fixture ne beyaz liste) bu test kırmızı yanar.
+  const OLD_SWITCH: Record<string, Record<string, string | null>> = {
+    deno: { run: "deno task dev", test: "deno test", build: "deno task build", install: "deno cache --reload .", lint: "deno lint" },
+    rust: { run: "cargo run", test: "cargo test", build: "cargo build", install: "cargo fetch", lint: "cargo clippy" },
+    "python-poetry": { run: "poetry run python main.py", test: "poetry run pytest", build: null, install: "poetry install", lint: "poetry run ruff check ." },
+    "python-uv": { run: "uv run python main.py", test: "uv run pytest", build: null, install: "uv sync", lint: "uv run ruff check ." },
+    "python-pip": { run: "python main.py", test: "pytest", build: null, install: "pip install -r requirements.txt", lint: "ruff check ." },
+    go: { run: "go run .", test: "go test ./...", build: "go build ./...", install: "go mod download", lint: "go vet ./..." },
+    ruby: { run: "bundle exec ruby main.rb", test: "bundle exec rspec", build: null, install: "bundle install", lint: "bundle exec rubocop" },
+    php: { run: "php -S localhost:8000", test: "vendor/bin/phpunit", build: null, install: "composer install", lint: "vendor/bin/phpcs" },
+    maven: { run: "mvn spring-boot:run", test: "mvn test", build: "mvn package", install: "mvn install", lint: "mvn checkstyle:check" },
+    gradle: { run: "./gradlew run", test: "./gradlew test", build: "./gradlew build", install: "./gradlew build", lint: "./gradlew check" },
+    elixir: { run: "mix run --no-halt", test: "mix test", build: "mix compile", install: "mix deps.get", lint: "mix credo" },
+    dart: { run: "dart run", test: "dart test", build: "dart compile exe bin/main.dart", install: "dart pub get", lint: "dart analyze" },
+    flutter: { run: "flutter run", test: "flutter test", build: "flutter build apk", install: "flutter pub get", lint: "flutter analyze" },
+    swift: { run: "swift run", test: "swift test", build: "swift build", install: "swift package resolve", lint: null },
+    dotnet: { run: "dotnet run", test: "dotnet test", build: "dotnet build", install: "dotnet restore", lint: "dotnet format --verify-no-changes" },
+  };
+  // Kasıtlı farklar: "stack:intent" → yeni kanonik değer (gerekçe commit mesajında).
+  const INTENTIONAL: Record<string, string | null> = {
+    "deno:install": "deno install",
+    "rust:build": "cargo build --release",
+    "rust:lint": "cargo clippy -- -D warnings",
+    "go:lint": "golangci-lint run",
+    "ruby:run": "bundle exec ruby main.rb", // aynı — run anahtarı profile taşındı
+    "php:lint": "vendor/bin/phpstan analyse",
+    "maven:install": "mvn install -DskipTests",
+    "gradle:build": "./gradlew build -x test",
+    "gradle:install": "./gradlew dependencies",
+    "elixir:lint": "mix credo --strict",
+    "swift:lint": "swiftlint",
+    "dotnet:build": "dotnet build --configuration Release",
+  };
+  const INTENTS = ["run", "test", "build", "install", "lint"] as const;
+
+  for (const [stack, cmds] of Object.entries(OLD_SWITCH)) {
+    it(`${stack}: her niyet ya eski değer ya beyaz listeli kanonik`, async () => {
+      for (const intent of INTENTS) {
+        const actual = await commandFor(stack as never, intent);
+        const key = `${stack}:${intent}`;
+        const expected = key in INTENTIONAL ? INTENTIONAL[key] : cmds[intent];
+        expect(actual, key).toBe(expected);
+      }
+    });
+  }
 });
 
 describe("intent-router/command · detectStack + deriveCommand (FS integration)", () => {
@@ -152,51 +213,51 @@ describe("intent-router/command · detectStack + deriveCommand (FS integration)"
     expect(detectStack(tmpRoot)).toBe("dotnet");
   });
 
-  it("deriveCommand: hint öncelikli (stack tespitini bypass eder)", () => {
-    expect(deriveCommand(tmpRoot, null, "make build")).toBe("make build");
+  it("deriveCommand: hint öncelikli (stack tespitini bypass eder)", async () => {
+    expect(await deriveCommand(tmpRoot, null, "make build")).toBe("make build");
   });
 
-  it("deriveCommand: Node + dev script → npm run dev", () => {
+  it("deriveCommand: Node + dev script → npm run dev", async () => {
     writeFileSync(
       join(tmpRoot, "package.json"),
       JSON.stringify({ name: "x", scripts: { dev: "vite" } }),
     );
-    expect(deriveCommand(tmpRoot, "run")).toBe("npm run dev");
-    expect(deriveCommand(tmpRoot, "test")).toBe("npm test");
+    expect(await deriveCommand(tmpRoot, "run")).toBe("npm run dev");
+    expect(await deriveCommand(tmpRoot, "test")).toBe("npm test");
   });
 
-  it("deriveCommand: Rust projesi → cargo komutları", () => {
+  it("deriveCommand: Rust projesi → cargo komutları", async () => {
     writeFileSync(join(tmpRoot, "Cargo.toml"), "[package]\nname=\"x\"");
-    expect(deriveCommand(tmpRoot, "run")).toBe("cargo run");
-    expect(deriveCommand(tmpRoot, "test")).toBe("cargo test");
-    expect(deriveCommand(tmpRoot, "build")).toBe("cargo build");
+    expect(await deriveCommand(tmpRoot, "run")).toBe("cargo run");
+    expect(await deriveCommand(tmpRoot, "test")).toBe("cargo test");
+    expect(await deriveCommand(tmpRoot, "build")).toBe("cargo build --release");
   });
 
-  it("deriveCommand: Python (uv) → uv komutları", () => {
+  it("deriveCommand: Python (uv) → uv komutları", async () => {
     writeFileSync(join(tmpRoot, "pyproject.toml"), "[project]\nname=\"x\"");
     writeFileSync(join(tmpRoot, "uv.lock"), "");
-    expect(deriveCommand(tmpRoot, "install")).toBe("uv sync");
-    expect(deriveCommand(tmpRoot, "test")).toBe("uv run pytest");
+    expect(await deriveCommand(tmpRoot, "install")).toBe("uv sync");
+    expect(await deriveCommand(tmpRoot, "test")).toBe("uv run pytest");
   });
 
-  it("deriveCommand: Go projesi", () => {
+  it("deriveCommand: Go projesi", async () => {
     writeFileSync(join(tmpRoot, "go.mod"), "module x");
-    expect(deriveCommand(tmpRoot, "run")).toBe("go run .");
-    expect(deriveCommand(tmpRoot, "build")).toBe("go build ./...");
+    expect(await deriveCommand(tmpRoot, "run")).toBe("go run .");
+    expect(await deriveCommand(tmpRoot, "build")).toBe("go build ./...");
   });
 
-  it("deriveCommand: unknown stack + kind verilse de null", () => {
+  it("deriveCommand: unknown stack + kind verilse de null", async () => {
     // mkdir ama hiçbir manifest yazma — stack 'unknown' olur
     mkdirSync(join(tmpRoot, "subdir"));
-    expect(deriveCommand(tmpRoot, "run")).toBeNull();
+    expect(await deriveCommand(tmpRoot, "run")).toBeNull();
   });
 
-  it("deriveCommand: kind null + hint yok → null (caller hata göstermeli)", () => {
+  it("deriveCommand: kind null + hint yok → null (caller hata göstermeli)", async () => {
     writeFileSync(
       join(tmpRoot, "package.json"),
       JSON.stringify({ name: "x" }),
     );
-    expect(deriveCommand(tmpRoot, null)).toBeNull();
+    expect(await deriveCommand(tmpRoot, null)).toBeNull();
   });
 });
 
