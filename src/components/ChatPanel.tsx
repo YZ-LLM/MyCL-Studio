@@ -251,6 +251,8 @@ interface Props {
   fullTestRunning?: boolean;
   onMaintenanceClick?: () => void;
   maintenanceRunning?: boolean;
+  planMode?: boolean;
+  onPlanModeToggle?: (enabled: boolean) => void;
   /** WP4 DAST: tarama sürüyor mu — buton spinner + disabled (çift-tetik koruması). */
   dastRunning?: boolean;
   /** YZLLM 2026-06-17: o anki iş — ChatPanel başlığında "Tümünü kopyala" yanında gösterilir. */
@@ -286,6 +288,8 @@ export function ChatPanel({
   fullTestRunning,
   onMaintenanceClick,
   maintenanceRunning,
+  planMode,
+  onPlanModeToggle,
   currentJob,
   onShowCode,
 }: Props) {
@@ -664,6 +668,29 @@ export function ChatPanel({
               style={{ margin: 0 }}
             />
             <span className="intent-pill-label">Hiçbir şey sorma</span>
+          </label>
+        )}
+        {/* 🗺️ Plan Modu (2026-07-16): AÇIKKEN yazdıkların önce iş planına çevrilir;
+            onaylayınca adımlar iş kuyruğuna eklenir ve sırayla uygulanır. */}
+        {onPlanModeToggle && (
+          <label
+            className="intent-pill"
+            title="Açıkken: yazdığın hedef önce sıralı bir iş planına çevrilir; planı sen onaylarsın (hiçbir şey sorma modunda bile), onaydan sonra her adım iş kuyruğuna eklenir ve sırayla uygulanır. Düzenle seçeneğiyle planı geri bildirimle revize edebilirsin."
+            style={{
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <input
+              type="checkbox"
+              data-testid="plan-mode-toggle"
+              checked={!!planMode}
+              onChange={(e) => onPlanModeToggle(e.target.checked)}
+              style={{ margin: 0 }}
+            />
+            <span className="intent-pill-label">🗺️ Plan modu</span>
           </label>
         )}
         {/* YZLLM 2026-06-27: 📄 Proje Dökümanı butonu sağdaki Orkestra Ajanı paneline taşındı. */}

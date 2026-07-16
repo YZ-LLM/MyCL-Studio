@@ -180,6 +180,14 @@ import { Phase6Controller } from "./phase-6.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import { runFullTest, formatFullTestReport, fixTasksFromReport } from "./full-test.js";
 import { runMaintenance, formatMaintenanceReport } from "./maintenance.js";
+import {
+  formatPlanTR,
+  generatePlan,
+  isPlanMode,
+  persistPlan,
+  setPlanMode,
+  type PlanProposal,
+} from "./plan-mode.js";
 import { Phase7Controller } from "./phase-7.js";
 import { Phase8Controller } from "./phase-8.js";
 import { Phase9Controller } from "./phase-9.js";
@@ -314,6 +322,10 @@ interface OrchestratorRuntime {
   pendingFullTest: { askqId: string } | null;
   /** 🔧 Bakım Turu onayı bekliyor (2026-07-16) — aynı desen (bağımlılık YAZAR → onay şart). */
   pendingMaintenance: { askqId: string } | null;
+  /** 🗺️ Plan onayı bekliyor (2026-07-16) — plan_approve_* korumalı askq + plan gövdesi. */
+  pendingPlan: { askqId: string; plan: PlanProposal } | null;
+  /** 🗺️ Plan revizyonu bekliyor — sonraki kullanıcı mesajı geri bildirim olarak işlenir. */
+  pendingPlanEdit: { plan: PlanProposal } | null;
   // İş kuyruğu (YZLLM 2026-06-14): şu an Faz 1'den işlenen kuyruk işinin id'si.
   // pipeline-end bunu "done"+tarih ile damgalar + sıradaki bekleyen işi başlatır.
   // null → kuyruk-dışı iterasyon (örn. resume) ya da çalışan iş yok.
@@ -347,6 +359,8 @@ const runtime: OrchestratorRuntime = {
   pendingDast: null,
   pendingFullTest: null,
   pendingMaintenance: null,
+  pendingPlan: null,
+  pendingPlanEdit: null,
   currentTaskId: null,
   lastPhase1Intent: null,
   pendingAnswerReuse: null,
@@ -377,6 +391,8 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.pendingDast = null;
   runtime.pendingFullTest = null;
   runtime.pendingMaintenance = null;
+  runtime.pendingPlan = null;
+  runtime.pendingPlanEdit = null;
   runtime.pendingAnswerReuse = null;
   setHistoryRoot(state.project_root);
   setAgentTraceRoot(state.project_root);
@@ -3195,6 +3211,52 @@ async function handleUserMessage(text: string): Promise<void> {
   // pipeline bitince kendi finally'sinde boşaltılır.
   void commandDirectQueue.drain();
 }
+/**
+ * 🗺️ Plan Modu mesaj işleyici (2026-07-16): metni (veya revizyon geri bildirimini) plana çevir,
+ * sohbete yaz, korumalı onay askq'ı aç. Plan üretilemezse GÖRÜNÜR hata — hiçbir şey kuyruğa girmez
+ * (sessiz tek-iş fallback'i YOK; plan modu açık bir moddur, KATI #4).
+ */
+async function handlePlanModeMessage(text: string, revisePrevious?: PlanProposal): Promise<void> {
+  if (!runtime.state || !runtime.config) return;
+  runtime.pendingPlanEdit = null; // revizyon geri bildirimi tüketildi (tek kullanımlık)
+  emitPhaseRunning("🗺️ Plan hazırlanıyor", revisePrevious ? "revizyon" : "yeni plan");
+  let plan: PlanProposal | null = null;
+  try {
+    plan = await generatePlan(
+      runtime.config,
+      runtime.state.project_root,
+      text,
+      revisePrevious ? { previous: revisePrevious, feedback: text } : undefined,
+    );
+  } finally {
+    emitPhaseIdle();
+  }
+  if (!plan) {
+    emitChatMessage(
+      "error",
+      "🗺️ Plan üretilemedi (planlayıcı hatası). Hedefi tekrar yaz; sorun sürerse plan modunu kapatıp normal akışı kullanabilirsin. Hiçbir iş kuyruğa eklenmedi.",
+    );
+    return;
+  }
+  const askqId = `plan_approve_${randomUUID()}`;
+  runtime.pendingPlan = { askqId, plan };
+  emitChatMessage("assistant", formatPlanTR(plan));
+  await appendAuditModule(runtime.state.project_root, {
+    ts: Date.now(),
+    phase: runtime.state.current_phase,
+    event: "plan-proposed",
+    caller: "mycl-orchestrator",
+    detail: `steps=${plan.steps.length}`,
+  }).catch(() => {});
+  emitAskq({
+    id: askqId,
+    question: "Plan bu — nasıl ilerleyelim?",
+    options: ["✅ Planı onayla", "✏️ Düzenle", "Vazgeç"],
+    allow_other: false,
+    multi_select: false,
+  });
+}
+
 async function handleUserMessageInner(text: string): Promise<void> {
   log.info("orchestrator", "user_message", { text_len: text.length });
   if (!runtime.state || !runtime.config) {
@@ -3232,6 +3294,19 @@ async function handleUserMessageInner(text: string): Promise<void> {
   // Askq UI açık kalır; kullanıcı isterse askq'dan da cevap verebilir.
   // Kullanıcı kuralı: "Composer'dan bişeyler yazılırsa, o soru için değil,
   // daha genel kapsamda bi cevap ya da eleştri yapılıyor demektir."
+
+  // 🗺️ PLAN MODU (2026-07-16): mod AÇIKKEN kullanıcı mesajı normal orkestratör kararına
+  // GİTMEZ — planlayıcı çalışır, plan + korumalı onay askq'ı sunulur. Bekleyen plan
+  // revizyonu varsa bu mesaj GERİ BİLDİRİMDİR (plan yeniden üretilir). Regex yok — bu bir
+  // MOD kapısıdır (kullanıcının açtığı anahtar), niyet tahmini değil; KAPALIYKEN yol bayt-aynı.
+  if (runtime.pendingPlanEdit) {
+    await handlePlanModeMessage(text, runtime.pendingPlanEdit.plan);
+    return;
+  }
+  if (isPlanMode()) {
+    await handlePlanModeMessage(text);
+    return;
+  }
 
   // v15.7 (2026-05-27): Bug/probe regex fast-path kaldırıldı.
   // Kullanıcı kuralı: "orkestra ajanı her zaman llm e sorsun. kendi yanlış
@@ -4295,6 +4370,7 @@ function isPipelineParked(): boolean {
     runtime.pendingDast !== null ||
     runtime.pendingFullTest !== null ||
     runtime.pendingMaintenance !== null ||
+    runtime.pendingPlan !== null ||
     Boolean(runtime.state?.pending_ui_tweak) ||
     Boolean(runtime.state?.pending_diagnostic) ||
     Boolean(runtime.state?.pending_ui_review) // Faz 6 deferred UI-incelemesi (askq'sız park)
@@ -6714,6 +6790,64 @@ export async function handleAskqAnswer(
     return;
   }
 
+  // 🗺️ Plan onayı (2026-07-16) — korumalı askq (never-ask'ta bile açık onay; kullanıcının şartı).
+  // Onay → her adım kuyruğa (source:"plan", priority=sıra) + kalıcı iz + drain; Düzenle → sonraki
+  // mesaj revizyon geri bildirimi; Vazgeç → hiçbir şey eklenmez.
+  if (runtime.pendingPlan && runtime.pendingPlan.askqId === id) {
+    const { plan } = runtime.pendingPlan;
+    runtime.pendingPlan = null; // tek kullanımlık (çift-cevap re-tetikleyemez)
+    const sel = (Array.isArray(selected) ? selected[0] : selected) ?? "";
+    if (!runtime.state) {
+      emitChatMessage("error", "Proje kapandı — plan uygulanamadı.");
+      return;
+    }
+    const root = runtime.state.project_root;
+    if (sel === "✏️ Düzenle") {
+      runtime.pendingPlanEdit = { plan };
+      emitChatMessage("system", "✏️ Düzeltme talebini yaz — planı geri bildirimine göre güncelleyeceğim.");
+      return;
+    }
+    if (sel !== "✅ Planı onayla") {
+      emitChatMessage("system", "🗺️ Plan iptal edildi — hiçbir iş kuyruğa eklenmedi.");
+      await appendAuditModule(root, {
+        ts: Date.now(),
+        phase: runtime.state.current_phase,
+        event: "plan-rejected",
+        caller: "user",
+      }).catch(() => {});
+      return;
+    }
+    const now = Date.now();
+    const sorted = [...plan.steps].sort((a, b) => a.priority - b.priority);
+    for (let i = 0; i < sorted.length; i++) {
+      const step = sorted[i]!;
+      await appendTask(root, {
+        id: randomUUID(),
+        ts: now + i, // stabil FIFO (intake deseni)
+        text: step.text,
+        priority: step.priority,
+        status: "pending",
+        source: "plan",
+      });
+    }
+    const planPath = await persistPlan(root, plan);
+    await appendAuditModule(root, {
+      ts: Date.now(),
+      phase: runtime.state.current_phase,
+      event: "plan-approved",
+      caller: "user",
+      detail: `steps=${sorted.length}${planPath ? ` path=${planPath}` : ""}`,
+    }).catch(() => {});
+    await emitQueueChangedFor(root);
+    emitChatMessage(
+      "system",
+      `✅ Plan onaylandı — ${sorted.length} adım iş kuyruğuna eklendi, sırayla uygulanıyor.` +
+        (planPath ? ` (kalıcı iz: \`${planPath.replace(root + "/", "")}\`)` : ""),
+    );
+    await kickWorkQueue();
+    return;
+  }
+
   // 🔧 Bakım Turu onayı (2026-07-16) — Full Test dalının ikizi. Bakım motoru bulguları
   // burada kuyruğa döker (audit/SAST/Full Test), rapor + Full Test raporu tek mesajda.
   if (runtime.pendingMaintenance && runtime.pendingMaintenance.askqId === id) {
@@ -8275,6 +8409,12 @@ ipcRouter.register("run_full_test", async () => {
 // 🔧 Bakım Turu (2026-07-16): aynı desen — buton onay askq'ı açar.
 ipcRouter.register("run_maintenance", async () => {
   await handleRunMaintenanceRequest();
+});
+// 🗺️ Plan Modu (2026-07-16): composer pili — AÇIKKEN kullanıcı mesajları plana çevrilir.
+ipcRouter.register("set_plan_mode", async (data: unknown) => {
+  const d = data as { enabled?: boolean } | undefined;
+  setPlanMode(d?.enabled === true);
+  log.info("orchestrator", "plan mode", { enabled: d?.enabled === true });
 });
 ipcRouter.register("save_api_keys", async (data: unknown) => {
   await handleSaveApiKeys(data as Partial<ApiKeys>);

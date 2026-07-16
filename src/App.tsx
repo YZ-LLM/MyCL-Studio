@@ -796,6 +796,17 @@ function App() {
     void orch.send({ kind: "set_never_ask", data: { enabled } });
   };
 
+  // 🗺️ PLAN MODU toggle (2026-07-16): açıkken yazılanlar önce iş planına çevrilir; onay
+  // korumalı askq ile İNSANDA kalır. DEFAULT KAPALI (opt-in). localStorage'da saklanır.
+  const [planMode, setPlanMode] = useState<boolean>(
+    () => localStorage.getItem("mycl_plan_mode") === "1",
+  );
+  const handlePlanModeToggle = (enabled: boolean): void => {
+    setPlanMode(enabled);
+    localStorage.setItem("mycl_plan_mode", enabled ? "1" : "0");
+    void orch.send({ kind: "set_plan_mode", data: { enabled } });
+  };
+
   // YZLLM 2026-07-03: Cevap-bekleme sesi (askq geldiğinde bip). DEFAULT AÇIK — yalnız kullanıcı
   // açıkça kapattıysa ("0") kapalı. Saf ön-yüz tercihi (backend'e bildirilmez); localStorage'da saklanır.
   const [soundOn, setSoundOn] = useState<boolean>(
@@ -964,6 +975,8 @@ function App() {
           void orch.send({ kind: "set_auto_answer", data: { enabled: autoAnswer } });
           // YZLLM 2026-07-09: hiçbir şey sorma tercihini (localStorage) backend'e geri yükle.
           void orch.send({ kind: "set_never_ask", data: { enabled: neverAsk } });
+          // 🗺️ Plan modu tercihini (localStorage) backend'e geri yükle (2026-07-16).
+          void orch.send({ kind: "set_plan_mode", data: { enabled: planMode } });
         } else {
           setConfigStatus({
             state: "missing",
@@ -1620,6 +1633,8 @@ function App() {
           fullTestRunning={mainState.runningBanner?.label === "🧪 Full Test"}
           onMaintenanceClick={sendRunMaintenance}
           maintenanceRunning={mainState.runningBanner?.label === "🔧 Bakım Turu"}
+          planMode={planMode}
+          onPlanModeToggle={handlePlanModeToggle}
           onShowCode={(ref) => setCodeModal({ open: true, codeRef: ref })}
         />
         {activeRightPanel && (
