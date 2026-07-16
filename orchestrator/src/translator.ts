@@ -303,8 +303,7 @@ export async function translate(
   }
   // SABİT hızlı model (YZLLM 2026-06-11): config.selected_models.translator YOK SAYILIR — translator hep hızlı/ucuz
   // tier'da, kullanıcı değiştiremez. Çeviri mekanik; hız önemli; teknik token'lar verbatim geçer (system prompt).
-  // claude'da AYNEN korunur (api.model = TRANSLATOR_MODEL, api.client = translator key). Provider=zai → API yolu
-  // (isAutoMode false, backendForRole "api") → model her zaman doğru efektif değer.
+  // (api.model = TRANSLATOR_MODEL, api.client = translator key).
   const api = resolveLlmClient(config, "translator", config.api_keys.translator, TRANSLATOR_MODEL, {
     timeoutMs: 60_000,
   });

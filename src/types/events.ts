@@ -227,7 +227,6 @@ export interface ModelsListEvent {
  * v15.12: "auto" = Auto Mode — CLI ile başla, abonelik limiti dolunca API kullan,
  * limit açılınca CLI'ye dön.
  */
-// "auto" z.ai'yi SEÇMEZ (sadece api↔cli yönetir); z.ai açıkça seçilir.
 export type AgentBackend = "api" | "cli" | "auto";
 export interface AgentBackends {
   orchestrator: AgentBackend;

@@ -404,7 +404,7 @@ export async function updateLivingDocs(
             : 'Reminder: output ONLY the single {"kind":"docs", ...} JSON block — no prose before or after, no code fences. Emit it now.') +
           ' IMPORTANT: If you CANNOT read the project files (Read/Grep/Glob fail due to permission or sandbox errors), do NOT apologize or invent documentation — instead emit exactly {"kind":"docs","features_md":"MYCL_NO_ACCESS"} and stop.',
         modelId: docsModel,
-          cwd: state.project_root,
+        cwd: state.project_root,
         allowedTools: ["Read", "Grep", "Glob"],
         // salt-okunur: ajan kodu Read/Grep/Glob ile gezip JSON döner, dosyaları MyCL'in kendi Node kodu yazar.
         // Bash KALDIRILDI (çapraz-aile mahkeme): Bash açıkken salt-okunur niyete rağmen `cat > dosya << EOF`
