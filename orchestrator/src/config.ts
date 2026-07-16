@@ -241,6 +241,14 @@ export interface FeatureFlags {
    * fallback, KATI #4). Kurulum: `ensureCognee`. codebase-memory-mcp'nin (yapısal) semantik-kalıcı kardeşi.
    */
   cognee_memory?: boolean;
+  /**
+   * ⚡ Paralel iş kümeleme (YZLLM 2026-07-16, "orta yol"): kuyrukta ≥2 BAĞIMSIZ iş beklerken kod yazma
+   * kısımları izole worktree'lerde PARALEL koşar, birleştirme sonrası kalite fazları (9→17, Faz 6 dahil)
+   * birleşik sonuçta TEK SEFER eksiksiz koşar (multi_agent_selection emsali). FAIL-CLOSED: git yok/kirli
+   * ağaç/kapsam çakışması/worker hatası → sıralı akış (iş kaybolmaz). Opt-in default KAPALI (makine yükü
+   * + abonelik limiti — kullanıcı kral). Kümede en çok 3 iş.
+   */
+  parallel_task_batching?: boolean;
 }
 
 const DEFAULT_FEATURES: FeatureFlags = {
@@ -259,6 +267,7 @@ const DEFAULT_FEATURES: FeatureFlags = {
   layer_cost_report: true, // deterministik + ucuz (LLM yok); katman-maliyet görünürlüğü — kullanıcı budamayı KENDİ yapar.
   codebase_memory_mcp: false, // opt-in (dış bağımlılık: codebase-memory-mcp binary); Ayarlar'dan açılır, kurulamazsa grep fallback.
   cognee_memory: false, // opt-in (AĞIR dış bağımlılık: cognee Python kaynak+uv); Ayarlar'dan açılır, key/kurulum yoksa görünür fallback.
+  parallel_task_batching: false, // opt-in (makine yükü + abonelik limiti); Ayarlar'dan açılır — fail-closed sıralı fallback.
 };
 
 /**

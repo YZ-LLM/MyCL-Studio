@@ -78,11 +78,17 @@ interface Props {
   savingKeys: boolean;
   errorDetail?: string;
   /** v15.7 (2026-05-25): Feature flags */
-  features?: { playwright_enabled: boolean; over_engineering_control?: boolean; advisor_enabled?: boolean };
+  features?: {
+    playwright_enabled: boolean;
+    over_engineering_control?: boolean;
+    advisor_enabled?: boolean;
+    parallel_task_batching?: boolean;
+  };
   onSaveFeatures?: (features: {
     playwright_enabled?: boolean;
     over_engineering_control?: boolean;
     advisor_enabled?: boolean;
+    parallel_task_batching?: boolean;
   }) => void;
   /** Bağlam sadeleştirme doktoru: enjekte-bağlamı ölç + kesim öner (non-destructive; chat + .mycl raporu). */
   onRunContextTrim?: () => void;
@@ -818,6 +824,46 @@ export function Settings({
                     (gold-plating, erken soyutlama, istenmeyen özellik) atlar.
                     Gerekli işi, testleri veya güvenliği ASLA kesmez. Kapalı:
                     davranış değişmez.
+                  </div>
+                </div>
+              </label>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: 12,
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={features?.parallel_task_batching ?? false}
+                  onChange={(e) =>
+                    onSaveFeatures?.({ parallel_task_batching: e.target.checked })
+                  }
+                  style={{ width: 18, height: 18 }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: "var(--fg-bright)" }}>
+                    ⚡ Paralel iş kümeleme
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--fg-dim)",
+                      marginTop: 2,
+                    }}
+                  >
+                    Açık: iş kuyruğunda birbirinden bağımsız 2-3 iş beklerken kod
+                    yazma kısımları ayrı çalışma kopyalarında AYNI ANDA yapılır,
+                    birleştirme sonrası tüm kalite fazları birleşik sonuçta
+                    eksiksiz koşar (hiçbir kural atlanmaz). Bağımsızlık kanıtlanamazsa
+                    veya git deposu temiz değilse otomatik SIRALI akışa dönülür — iş
+                    kaybolmaz. Kapalı: işler her zaman tek tek işlenir.
                   </div>
                 </div>
               </label>

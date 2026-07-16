@@ -82,6 +82,7 @@ import {
   removeTask,
   patchTask,
   nextPendingTask,
+  taskStatus,
 } from "./task-queue/store.js";
 import { intakeAndEnqueue } from "./task-queue/intake.js";
 import type { TaskQueueItem } from "./task-queue/types.js";
@@ -220,6 +221,10 @@ import { maybeRunEdd } from "./edd/engine.js";
 import { attachEddCodegenNote } from "./edd/codegen-note.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
+import { runParallelModules } from "./module-parallel/dispatch.js";
+import { makeScopedCodegenWorker } from "./module-parallel/worker.js";
+import { candidatesToModules, judgeBatch, MAX_BATCH } from "./task-batch.js";
+import { isGitRepo, isWorkingTreeClean } from "./git.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
@@ -326,6 +331,9 @@ interface OrchestratorRuntime {
   pendingPlan: { askqId: string; plan: PlanProposal } | null;
   /** 🗺️ Plan revizyonu bekliyor — sonraki kullanıcı mesajı geri bildirim olarak işlenir. */
   pendingPlanEdit: { plan: PlanProposal } | null;
+  /** ⚡ Aktif paralel iş kümesi (2026-07-16) — currentTaskId'den AYRI slot; asla ikisi birden set olmaz.
+   *  Birleşik pipeline (9→17) koşarken iş kimlikleri + iş-başına entegre dosyalar (teslimat kanıtı). */
+  currentBatch: { taskIds: string[]; filesByTask: Record<string, string[]> } | null;
   // İş kuyruğu (YZLLM 2026-06-14): şu an Faz 1'den işlenen kuyruk işinin id'si.
   // pipeline-end bunu "done"+tarih ile damgalar + sıradaki bekleyen işi başlatır.
   // null → kuyruk-dışı iterasyon (örn. resume) ya da çalışan iş yok.
@@ -361,6 +369,7 @@ const runtime: OrchestratorRuntime = {
   pendingMaintenance: null,
   pendingPlan: null,
   pendingPlanEdit: null,
+  currentBatch: null,
   currentTaskId: null,
   lastPhase1Intent: null,
   pendingAnswerReuse: null,
@@ -393,6 +402,7 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.pendingMaintenance = null;
   runtime.pendingPlan = null;
   runtime.pendingPlanEdit = null;
+  runtime.currentBatch = null;
   runtime.pendingAnswerReuse = null;
   setHistoryRoot(state.project_root);
   setAgentTraceRoot(state.project_root);
@@ -1842,6 +1852,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // DIVERT_MAX'a ulaşan sayaç yeni projeye TAŞINIR → yeni projenin İLK timeout'u yanlışça "tükendi" sayılıp erken escalate olur.
   timeoutRetried.clear();
   gateFailStreak.clear(); // faz-seviyesi döngü sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
+  _batchFailedIds.clear(); // ⚡ paralel küme tek-atış seti de sıfır (proje değişti; eski id'ler anlamsız).
   // YZLLM 2026-07-01 (FIX C): model-satırı cache'i sıfırla → yeni projede ilk model-seçim satırı yine görünür.
   resetModelChoiceCache();
   // FIX D (mahkeme): tech-debt son-bulgu deposunu da temizle (proje-değişiminde eski bulgular accept'e sızmasın).
@@ -4437,9 +4448,114 @@ async function driveWorkQueue(rawText: string): Promise<void> {
  * böyle kullanılsın MyCL"): manuel/auto AYRIMI YOK — kaynağı ne olursa olsun
  * (İş Ekle ya da çok-problem intake) bekleyen HER iş sırayla işlenir.
  */
+// ⚡ Paralel küme tek-atış emniyeti (2026-07-16): başarısız kümedeki işler bir daha KÜMEYE girmez
+// (sıralı işlenir) → sonsuz yeniden-kümeleme döngüsü imkânsız. Proje değişince temizlenir.
+const _batchFailedIds = new Set<string>();
+
+/**
+ * ⚡ Kuyruktan paralel iş kümesi başlatmayı DENE (2026-07-16, "orta yol" — KULLANICI KARARI).
+ * FAIL-CLOSED her kenarda: bayrak kapalı / <2 uygun iş / git yok / kirli ağaç / hakem bölemedi /
+ * worker-birleştirme hatası → false (caller SIRALI devam eder; hiçbir iş kaybolmaz).
+ * Başarıda: işler running, kod paralel worktree'lerde yazılıp birleştirilir, kalite fazları
+ * (9→17, Faz 6 dahil) birleşik sonuçta TEK SEFER eksiksiz koşar (multi_agent_selection emsali).
+ * Çağıran _handlingUserMessage kilidini tutmalı (startNextPendingTask sözleşmesi).
+ */
+async function tryStartTaskBatch(): Promise<boolean> {
+  if (!runtime.state || !runtime.config) return false;
+  if (runtime.config.features.parallel_task_batching !== true) return false;
+  if (runtime.currentTaskId || runtime.currentBatch) return false;
+  const root = runtime.state.project_root;
+  const pending = (await readTasks(root).catch(() => [] as TaskQueueItem[]))
+    .filter((t) => taskStatus(t) === "pending" && !_batchFailedIds.has(t.id))
+    .sort(
+      (a, b) =>
+        (a.priority ?? Number.POSITIVE_INFINITY) - (b.priority ?? Number.POSITIVE_INFINITY) || a.ts - b.ts,
+    )
+    .slice(0, MAX_BATCH);
+  if (pending.length < 2) return false;
+  // Ön koşul: git + TEMİZ ağaç — worktree yalnız COMMIT'li kodu görür (risk-fix-parallel dersi).
+  const gitOk =
+    (await isGitRepo(root).catch(() => false)) && (await isWorkingTreeClean(root).catch(() => false));
+  if (!gitOk) {
+    log.info("orchestrator", "paralel küme ön koşulu yok (git değil / ağaç kirli) → sıralı akış");
+    return false;
+  }
+  // LLM hakem önerir, DETERMİNİSTİK kapı (shouldParallelize) karar verir — fail-closed.
+  const candidates = await judgeBatch(runtime.config, pending, root).catch((e: unknown) => {
+    log.warn("orchestrator", "küme hakemi hatası → sıralı akış", e);
+    return null;
+  });
+  if (!candidates) {
+    log.info("orchestrator", "küme hakemi paralel-güvenli alt küme bulamadı → sıralı akış");
+    return false;
+  }
+  const now = Date.now();
+  for (const c of candidates) {
+    await patchTask(root, c.task.id, { status: "running", started_at: now });
+  }
+  await emitQueueChangedFor(root);
+  emitChatMessage(
+    "system",
+    `⚡ ${candidates.length} bağımsız iş PARALEL çalışıyor (izole worktree'lerde): ` +
+      candidates.map((c) => `_"${c.task.text.slice(0, 60)}"_`).join(", "),
+  );
+  await appendAuditModule(root, {
+    ts: now,
+    phase: runtime.state.current_phase,
+    event: "task-batch-start",
+    caller: "mycl-orchestrator",
+    detail: `n=${candidates.length} ids=${candidates.map((c) => c.task.id.slice(0, 8)).join(",")}`,
+  }).catch(() => {});
+  _escalateAcceptChain = 0; // per-iş escalate bütçesi (startNextPendingTask sözleşmesiyle aynı)
+  const outcome = await runParallelModules(
+    root,
+    candidatesToModules(candidates),
+    { enabled: true },
+    makeScopedCodegenWorker(runtime.config, runtime.state),
+  );
+  if (!outcome.parallel || !outcome.ok) {
+    // Geri al: işler pending'e döner + tek-atış fail-set → SIRALI devam (hiçbir iş kaybolmaz).
+    for (const c of candidates) {
+      _batchFailedIds.add(c.task.id);
+      await patchTask(root, c.task.id, { status: "pending" });
+    }
+    await emitQueueChangedFor(root);
+    emitChatMessage(
+      "system",
+      `⚠️ Paralel deneme başarısız (${outcome.reason}) — işler kuyruğa geri kondu, SIRALI işlenecek (kayıp yok).`,
+    );
+    await appendAuditModule(root, {
+      ts: Date.now(),
+      phase: runtime.state.current_phase,
+      event: "task-batch-fallback",
+      caller: "mycl-orchestrator",
+      detail: outcome.reason.slice(0, 180),
+    }).catch(() => {});
+    return false;
+  }
+  runtime.currentBatch = {
+    taskIds: candidates.map((c) => c.task.id),
+    filesByTask: outcome.integratedByModule ?? {},
+  };
+  emitChatMessage(
+    "assistant",
+    `⚡ Paralel küme birleştirildi (${outcome.reason}). Kalite fazları (9→17, Faz 6 dahil) birleşik sonuç üstünde EKSİKSİZ koşuyor…`,
+  );
+  // Anlamsal bütünlük review'ı (multi_agent_selection emsali) — bloklamaz.
+  try {
+    const review = await reviewMergedModules(runtime.config, root, outcome.integratedFiles ?? []);
+    emitChatMessage("assistant", formatReview(review));
+  } catch (e) {
+    log.warn("orchestrator", "küme anlamsal review hatası (non-blocking)", e);
+  }
+  await advanceToNextPhase(9);
+  return true;
+}
+
 async function startNextPendingTask(): Promise<boolean> {
   if (!runtime.state) return false;
   if (runtime.currentTaskId) return false; // #4: canlı/parkta işi EZME
+  if (runtime.currentBatch) return false; // ⚡ aktif paralel küme varken yeni iş başlatma (2026-07-16)
   const root = runtime.state.project_root;
   const next = nextPendingTask(await readTasks(root));
   if (!next) {
@@ -4477,6 +4593,35 @@ async function startNextPendingTask(): Promise<boolean> {
  * BURADA değil, advanceToNextPhase finally → reconcileAndDrainTasks'te (seri).
  * currentTaskId yoksa no-op (kuyruk-dışı iterasyon, örn. resume).
  */
+/**
+ * ⚡ Pipeline-end'de paralel kümenin işlerini damgala (2026-07-16): iş-başına DOSYA KANITI
+ * (entegre edilen dosyalar) + proje-seviyesi deliverable birlikte → done; yoksa dropped
+ * (sahte-tamamlanma kilidi — onTaskMaybeComplete'in :4400 aynası). currentBatch temizlenir.
+ */
+async function onBatchMaybeComplete(projectRoot: string): Promise<void> {
+  const batch = runtime.currentBatch;
+  if (!batch) return;
+  runtime.currentBatch = null;
+  const projectOk = await hasDeliverable(projectRoot);
+  let dropped = 0;
+  for (const tid of batch.taskIds) {
+    const files = batch.filesByTask[tid] ?? [];
+    if (projectOk && files.length > 0) {
+      await patchTask(projectRoot, tid, { status: "done", completed_at: Date.now() });
+    } else {
+      await patchTask(projectRoot, tid, { status: "dropped" });
+      dropped++;
+    }
+  }
+  await emitQueueChangedFor(projectRoot);
+  if (dropped > 0) {
+    emitChatMessage(
+      "system",
+      `⛔ Paralel kümedeki ${dropped} iş dosya kanıtı üretmedi — 'Düştü' işaretlendi (yeniden eklenebilir; sahte tamamlanma kilidi).`,
+    );
+  }
+}
+
 async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   let doneId = runtime.currentTaskId;
   // YZLLM 2026-07-02 ("iş yeşil bitti ama 'Düştü' kaldı"): işin ilk koşusu dönüp reconcile onu 'dropped'
@@ -4561,11 +4706,29 @@ async function reconcileAndDrainTasks(): Promise<void> {
           "⏹ Çalışan iş tamamlanmadan durdu — kuyrukta 'düştü' işaretlendi (gerekirse yeniden ekle).",
         );
       }
+      // ⚡ Aktif paralel küme (2026-07-16): birleşik pipeline parktaysa dur; park DEĞİLSE
+      // tamamlanmadan durmuş (terminal fail) → işleri BİR KEZ pending'e döndür (tek-atış
+      // fail-set → yeniden kümelenmez, sıralı işlenir; hiçbir iş kaybolmaz).
+      if (runtime.currentBatch) {
+        if (isPipelineParked()) break;
+        const batch = runtime.currentBatch;
+        runtime.currentBatch = null;
+        for (const tid of batch.taskIds) {
+          _batchFailedIds.add(tid);
+          await patchTask(root, tid, { status: "pending" });
+        }
+        await emitQueueChangedFor(root);
+        emitChatMessage(
+          "system",
+          "⚠️ Paralel küme tamamlanmadan durdu — işler kuyruğa geri kondu, SIRALI işlenecek (kayıp yok).",
+        );
+      }
       if (!_drainActive) break; // aktif drain oturumu yok → yalnız orphan uzlaştırıldı
       _handlingUserMessage = true; // seri garanti (kullanıcı mesajıyla yarış yok)
       let ran = false;
       try {
-        ran = await startNextPendingTask();
+        // ⚡ Önce paralel küme dene (bayrak + ≥2 bağımsız iş + git temiz); olmuyorsa sıralı tek iş.
+        ran = (await tryStartTaskBatch()) || (await startNextPendingTask());
       } finally {
         _handlingUserMessage = false;
       }
@@ -5028,6 +5191,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // tamamlanma-tarihi ile damgala (KİLİT: tekrar uygulanamaz) + kuyrukta
       // bekleyen iş varsa sıradakini başlat. currentTaskId yoksa no-op.
       await onTaskMaybeComplete(state.project_root);
+      // ⚡ Paralel küme işlerini damgala (2026-07-16) — currentBatch yoksa no-op.
+      await onBatchMaybeComplete(state.project_root);
       // v15.7 (2026-05-25) BUG FIX: Akış son fazda (örn. Faz 17) bittiğinde
       // son emitPhaseChanged hâlâ "running" idi → sidebar mavi (running)
       // kalıyordu. Loop break öncesi son fazı "complete" işaretle.

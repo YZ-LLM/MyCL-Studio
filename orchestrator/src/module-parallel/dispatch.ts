@@ -32,6 +32,8 @@ export interface ParallelOutcome {
   ok?: boolean;
   /** Entegre edilen göreli dosya yolları (ok=true iken). */
   integratedFiles?: string[];
+  /** Modül id → entegre edilen dosyalar (ok=true iken; iş-başına teslimat kanıtı — task-batch 2026-07-16). */
+  integratedByModule?: Record<string, string[]>;
   /** Başarısızlık/çakışma detayları (ok=false iken). */
   failures?: string[];
 }
@@ -44,7 +46,13 @@ export interface ParallelOutcome {
 async function integrateWorktrees(
   projectRoot: string,
   wts: Array<{ module: ModuleWork; path: string }>,
-): Promise<{ ok: boolean; files: string[]; reason: string; conflicts?: string[] }> {
+): Promise<{
+  ok: boolean;
+  files: string[];
+  reason: string;
+  conflicts?: string[];
+  byModule?: Record<string, string[]>;
+}> {
   const claimed = new Map<string, string>(); // dosya → modül id
   const toCopy: Array<{ file: string; from: string }> = [];
   for (const w of wts) {
@@ -67,7 +75,10 @@ async function integrateWorktrees(
     await mkdir(dirname(dest), { recursive: true });
     await copyFile(c.from, dest);
   }
-  return { ok: true, files: toCopy.map((c) => c.file), reason: "entegre" };
+  // Modül-başına dosya listesi (claimed haritasının tersi) — iş-başına teslimat kanıtı.
+  const byModule: Record<string, string[]> = {};
+  for (const [file, moduleId] of claimed) (byModule[moduleId] ??= []).push(file);
+  return { ok: true, files: toCopy.map((c) => c.file), reason: "entegre", byModule };
 }
 
 /**
@@ -123,5 +134,6 @@ export async function runParallelModules(
     ok: true,
     reason: `${modules.length} modül paralel + entegre (${integration.files.length} dosya)`,
     integratedFiles: integration.files,
+    integratedByModule: integration.byModule,
   };
 }

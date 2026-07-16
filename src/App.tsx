@@ -903,10 +903,12 @@ function App() {
     playwright_enabled: boolean;
     over_engineering_control?: boolean;
     advisor_enabled?: boolean;
+    parallel_task_batching?: boolean;
   }>({
     playwright_enabled: true,
     over_engineering_control: false,
     advisor_enabled: false,
+    parallel_task_batching: false,
   });
   // v15.8 (2026-05-30): Main model efor seçimi (CLI backend için). selected_models event'inden gelir.
   const [currentEffort, setCurrentEffort] = useState<string>("max");
@@ -1023,6 +1025,7 @@ function App() {
           playwright_enabled: ev.data.features.playwright_enabled,
           over_engineering_control: ev.data.features.over_engineering_control ?? false,
           advisor_enabled: ev.data.features.advisor_enabled ?? false,
+          parallel_task_batching: ev.data.features.parallel_task_batching ?? false,
         });
       } else if (ev.kind === "tech_doc") {
         setProjectDoc(ev.data.content);
