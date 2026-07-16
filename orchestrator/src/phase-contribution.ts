@@ -100,7 +100,7 @@ export async function runPhaseContributionReport(state: State, config: MyclConfi
       systemPrompt: CONTRIB_SYSTEM,
       userMessage: `Bu pipeline koşusunun faz-başına audit sinyalleri:\n\n${signalText}\n\nHer fazın katkı yüzdesini yukarıdaki JSON bloğuyla emit et.`,
       // Katkı-yüzdesi skorlama = bilgilendirici rapor (hiçbir şeyi gate'lemez, kod yazmaz) → Opus gereksiz. balanced
-      // tier yeter; z.ai'de resolveLlmClient GLM'e eşler. (Mahkeme oybirliği safe-to-balanced.)
+      // tier yeter. (Mahkeme oybirliği safe-to-balanced.)
       modelId: selectModelForTask("classification", config.selected_models.model_tiers).modelId,
       projectRoot: state.project_root,
       maxTokens: 1500,

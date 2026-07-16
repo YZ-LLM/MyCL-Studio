@@ -11,30 +11,12 @@
 // kendi tool set'i, system prompt'u, gate logic'iyle bu wrapper'ı çağırır.
 
 import Anthropic from "@anthropic-ai/sdk";
-import {
-  ZAI_BASE_URL,
-  resolveProvider,
-  zaiKeyForRole,
-  type AgentRole,
-  type MyclConfig,
-} from "./config.js";
-import { findModel, glmModelForTier } from "./model-catalog.js";
+import { type AgentRole, type MyclConfig } from "./config.js";
 import { emitChatMessage, emitClaudeStream, recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
 
-/**
- * Claude (veya keyfi) model id'sini provider=z.ai turu için GEÇERLİ bir GLM modeline çevirir (z.ai Aşama 2 ⑤).
- * findModel ile DOĞRULAR (canlı-bug 2026-06-22): config'te eski/SAHTE bir `glm-` id'si kalmış olabilir
- * (örn. katalogdan silinen glm-4-plus) → körü körüne geçirmek z.ai 404'üne yol açar. Kurallar:
- *  - katalogdaki GERÇEK GLM modeli → kendisi (kullanıcı dropdown'dan seçti)
- *  - tanınan claude modeli → tier-eş GLM (strong→glm-5.2, balanced→glm-4.6, cheap→glm-4.5-air)
- *  - tanınmayan (boş/sahte-glm/bilinmeyen) → tier'dan güvenli GLM (balanced) — 404 önlenir
- */
-function glmModelFor(model: string | undefined): string {
-  const known = model ? findModel(model) : undefined;
-  if (known?.id.startsWith("glm-")) return known.id;
-  return glmModelForTier(known?.tier ?? "balanced");
-}
+// NOT (2026-07-16): z.ai (GLM) sağlayıcısı KALDIRILDI (YZLLM: "sadece claude abonelik ve
+// claude API kalsın") — glmModelFor / zaiCliEnv / resolveCliProvider / z.ai auto-fallback söküldü.
 
 /**
  * Anthropic API error'ını kullanıcıya gösterilecek **Türkçe + anlamlı** mesaja
@@ -207,13 +189,10 @@ function isTransientError(err: unknown): boolean {
  */
 export function makeAnthropicClient(
   apiKey: string,
-  opts?: { timeoutMs?: number; maxRetries?: number; betas?: readonly string[]; baseURL?: string },
+  opts?: { timeoutMs?: number; maxRetries?: number; betas?: readonly string[] },
 ): Anthropic {
   return new Anthropic({
     apiKey,
-    // z.ai (GLM) gibi Anthropic-uyumlu sağlayıcılar: baseURL override → AYNI SDK, AYNI protokol
-    // (tool_use/system/cache_control birebir). Adapter YOK. undefined → Anthropic default endpoint.
-    ...(opts?.baseURL ? { baseURL: opts.baseURL } : {}),
     timeout: opts?.timeoutMs ?? 600_000,
     maxRetries: opts?.maxRetries ?? 3,
     defaultHeaders:
@@ -224,64 +203,24 @@ export function makeAnthropicClient(
 }
 
 /**
- * Sağlayıcı-aware SDK client (z.ai Aşama 2 ⑤b) — runTurn DIŞINDA `makeAnthropicClient`'ı doğrudan
- * kullanan raw-SDK siteleri için (translator/llm-reasoning/error-analysis/intake/...). resolveProvider
- * ile rolü çözer: Sağlayıcı=Z.AI ise z.ai key+endpoint+GLM model döner (betas strip); claude ise GEÇEN
- * `apiKey` AYNEN korunur + model değişmez → sıfır regresyon (kritik-path güvenliği). Dönen `model`'i
- * `messages.create({ model })`'a geçir. NOT: bu yol claude→z.ai auto-fallback YAPMAZ (yalnız runTurn yapar);
- * birincil sağlayıcı seçimini uygular.
+ * Rol-aware SDK client — runTurn DIŞINDA `makeAnthropicClient`'ı doğrudan kullanan raw-SDK
+ * siteleri için (translator/llm-reasoning/error-analysis/intake/plan-mode/...). z.ai sağlayıcısı
+ * kaldırıldıktan (2026-07-16) sonra saf Claude: geçen `apiKey` + `model` aynen kullanılır.
+ * İmza korunur (8 tüketici) — dönen `model`'i `messages.create({ model })`'a geçir.
  */
 export function resolveLlmClient(
-  config: MyclConfig,
-  role: AgentRole,
+  _config: MyclConfig,
+  _role: AgentRole,
   apiKey: string,
   model: string,
   opts?: { timeoutMs?: number; maxRetries?: number; betas?: readonly string[] },
-): { client: Anthropic; model: string; isZai: boolean } {
-  const prov = resolveProvider(config, role);
-  const isZai = prov.isZai;
-  const client = makeAnthropicClient(isZai ? prov.apiKey : apiKey, {
+): { client: Anthropic; model: string } {
+  const client = makeAnthropicClient(apiKey, {
     timeoutMs: opts?.timeoutMs,
     maxRetries: opts?.maxRetries,
-    betas: isZai ? undefined : opts?.betas,
-    baseURL: prov.baseURL, // claude → undefined (Anthropic default)
+    betas: opts?.betas,
   });
-  return { client, model: isZai ? glmModelFor(model) : model, isZai };
-}
-
-/**
- * Forced-CLI siteleri için sağlayıcı-aware CLI parametreleri (z.ai Aşama 2 ⑥). `runClaudeCli`'yi (claude
- * subprocess) doğrudan kullanan + backendForRole(zai)→"api" yüzünden SDK yoluna düşmeyen yollar için
- * (visual-design/debate/module-stock/living-docs/devs-spec-refresh/parallel-codegen). Rolün Sağlayıcı=Z.AI
- * seçimi varsa: claude CLI'yi z.ai endpoint'ine yönlendiren extraEnv (ANTHROPIC_BASE_URL+AUTH_TOKEN+API_KEY)
- * + GLM model döner; claude ise extraEnv=undefined + model değişmez (sıfır regresyon). CANLI DOĞRULANDI
- * (2026-06-22): `claude -p` + bu env → z.ai GLM yanıt verdi. NOT: müfettiş (inspector) BİLEREK çapraz-aile
- * (claude) kalır — bu helper'ı oraya UYGULAMA (z.ai-main'de bile bağımsız aile gerek).
- */
-/** claude CLI'yi z.ai endpoint'ine yönlendiren env (BASE_URL + AUTH_TOKEN + API_KEY aynı key). */
-function zaiCliEnv(key: string, base?: string): Record<string, string> {
-  const b = base ?? ZAI_BASE_URL;
-  return { ANTHROPIC_BASE_URL: b, ANTHROPIC_AUTH_TOKEN: key, ANTHROPIC_API_KEY: key };
-}
-
-export function resolveCliProvider(
-  config: MyclConfig,
-  role: AgentRole,
-  model: string,
-  opts?: { accountErrorFallback?: boolean },
-): { extraEnv?: Record<string, string>; model: string } {
-  const prov = resolveProvider(config, role);
-  // Birincil Sağlayıcı=Z.AI seçimi → claude CLI doğrudan z.ai endpoint'ine.
-  if (prov.isZai && prov.apiKey) {
-    return { extraEnv: zaiCliEnv(prov.apiKey, prov.baseURL), model: glmModelFor(model) };
-  }
-  // Account-error fallback (Claude SEÇİLİ ama kredi/limit bitti): z.ai key varsa AYNI turu z.ai-CLI ile
-  // tekrarla — SDK runTurn'deki account-error→z.ai fallback'inin CLI muadili (evrensel fallback). zaiFallbackKey
-  // resolveProvider'dan gelir (per-rol ?? ortak). Müfettiş bu yolu KULLANMAZ (kendi Claude env'i + claudeKeyForRole).
-  if (opts?.accountErrorFallback && prov.zaiFallbackKey) {
-    return { extraEnv: zaiCliEnv(prov.zaiFallbackKey), model: glmModelFor(model) };
-  }
-  return { model };
+  return { client, model };
 }
 
 
@@ -355,22 +294,8 @@ export interface RunTurnOptions {
    * API modunda da merdiven eforu (low→medium→high→xhigh→max) `output_config.effort`'a yansır (CLI paritesi).
    */
   effortOverride?: string;
-  /** Anthropic-uyumlu sağlayıcı endpoint override (z.ai/GLM). undefined → Anthropic. */
-  baseURL?: string;
-  /** Bu tur z.ai/GLM mi (provider=zai). true → betas strip (GLM Anthropic-beta'yı bilmez). */
-  isZai?: boolean;
-  /**
-   * Ajan rolü (z.ai Aşama 2 ⑤): verilirse runTurn merkezi `resolveProvider` ile sağlayıcıyı çözer —
-   * o rolün Sağlayıcı=Z.AI seçimi varsa çağrı GLM'e yönlenir (key+endpoint+model otomatik). Verilmezse
-   * davranış aynen (geçen apiKey+model claude'a gider). claude→z.ai fallback'ı da rolün z.ai key'ini kullanır.
-   */
+  /** Ajan rolü — loglama/izleme için (z.ai kaldırıldı 2026-07-16; sağlayıcı yönlendirmesi yok). */
   role?: AgentRole;
-  /**
-   * z.ai fallback'ı KAPAT (YZLLM 2026-06-23): müfettiş ÇAPRAZ-AİLE gereği DAİMA Claude olmalı — Claude
-   * account-error'da z.ai'ye düşmek aileyi bozar (müfettiş=z.ai=orkestratörle aynı aile → çeşitlilik biter).
-   * true → claude erişilemezse z.ai'ye düşme, hatayı fırlat (caller fail-closed: insana yükseltir).
-   */
-  noZaiFallback?: boolean;
 }
 
 export interface TurnUsage {
@@ -489,7 +414,7 @@ export function thinkingConfigFor(
  * Tek bir API turunu stream eder. Tool_use yayılırsa caller tool_result
  * yazıp aynı conversation history ile tekrar çağırarak multi-turn devam eder.
  */
-// Tek-tur (tek sağlayıcı). runTurn (aşağıda) bunu önce claude, gerekirse z.ai ile sarar.
+// Tek-tur. runTurn (aşağıda) retry/hata çevirisiyle sarar.
 async function runTurnOnce(
   config: MyclConfig,
   apiKey: string,
@@ -501,11 +426,7 @@ async function runTurnOnce(
   const client = makeAnthropicClient(apiKey, {
     timeoutMs: 600_000,
     maxRetries: 0,
-    // z.ai/GLM Anthropic-beta header'larını (context-1m/prompt-caching vb.) BİLMEZ → strip.
-    // thinking/effort KALIR: GLM'in Deep Think'i (thinking:{type:enabled}+reasoning_effort)
-    // Anthropic'in param şeklini birebir yansıtır → endpoint map'ler.
-    betas: opts.isZai ? undefined : opts.betas,
-    baseURL: opts.baseURL, // z.ai/GLM → Anthropic-uyumlu endpoint
+    betas: opts.betas,
   });
 
   log.info("claude-api", "runTurn", {
@@ -714,11 +635,9 @@ async function runTurnOnce(
 }
 
 /**
- * Fallback ladder'ın 3. halkası (claude-CLI → claude-API → z.ai). runTurn'ü claude ile dener;
- * HESAP/ERİŞİM hatası (isApiAccountError: kredi/limit/auth — transient DEĞİL, runTurn onları zaten retry'ladı)
- * + z.ai key varsa → AYNI turu z.ai (GLM, Anthropic-uyumlu endpoint) ile tekrarlar. GÖRÜNÜR mesaj
- * (sessiz fallback yasağı). z.ai DE account-error/başka hata verirse YUKARI fırlatır (dürüst hata; sessiz
- * yutma yok). z.ai turuna Anthropic-spesifik `betas` geçilmez (GLM bilmez). Diğer hatalar → claude'a aittir.
+ * runTurn — tek sağlayıcı: Claude API. (z.ai fallback halkası 2026-07-16'da KALDIRILDI;
+ * fallback zinciri artık claude-CLI → claude-API'de biter. Hesap/erişim hatası — kredi/limit/
+ * auth — YUKARI fırlatılır; caller görünür hata verir + dürüst durur. Sessiz yutma yok.)
  */
 export async function runTurn(
   config: MyclConfig,
@@ -726,45 +645,5 @@ export async function runTurn(
   opts: RunTurnOptions,
   onEvent: StreamHandler,
 ): Promise<TurnResult> {
-  // ⑤ PROVIDER ROUTING (z.ai Aşama 2): rol verilmişse merkezi resolveProvider çözer.
-  // Rolün Sağlayıcı=Z.AI seçimi varsa BİRİNCİL çağrı doğrudan GLM'e gider (key+endpoint+model swap).
-  // Sağlayıcı claude ise geçen apiKey + opts AYNEN korunur (sıfır davranış değişikliği — kritik path güvenliği).
-  let primaryKey = apiKey;
-  let primaryOpts = opts;
-  if (opts.role) {
-    const prov = resolveProvider(config, opts.role);
-    if (prov.isZai) {
-      primaryKey = prov.apiKey;
-      primaryOpts = {
-        ...opts,
-        baseURL: prov.baseURL,
-        isZai: true,
-        model: glmModelFor(opts.model),
-        betas: undefined,
-      };
-    }
-  }
-  try {
-    return await runTurnOnce(config, primaryKey, primaryOpts, onEvent);
-  } catch (err) {
-    // FALLBACK (ladder 3. halka): birincil claude idiyse + HESAP/erişim hatası (kredi/limit/auth) →
-    // AYNI turu z.ai (GLM) ile tekrarla. Rol varsa rolün z.ai key'i (per-rol ?? default), yoksa default zai.
-    // Birincil ZATEN z.ai idiyse fallback YOK (z.ai son halka; hatasını dürüstçe fırlat — sessiz yutma yok).
-    const zaiKey = opts.role ? zaiKeyForRole(config.api_keys, opts.role) : config.api_keys.zai;
-    if (!primaryOpts.isZai && !opts.noZaiFallback && zaiKey && err instanceof ClaudeApiError && isApiAccountError(err.message)) {
-      const fallbackModel = glmModelFor(opts.model);
-      emitChatMessage(
-        "system",
-        `⚠️ Claude API erişilemedi (kredi/limit) → z.ai (GLM \`${fallbackModel}\`) fallback deneniyor.`,
-      );
-      log.warn("claude-api", "claude API account-error → z.ai fallback", { model: fallbackModel });
-      return await runTurnOnce(
-        config,
-        zaiKey,
-        { ...opts, model: fallbackModel, baseURL: ZAI_BASE_URL, isZai: true, betas: undefined },
-        onEvent,
-      );
-    }
-    throw err;
-  }
+  return runTurnOnce(config, apiKey, opts, onEvent);
 }

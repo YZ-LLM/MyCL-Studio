@@ -91,7 +91,7 @@ export async function probeTestValidity(opts: {
       systemPrompt: MUTATE_SYSTEM,
       userMessage: `FILE: ${file}\n\n${orig.slice(0, 9000)}`,
       // Tek-satır davranışsal mutasyon üretimi hafif iş — Opus (main) gereksiz. balanced tier yeter; üretilemezse
-      // prob zaten atlanır (checked:false), kaliteyi düşürmez. z.ai'de resolveLlmClient tier'a göre GLM'e eşler.
+      // prob zaten atlanır (checked:false), kaliteyi düşürmez.
       modelId: modelForTier("balanced", opts.config.selected_models.model_tiers).id,
       projectRoot: opts.projectRoot,
       effort: "low",

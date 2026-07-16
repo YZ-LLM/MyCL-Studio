@@ -35,8 +35,8 @@ import { log } from "./logger.js";
  * sürer (araç-kullanan kanıt-toplama). Abonelik modunda binary login'le çalışır; AMA API-modunda binary
  * login DEĞİL → claudeSpawnEnv Claude anahtarını ENJEKTE ETMEZ → müfettiş auth'suz kalır (fail-closed
  * escalate, değeri kaybolur). Fix: API-modunda Claude anahtarını CLI'ya extraEnv ile geç. Müfettiş BİLEREK
- * Claude (çapraz-aile) → claudeKeyForRole HER ZAMAN Claude anahtarını verir (z.ai değil). Guard backendForRole
- * "api" → abonelik modunda GEÇMEZ (sürpriz API faturası yok). Claude anahtarı yoksa (saf-z.ai/abonelik-yok)
+ * Claude (çapraz-aile) → claudeKeyForRole HER ZAMAN Claude anahtarını verir. Guard backendForRole
+ * "api" → abonelik modunda GEÇMEZ (sürpriz API faturası yok). Claude anahtarı yoksa
  * → undefined → claudeSpawnEnv (abonelik) ya da fail-closed (çapraz-aile tasarım sınırı: Claude erişimi şart).
  */
 export function inspectorClaudeEnv(config: MyclConfig): Record<string, string> | undefined {
@@ -117,9 +117,6 @@ async function runInspectorSdkLoop(
           // CLI tarafında --effort=max iletilir; API/SDK tarafında efor yalnız adaptive-thinking destekleyen
           // modelde output_config'e yansır (Sonnet 4.6 thinkingConfigFor'da almıyorsa efektif no-op — dürüst not).
           effortOverride: opts.effort,
-          // role VERİLMEZ + noZaiFallback → çapraz-aile Claude korunur (z.ai'ye yönlenmez VE account-error'da
-          // z.ai'ye düşmez → erişilemezse fail-closed escalate; default z.ai key'i olan kullanıcıda bile güvenli).
-          noZaiFallback: true,
         },
         () => {},
       );

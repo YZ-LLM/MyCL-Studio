@@ -19,8 +19,8 @@ import {
   renderChangedFilesList,
   renderTechDebtFindings,
 } from "./phase-9-tech-debt.js";
-import { resolveCliProvider, type ToolDef } from "./claude-api.js";
-import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
+import { type ToolDef } from "./claude-api.js";
+import { backendForRole, type MyclConfig } from "./config.js";
 import { runDebateReview, DEBATE_AXES } from "./phase-9-debate-review.js";
 import { eddGroundingForState } from "./edd/grounding.js";
 import { emitChatMessage, emitError } from "./ipc.js";
@@ -204,18 +204,14 @@ export class Phase9Controller {
     // deseni). N uzman bulucu paralel tarar → bağımsız çürütücüler yanlış-pozitifi eler → ETKİLEŞİMSİZ
     // (onay yok) → doğrulanan bulgular decisions[] olarak risk-fix dispatch'ine akar. API modunda eski
     // tek-ajan qa-askq'ya düşer (review fan-out CLI-only açık-maddesi; görünür not).
-    // ⑥ CLI/abonelik VEYA Sağlayıcı=Z.AI (main) → çok-ajanlı debate; z.ai'de tüm bulucu/çürütücü
-    // claude CLI'ları z.ai endpoint'ine gider (çok-ajanlı z.ai — kullanıcı isteği). Aksi API → tek-ajan qa-askq.
-    const mainProvP9 = resolveProvider(this.config, "main");
-    if (backendForRole(this.config, "main") === "cli" || mainProvP9.isZai) {
+    if (backendForRole(this.config, "main") === "cli") {
       emitChatMessage(
         "system",
         `🔬 Risk incelemesi çok-ajanlı modda — ${DEBATE_AXES.length} uzman bulucu (STRIDE tehdit-modeli dahil) paralel tarıyor, sonra her bulgu bağımsız çürütücüyle doğrulanıyor (yanlış-pozitif elenir).`,
       );
-      const cliP9 = resolveCliProvider(this.config, "main", escMe.modelId);
       const review = await runDebateReview(
         this.state.project_root,
-        cliP9.model,
+        escMe.modelId,
         escMe.effort,
         {
           specRisks,
@@ -224,7 +220,6 @@ export class Phase9Controller {
           changedFiles: renderChangedFilesList(techDebt),
           eddGrounding, // EDD (foreign): mevcut davranış zemini — bulucular değişikliği mevcut davranışa karşı tartar
         },
-        cliP9.extraEnv,
       );
       if (!review.ok) {
         this.lastFailReason = review.reason ?? "debate review başarısız";

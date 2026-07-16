@@ -55,7 +55,7 @@ export async function proposeModules(
     systemPrompt: DECOMPOSE_SYSTEM,
     userMessage: `Plan only — do NOT implement. Split this into independent modules:\n\n${request}`,
     // Modül ayrıştırma = planlama (kod yazmaz) → Opus (main) gereksiz. orchestration tier (balanced) yeter; sonuç
-    // K1 kapısından (shouldParallelize) fail-closed geçer (ayrık değilse SERİ codegen). z.ai'de GLM'e eşlenir.
+    // K1 kapısından (shouldParallelize) fail-closed geçer (ayrık değilse SERİ codegen).
     modelId: selectModelForTask("orchestration", config.selected_models.model_tiers).modelId,
     projectRoot,
   });

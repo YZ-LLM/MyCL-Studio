@@ -185,9 +185,9 @@ describe("modelChoiceLineIfChanged — yalnız değişince yaz (gürültü kısm
 
 // Fix 3 (YZLLM 2026-07-01: canlı Faz 17 living-docs claude-fable-5 exit=1): katalog-dışı model guard.
 describe("resolveKnownModel — katalog-dışı model → görünür fallback", () => {
-  it("katalog modeli (Claude/GLM) → dokunma, note yok", () => {
+  it("katalog modeli (Claude) → dokunma, note yok", () => {
     expect(resolveKnownModel("claude-opus-4-8", "claude-opus-4-8", "x")).toEqual({ model: "claude-opus-4-8" });
-    expect(resolveKnownModel("glm-4.6", "claude-opus-4-8", "x").note).toBeUndefined();
+    expect(resolveKnownModel("claude-sonnet-4-6", "claude-opus-4-8", "x").note).toBeUndefined();
   });
   it("katalog-dışı (claude-fable-5) + bilinen main → main'e düşer + note", () => {
     const r = resolveKnownModel("claude-fable-5", "claude-opus-4-8", "dökümantasyon");
@@ -200,7 +200,9 @@ describe("resolveKnownModel — katalog-dışı model → görünür fallback", 
     expect(r.model).toBe("claude-fable-5"); // değişmedi
     expect(r.note).toBeTruthy();
   });
-  it("GLM modeli (z.ai) tanınır → fallback YOK (guard z.ai yolunu bloklamaz)", () => {
-    expect(resolveKnownModel("glm-5.2", "glm-4.6", "x")).toEqual({ model: "glm-5.2" });
+  it("GLM modeli artık TANINMAZ (z.ai kaldırıldı 2026-07-16) → bilinen main'e görünür fallback", () => {
+    const r = resolveKnownModel("glm-5.2", "claude-opus-4-8", "x");
+    expect(r.model).toBe("claude-opus-4-8");
+    expect(r.note).toBeTruthy();
   });
 });

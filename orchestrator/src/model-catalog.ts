@@ -64,30 +64,11 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
 ];
 
-/**
- * z.ai/GLM modelleri — CANLI /v4/models ile DOĞRULANDI (2026-06-22): 8 model. Önceki glm-4-plus/
- * glm-4-flash SAHTE'ydi (yoktu → o tier seçilince çağrı patlardı). Provider "zai" seçili rol/tier'da
- * bu katalogdan model çözülür — claude id'si GLM endpoint'ine GİTMEZ. Tier-default = her tier'ın İLK'i
- * (strong→glm-5.2, balanced→glm-4.6, cheap→glm-4.5-air). contextTokens: API context vermiyor →
- * muhafazakâr tahmin (taşma 400'ünü önler). Hepsi canlı chat + forced tool_choice + cache_control +
- * Deep Think ile doğrulandı.
- */
-export const GLM_CATALOG: ModelInfo[] = [
-  { id: "glm-5.2", label: "GLM-5.2", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai flagship — codegen/spec/tasarım/inceleme; Deep Think" },
-  { id: "glm-5.1", label: "GLM-5.1", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai güçlü (5 serisi)" },
-  { id: "glm-5", label: "GLM-5", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai güçlü (5 serisi)" },
-  { id: "glm-4.7", label: "GLM-4.7", tier: "strong", contextTokens: 200_000, isOpus: false, blurb: "z.ai güçlü (4.x)" },
-  { id: "glm-4.6", label: "GLM-4.6", tier: "balanced", contextTokens: 200_000, isOpus: false, blurb: "z.ai dengeli kod modeli" },
-  { id: "glm-4.5", label: "GLM-4.5", tier: "balanced", contextTokens: 128_000, isOpus: false, blurb: "z.ai dengeli" },
-  { id: "glm-4.5-air", label: "GLM-4.5-Air", tier: "cheap", contextTokens: 128_000, isOpus: false, blurb: "z.ai hafif/hızlı — sınıflandırma/çeviri" },
-  { id: "glm-5-turbo", label: "GLM-5-Turbo", tier: "cheap", contextTokens: 200_000, isOpus: false, blurb: "z.ai hızlı (5 serisi turbo)" },
-];
+// (GLM_CATALOG KALDIRILDI — 2026-07-16, YZLLM: z.ai sağlayıcısı çıkarıldı; yalnız Claude.)
 
-// (catalogForProvider KALDIRILDI — mahkeme denetimi 2026-07-11: 0 çağıran, ölü export.)
-
-/** id → ModelInfo (Claude + GLM). GLM id'leri artık tanınır → sessiz claude-default landmine'ı önler. */
+/** id → ModelInfo (Claude kataloğu). */
 export function findModel(id: string): ModelInfo | undefined {
-  return MODEL_CATALOG.find((m) => m.id === id) ?? GLM_CATALOG.find((m) => m.id === id);
+  return MODEL_CATALOG.find((m) => m.id === id);
 }
 
 export interface ResolvedModel {
@@ -102,7 +83,7 @@ export interface ResolvedModel {
  * quality-audit) `selected_models.orchestrator ?? main`'i doğrulamadan CLI'a veriyordu → katalog-DIŞI bir id
  * (canlı: `claude-fable-5` — MyCL kataloğunda yok, CLI `exit=1 "issue with the selected model"`) adımı DÜŞÜRÜYORDU.
  *
- * Bu guard: model MODEL_CATALOG **veya** GLM_CATALOG'da (findModel) ise DOKUNMAZ (kullanıcı ayarı kral). Değilse
+ * Bu guard: model MODEL_CATALOG'da (findModel) ise DOKUNMAZ (kullanıcı ayarı kral). Değilse
  * `mainModel`'e düşer (o da bilinen ise) + GÖRÜNÜR note. main de bilinmiyorsa modeli DEĞİŞTİRMEZ (yanlış
  * sağlayıcıya zorlamaktan iyidir) → yalnız uyarır. SAF (config değil, main string alır → test edilebilir).
  * NOT: katalog bayatsa (gerçek yeni model henüz eklenmemiş) fallback tetiklenir — note kullanıcıyı bilgilendirir;
@@ -161,20 +142,11 @@ export const TASK_RELEVANCE: Record<TaskKind, { tier: ModelTier; reason: string 
   verification: { tier: "balanced", reason: "doğrulama → dengeli yeter" },
 };
 
-/**
- * Bir tier'ı varsayılan modele çözer (config tier'ı yoksa fallback). Provider-aware:
- * isZai → GLM kataloğundan (claude id'si z.ai endpoint'ine gitmez), aksi Claude.
- */
-function defaultModelForTier(tier: ModelTier, isZai = false): ModelInfo {
-  const cat = isZai ? GLM_CATALOG : MODEL_CATALOG;
-  const m = cat.find((x) => x.tier === tier);
+/** Bir tier'ı varsayılan Claude modeline çözer (config tier'ı yoksa fallback). */
+function defaultModelForTier(tier: ModelTier): ModelInfo {
+  const m = MODEL_CATALOG.find((x) => x.tier === tier);
   // Katalog her zaman her tier'dan en az bir model içerir (test bunu garanti eder).
-  return m ?? cat[0];
-}
-
-/** Public: bir tier için z.ai/GLM varsayılan model id'si (Settings + provider-aware çözüm). */
-export function glmModelForTier(tier: ModelTier): string {
-  return defaultModelForTier(tier, true).id;
+  return m ?? MODEL_CATALOG[0];
 }
 
 /**

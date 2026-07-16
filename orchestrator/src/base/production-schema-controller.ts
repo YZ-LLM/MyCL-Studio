@@ -281,7 +281,7 @@ export class ProductionSchemaBaseController extends ProductionSchemaSharedCore i
             messages,
             system: opts.systemPrompt,
             model: opts.modelId,
-            role: "main", // ⑤ main-pipeline → Sağlayıcı=Z.AI seçiliyse GLM'e yönlenir
+            role: "main",
             tools: opts.tools,
             max_tokens: 8192,
             betas: opts.betas,

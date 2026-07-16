@@ -1,7 +1,7 @@
 // edd/analyzer — EDD birim davranış analizi. YZLLM 2026-07-07 (EDD Faz 1).
 //
 // BACKEND-AWARE = KATI PARİTE (API modu = diğer modlar, fark yok): backendForRole(orchestrator)==="cli" →
-// runClaudeCli (abonelik claude); değilse → runTurn agentic loop (claude API / z.ai GLM — runTurn provider routing).
+// runClaudeCli (abonelik claude); değilse → runTurn agentic loop (claude API).
 // İkisi de SALT-OKUNUR (Read/Grep/Glob; Write/Edit/Bash/alt-ajan YASAK — yabancı kaynağa DOKUNMA, kod ÇALIŞTIRMA).
 //
 // AMAÇ (YZLLM reframe): mevcut davranışı ANLA + belgele. Kod DOĞRU varsayılır — bug ARAMA/düzeltme YOK. Çıktı:
@@ -59,7 +59,7 @@ function textOf(content: Anthropic.MessageParam["content"]): string {
     .join("");
 }
 
-/** API/z.ai yolu: runTurn agentic loop (Read/Grep/Glob executeTool), end_turn'e kadar; final metni döner. */
+/** API yolu: runTurn agentic loop (Read/Grep/Glob executeTool), end_turn'e kadar; final metni döner. */
 async function runViaApi(
   config: MyclConfig,
   projectRoot: string,
@@ -91,7 +91,7 @@ async function runViaApi(
     const toolResults: Anthropic.MessageParam["content"] = [];
     for (const tu of r.toolUses) {
       // SALT-OKUNUR SERT ALLOWLIST (mahkeme blocker): EDD GÜVENSİZ yabancı repo içeriğini modele besler → prompt-injection
-      // (repo'da gizli "tool_use name=Bash…") veya GLM'in gevşek şema disiplini Bash/Write/Edit üretebilir. tools listesi
+      // (repo'da gizli "tool_use name=Bash…") Bash/Write/Edit üretebilir. tools listesi
       // yalnız prompt-seviyesi; executeTool çağıranın izin-setini bilmez → BURADA sert reddet (prompt'a değil KODA güven,
       // CLI'deki disallowedTools'un API eşdeğeri). tool-policy.ts dersi: "allowlist kısıt değil, deny gerçek engel".
       if (!READ_TOOLS.includes(tu.name)) {

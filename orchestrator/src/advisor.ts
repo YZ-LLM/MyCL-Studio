@@ -8,7 +8,6 @@
 // Katı gate'ler (hepsi sağlanmazsa danışman EKLENMEZ; agent normal koşar — best-effort takviye):
 //   - features.advisor_enabled (opt-in; ek maliyet → kullanıcı kral)
 //   - backend = "cli" (`--advisor` yalnız `claude` CLI bayrağı; API/SDK yolu desteklemez — AÇIK istisna)
-//   - provider ≠ z.ai (danışman aracı Anthropic sunucu-taraflı; GLM endpoint'i desteklemez)
 //   - `claude` ≥ v2.1.98 (bayrağın gerektirdiği asgari sürüm — eski sürümde bilinmeyen-bayrak hatası olurdu)
 //   - executor tier < strong (strong executor'a strong danışman anlamsız; aynı model → no-op)
 //
@@ -18,7 +17,6 @@ import { execFileSync } from "node:child_process";
 import { resolveClaudePath } from "./codegen/cli-backend.js";
 import {
   backendForRole,
-  resolveProvider,
   type AgentRole,
   type MyclConfig,
 } from "./config.js";
@@ -50,7 +48,7 @@ export function semverGte(a: string, b: string): boolean {
 
 /**
  * SAF: `claude --advisor` için DANIŞMAN model id'si — CLI executor Claude olduğundan danışman da CLAUDE olmalı.
- * Konfigüre strong Claude katalogunda ise onu, DEĞİLSE (GLM/bilinmeyen id) Claude katalog varsayılan strong'unu döndür.
+ * Konfigüre strong Claude katalogunda ise onu, DEĞİLSE (bilinmeyen id) Claude katalog varsayılan strong'unu döndür.
  * Mahkeme (2026-07-11): kullanıcı strong-tier'a GLM seçip main'i Claude/CLI bırakırsa, ham model_tiers.strong=`glm-...`
  * gerçek `claude` CLI'ına `--advisor glm-...` olarak geçip fan-out turlarını KIRIYORDU. Bu helper GLM'i asla geçirmez.
  */
@@ -62,7 +60,6 @@ export function claudeStrongModelId(configuredStrong: string | undefined): strin
 export interface AdvisorDecisionInput {
   enabled: boolean; // features.advisor_enabled
   backend: "api" | "cli"; // backendForRole(config, role)
-  isZai: boolean; // resolveProvider(config, role).isZai
   claudeVersionOk: boolean; // claude ≥ ADVISOR_MIN_VERSION
   executorTier: ModelTier; // executor modelinin tier'i
   strongModelId: string; // modelForTier("strong")
@@ -76,7 +73,6 @@ export interface AdvisorDecisionInput {
 export function decideAdvisorModel(i: AdvisorDecisionInput): string | null {
   if (!i.enabled) return null; // opt-in kapalı
   if (i.backend !== "cli") return null; // --advisor yalnız CLI
-  if (i.isZai) return null; // z.ai endpoint danışman aracını desteklemez
   if (!i.claudeVersionOk) return null; // claude < 2.1.98
   if (i.executorTier === "strong") return null; // strong executor'a strong danışman anlamsız
   if (i.strongModelId === i.executorModelId) return null; // aynı model → no-op
@@ -131,7 +127,6 @@ export function resolveAdvisorModel(
   return decideAdvisorModel({
     enabled: !!config.features.advisor_enabled,
     backend: backendForRole(config, role),
-    isZai: resolveProvider(config, role).isZai,
     claudeVersionOk: claudeSupportsAdvisor(),
     executorTier,
     strongModelId,
@@ -148,8 +143,6 @@ export function advisorStatusMessage(config: MyclConfig): string | null {
   const strong = claudeStrongModelId(config.selected_models.model_tiers?.strong);
   if (backendForRole(config, "main") === "api")
     return `🧭 Advisor açık ama uygulanmıyor: seçili arka uç API/SDK — danışman yalnız \`claude\` (CLI) aboneliğinde çalışır. Ayarlar → Modeller'den main'i CLI yap.`;
-  if (resolveProvider(config, "main").isZai)
-    return `🧭 Advisor açık ama uygulanmıyor: z.ai (GLM) modunda danışman aracı yok. Anthropic (Claude) arka ucunda çalışır.`;
   if (!claudeSupportsAdvisor()) {
     const v = claudeVersion();
     return `🧭 Advisor açık ama uygulanmıyor: \`claude\` sürümü ${v ?? "bilinmiyor"} < ${ADVISOR_MIN_VERSION}. \`claude update\` sonrası aktif olur.`;

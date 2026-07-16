@@ -289,7 +289,7 @@ export async function runOnboarding(
       docsStatus = "zaten vardı";
       break;
     case "provider-skip":
-      docsStatus = "bu sağlayıcı modunda atlandı (CLI/abonelik VEYA z.ai gerektirir)";
+      docsStatus = "bu sağlayıcı modunda atlandı (CLI/abonelik gerektirir)";
       break;
     case "empty":
       docsStatus = "atlandı (boş proje)";

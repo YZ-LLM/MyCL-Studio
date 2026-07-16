@@ -16,8 +16,7 @@ import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
-import { resolveCliProvider } from "./claude-api.js";
+import { backendForRole, type MyclConfig } from "./config.js";
 import { emitChatMessage, emitClaudeStream, emitUserGuide, emitTechDoc, emitPhaseRunning, emitPhaseIdle } from "./ipc.js";
 import { log } from "./logger.js";
 import { templatePath } from "./phase-registry.js";
@@ -268,12 +267,12 @@ export async function bootstrapLivingDocs(
     const { isExistingProject } = await import("./phase-1-codebase-probe.js");
     if (!(await isExistingProject(state.project_root))) return { ok: false, reason: "empty" }; // boş proje → pipeline üretir
     // v15.13: docs'u ORKESTRATÖR rolü yazar (ana ajan değil — kullanıcı kuralı).
-    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
+    if (backendForRole(config, "orchestrator") !== "cli") {
       // KATI #4 (sessiz fallback yok — çapraz-aile mahkeme): API modunda orkestratör derin docs ÜRETMEZ →
       // GÖRÜNÜR not (eski kod sessizce return ediyordu). Onboarding'de bu, raporda da yer alır.
       emitChatMessage(
         "system",
-        "ℹ️ Derin proje dökümantasyonu (features/tech-doc) CLI/abonelik VEYA z.ai modunda üretilir — API modunda atlandı.",
+        "ℹ️ Derin proje dökümantasyonu (features/tech-doc) CLI/abonelik modunda üretilir — API modunda atlandı.",
       );
       return { ok: false, reason: "provider-skip" };
     }
@@ -344,11 +343,10 @@ export async function updateLivingDocs(
     // v15.13: Yaşayan dökümantasyonu ORKESTRATÖR rolü yazar — ana ajana (codegen) GİTMEZ
     // (kullanıcı kuralı). Orkestratör "her şeyi bilen" hafif rol → docs için doğru yer.
     // Abonelik/CLI modu birincil hedef. API modu sonraki tur — görünür not (sessiz değil).
-    // ⑥ CLI/abonelik VEYA Sağlayıcı=Z.AI (orkestratör) → çalışır; z.ai'de claude CLI z.ai endpoint'ine yönlenir.
-    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
+    if (backendForRole(config, "orchestrator") !== "cli") {
       emitChatMessage(
         "system",
-        "ℹ️ Yaşayan dökümantasyon şu an CLI/abonelik VEYA z.ai modunda güncellenir (orkestratör rolü).",
+        "ℹ️ Yaşayan dökümantasyon şu an CLI/abonelik modunda güncellenir (orkestratör rolü).",
       );
       return "failed";
     }
@@ -359,8 +357,7 @@ export async function updateLivingDocs(
     // düşürüyordu. Tanınmayan model → ana modele GÖRÜNÜR fallback (kullanıcı ayarı kral: bilineni değiştirmez).
     const knownDocs = resolveKnownModel(baseDocsModel, config.selected_models.main, "dökümantasyon");
     if (knownDocs.note) emitChatMessage("system", `ℹ️ ${knownDocs.note}`);
-    const docsCli = resolveCliProvider(config, "orchestrator", knownDocs.model);
-    const docsModel = docsCli.model;
+    const docsModel = knownDocs.model;
 
     const tmpl = await fs.readFile(templatePath("living-docs.md"), "utf-8");
     const prompt = buildLivingDocsPrompt({
@@ -407,8 +404,7 @@ export async function updateLivingDocs(
             : 'Reminder: output ONLY the single {"kind":"docs", ...} JSON block — no prose before or after, no code fences. Emit it now.') +
           ' IMPORTANT: If you CANNOT read the project files (Read/Grep/Glob fail due to permission or sandbox errors), do NOT apologize or invent documentation — instead emit exactly {"kind":"docs","features_md":"MYCL_NO_ACCESS"} and stop.',
         modelId: docsModel,
-        extraEnv: docsCli.extraEnv, // ⑥ z.ai ise claude CLI'yi z.ai endpoint'ine yönlendir
-        cwd: state.project_root,
+          cwd: state.project_root,
         allowedTools: ["Read", "Grep", "Glob"],
         // salt-okunur: ajan kodu Read/Grep/Glob ile gezip JSON döner, dosyaları MyCL'in kendi Node kodu yazar.
         // Bash KALDIRILDI (çapraz-aile mahkeme): Bash açıkken salt-okunur niyete rağmen `cat > dosya << EOF`

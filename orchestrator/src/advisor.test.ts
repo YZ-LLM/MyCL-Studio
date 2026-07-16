@@ -46,7 +46,6 @@ describe("decideAdvisorModel — gate doğruluk tablosu", () => {
   const OK: AdvisorDecisionInput = {
     enabled: true,
     backend: "cli",
-    isZai: false,
     claudeVersionOk: true,
     executorTier: "balanced",
     strongModelId: "claude-opus-4-8",
@@ -62,7 +61,6 @@ describe("decideAdvisorModel — gate doğruluk tablosu", () => {
   it("her bir gate ihlali → null (danışman eklenmez)", () => {
     expect(decideAdvisorModel({ ...OK, enabled: false })).toBeNull(); // opt-in kapalı
     expect(decideAdvisorModel({ ...OK, backend: "api" })).toBeNull(); // --advisor CLI-only
-    expect(decideAdvisorModel({ ...OK, isZai: true })).toBeNull(); // z.ai desteklemez
     expect(decideAdvisorModel({ ...OK, claudeVersionOk: false })).toBeNull(); // claude < 2.1.98
     expect(decideAdvisorModel({ ...OK, executorTier: "strong" })).toBeNull(); // strong executor
     expect(
@@ -76,16 +74,14 @@ describe("decideAdvisorModel — gate doğruluk tablosu", () => {
   });
 });
 
-describe("claudeStrongModelId — danışman DAİMA Claude (GLM'i --advisor'a geçirme; mahkeme 2026-07-11)", () => {
+describe("claudeStrongModelId — danışman DAİMA katalogdaki bir Claude modeli", () => {
   it("konfigüre strong Claude ise onu döndürür", () => {
     expect(claudeStrongModelId("claude-opus-4-7")).toBe("claude-opus-4-7");
     expect(claudeStrongModelId("claude-opus-4-8")).toBe("claude-opus-4-8");
   });
-  it("konfigüre strong GLM/bilinmeyen ise Claude katalog varsayılanına düşer (asla glm-* döndürmez)", () => {
-    const fromGlm = claudeStrongModelId("glm-5.2");
-    expect(fromGlm.startsWith("claude")).toBe(true);
-    expect(fromGlm).not.toBe("glm-5.2");
-    expect(claudeStrongModelId("bilinmeyen-model")).toBe(fromGlm);
-    expect(claudeStrongModelId(undefined)).toBe(fromGlm); // undefined de Claude varsayılanı
+  it("konfigüre strong bilinmeyen ise Claude katalog varsayılanına düşer", () => {
+    const fromUnknown = claudeStrongModelId("bilinmeyen-model");
+    expect(fromUnknown.startsWith("claude")).toBe(true);
+    expect(claudeStrongModelId(undefined)).toBe(fromUnknown); // undefined de Claude varsayılanı
   });
 });

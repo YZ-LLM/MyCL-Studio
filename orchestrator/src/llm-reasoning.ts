@@ -68,7 +68,6 @@ export async function runReasoning(
   }
   // API (api / auto-limited→api)
   try {
-    // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise reasoning turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
     const { client, model } = resolveLlmClient(config, "main", config.api_keys.main, opts.modelId, {
       timeoutMs: 60_000,
     });
@@ -77,7 +76,7 @@ export async function runReasoning(
       max_tokens: opts.maxTokens ?? 4096,
       system: opts.systemPrompt,
       messages: [{ role: "user", content: opts.userMessage }],
-      // Efor yalnız destekleyen modelde (aksi 400) — efektif modele bak (GLM adaptive desteklemez → atlanır).
+      // Efor yalnız destekleyen modelde (aksi 400) — efektif modele bak.
       ...(opts.effort && modelSupportsAdaptive(model)
         ? { output_config: { effort: opts.effort as "low" | "medium" | "high" | "xhigh" | "max" } }
         : {}),

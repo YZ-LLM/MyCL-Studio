@@ -94,7 +94,7 @@ async function splitTasks(
   pendingTexts: string[],
 ): Promise<SplitTask[] | null> {
   // Salt sınıflandırma (kodun kendi yorumu: "pure classification") → orchestratorModelId (Opus) gereksiz. İş-tipine
-  // göre balanced tier; z.ai'de resolveLlmClient GLM'e eşler. Backend seçimi (cli/api) ayrı — orchestrator rolü.
+  // göre balanced tier. Backend seçimi (cli/api) ayrı — orchestrator rolü.
   const model = selectModelForTask("classification", config.selected_models.model_tiers).modelId;
   const useCli = backendForRole(config, "orchestrator") === "cli";
   let text: string;
@@ -122,7 +122,6 @@ async function splitTasks(
     }
     text = res.text;
   } else {
-    // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise iş-bölme turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
     const { client, model: apiModel } = resolveLlmClient(
       config,
       "orchestrator",

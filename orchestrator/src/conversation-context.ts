@@ -73,7 +73,6 @@ async function generateSummary(
 ): Promise<string> {
   // Tek factory (kod-analiz): SDK 0.102 timeout regresyonu burada da açıktı; özet hang ederse
   // handleUserMessage/boot yanıtı gecikiyordu. 60sn timeout + SDK retry.
-  // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise özet turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
   const { client, model } = resolveLlmClient(
     config,
     "translator",

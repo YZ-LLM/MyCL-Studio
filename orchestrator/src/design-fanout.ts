@@ -97,14 +97,13 @@ export async function runReasoningTurn(
       wallClockMs: DESIGN_WALL_CLOCK_MS, // gerçek-hang/runaway 8dk'da kesilir
       // Advisor (YZLLM 2026-07-11): strong-ALTI fan-out rolleri (ux/security/data/hypothesis) karar anlarında strong
       // danışmana danışır — kaliteyi düşürmez, karar-anı kalitesini artırır. Gate strong rollerini (architect/verifier/
-      // synthesizer) otomatik atlar (executorTier=strong → null). Bu dal zaten CLI (z.ai değil) → provider gate temiz.
+      // synthesizer) otomatik atlar (executorTier=strong → null). Bu dal zaten CLI → provider gate temiz.
       advisorModel: resolveAdvisorModel(config, model, "main") ?? undefined,
     });
     if (!res.ok) throw new Error(res.error ?? "cli reasoning failed");
     return res.text.trim();
   }
   // API (backend "api"; "auto" da limitliyken backendForRole bunu "api"ye çözer)
-  // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise fan-out perspektif turu GLM'e gider; claude'da AYNEN korunur.
   const { client, model: apiModel } = resolveLlmClient(config, "main", config.api_keys.main, model);
   const response = await client.messages.create({
     model: apiModel,
@@ -112,7 +111,7 @@ export async function runReasoningTurn(
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
-  // YZLLM 2026-06-27 (mahkeme H1): API/z.ai kolu da token'ı KAYDET — withAgentRun bağlamı içinde olduğumuz için
+  // YZLLM 2026-06-27 (mahkeme H1): API kolu da token'ı KAYDET — withAgentRun bağlamı içinde olduğumuz için
   // recordTokenUsage o ajana atfeder (Ajan Takımı popup'ı token gösterir; eskiden API kolu atlıyordu → 0 token).
   recordTokenUsage({
     input_tokens: response.usage.input_tokens,
@@ -347,7 +346,6 @@ export async function negotiateConflicts(
         }
         // API (gerçek Agent Teams YOK): MyCL-simüle cross-critique — synthesizer çelişkileri tek-tur
         // muhakemeyle (her iki tarafı steel-man) çözer. Aynı template; "teams yoksa kendin akıl yürüt" der.
-        // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise sentez/müzakere turu GLM'e gider; claude'da AYNEN korunur.
         const { client, model: apiSynthModel } = resolveLlmClient(config, "main", config.api_keys.main, synthModel);
         const response = await client.messages.create({
           model: apiSynthModel,

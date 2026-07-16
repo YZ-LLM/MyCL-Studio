@@ -19,7 +19,6 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runClaudeCli } from "./cli-run.js";
-import { resolveCliProvider } from "./claude-api.js";
 import { escalatedModelEffort } from "./escalation.js";
 import { scanCspViolations } from "./csp-compliance.js";
 import { appendAudit } from "./audit.js";
@@ -156,15 +155,12 @@ export async function runVisualDesignAgent(
   if (hasGit) await git(root, ["add", "-A"]);
 
   const { modelId, effort } = escalatedModelEffort(state, config, "ui-codegen");
-  // ⑥ Sağlayıcı=Z.AI (main) ise görsel ajan da z.ai'ye (claude CLI + z.ai env + GLM model) — sessiz claude YOK.
-  const cli = resolveCliProvider(config, "main", modelId);
-  emitChatMessage("system", `🎨 Görsel tasarım ajanı çalışıyor — estetik rötuş (yalnız CSS; model: ${cli.model})…`);
+  emitChatMessage("system", `🎨 Görsel tasarım ajanı çalışıyor — estetik rötuş (yalnız CSS; model: ${modelId})…`);
 
   const res = await runClaudeCli({
     systemPrompt: VISUAL_SYSTEM_PROMPT,
     userMessage: buildUserMessage(beforeShot, root),
-    modelId: cli.model,
-    extraEnv: cli.extraEnv,
+    modelId,
     cwd: root,
     // acceptEdits → allowedTools yalnız oto-onay; GERÇEK kısıt disallowedTools (Bash/Agent/Task kaçış+donma).
     allowedTools: ["Read", "Edit", "Write", "Glob", "Grep"],

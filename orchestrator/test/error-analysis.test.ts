@@ -281,12 +281,12 @@ describe("buildErrorAnalysisAskq — kalıcı sağlayıcı-yok (permanentNoProvi
   });
 });
 
-describe("buildErrorAnalysisPrompt — z.ai fallback farkındalığı (YZLLM: ajan 'fallback yok' demesin)", () => {
+describe("buildErrorAnalysisPrompt — sağlayıcı hatası rehberi (z.ai kaldırıldı 2026-07-16)", () => {
   const pctx = { phase: 3, message: "Faz 3 hatası", detail: "credit balance too low" };
-  it("prompt z.ai (GLM) fallback'in VAR olduğunu söyler", () => {
+  it("prompt kredi/limit hatasında kredi-yükle/abonelik-bekle der; z.ai'dan HİÇ bahsetmez", () => {
     const p = buildErrorAnalysisPrompt(pctx, true);
-    expect(p).toContain("z.ai");
-    expect(p.toLowerCase()).toContain("fallback");
+    expect(p).not.toContain("z.ai");
+    expect(p).toContain("topping up Claude credit");
   });
 });
 

@@ -19,8 +19,7 @@ import { appendAudit, readAuditLog } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { backendForRole, resolveProvider, type MyclConfig } from "./config.js";
-import { resolveCliProvider } from "./claude-api.js";
+import { backendForRole, type MyclConfig } from "./config.js";
 import { computeVerdict } from "./harness-verdict.js";
 import { emitChatMessage } from "./ipc.js";
 import { resolveKnownModel } from "./model-catalog.js";
@@ -243,11 +242,10 @@ export async function extractStockedModules(state: State, config: MyclConfig): P
     if (!verdict.completed || verdict.gateFailures.length > 0 || verdict.securitySkipped.length > 0) {
       return; // yalnız tam-doğrulanmış koşu (çöp/yarım modül yok)
     }
-    // ⑥ CLI/abonelik VEYA Sağlayıcı=Z.AI (orkestratör) → çalışır; z.ai'de claude CLI z.ai endpoint'ine yönlenir.
-    if (backendForRole(config, "orchestrator") !== "cli" && !resolveProvider(config, "orchestrator").isZai) {
+    if (backendForRole(config, "orchestrator") !== "cli") {
       emitChatMessage(
         "system",
-        "ℹ️ Modül stoğu çıkarımı şu an CLI/abonelik VEYA z.ai modunda yapılır (orkestratör rolü).",
+        "ℹ️ Modül stoğu çıkarımı şu an CLI/abonelik modunda yapılır (orkestratör rolü).",
       );
       return;
     }
@@ -255,13 +253,11 @@ export async function extractStockedModules(state: State, config: MyclConfig): P
     // Model guard (YZLLM 2026-07-01): katalog-dışı id CLI'da düşürmesin → ana modele GÖRÜNÜR fallback.
     const knownStock = resolveKnownModel(baseModel, config.selected_models.main, "modül stoğu");
     if (knownStock.note) emitChatMessage("system", `ℹ️ ${knownStock.note}`);
-    const cli = resolveCliProvider(config, "orchestrator", knownStock.model);
     emitChatMessage("system", "📦 Yeniden kullanılabilir modüller aranıyor (orkestratör)…");
     const res = await runClaudeCli({
       systemPrompt: buildModuleExtractPrompt(),
       userMessage: "Inspect the project and emit the modules JSON now.",
-      modelId: cli.model,
-      extraEnv: cli.extraEnv,
+      modelId: knownStock.model,
       cwd: state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
       disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // salt-okunur: yazma + alt-ajan yasak, Bash inceleme için açık

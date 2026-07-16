@@ -12,21 +12,14 @@ import {
 import type { MyclConfig } from "./config.js";
 
 describe("cogneeLlmEnvFromTarget — MyCL sağlayıcısı → LiteLLM anthropic env", () => {
-  it("Claude (api key, non-zai) → LLM_MODEL='anthropic/<model>' + key; LLM_ENDPOINT YOK", () => {
-    const env = cogneeLlmEnvFromTarget("sk-ant-xyz", "claude-opus-4-8", false);
+  it("Claude → LLM_MODEL='anthropic/<model>' + key; LLM_ENDPOINT YOK", () => {
+    const env = cogneeLlmEnvFromTarget("sk-ant-xyz", "claude-opus-4-8");
     expect(env).toEqual({ LLM_API_KEY: "sk-ant-xyz", LLM_MODEL: "anthropic/claude-opus-4-8" });
     expect(env?.LLM_ENDPOINT).toBeUndefined();
   });
 
-  it("z.ai (isZai + baseURL) → ek LLM_ENDPOINT (anthropic-uyumlu base); model yine anthropic/ prefix", () => {
-    const env = cogneeLlmEnvFromTarget("zai-key", "glm-5.2", true, "https://api.z.ai/api/anthropic");
-    expect(env?.LLM_MODEL).toBe("anthropic/glm-5.2");
-    expect(env?.LLM_ENDPOINT).toBe("https://api.z.ai/api/anthropic");
-    expect(env?.LLM_API_KEY).toBe("zai-key");
-  });
-
   it("apiKey yok (salt-abonelik/CLI) → null (cognee LLM'i besleyemez → görünür fallback)", () => {
-    expect(cogneeLlmEnvFromTarget("", "claude-opus-4-8", false)).toBeNull();
+    expect(cogneeLlmEnvFromTarget("", "claude-opus-4-8")).toBeNull();
   });
 });
 
@@ -36,7 +29,7 @@ describe("cogneeEmbeddedEnv — Docker/Postgres/dış-key YOK + proje-bazlı izo
     expect(env.DB_PROVIDER).toBe("sqlite");
     expect(env.VECTOR_DB_PROVIDER).toBe("lancedb");
     expect(env.GRAPH_DATABASE_PROVIDER).toBe("kuzu");
-    expect(env.EMBEDDING_PROVIDER).toBe("fastembed"); // yerel ONNX; Anthropic/z.ai embeddings sunmaz → OpenAI-key gerekmesin
+    expect(env.EMBEDDING_PROVIDER).toBe("fastembed"); // yerel ONNX; Anthropic embeddings sunmaz → OpenAI-key gerekmesin
     expect(env.EMBEDDING_MODEL).toContain("bge-small");
     expect(env.EMBEDDING_DIMENSIONS).toBe("384");
   });

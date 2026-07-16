@@ -51,7 +51,7 @@ export interface CliSessionTurnOpts {
   onText?: (text: string) => void;
   /** Her tool_use için (Faz 8 observer köprüsü). */
   observer?: (toolUse: { name: string; input: Record<string, unknown> }) => void;
-  /** claudeSpawnEnv ÜSTÜNE eklenecek ekstra env (cli-run.ts ile aynı): account-error → z.ai-CLI
+  /** claudeSpawnEnv ÜSTÜNE eklenecek ekstra env (cli-run.ts ile aynı) — genel altyapı;
    *  fallback'inde ANTHROPIC_BASE_URL/AUTH_TOKEN enjekte etmek için. claudeSpawnEnv ANTHROPIC_* döndürmez → temiz override. */
   extraEnv?: Record<string, string>;
 }
@@ -172,7 +172,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
 
     const child = spawn(spawnCmd.cmd, spawnCmd.args, {
       cwd: opts.cwd,
-      // API key YOK → abonelik; PATH zenginleştirilir. extraEnv (varsa, z.ai-CLI fallback) ÜSTE eklenir.
+      // API key YOK → abonelik; PATH zenginleştirilir. extraEnv (varsa) ÜSTE eklenir.
       env: opts.extraEnv ? { ...claudeSpawnEnv(), ...opts.extraEnv } : claudeSpawnEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -319,7 +319,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
         turns,
         usage,
         // Hata metni: resultErrorText (result event — account/kredi hatası BURADA gelir) + stderrTail.
-        // İkisini de kat ki isApiAccountError sınıflandırması (z.ai fallback tetiği) "credit balance"i görsün.
+        // İkisini de kat ki isApiAccountError sınıflandırması "credit balance"i görsün.
         error: ok
           ? undefined
           : `claude exit=${code}` +

@@ -22,7 +22,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { resolveLlmClient, isApiAccountError } from "./claude-api.js";
-import { backendForRole, orchestratorModelId, resolveProvider, zaiKeyForRole, type MyclConfig } from "./config.js";
+import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream, withClaudeStreamBanner } from "./ipc.js";
 import { describeTouchedForFiles } from "./foreign-write-consent.js";
@@ -132,13 +132,6 @@ export interface PendingErrorAnalysis {
    */
   auto_selected_solution?: string;
   /**
-   * YZLLM 2026-06-26: Claude (abonelik+API) kredi/limit hatası AMA z.ai (GLM) anahtarı VAR + henüz z.ai'de
-   * DEĞİLİZ → "tüm sağlayıcılar tükendi" demek YALAN olur (z.ai hiç denenmedi; canlı: $6.29 bakiye varken
-   * "tükendi" dedi). Bu durumda failPermanent YERİNE bu sinyal döner; failPhase TÜM rolleri z.ai'ya geçirip
-   * fazı tekrar koşar (askq AÇILMAZ — sentinel). Diğer alanlar boştur.
-   */
-  needsProviderSwitch?: boolean;
-  /**
    * YZLLM 2026-07-03 (cevap-hatırlama merdiveni): bu pending, kullanıcının GERÇEK seçimi değil, kayıtlı bir
    * cevabın YENİDEN uygulanmasıdır (Kademe 2/3). handleAskqAnswer bunu görünce cevabı answer-memory'ye TEKRAR
    * kaydetmez (reuseApproved bayrağını sıfırlamasın). Yalnız applyRecalledErrorAnswer set eder.
@@ -218,7 +211,7 @@ export function buildErrorAnalysisAskq(
 
   const options: string[] = [];
   // KALICI sağlayıcı-yok (kredi/yetki bitti): "Çöz", çözüm-uygula ve "Tekrar analiz" HEPSİ bir sağlayıcı
-  // (CLI/API/z.ai) ister → hep aynı hatayı verir → sonsuz döngü (canlı bug). Yalnız "kaydet + devam"
+  // (CLI/API) ister → hep aynı hatayı verir → sonsuz döngü (canlı bug). Yalnız "kaydet + devam"
   // (+ blocking gate'te kabul) sun; sağlayıcı dönünce iş listesinden tekrar denenir.
   if (permanentNoProvider) {
     options.push(OPT_QUEUE);
@@ -513,10 +506,8 @@ export function buildErrorAnalysisPrompt(
     "- the SAME failure persists after a fix → the cause is NOT what you changed; widen",
     "  the diagnosis (environment/external), do NOT repeat project-level edits.",
     "- Claude account/credit/usage-limit error ('credit balance too low', usage limit, billing/auth) → an",
-    "  EXTERNAL provider/billing issue, NOT a code bug. MyCL HAS an automatic z.ai (GLM) fallback for",
-    "  main/orchestrator/translator turns (both SDK and CLI) when a z.ai key is configured — do NOT tell the",
-    "  user 'there is no fallback / no architectural z.ai switch'. The only blocking case is when z.ai is ALSO",
-    "  missing or failing; then advise topping up Claude credit OR adding a z.ai key. Do NOT retry a dead provider.",
+    "  EXTERNAL provider/billing issue, NOT a code bug. Advise topping up Claude credit or waiting for the",
+    "  subscription limit to reset. Do NOT retry a dead provider.",
     "GATE INTEGRITY: NEVER propose a solution that makes a gate pass by WEAKENING it — no deleting/skipping",
     "tests, loosening assertions, disabling lint rules, eslint-disable, lowering thresholds, or editing the",
     "gate/lint/tsconfig config to ignore the failure. Fix the underlying CODE so the gate passes honestly.",
@@ -572,17 +563,7 @@ export async function analyzeAndAskError(
   };
   // KALICI sağlayıcı-yok (kredi/yetki): analizin KENDİSİ de bir sağlayıcı ister → "tekrar analiz" hep aynı
   // hatayı verir → SONSUZ DÖNGÜ (canlı bug). Döngüyü kır: net durum mesajı + yalnız "kaydet + devam" askq'sı
-  // (Çöz/Tekrar-analiz YOK). Sağlayıcı (kredi/z.ai) dönünce iş listesinden tekrar denenir.
-  // YZLLM 2026-06-26: z.ai sinyali — Claude account-error AMA z.ai (GLM) anahtarı var + henüz z.ai'de değiliz →
-  // "tükendi" demek YALAN (z.ai denenmedi). failPermanent yerine bu döner; failPhase z.ai'ya geçip fazı tekrar koşar.
-  const signalProviderSwitch = (): PendingErrorAnalysis => ({
-    id: `error_analysis_${randomUUID()}`,
-    phase: errCtx.phase,
-    blocking: false,
-    options: [],
-    solutions_tr: [],
-    needsProviderSwitch: true,
-  });
+  // (Çöz/Tekrar-analiz YOK). Sağlayıcı (kredi/abonelik) dönünce iş listesinden tekrar denenir.
   const failPermanent = async (provDetail: string): Promise<PendingErrorAnalysis> => {
     const id = `error_analysis_${randomUUID()}`;
     const blocking = !!errCtx.allowAcceptContinue;
@@ -591,14 +572,8 @@ export async function analyzeAndAskError(
       permanentNoProvider: true,
     });
     const optionLabels = options.map((o) => (typeof o === "string" ? o : o.label));
-    // DÜRÜST mesaj (YZLLM 2026-06-26): buraya yalnız z.ai bizi KURTARAMADIĞINDA gelinir — ya z.ai zaten
-    // seçili+o da tükendi, ya da z.ai anahtarı hiç yok. "tüm sağlayıcılar tükendi (Claude+z.ai)" diye SABİT
-    // yazmak (z.ai bakiyesi varken) yalandı → duruma göre net söyle.
-    const onZai = resolveProvider(config, "orchestrator").isZai;
-    const detail = onZai
-      ? `z.ai (GLM) bakiyeniz/kotanız da tükendi — z.ai panelinden bakiye yükleyin, sonra iş listesinden tekrar denenir.`
-      : `Anthropic kredisi/limiti tükendi ve yapılandırılmış bir z.ai (GLM) yedeği yok — kredi yükleyin VEYA ` +
-        `Ayarlar → API Anahtarları'ndan bir z.ai anahtarı girin; sonra iş listesinden tekrar denenir.`;
+    const detail = `Anthropic kredisi/limiti tükendi — kredi yükleyin VEYA abonelik limitinin açılmasını bekleyin; ` +
+      `sonra iş listesinden tekrar denenir.`;
     emitChatMessage(
       "assistant",
       `⛔ Faz ${errCtx.phase} hata analizi YAPILAMADI: ${detail} ` +
@@ -669,20 +644,14 @@ export async function analyzeAndAskError(
       if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
       if (!res.ok) {
         const et = String(res.error ?? "");
-        // Kredi/yetki (kalıcı): z.ai (GLM) anahtarı VAR + henüz z.ai'de değilsek → z.ai'ya geç sinyali (yalan
-        // "tükendi" YOK). z.ai yoksa/zaten z.ai'deysek → döngü-kıran dürüst failPermanent. Aksi (account dışı)
-        // → normal fail (reanalyze yardımcı olabilir).
-        if (isApiAccountError(et)) {
-          const canSwitchZai = !!zaiKeyForRole(config.api_keys, "main") && !resolveProvider(config, "orchestrator").isZai;
-          return canSwitchZai ? signalProviderSwitch() : await failPermanent(et);
-        }
+        // Kredi/yetki (kalıcı) → döngü-kıran dürüst failPermanent. Aksi → normal fail (reanalyze yardımcı olabilir).
+        if (isApiAccountError(et)) return await failPermanent(et);
         return await fail("Hata analizi yapılamadı (claude hatası).", et);
       }
       analysisText = res.text;
     } else {
       // API yolu — Anthropic SDK tek-atış (tool yok; hata mesajı + detail'den triage).
       try {
-        // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI ise hata-analizi turu GLM'e (z.ai key+endpoint) gider; claude'da AYNEN korunur.
         const { client, model } = resolveLlmClient(
           config,
           "orchestrator",
@@ -708,10 +677,7 @@ export async function analyzeAndAskError(
           .join("\n");
       } catch (e) {
         const et = String(e);
-        if (isApiAccountError(et)) {
-          const canSwitchZai = !!zaiKeyForRole(config.api_keys, "main") && !resolveProvider(config, "orchestrator").isZai;
-          return canSwitchZai ? signalProviderSwitch() : await failPermanent(et);
-        }
+        if (isApiAccountError(et)) return await failPermanent(et);
         return await fail("Hata analizi yapılamadı (API hatası).", et);
       }
     }

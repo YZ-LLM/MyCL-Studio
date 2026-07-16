@@ -1072,22 +1072,15 @@ function App() {
     translator: string,
     main: string,
     orchestrator?: string,
-    zaiTranslator?: string,
-    zaiMain?: string,
-    zaiOrchestrator?: string,
   ) => {
     setSavingKeys(true);
     // Kayıt bir PATCH (merge): boş alan gönderme → orkestratör mevcut key'i korur (silmez).
-    // Böylece z.ai key'i eklerken claude key'lerini (formda boş) yeniden girmeye gerek yok.
     void orch.send({
       kind: "save_api_keys",
       data: {
         ...(translator ? { translator } : {}),
         ...(main ? { main } : {}),
         ...(orchestrator ? { orchestrator } : {}),
-        ...(zaiTranslator ? { zai_translator: zaiTranslator } : {}),
-        ...(zaiMain ? { zai_main: zaiMain } : {}),
-        ...(zaiOrchestrator ? { zai_orchestrator: zaiOrchestrator } : {}),
       },
     });
   };

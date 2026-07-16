@@ -201,7 +201,6 @@ export async function classifyProjectType(
     return await classifyViaCli(config, summary);
   }
 
-  // z.ai Aşama 2 ⑤b: Sağlayıcı=Z.AI (main) ise proje-tipi sınıflandırma turu GLM'e gider; claude'da AYNEN korunur.
   const { client, model } = resolveLlmClient(
     config,
     "main",

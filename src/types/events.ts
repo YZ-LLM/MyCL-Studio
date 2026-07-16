@@ -227,9 +227,8 @@ export interface ModelsListEvent {
  * v15.12: "auto" = Auto Mode — CLI ile başla, abonelik limiti dolunca API kullan,
  * limit açılınca CLI'ye dön.
  */
-// "zai" = z.ai (GLM) sağlayıcısı: o rol z.ai key'iyle Anthropic-uyumlu endpoint'e gider (claude değil).
 // "auto" z.ai'yi SEÇMEZ (sadece api↔cli yönetir); z.ai açıkça seçilir.
-export type AgentBackend = "api" | "cli" | "auto" | "zai";
+export type AgentBackend = "api" | "cli" | "auto";
 export interface AgentBackends {
   orchestrator: AgentBackend;
   translator: AgentBackend;
@@ -545,15 +544,10 @@ export type OrchestratorCommand =
   | {
       kind: "save_api_keys";
       // PATCH/merge semantiği: yalnız dolu alanlar gönderilir; boş alan mevcut key'i korur (silmez).
-      // translator/main da opsiyonel — z.ai key'i eklerken claude key'lerini yeniden girmeye gerek yok.
       data: {
         translator?: string;
         main?: string;
         orchestrator?: string;
-        // z.ai (GLM) rol-başına key'ler — provider=zai seçili rolde kullanılır + claude→z.ai fallback'ın halkası.
-        zai_translator?: string;
-        zai_main?: string;
-        zai_orchestrator?: string;
       };
     }
   | { kind: "list_models"; data: { which: "translator" | "main"; force?: boolean } }

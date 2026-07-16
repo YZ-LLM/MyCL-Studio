@@ -553,7 +553,7 @@ export class Phase0Controller {
             ],
             system: systemPrompt,
             model: modelChoice.modelId,
-            role: "main", // ⑤ Sağlayıcı=Z.AI seçiliyse GLM'e yönlenir
+            role: "main",
             tools: [TOOL_REPORT_ROOT_CAUSE],
             tool_choice: {
               type: "tool",

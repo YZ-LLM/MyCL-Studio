@@ -175,7 +175,7 @@ export class CliOrchestratorBackend {
         // ile JSON garantiler; CLI garantileyemez. questionMode salt-okunur (executeAgentDecision çağrılmaz, faz
         // tetiklenmez) → düz-metin GEÇERLİ bir danışma cevabıdır: chat kararı olarak sar (message_to_user=metin).
         // İki çağıran da (direktif eval + salt-okunur Q&A) message_to_user/reason okur → parite. CANLI KÖK: bu yol
-        // olmadan CLI orkestratör "KARAR: BENİMSE" verdi ama "decision json not found" deyip düştü → API→z.ai→hata.
+        // olmadan CLI orkestratör "KARAR: BENİMSE" verdi ama "decision json not found" deyip düştü → API→hata.
         if (this.questionMode && res.text.trim()) {
           const prose = res.text.trim();
           log.info("cli-orchestrator", "questionMode düz-metin yanıt kabul edildi (JSON yok)", {

@@ -2,7 +2,7 @@
 //
 // Kalıcı çapraz-oturum bilgi grafiği + vektör hafıza (remember/recall/forget). GÖMÜLÜ backend (SQLite+LanceDB+Kuzu,
 // Docker/Postgres YOK); argsız `python server.py` = stdio JSON-RPC MCP server; Claude Code'a --mcp-config ile bağlanır.
-// LLM = MyCL'in KENDİ sağlayıcısı (cognee LiteLLM kullanır → Claude "anthropic/<model>" veya z.ai anthropic-base;
+// LLM = MyCL'in KENDİ sağlayıcısı (cognee LiteLLM kullanır → Claude "anthropic/<model>";
 // AYRI OpenAI key YOK → "sağlayıcı=kral" korunur). Canlı smoke doğrulandı (2026-07-13): install(uv sync) + stdio +
 // remember/recall/forget + gömülü SQLite/Kuzu/LanceDB migration'ları dış servissiz koştu.
 //
@@ -46,25 +46,22 @@ export function resolveCogneeInstalled(): boolean {
  * cognee LLM env'ini MyCL sağlayıcısından türet (LiteLLM anthropic formatı). Kullanılabilir API key yoksa
  * (salt-abonelik/CLI modu) null → cognee kullanılamaz. SAF, test edilebilir.
  */
-/** SAF (test edilebilir): apiKey + model + isZai/baseURL → cognee LiteLLM env (anthropic formatı). apiKey yoksa null. */
+/** SAF (test edilebilir): apiKey + model → cognee LiteLLM env (anthropic formatı). apiKey yoksa null.
+ *  (z.ai LLM_ENDPOINT dalı 2026-07-16'da kaldırıldı — yalnız Claude.) */
 export function cogneeLlmEnvFromTarget(
   apiKey: string,
   model: string,
-  isZai: boolean,
-  baseURL?: string,
 ): Record<string, string> | null {
   if (!apiKey) return null; // salt-abonelik/CLI: gerçek key yok → cognee cognify LLM'ini besleyemez
-  const env: Record<string, string> = {
+  return {
     LLM_API_KEY: apiKey,
-    LLM_MODEL: `anthropic/${model}`, // LiteLLM anthropic provider (Claude modeli veya z.ai glm)
+    LLM_MODEL: `anthropic/${model}`, // LiteLLM anthropic provider (Claude modeli)
   };
-  if (isZai && baseURL) env.LLM_ENDPOINT = baseURL; // z.ai anthropic-uyumlu base
-  return env;
 }
 
 export function buildCogneeLlmEnv(config: MyclConfig): Record<string, string> | null {
   const t = resolveProvider(config, "orchestrator");
-  return cogneeLlmEnvFromTarget(t.apiKey, orchestratorModelId(config.selected_models), t.isZai, t.baseURL);
+  return cogneeLlmEnvFromTarget(t.apiKey, orchestratorModelId(config.selected_models));
 }
 
 /** Proje kökünden kısa deterministik hash (per-proje izole depo dizini). */
@@ -75,7 +72,7 @@ function projectHash(projectRoot: string): string {
 /**
  * Gömülü backend + YEREL embedder env (Docker/Postgres/dış-key YOK). SAF.
  * BULGU 1 (mahkeme): cognify/recall EMBEDDING'i LLM'den AYRI ister; cognee default'u OpenAI (LLM_API_KEY'i embedding'de
- * kullanır → Anthropic/z.ai embeddings API sunmaz → patlar). Fix: YEREL fastembed (ONNX) → dış key YOK ("sağlayıcı=kral").
+ * kullanır → Anthropic embeddings API sunmaz → patlar). Fix: YEREL fastembed (ONNX) → dış key YOK ("sağlayıcı=kral").
  * BULGU 2 (mahkeme): DATA_DIRECTORY PROJE-BAZLI izole (global depo çapraz-proje hafıza sızıntısına yol açardı).
  */
 export function cogneeEmbeddedEnv(projectRoot: string): Record<string, string> {
@@ -129,7 +126,7 @@ export async function ensureCognee(config: MyclConfig, projectRoot: string): Pro
     emitChatMessage(
       "system",
       "⚠️ cognee açık ama kullanılabilir API anahtarı yok (salt-abonelik/CLI modu) — cognee kalıcı hafızası LLM'e ihtiyaç " +
-        "duyar; devre dışı (MyCL mevcut EDD/relevance/karar-hafızasıyla sürer). Claude API veya z.ai anahtarı gir.",
+        "duyar; devre dışı (MyCL mevcut EDD/relevance/karar-hafızasıyla sürer). Claude API anahtarı gir.",
     );
     return "failed";
   }
