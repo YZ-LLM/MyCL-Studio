@@ -29,7 +29,14 @@ function baselinePath(root: string): string {
   return join(root, MYCL_DIR, BASELINE_FILE);
 }
 
-async function runCmd(cmd: string, cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+/**
+ * Test-suite süreç koşucusu — 2026-07-16'da export edildi (Full Test F1 aynı
+ * koşucu/timeout/kısmi-çıktı semantiğini kullanır; kopya makine olmasın).
+ */
+export async function runSuiteProcess(
+  cmd: string,
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await execAsync(cmd, {
       cwd,
@@ -73,7 +80,7 @@ export async function snapshotBehaviorBaseline(state: State, ts: number): Promis
   if (!cmd) {
     baseline = { ts, testCmd: null, green: false, failures: [] };
   } else {
-    const res = await runCmd(cmd, state.project_root);
+    const res = await runSuiteProcess(cmd, state.project_root);
     const failures = parseFailures(`${res.stdout}\n${res.stderr}`);
     if (isMissingCommand(res) || isSpawnEnvFailure(res) || (res.code !== 0 && failures.size === 0)) {
       // komut yok / ortam faulty / kırmızı-ama-0-fail (parser runner'ı anlamadı) → güvenilmez.

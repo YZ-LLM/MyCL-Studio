@@ -159,10 +159,18 @@ export function autoAnswerPick(
 /**
  * SAF: bu askq id-öneki YIKICI / kullanıcı-tetikli mi → never-ask'ta bile otonom cevaplanMAZ (bilinçli korunur).
  * agent_decision_* = cancel_pipeline (iş/pipeline iptali, geri-alınamaz iş kaybı). dast_confirm_* = 🛡️ Güvenlik Taraması
- * (kullanıcı butonu, makine yükü + yan etki). Bunlar açık kullanıcı-tetiklidir; otonom ajan seçmemeli.
+ * (kullanıcı butonu, makine yükü + yan etki). full_test_confirm_* = 🧪 Full Test, maintenance_confirm_* = 🔧 Bakım Turu
+ * (kullanıcı butonları, makine yükü + bakımda bağımlılık yazımı). plan_approve_* = 🗺️ plan onayı (kullanıcının açık
+ * şartı: plan HERKESİN onayından değil, ONUN onayından geçer). Otonom ajan bunları seçmemeli.
  */
 export function isProtectedAskqId(id: string): boolean {
-  return id.startsWith("agent_decision_") || id.startsWith("dast_confirm_");
+  return (
+    id.startsWith("agent_decision_") ||
+    id.startsWith("dast_confirm_") ||
+    id.startsWith("full_test_confirm_") ||
+    id.startsWith("maintenance_confirm_") ||
+    id.startsWith("plan_approve_")
+  );
 }
 
 /**

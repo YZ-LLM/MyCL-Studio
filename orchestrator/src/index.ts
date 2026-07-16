@@ -178,6 +178,7 @@ import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller } from "./phase-5.js";
 import { Phase6Controller } from "./phase-6.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
+import { runFullTest, formatFullTestReport, fixTasksFromReport } from "./full-test.js";
 import { Phase7Controller } from "./phase-7.js";
 import { Phase8Controller } from "./phase-8.js";
 import { Phase9Controller } from "./phase-9.js";
@@ -308,6 +309,8 @@ interface OrchestratorRuntime {
   // eşleşmeyle (askqId === id && selected === Başlat) işler; tarama yalnız buradan
   // tetiklenir (tek çağrı-noktası → onay-baypası imkânsız).
   pendingDast: { askqId: string } | null;
+  /** 🧪 Full Test onayı bekliyor (2026-07-16) — DAST deseni: askq onaysız koşum imkânsız. */
+  pendingFullTest: { askqId: string } | null;
   // İş kuyruğu (YZLLM 2026-06-14): şu an Faz 1'den işlenen kuyruk işinin id'si.
   // pipeline-end bunu "done"+tarih ile damgalar + sıradaki bekleyen işi başlatır.
   // null → kuyruk-dışı iterasyon (örn. resume) ya da çalışan iş yok.
@@ -339,6 +342,7 @@ const runtime: OrchestratorRuntime = {
   pendingErrorAnalysis: null,
   findingQueue: null,
   pendingDast: null,
+  pendingFullTest: null,
   currentTaskId: null,
   lastPhase1Intent: null,
   pendingAnswerReuse: null,
@@ -348,6 +352,8 @@ const runtime: OrchestratorRuntime = {
 // taramayı YALNIZ selected === DAST_START_LABEL iken çalıştırır (kesin string eşleşme).
 const DAST_START_LABEL = "🛡️ Başlat";
 const DAST_RUNNING_LABEL = "🛡️ Güvenlik Taraması (DAST)";
+const FULL_TEST_START_LABEL = "🧪 Başlat";
+const FULL_TEST_RUNNING_LABEL = "🧪 Full Test";
 
 /**
  * TEST-ONLY seam (v15.8): runtime.state/config'i set eder + history root bağlar,
@@ -363,6 +369,7 @@ export function __initRuntimeForTest(state: State, config: MyclConfig): void {
   runtime.pendingErrorAnalysis = null;
   runtime.findingQueue = null;
   runtime.pendingDast = null;
+  runtime.pendingFullTest = null;
   runtime.pendingAnswerReuse = null;
   setHistoryRoot(state.project_root);
   setAgentTraceRoot(state.project_root);
@@ -4273,6 +4280,7 @@ function isPipelineParked(): boolean {
     runtime.pendingPhaseScope !== null ||
     runtime.pendingMemoryProposal !== null ||
     runtime.pendingDast !== null ||
+    runtime.pendingFullTest !== null ||
     Boolean(runtime.state?.pending_ui_tweak) ||
     Boolean(runtime.state?.pending_diagnostic) ||
     Boolean(runtime.state?.pending_ui_review) // Faz 6 deferred UI-incelemesi (askq'sız park)
@@ -6248,13 +6256,25 @@ async function enqueueSecurityFindings(
  * olmayan taramalar için). DAST'ın per-bulgu enqueue'sinden farklı: tek "şu sınıfı gider" işi.
  */
 async function enqueueSecurityFixTask(projectRoot: string, text: string): Promise<void> {
+  await enqueueSystemFixTask(projectRoot, text, "security");
+}
+
+/**
+ * Sistem kaynaklı coarse fix-işi kuyruğa (güvenlik / Full Test / bakım turu ortak makinesi,
+ * 2026-07-16). Kaynak rozeti panelde görünür; iş Faz 3'ten normal pipeline iterasyonu olur.
+ */
+async function enqueueSystemFixTask(
+  projectRoot: string,
+  text: string,
+  source: "security" | "full-test" | "maintenance",
+): Promise<void> {
   const task: TaskQueueItem = {
     id: randomUUID(),
     ts: Date.now(),
     text,
-    priority: 2, // güvenlik → yüksek öncelik
+    priority: 2, // sistem bulgusu → yüksek öncelik
     status: "pending",
-    source: "security",
+    source,
     from_phase: 3,
   };
   await appendTask(projectRoot, task);
@@ -6322,6 +6342,38 @@ async function handleRunDastRequest(): Promise<void> {
     id: askqId,
     question: "Aktif güvenlik taraması (yalnız localhost) — emin misin?",
     options: [DAST_START_LABEL, "İptal"],
+    allow_other: false,
+    multi_select: false,
+  });
+}
+
+/**
+ * 🧪 Full Test buton handler'ı (2026-07-16) — DAST deseni: SADECE açıklama + onay askq'ı açar.
+ * Koşum yalnız handleAskqAnswer'ın pendingFullTest dalında "Başlat" seçilince → onay baypası imkânsız.
+ * emitAskq doğrudan (auto-answer yolundan geçmez; id auto-answer.ts'te korumalı).
+ */
+async function handleRunFullTestRequest(): Promise<void> {
+  if (!runtime.state) {
+    emitChatMessage("error", "Önce bir proje aç — Full Test için bir proje gerekli.");
+    return;
+  }
+  if (runtime.pendingFullTest) {
+    emitChatMessage("system", "Zaten bir Full Test onayı bekleniyor.");
+    return;
+  }
+  const askqId = `full_test_confirm_${randomUUID()}`;
+  runtime.pendingFullTest = { askqId };
+  emitChatMessage(
+    "assistant",
+    "🧪 **Full Test**: tüm proje baştan sona test edilir — birim testleri, entegrasyon, " +
+      "Playwright ile uçtan uca (E2E), tüm sayfaların taranması (konsol hataları, kırık istekler, " +
+      "boş sayfa), erişilebilirlik ve görsel karşılaştırma. Uygulama gerekirse başlatılır. " +
+      "Birkaç dakika sürebilir; bulunan sorunlar iş kuyruğuna düzeltme işi olarak eklenir. Başlatayım mı?",
+  );
+  emitAskq({
+    id: askqId,
+    question: "Tüm proje test edilsin mi?",
+    options: [FULL_TEST_START_LABEL, "İptal"],
     allow_other: false,
     multi_select: false,
   });
@@ -6559,6 +6611,56 @@ export async function handleAskqAnswer(
         "error",
         `Güvenlik taraması başarısız: ${String(err).slice(0, 200)}`,
       );
+    } finally {
+      emitPhaseIdle();
+    }
+    return;
+  }
+
+  // 🧪 Full Test onayı (2026-07-16) — DAST dalının ikizi: KATI üçlü eşleşme + girer girmez
+  // pendingFullTest=null (çift-tık/re-entrancy kapanır). Koşum TEK buradan tetiklenir.
+  if (runtime.pendingFullTest && runtime.pendingFullTest.askqId === id) {
+    runtime.pendingFullTest = null;
+    const sel = (Array.isArray(selected) ? selected[0] : selected) ?? "";
+    if (sel !== FULL_TEST_START_LABEL) {
+      emitChatMessage("system", "Full Test iptal edildi.");
+      return;
+    }
+    if (!runtime.state) {
+      emitChatMessage("error", "Proje kapandı — Full Test yapılamadı.");
+      return;
+    }
+    const st = runtime.state;
+    emitPhaseRunning(FULL_TEST_RUNNING_LABEL, "birim + entegrasyon + E2E + rota taraması");
+    try {
+      await appendAuditModule(st.project_root, {
+        ts: Date.now(),
+        phase: st.current_phase,
+        event: "full-test-run-start",
+        caller: "user",
+      }).catch(() => {});
+      const report = await runFullTest(st, {
+        ensureDevServer: async () => {
+          if (!runtime.config) return { ok: false };
+          const dev = await ensureDevServerForReview(st, runtime.config);
+          return { ok: dev.ok, port: dev.port };
+        },
+        ensureE2E: () => ensurePlaywrightForPhase16(st),
+      });
+      emitChatMessage(report.ok ? "system" : "error", formatFullTestReport(report));
+      await appendAuditModule(st.project_root, {
+        ts: Date.now(),
+        phase: st.current_phase,
+        event: report.ok ? "full-test-run-complete" : "full-test-run-failed",
+        caller: "mycl-orchestrator",
+        detail: report.sections.map((s) => `${s.id}=${s.status}`).join(" "),
+      }).catch(() => {});
+      // Düşen çekirdek bölümler → iş kuyruğuna görünür fix işi (DAST bulgu deseni).
+      for (const text of fixTasksFromReport(report)) {
+        await enqueueSystemFixTask(st.project_root, text, "full-test");
+      }
+    } catch (err) {
+      emitChatMessage("error", `Full Test başarısız: ${String(err).slice(0, 200)}`);
     } finally {
       emitPhaseIdle();
     }
@@ -8049,6 +8151,11 @@ ipcRouter.register("askq_answer", async (data: unknown) => {
   await reconcileAndDrainTasks().catch((e: unknown) =>
     log.error("orchestrator", "askq sonrası kuyruk uzlaştırma hatası", e),
   );
+});
+// 🧪 Full Test (2026-07-16): buton yalnız onay askq'ı açar; koşum handleAskqAnswer
+// pendingFullTest dalında (DAST deseni — onay baypası imkânsız).
+ipcRouter.register("run_full_test", async () => {
+  await handleRunFullTestRequest();
 });
 ipcRouter.register("save_api_keys", async (data: unknown) => {
   await handleSaveApiKeys(data as Partial<ApiKeys>);

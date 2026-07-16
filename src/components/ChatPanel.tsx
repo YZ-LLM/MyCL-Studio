@@ -247,6 +247,8 @@ interface Props {
   /** WP4 DAST: 🛡️ Güvenlik Taraması butonu — backend açıklama+onay askq'ı açar
    *  (buton DOĞRUDAN taramaz). Yalnız çalışan localhost app'ine. */
   onDastClick?: () => void;
+  onFullTestClick?: () => void;
+  fullTestRunning?: boolean;
   /** WP4 DAST: tarama sürüyor mu — buton spinner + disabled (çift-tetik koruması). */
   dastRunning?: boolean;
   /** YZLLM 2026-06-17: o anki iş — ChatPanel başlığında "Tümünü kopyala" yanında gösterilir. */
@@ -278,6 +280,8 @@ export function ChatPanel({
   onNeverAskToggle,
   onDastClick,
   dastRunning,
+  onFullTestClick,
+  fullTestRunning,
   currentJob,
   onShowCode,
 }: Props) {
@@ -703,6 +707,44 @@ export function ChatPanel({
                 <span
                   className="agent-busy-spinner"
                   aria-label="tarama çalışıyor"
+                  style={{
+                    display: "inline-block",
+                    marginLeft: 6,
+                    width: 10,
+                    height: 10,
+                    border: "2px solid var(--fg-dim)",
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    verticalAlign: "middle",
+                    animation: "mycl-spin 0.8s linear infinite",
+                  }}
+                />
+              )}
+            </span>
+          </button>
+        )}
+        {/* 🧪 Full Test (2026-07-16): tüm proje testi — buton backend onay askq'ı açar
+            (doğrudan koşmaz). Spinner sticky banner'dan (fullTestRunning) türetilir. */}
+        {onFullTestClick && (
+          <button
+            type="button"
+            className="intent-pill"
+            data-testid="intent-full-test"
+            onClick={onFullTestClick}
+            disabled={fullTestRunning}
+            title={
+              fullTestRunning
+                ? "Full Test sürüyor…"
+                : "Tüm projeyi test et: birim + entegrasyon + E2E (Playwright) + rota taraması + erişilebilirlik + görsel — önce açıklar + onay sorar"
+            }
+          >
+            <span className="intent-pill-emoji" aria-hidden>🧪</span>
+            <span className="intent-pill-label">
+              Full Test
+              {fullTestRunning && (
+                <span
+                  className="agent-busy-spinner"
+                  aria-label="test çalışıyor"
                   style={{
                     display: "inline-block",
                     marginLeft: 6,

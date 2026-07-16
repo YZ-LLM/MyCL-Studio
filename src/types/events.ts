@@ -526,6 +526,7 @@ export type OrchestratorCommand =
   /** WP4 DAST: 🛡️ buton — backend açıklama + onay askq'ı açar; tarama ONAYDAN sonra
    *  (handleAskqAnswer pendingDast branch) çalışır. Buton doğrudan TARAMAZ. */
   | { kind: "run_dast" }
+  | { kind: "run_full_test" }
   // v15.7 (2026-05-25): intent_direct kaldırıldı — classifier ve sidebar
   // intent button'ları yok artık.
   | {

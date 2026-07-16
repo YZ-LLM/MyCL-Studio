@@ -1042,6 +1042,11 @@ function App() {
     void orch.send({ kind: "run_dast" });
   };
 
+  // 🧪 Full Test (2026-07-16): buton → backend açıklama+onay askq'ı açar (doğrudan koşmaz).
+  const sendRunFullTest = () => {
+    void orch.send({ kind: "run_full_test" });
+  };
+
   const handleSaveApiKeys = (
     translator: string,
     main: string,
@@ -1606,6 +1611,8 @@ function App() {
           onNeverAskToggle={handleNeverAskToggle}
           onDastClick={sendRunDast}
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
+          onFullTestClick={sendRunFullTest}
+          fullTestRunning={mainState.runningBanner?.label === "🧪 Full Test"}
           onShowCode={(ref) => setCodeModal({ open: true, codeRef: ref })}
         />
         {activeRightPanel && (

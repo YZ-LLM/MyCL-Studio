@@ -86,9 +86,12 @@ describe("classifyQaAskq (değişmedi — regresyon guard)", () => {
 });
 
 describe("otonom-cevap SAF helper'lar (never-ask kapsanmamış askq → orkestra ajanı/mahkeme; YZLLM 2026-07-10)", () => {
-  it("isProtectedAskqId: yıkıcı iş-iptali + DAST butonu korunur; diğer askq'ler otonom-cevaplanabilir", () => {
+  it("isProtectedAskqId: yıkıcı iş-iptali + kullanıcı-tetikli butonlar + plan onayı korunur; diğerleri otonom-cevaplanabilir", () => {
     expect(isProtectedAskqId("agent_decision_abc")).toBe(true); // cancel_pipeline — yıkıcı
     expect(isProtectedAskqId("dast_confirm_x")).toBe(true); // 🛡️ buton
+    expect(isProtectedAskqId("full_test_confirm_x")).toBe(true); // 🧪 buton (2026-07-16)
+    expect(isProtectedAskqId("maintenance_confirm_x")).toBe(true); // 🔧 buton (2026-07-16)
+    expect(isProtectedAskqId("plan_approve_x")).toBe(true); // 🗺️ plan onayı — never-ask'ta bile açık onay
     expect(isProtectedAskqId("phase-run-5")).toBe(false);
     expect(isProtectedAskqId("error_analysis_fallback_1")).toBe(false);
   });
