@@ -243,10 +243,11 @@ export interface FeatureFlags {
   cognee_memory?: boolean;
   /**
    * ⚡ Paralel iş kümeleme (YZLLM 2026-07-16, "orta yol"): kuyrukta ≥2 BAĞIMSIZ iş beklerken kod yazma
-   * kısımları izole worktree'lerde PARALEL koşar, birleştirme sonrası kalite fazları (9→17, Faz 6 dahil)
-   * birleşik sonuçta TEK SEFER eksiksiz koşar (multi_agent_selection emsali). FAIL-CLOSED: git yok/kirli
-   * ağaç/kapsam çakışması/worker hatası → sıralı akış (iş kaybolmaz). Opt-in default KAPALI (makine yükü
-   * + abonelik limiti — kullanıcı kral). Kümede en çok 3 iş.
+   * kısımları izole worktree'lerde PARALEL koşar, birleştirme sonrası kalite fazları 9-17 (risk incelemesi
+   * + mekanik kapılar + E2E) birleşik sonuçta TEK SEFER koşar. Faz 6 (kullanıcı UI incelemesi) bu birleşik
+   * koşuda otomatik AÇILMAZ — kullanıcıya görünür söylenir (mahkeme dürüstlük düzeltmesi; emsal
+   * multi_agent_selection yalnız 10-17 koşuyordu, burada 9 da dahil). FAIL-CLOSED: git yok/kirli ağaç/
+   * kapsam çakışması/worker hatası → GÖRÜNÜR sıralı akış (iş kaybolmaz). Opt-in default KAPALI. En çok 3 iş.
    */
   parallel_task_batching?: boolean;
 }

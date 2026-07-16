@@ -860,9 +860,11 @@ export function Settings({
                   >
                     Açık: iş kuyruğunda birbirinden bağımsız 2-3 iş beklerken kod
                     yazma kısımları ayrı çalışma kopyalarında AYNI ANDA yapılır,
-                    birleştirme sonrası tüm kalite fazları birleşik sonuçta
-                    eksiksiz koşar (hiçbir kural atlanmaz). Bağımsızlık kanıtlanamazsa
-                    veya git deposu temiz değilse otomatik SIRALI akışa dönülür — iş
+                    birleştirme sonrası kalite fazları (risk incelemesi + tüm
+                    mekanik kapılar + E2E) birleşik sonuçta koşar; UI incelemesi
+                    (Faz 6) bu birleşik koşuda otomatik açılmaz — sonunda
+                    çalıştırıp bakabilirsin. Bağımsızlık kanıtlanamazsa veya git
+                    deposu temiz değilse görünür şekilde SIRALI akışa dönülür — iş
                     kaybolmaz. Kapalı: işler her zaman tek tek işlenir.
                   </div>
                 </div>

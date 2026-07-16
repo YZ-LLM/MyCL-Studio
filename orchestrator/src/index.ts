@@ -1853,6 +1853,17 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   timeoutRetried.clear();
   gateFailStreak.clear(); // faz-seviyesi döngü sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
   _batchFailedIds.clear(); // ⚡ paralel küme tek-atış seti de sıfır (proje değişti; eski id'ler anlamsız).
+  // MAHKEME HIGH (2026-07-16): bayat askq + kullanıcı-tetikli pending'ler proje-BAĞIMSIZ global durumda
+  // yaşıyordu → proje A'nın plan/full-test/bakım onayı proje B'de yanlışlıkla cevaplanabilirdi
+  // (answer_askq top-of-stack'i proje kontrolsüz yönlendirir; pendingPlan onayı AKTİF projenin kuyruğuna
+  // yazar). Proje değişiminde HEPSİNİ temizle — eski projenin sorusu yeni projede yaşayamaz.
+  clearActiveAskq();
+  runtime.pendingDast = null;
+  runtime.pendingFullTest = null;
+  runtime.pendingMaintenance = null;
+  runtime.pendingPlan = null;
+  runtime.pendingPlanEdit = null;
+  runtime.currentBatch = null;
   // YZLLM 2026-07-01 (FIX C): model-satırı cache'i sıfırla → yeni projede ilk model-seçim satırı yine görünür.
   resetModelChoiceCache();
   // FIX D (mahkeme): tech-debt son-bulgu deposunu da temizle (proje-değişiminde eski bulgular accept'e sızmasın).
@@ -4084,6 +4095,17 @@ async function executeDispatchedIntent(
         runtime.currentTaskId = null;
         await emitQueueChangedFor(runtime.state.project_root);
       }
+      // ⚡ MAHKEME CRITICAL (2026-07-16): aktif paralel KÜME de iptali görmeli — yoksa küme işleri
+      // orphan-yolunda sessizce "pending"e dönüp kullanıcı onaysız OTOMATİK yeniden başlıyordu
+      // (iptal niyeti boşa düşer), park başka pending'e bağlıysa kuyruk KALICI kilitleniyordu.
+      // Tek-iş simetrisi: işler "dropped" (otomatik seçilmez; UI'dan yeniden eklenebilir) + slot boş.
+      if (runtime.currentBatch) {
+        for (const tid of runtime.currentBatch.taskIds) {
+          await patchTask(runtime.state.project_root, tid, { status: "dropped" });
+        }
+        runtime.currentBatch = null;
+        await emitQueueChangedFor(runtime.state.project_root);
+      }
     }
     emitChatMessage(
       "system",
@@ -4382,6 +4404,7 @@ function isPipelineParked(): boolean {
     runtime.pendingFullTest !== null ||
     runtime.pendingMaintenance !== null ||
     runtime.pendingPlan !== null ||
+    runtime.pendingPlanEdit !== null ||
     Boolean(runtime.state?.pending_ui_tweak) ||
     Boolean(runtime.state?.pending_diagnostic) ||
     Boolean(runtime.state?.pending_ui_review) // Faz 6 deferred UI-incelemesi (askq'sız park)
@@ -4451,6 +4474,14 @@ async function driveWorkQueue(rawText: string): Promise<void> {
 // ⚡ Paralel küme tek-atış emniyeti (2026-07-16): başarısız kümedeki işler bir daha KÜMEYE girmez
 // (sıralı işlenir) → sonsuz yeniden-kümeleme döngüsü imkânsız. Proje değişince temizlenir.
 const _batchFailedIds = new Set<string>();
+// Görünür-atlama throttle'ı: aynı neden art arda spam olmasın (drain her iş sonunda yeniden dener).
+let _lastBatchSkipNotice = "";
+function batchSkipNotice(reason: string): void {
+  log.info("orchestrator", "paralel küme atlandı → sıralı akış", { reason });
+  if (reason === _lastBatchSkipNotice) return;
+  _lastBatchSkipNotice = reason;
+  emitChatMessage("system", `⚡ Paralel kümeleme bu tur uygulanmadı: ${reason}.`);
+}
 
 /**
  * ⚡ Kuyruktan paralel iş kümesi başlatmayı DENE (2026-07-16, "orta yol" — KULLANICI KARARI).
@@ -4477,7 +4508,9 @@ async function tryStartTaskBatch(): Promise<boolean> {
   const gitOk =
     (await isGitRepo(root).catch(() => false)) && (await isWorkingTreeClean(root).catch(() => false));
   if (!gitOk) {
-    log.info("orchestrator", "paralel küme ön koşulu yok (git değil / ağaç kirli) → sıralı akış");
+    // MAHKEME MEDIUM (görünürlük): bayrak AÇIKKEN kullanıcı neden paralel olmadığını görsün —
+    // aynı neden tekrarlanırsa spam olmasın (throttle).
+    batchSkipNotice("git deposu değil ya da kaydedilmemiş değişiklik var — işler sıralı işleniyor");
     return false;
   }
   // LLM hakem önerir, DETERMİNİSTİK kapı (shouldParallelize) karar verir — fail-closed.
@@ -4486,7 +4519,7 @@ async function tryStartTaskBatch(): Promise<boolean> {
     return null;
   });
   if (!candidates) {
-    log.info("orchestrator", "küme hakemi paralel-güvenli alt küme bulamadı → sıralı akış");
+    batchSkipNotice("bekleyen işler bağımsız/ayrık bulunamadı — işler sıralı işleniyor (güvenli taraf)");
     return false;
   }
   const now = Date.now();
@@ -4537,9 +4570,13 @@ async function tryStartTaskBatch(): Promise<boolean> {
     taskIds: candidates.map((c) => c.task.id),
     filesByTask: outcome.integratedByModule ?? {},
   };
+  // MAHKEME dürüstlük düzeltmesi (2026-07-16): birleşik koşu Faz 9'DAN başlar (advanceToNextPhase(8)
+  // → 9 dahil: düşman gözlü risk incelemesi birleşik sonucu görür) + 10-17. Faz 6 (kullanıcı UI
+  // incelemesi) bu birleşik koşuda YOKTUR — bunu GÖRÜNÜR söyle (sessiz atlama yok, KATI #4).
   emitChatMessage(
     "assistant",
-    `⚡ Paralel küme birleştirildi (${outcome.reason}). Kalite fazları (9→17, Faz 6 dahil) birleşik sonuç üstünde EKSİKSİZ koşuyor…`,
+    `⚡ Paralel küme birleştirildi (${outcome.reason}). Kalite fazları (9-17: risk incelemesi + mekanik kapılar + E2E) birleşik sonuç üstünde koşuyor. ` +
+      `Not: bu birleşik koşuda Faz 6 UI incelemesi otomatik açılmaz — görsel incelemek istersen sonunda "▶ Çalıştır" veya 🧪 Full Test kullan.`,
   );
   // Anlamsal bütünlük review'ı (multi_agent_selection emsali) — bloklamaz.
   try {
@@ -4548,7 +4585,9 @@ async function tryStartTaskBatch(): Promise<boolean> {
   } catch (e) {
     log.warn("orchestrator", "küme anlamsal review hatası (non-blocking)", e);
   }
-  await advanceToNextPhase(9);
+  // Faz 9'dan itibaren (PHASE_TRANSITIONS[8]=9): risk incelemesi DAHİL — emsalden (multi_agent_selection
+  // advanceToNextPhase(9) = yalnız 10-17) bilinçli GÜÇLENDİRME (mahkeme bulgusu: 9 atlanıyordu).
+  await advanceToNextPhase(8);
   return true;
 }
 
@@ -6612,6 +6651,16 @@ async function handleRunFullTestRequest(): Promise<void> {
     emitChatMessage("error", "Önce bir proje aç — Full Test için bir proje gerekli.");
     return;
   }
+  // MAHKEME CRITICAL (2026-07-16): Faz 6 incelemesi PARKTAYKEN Full Test görsel çekimleri
+  // `.mycl/visual-pending`'i EZİYORDU → onayda kullanıcının gördüğü değil Full Test'in çektiği
+  // görüntüler taban oluyordu. Parktayken görünür engelle (önce incelemeyi bitir).
+  if (runtime.state.pending_ui_review) {
+    emitChatMessage(
+      "system",
+      "👀 Şu an Faz 6 UI incelemesi bekleniyor — önce incelemeyi bitir (onayla/değişiklik iste), sonra Full Test'i çalıştır.",
+    );
+    return;
+  }
   if (runtime.pendingFullTest) {
     emitChatMessage("system", "Zaten bir Full Test onayı bekleniyor.");
     return;
@@ -6642,6 +6691,15 @@ async function handleRunFullTestRequest(): Promise<void> {
 async function handleRunMaintenanceRequest(): Promise<void> {
   if (!runtime.state) {
     emitChatMessage("error", "Önce bir proje aç — bakım turu için bir proje gerekli.");
+    return;
+  }
+  // MAHKEME CRITICAL (2026-07-16): Faz 6 parkındayken bakım turunun Full Test kuyruğu görsel
+  // pending'i ezer (Full Test ile aynı gerekçe) — parktayken görünür engelle.
+  if (runtime.state.pending_ui_review) {
+    emitChatMessage(
+      "system",
+      "👀 Şu an Faz 6 UI incelemesi bekleniyor — önce incelemeyi bitir, sonra bakım turunu çalıştır.",
+    );
     return;
   }
   if (runtime.pendingMaintenance) {
@@ -8578,8 +8636,12 @@ ipcRouter.register("run_maintenance", async () => {
 // 🗺️ Plan Modu (2026-07-16): composer pili — AÇIKKEN kullanıcı mesajları plana çevrilir.
 ipcRouter.register("set_plan_mode", async (data: unknown) => {
   const d = data as { enabled?: boolean } | undefined;
-  setPlanMode(d?.enabled === true);
-  log.info("orchestrator", "plan mode", { enabled: d?.enabled === true });
+  const on = d?.enabled === true;
+  setPlanMode(on);
+  // MAHKEME MEDIUM (2026-07-16): mod KAPATILINCA bekleyen revizyon durumu da temizlenmeli —
+  // yoksa kullanıcı modu kapattığı hâlde sonraki mesajı sessizce plan revizyonuna gidiyordu.
+  if (!on) runtime.pendingPlanEdit = null;
+  log.info("orchestrator", "plan mode", { enabled: on });
 });
 ipcRouter.register("save_api_keys", async (data: unknown) => {
   await handleSaveApiKeys(data as Partial<ApiKeys>);
