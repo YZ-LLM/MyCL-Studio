@@ -19,6 +19,13 @@ import { runAdversarialTester, type AdversarialResult } from "./adversarial-test
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { backendForRole, type MyclConfig } from "./config.js";
+import {
+  isTestPath,
+  isProdPath,
+  isCosmeticFile,
+  isFeatureFile,
+  isBuildConfigFile,
+} from "./file-classify.js";
 import { getChangedFiles, getDiffSinceRef } from "./git.js";
 import { safeEnv } from "./safe-env.js";
 
@@ -106,76 +113,16 @@ export function hasReproRedThenGreen(events: Array<{ event: string }>): boolean 
   return false;
 }
 
-const TEST_PATH_PATTERNS = [
-  /\.test\.[tj]sx?$/,
-  /\.spec\.[tj]sx?$/,
-  /\/__tests__\//,
-  /\/tests?\//,
-];
-const PROD_EXT = /\.(ts|tsx|js|jsx|py|rs|go|java|cpp|c|rb|swift)$/;
-
-export function isTestPath(path: string): boolean {
-  if (path.includes("node_modules")) return false;
-  return TEST_PATH_PATTERNS.some((re) => re.test(path));
-}
-export function isProdPath(path: string): boolean {
-  if (path.includes("node_modules") || isTestPath(path)) return false;
-  return PROD_EXT.test(path);
-}
-
-// v15.10: repro-gate kapsamı için "kozmetik" dosya (stil/markup/doküman/görsel)
-// ayrımı — yalnız bunlar değiştiyse mantık değişikliği yok → repro-gate muaf.
-// Diğer her şey (kod, config) mantık sayılır (güvenli taraf). Regex yerine uzantı
-// kümesi (minimal).
-const COSMETIC_EXTS = new Set([
-  ".css", ".scss", ".sass", ".less", ".html", ".htm",
-  ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico",
-  ".md", ".markdown", ".txt",
-]);
-export function isCosmeticFile(path: string): boolean {
-  const dot = path.lastIndexOf(".");
-  return dot >= 0 && COSMETIC_EXTS.has(path.slice(dot).toLowerCase());
-}
-
-// BDD dış döngü (YZLLM 2026-07-03): görünür yaşayan dokümantasyon — `features/*.feature`.
-// Gherkin biçimli düz metin; parser/runner YOK (stack-bağımsız, KATI#1). SAF.
-// NOT: `.feature` bilerek isTestPath/isProdPath/isCosmeticFile'ın HİÇBİRİNE uymaz → tech-debt
-// taramasına girmez, tdd-*-write saymaz, repro-gate'i tetiklemez (çift sayım YOK). Bu bir GATE
-// DEĞİL: yalnız görünürlük/telemetri (bdd-scenario-write audit + Faz 9 yumuşak inceleme).
-export function isFeatureFile(path: string): boolean {
-  if (path.includes("node_modules")) return false;
-  return /\.feature$/i.test(path);
-}
-
-// GÖREV-SINIFI #3 (YZLLM 2026-06-21, Vestel canlı + mahkeme tasarımı): build/test-tooling CONFIG
-// dosyası mı. Bu dosyalar test-toplama/derleme/lint AYARIDIR — çalışan PROD kod-yolu DEĞİL → runtime
-// kırmızı→yeşil repro İMKANSIZ/anlamsız (playwright.config.ts'e testMatch eklemek gibi). STACK-BAĞIMSIZ
-// generic isim kalıbı (tek framework hardcode YOK: ".config." eki tüm JS araçlarında ortak + tsconfig/
-// jsconfig + rc + yaygın test/lint config'leri). PAKET-MANİFESTİ (package.json/Cargo.toml/go.mod) HARİÇ —
-// onlar bağımlılık taşır, prod'u etkiler. Kuşkuda FALSE (güvenli taraf: prod kabul et, repro iste).
-const CONFIG_EXTS = new Set([".ts", ".js", ".mjs", ".cjs", ".mts", ".cts", ".json"]);
-const OTHER_CONFIG_BASENAMES = new Set([
-  "pytest.ini", "tox.ini", "mypy.ini", ".flake8", // Python test/lint tooling (deps taşımaz)
-]);
-export function isBuildConfigFile(path: string): boolean {
-  if (path.includes("node_modules")) return false;
-  // Build/test-tooling config repo KÖKÜNDE bulunur (playwright.config.ts, vitest.config.ts, tsconfig.json).
-  // İç içe '*.config.ts' (ör. Angular src/app/app.config.ts) RUNTIME app-config olabilir → kök şartı bu
-  // yanlış-muafiyeti keser (kuşkuda prod kabul et, repro iste). Monorepo alt-config'i de güvenli tarafta kalır.
-  const norm = path.startsWith("./") ? path.slice(2) : path;
-  if (norm.includes("/")) return false;
-  const base = norm.toLowerCase();
-  const dot = base.lastIndexOf(".");
-  const ext = dot >= 0 ? base.slice(dot) : "";
-  // <ad>.config.<js-ext> — playwright/vitest/jest/vite/next/tailwind/postcss/eslint/rollup/webpack/cypress…
-  if (base.includes(".config.") && CONFIG_EXTS.has(ext)) return true;
-  // tsconfig*.json / jsconfig*.json (tsconfig.build.json dahil)
-  if (/^(ts|js)config(\.[\w-]+)*\.json$/.test(base)) return true;
-  // .<tool>rc / .<tool>rc.<ext> — eslintrc, prettierrc, babelrc, stylelintrc, swcrc…
-  if (/^\.[a-z]+rc(\.[\w-]+)?$/.test(base)) return true;
-  // diğer stack'lerin yaygın test/lint-tooling config'leri
-  return OTHER_CONFIG_BASENAMES.has(base);
-}
+// Dosya sınıflandırma (kaynak/test/kozmetik/config) 2026-07-16'da file-classify.ts'e
+// taşındı — TEK kaynak (eski üç tutarsız kopyanın birleşimi). Buradan re-export:
+// mevcut import yolları (phase-9-tech-debt, testler) kırılmadan çalışır.
+export {
+  isTestPath,
+  isProdPath,
+  isCosmeticFile,
+  isFeatureFile,
+  isBuildConfigFile,
+} from "./file-classify.js";
 
 // YZLLM gate-fix #1 (2026-06-19): Faz 8 repro-gate GÖREV-SINIFI-DUYARLI. Tip-only refactor / ölü-kod
 // removal / re-export düzenlemesi gibi STATIC-ONLY değişikliklerde runtime kırmızı→yeşil repro İMKANSIZ

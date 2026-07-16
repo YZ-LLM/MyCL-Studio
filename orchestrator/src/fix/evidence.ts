@@ -12,6 +12,7 @@ import {
   selectUnresolvedFindings,
   type RuntimeErrorRow,
 } from "../errors-db.js";
+import { hasSourceExt } from "../file-classify.js";
 import { getBlameForLines, getRecentCommits, isGitRepo } from "../git.js";
 import { log } from "../logger.js";
 
@@ -96,16 +97,9 @@ export function extractSourceLocations(
   return [...seen.entries()].map(([file, line]) => ({ file, line }));
 }
 
-const SOURCE_EXTS = [
-  ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
-  ".py", ".go", ".rs", ".java", ".kt", ".swift", ".ex", ".exs",
-  ".rb", ".php", ".vue", ".svelte",
-];
-
-export function hasSourceExt(p: string): boolean {
-  for (const e of SOURCE_EXTS) if (p.endsWith(e)) return true;
-  return false;
-}
+// Kaynak-uzantı bilgisi 2026-07-16'da file-classify.ts'e taşındı (üç tutarsız
+// kopyanın birleşimi — tek kaynak). Buradan re-export: mevcut import yolları korunur.
+export { hasSourceExt } from "../file-classify.js";
 
 /**
  * Serbest metinden (LLM plan özeti, kök neden) DOSYA YOLU token'larını çıkarır

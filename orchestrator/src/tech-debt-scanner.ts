@@ -220,22 +220,9 @@ export function resetLastTechDebtFindings(projectRoot: string): void {
 }
 
 // Test/spec dosyaları — tech-debt taraması dışı (mock/dummy/skip oralarda meşru).
-// Phase 8 kendi private kopyasını kullanır; Phase 9 (proje-geneli scope) bunu kullanır.
-const TEST_PATH_PATTERNS: RegExp[] = [
-  /\.test\.[tj]sx?$/,
-  /\.spec\.[tj]sx?$/,
-  /_test\.(py|go|rs)$/,
-  /test_.*\.py$/,
-  /\/__tests__\//,
-  /\/tests?\//,
-  /\/spec\//,
-];
-
-/** Bir yol test/spec dosyası mı (tech-debt taraması dışı). node_modules → false (zaten elenir). */
-export function isTestPath(path: string): boolean {
-  if (path.includes("node_modules")) return false;
-  return TEST_PATH_PATTERNS.some((re) => re.test(path));
-}
+// Desenler 2026-07-16'da file-classify.ts'e taşındı (üç tutarsız kopyanın birleşimi
+// — buradaki liste üst kümeydi, birleşim ona eşit). Re-export: import yolları korunur.
+export { isTestPath } from "./file-classify.js";
 
 // i18n / çeviri / locale dosyaları — UI etiket string'leri credential DEĞİL (yalnız
 // hardcoded_credential kontrolünden muaf; TODO/mock/skip yine taranır). Yaygın yapılar:
