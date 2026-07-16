@@ -224,6 +224,28 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı
   onaylı; pipeline'da otomatik koşmaz — pentest ağır olduğundan yükü kullanıcı kontrol
   eder). Bulgular önceliklenip otomatik düzeltme iterasyonlarına (Faz 3'ten) dönüşür.
+- **🧪 Full Test butonu** — istediğin an TÜM projeyi test eder: birim testleri,
+  entegrasyon, Playwright ile uçtan uca (E2E), tüm sayfaların taranması (konsol
+  hataları, kırık istekler, boş sayfa), erişilebilirlik ve görsel karşılaştırma.
+  Kullanıcı onaylı; koşulamayan bölüm nedeniyle birlikte görünür "atlandı" olur
+  (sessiz yeşil yok). Bulunan sorunlar iş kuyruğuna düzeltme işi olarak eklenir.
+- **🔧 Bakım Turu butonu** — güncel olmayan bağımlılıklar raporlanır; güvenliyse
+  (kaydedilmemiş değişiklik yoksa) bağımlılıklar mevcut sürüm aralığında
+  **muhafazakârca** güncellenir (büyük sürüm atlaması yok; komutlar stack
+  profilinden), güvenlik taramaları koşar ve **her zaman Full Test ile biter**.
+  Güncelleme öncesi duruma dönüş noktası raporda verilir; otomatik geri alma
+  yapılmaz. Sohbetten "bağımlılıkları güncelle" da aynı onaya düşer.
+- **🗺️ Plan Modu** — composer'daki pil açıkken yazdığın hedef önce sıralı bir
+  iş planına çevrilir (adımlar + gerekçeler); planı sen onaylarsın ("hiçbir şey
+  sorma" modunda bile), onaydan sonra her adım iş kuyruğuna eklenir ve sırayla
+  uygulanır. "Düzenle" ile planı geri bildirimle revize edebilirsin; onaylanan
+  plan `.mycl/plans/` altında kalıcı iz bırakır.
+- **⚡ Paralel iş kümeleme** — Ayarlar → Özellikler'den açılır (varsayılan
+  **kapalı**). Kuyrukta birbirinden bağımsız 2-3 iş beklerken kod yazma kısımları
+  izole çalışma kopyalarında aynı anda yapılır; birleştirme sonrası kalite
+  fazları (risk incelemesi + mekanik kapılar + E2E) birleşik sonuçta koşar.
+  Bağımsızlık kanıtlanamazsa veya git deposu temiz değilse görünür şekilde
+  sıralı akışa dönülür — iş kaybolmaz.
 - **Ajan Takımı** (**👥**) — sağ kenar çubuğundaki butonla açılan popup, o
   iterasyonda çalışan tüm çoklu-ajan takımlarını gösterir: hangi takım (Tasarım
   Paneli, Kök-neden Mercekleri, Modül Codegen, Faz 9 İncelemesi…), hangi fazda,
