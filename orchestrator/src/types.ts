@@ -34,6 +34,40 @@ export type StackId =
   | "unknown";
 
 /**
+ * Profili OLAN tüm stack'ler ("unknown" hariç) — profil-birleşimi gereken yerler
+ * (ör. stack bilinmezken eksik-bağımlılık imza birleşimi) buradan yürür.
+ * Derleme zamanı bütünlük: StackId'ye eleman eklenip bu dizi unutulursa tsc kırmızı.
+ */
+export const ALL_STACK_IDS = [
+  "node-npm",
+  "node-yarn",
+  "node-pnpm",
+  "node-bun",
+  "deno",
+  "rust",
+  "python-poetry",
+  "python-uv",
+  "python-pip",
+  "go",
+  "ruby",
+  "php",
+  "maven",
+  "gradle",
+  "elixir",
+  "dart",
+  "swift",
+  "dotnet",
+] as const satisfies readonly StackId[];
+
+// Bütünlük kontrolü: ALL_STACK_IDS ∪ {"unknown"} tam olarak StackId olmalı.
+// StackId'ye yeni eleman eklenip dizi unutulursa bu satır derlenmez.
+type _AllStackIdsExhaustive = Exclude<StackId, (typeof ALL_STACK_IDS)[number] | "unknown"> extends never
+  ? true
+  : never;
+const _allStackIdsExhaustive: _AllStackIdsExhaustive = true;
+void _allStackIdsExhaustive;
+
+/**
  * Proje tipi — Phase 2 hassasiyet sonu Haiku ile sınıflandırılır. Faz 16 (E2E)
  * ve Faz 17 (Load) test runner seçimi + Faz 5/7 skip kararı buna bağlıdır.
  * Web app → Playwright, API → hurl/supertest, CLI → shell, library → null vb.

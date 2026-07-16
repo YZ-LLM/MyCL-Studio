@@ -191,4 +191,69 @@ describe("profile-loader schema validation (QC B4)", () => {
     expect(profile!.commands.lint).toBe("echo lint");
     expect(profile!.commands.perf).toBeNull();
   });
+
+  // missing_deps_signatures doğrulaması — bozuk imza load anında patlar (KATI #4).
+  it("_loadProfileFromPath accepts valid missing_deps_signatures", async () => {
+    const path = await writeFixture("sigs-valid.json", {
+      stack_id: "test-stack",
+      commands: {},
+      missing_deps_signatures: ["ModuleNotFoundError", "No module named"],
+    });
+    const profile = await _loadProfileFromPath(path);
+    expect(profile!.missing_deps_signatures).toEqual([
+      "ModuleNotFoundError",
+      "No module named",
+    ]);
+  });
+
+  it("_loadProfileFromPath accepts empty missing_deps_signatures (kasıtlı hariç tutma)", async () => {
+    const path = await writeFixture("sigs-empty.json", {
+      stack_id: "test-stack",
+      commands: {},
+      missing_deps_signatures: [],
+    });
+    const profile = await _loadProfileFromPath(path);
+    expect(profile!.missing_deps_signatures).toEqual([]);
+  });
+
+  it("_loadProfileFromPath loads profile without missing_deps_signatures field", async () => {
+    const path = await writeFixture("sigs-absent.json", {
+      stack_id: "test-stack",
+      commands: {},
+    });
+    const profile = await _loadProfileFromPath(path);
+    expect(profile).not.toBeNull();
+    expect(profile!.missing_deps_signatures).toBeUndefined();
+  });
+
+  it("_loadProfileFromPath throws when missing_deps_signatures is not an array", async () => {
+    const path = await writeFixture("sigs-notarray.json", {
+      stack_id: "test-stack",
+      commands: {},
+      missing_deps_signatures: "ModuleNotFoundError",
+    });
+    await expect(_loadProfileFromPath(path)).rejects.toThrow(/dizi olmalı/);
+  });
+
+  it("_loadProfileFromPath throws on non-string signature element with index", async () => {
+    const path = await writeFixture("sigs-badelem.json", {
+      stack_id: "test-stack",
+      commands: {},
+      missing_deps_signatures: ["ok", 42],
+    });
+    await expect(_loadProfileFromPath(path)).rejects.toThrow(
+      /missing_deps_signatures\[1\] string olmalı/,
+    );
+  });
+
+  it("_loadProfileFromPath throws on invalid regex source with index", async () => {
+    const path = await writeFixture("sigs-badregex.json", {
+      stack_id: "test-stack",
+      commands: {},
+      missing_deps_signatures: ["([unclosed"],
+    });
+    await expect(_loadProfileFromPath(path)).rejects.toThrow(
+      /missing_deps_signatures\[0\] geçersiz regex/,
+    );
+  });
 });

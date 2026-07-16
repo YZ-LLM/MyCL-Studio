@@ -21,6 +21,10 @@ import type { ProjectType, StackId } from "./types.js";
 export type ProfileCommandKey =
   | "install"
   | "dev"
+  // Generic "çalıştır" komutu — web dev-server olmayan çalıştırma (cargo run,
+  // python main.py). `dev` web dev-server'dır; ikisi ayrı niyettir. Profilde
+  // run yoksa caller dev'e düşer (commandFor).
+  | "run"
   | "build"
   | "test"
   | "lint"
@@ -72,6 +76,11 @@ export interface StackProfile {
    *  dart→".dart_tool", elixir→"deps". PROAKTİF deps kontrolü bunu kullanır (crash'ten önce: dizin yok/boşsa kur).
    *  Global cache kullanan stack'ler (python/go/rust) bunu BİLDİRMEZ → yalnız reaktif yol (KATI #1: bilgi profilde). */
   deps_dir?: string;
+  /** Eksik-bağımlılık crash imzaları (regex kaynakları) — service-provision
+   *  reaktif deps tespiti bu stack'in crash çıktısında bunları arar.
+   *  BOŞ dizi meşru = "bu stack için imza bildirilmiyor" (kasıtlı hariç tutma;
+   *  ör. ruby/rust'ta yerel-typo ile ayırt edilemez). Alan hiç yoksa [] sayılır. */
+  missing_deps_signatures?: string[];
 }
 
 /**
@@ -79,6 +88,19 @@ export interface StackProfile {
  * (re-read denemesi yapılmaz). undefined (Map'te yok) = henüz denenmedi.
  */
 const profileCache = new Map<StackId, StackProfile | null>();
+
+/** StackProfile'ın bilinen üst-seviye anahtarları — bilinmeyene load'da uyarı verilir. */
+const KNOWN_PROFILE_KEYS: ReadonlySet<string> = new Set([
+  "stack_id",
+  "commands",
+  "e2e_by_project_type",
+  "load_by_project_type",
+  "default_port",
+  "manifest_files",
+  "build_tool",
+  "deps_dir",
+  "missing_deps_signatures",
+]);
 
 /**
  * Komut değerinin geçerli olup olmadığını doğrular: `string | null` dışında
@@ -148,6 +170,31 @@ export async function _loadProfileFromPath(
       }
       for (const [k, v] of Object.entries(block as Record<string, unknown>)) {
         validateCommandValue(v, `${blockKey}.${k}`, path);
+      }
+    }
+    // missing_deps_signatures: dizi + her eleman derlenebilir regex kaynağı.
+    // Bozuk imza load anında patlasın (KATI #4) — runtime'da sessiz kaçırma olmasın.
+    const sigs = (parsed as Record<string, unknown>).missing_deps_signatures;
+    if (sigs !== undefined) {
+      if (!Array.isArray(sigs)) {
+        throw new Error(`${path}: missing_deps_signatures dizi olmalı, ${typeof sigs} geldi`);
+      }
+      sigs.forEach((s, i) => {
+        if (typeof s !== "string") {
+          throw new Error(`${path}: missing_deps_signatures[${i}] string olmalı, ${typeof s} geldi`);
+        }
+        try {
+          new RegExp(s);
+        } catch (e) {
+          throw new Error(`${path}: missing_deps_signatures[${i}] geçersiz regex: ${String(e)}`);
+        }
+      });
+    }
+    // Bilinmeyen üst-seviye anahtar → uyar ama FIRLATMA (kullanıcının elle
+    // düzenlediği profildeki yazım hatası görünür olsun, pipeline kilitlenmesin).
+    for (const key of Object.keys(parsed as Record<string, unknown>)) {
+      if (!KNOWN_PROFILE_KEYS.has(key)) {
+        log.warn("profile-loader", "bilinmeyen profil anahtarı (yazım hatası olabilir)", { path, key });
       }
     }
     const profile = parsed as StackProfile;
