@@ -35,5 +35,10 @@
     "package.json"
   ],
   "build_tool": "vite",
-  "deps_dir": "node_modules"
+  "deps_dir": "node_modules",
+  "missing_deps_signatures": [
+    "ERR_MODULE_NOT_FOUND",
+    "Cannot find package\\s+['\"]",
+    "could not determine executable to run"
+  ]
 }

@@ -14,7 +14,12 @@ import { join, resolve, relative, isAbsolute } from "node:path";
 import { tryDevServerChain, type DevServerChainResult } from "./dev-server-launcher.js";
 import { emitChatMessage } from "./ipc.js";
 import { safeEnv } from "./safe-env.js";
-import { loadProfile, resolveCommand } from "./profile-loader.js";
+import {
+  allMissingDepsSignatures,
+  compileMissingDepsSignatures,
+  loadProfile,
+  resolveCommand,
+} from "./profile-loader.js";
 import { loadKnownServices, type KnownService } from "./provision-services.js";
 import type { StackId } from "./types.js";
 
@@ -67,7 +72,11 @@ export async function launchWithProvision(
 
   // REAKTİF FALLBACK — proaktif YAKALAMADIYSA (non-node stack; ya da node_modules "dolu görünüp" runtime'da bir
   // paket eksikse) crash "Cannot find module"/eşdeğer imzasından tespit + kur + BİR KEZ retry. Servisten ÖNCE.
-  if (!depsHandled && detectMissingDeps(crashOut, pkgDeps)) {
+  // İmzalar PROFİLDEN (stack biliniyorsa dar tespit); profil yoksa tüm profillerin birleşimi (eski davranış).
+  const depSigs = profile
+    ? compileMissingDepsSignatures(profile.missing_deps_signatures ?? [])
+    : await allMissingDepsSignatures();
+  if (!depsHandled && detectMissingDeps(crashOut, pkgDeps, depSigs)) {
     const ok = await runInstall(`📦 Uygulama başlamadı: bağımlılıklar kurulu değil. \`${installCmd}\` ile kuruluyor…`);
     if (ok) {
       const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
@@ -195,12 +204,12 @@ export async function readManifestText(
   return parts.join("\n");
 }
 
-// Non-node ekosistem "kurulmamış bağımlılık" crash imzaları. MAHKEME (2. tur) uyarısı: yalnız PAKET/BAĞIMLILIK
-// sistemine ÖZGÜ, kesin imzalar tutuldu (genel "dosya/modül bulunamadı" olanlar YEREL-yol typo'sundan ayırt
-// edilemez → yanlış-pozitif). Çıkarılanlar: Ruby `cannot load such file --`, PHP `Failed opening required`,
-// Rust `use of undeclared crate` (hepsi yerel-modül typo'suyla aynı metni verir). Tutulanlar paket-sistemine gömülü.
-const OTHER_STACK_MISSING_DEPS_RE =
-  /ERR_MODULE_NOT_FOUND|ModuleNotFoundError|No module named|Cannot find package\s+['"]|could not determine executable to run|vendor\/autoload|Couldn't resolve the package\s+['"]|no required module provides package/i;
+// "Kurulmamış bağımlılık" crash imzaları 2026-07-16'da PROFİLLERE taşındı
+// (missing_deps_signatures — stack başına; boş dizi = kasıtlı hariç tutma).
+// MAHKEME (2. tur) kararı VERİ olarak yaşıyor: Ruby `cannot load such file --`,
+// PHP `Failed opening required`, Rust `use of undeclared crate` imzaları yerel-yol
+// typo'sundan ayırt edilemediği için o profiller BOŞ bildirir (yanlış-pozitif önlenir).
+// Stack bilinmiyorsa allMissingDepsSignatures (tüm profillerin birleşimi) kullanılır.
 
 /** Bir bare specifier'ın KÖK paket adı (@scope/name → @scope/name; express/lib/x → express; routes/db → routes). */
 function rootPackageName(spec: string): string {
@@ -223,13 +232,20 @@ function isDeclaredDep(pkg: string, pkgDepsText: string): boolean {
 }
 
 /**
- * Crash çıktısı KURULMAMIŞ bağımlılık (paket) hatası mı? SAF (testli). Stack-bağımsız imzalar.
- * Node CJS ("Cannot find module 'X'"): X BARE paket olmalı (./ veya / ile başlayan YEREL yol typo'su install ile
- * çözülmez) VE (mahkeme yanlış-pozitif fix) X package.json'da BİLDİRİLMİŞ olmalı — `require('routes/db')` gibi `./`
- * unutulmuş yerel yol bare görünür ama deps değildir → install çözmez. pkgDepsText YOKSA (okunamadı) bare→true (cave
- * gibi node_modules hiç yok senaryosu için güvenli taraf). ESM/Python/Ruby/PHP/Dart/Go/Rust imzaları zaten specifik.
+ * Crash çıktısı KURULMAMIŞ bağımlılık (paket) hatası mı? SAF (testli).
+ * `signatures`: aktif stack'in PROFİLİNDEN gelen imzalar (stack biliniyorsa dar =
+ * kök hassasiyet: Node projesinde Python imzası yanlış install tetiklemez); stack
+ * bilinmiyorsa allMissingDepsSignatures birleşimi (eski davranış, sıfır hardcode).
+ * Node CJS ("Cannot find module 'X'") MEKANİZMASI kodda kalır (imza değil, package.json
+ * manifest'ine kilitli FP filtresi): X BARE paket olmalı (./ veya / YEREL yol typo'su
+ * install ile çözülmez) VE package.json'da BİLDİRİLMİŞ olmalı. pkgDepsText YOKSA
+ * bare→true (cave gibi node_modules hiç yok senaryosu için güvenli taraf).
  */
-export function detectMissingDeps(crashOutput: string, pkgDepsText = ""): boolean {
+export function detectMissingDeps(
+  crashOutput: string,
+  pkgDepsText = "",
+  signatures: readonly RegExp[],
+): boolean {
   if (!crashOutput) return false;
   const m = /Cannot find module\s+['"]([^'"]+)['"]/i.exec(crashOutput);
   if (m) {
@@ -241,7 +257,7 @@ export function detectMissingDeps(crashOutput: string, pkgDepsText = ""): boolea
       // pkgDepsText var ama root bildirilmemiş → yerel-yol typo'su / undeclared → install çözmez (FP önle)
     }
   }
-  return OTHER_STACK_MISSING_DEPS_RE.test(crashOutput);
+  return signatures.some((re) => re.test(crashOutput));
 }
 
 /**

@@ -32,5 +32,9 @@
   "manifest_files": [
     "requirements.txt",
     "pyproject.toml"
+  ],
+  "missing_deps_signatures": [
+    "ModuleNotFoundError",
+    "No module named"
   ]
 }

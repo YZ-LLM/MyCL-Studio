@@ -28,5 +28,6 @@
   "manifest_files": [
     "deno.json",
     "deno.jsonc"
-  ]
+  ],
+  "missing_deps_signatures": []
 }

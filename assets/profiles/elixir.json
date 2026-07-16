@@ -30,5 +30,6 @@
     "mix.exs",
     "mix.lock"
   ],
-  "deps_dir": "deps"
+  "deps_dir": "deps",
+  "missing_deps_signatures": []
 }

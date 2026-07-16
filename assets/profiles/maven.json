@@ -25,5 +25,8 @@
     "default": null
   },
   "default_port": 8080,
-  "manifest_files": ["pom.xml"]
+  "manifest_files": [
+    "pom.xml"
+  ],
+  "missing_deps_signatures": []
 }

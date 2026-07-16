@@ -30,5 +30,8 @@
     "composer.json",
     "composer.lock"
   ],
-  "deps_dir": "vendor"
+  "deps_dir": "vendor",
+  "missing_deps_signatures": [
+    "vendor\\/autoload"
+  ]
 }

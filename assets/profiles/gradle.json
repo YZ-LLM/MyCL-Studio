@@ -30,5 +30,6 @@
     "build.gradle",
     "build.gradle.kts",
     "settings.gradle"
-  ]
+  ],
+  "missing_deps_signatures": []
 }

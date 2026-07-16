@@ -11,6 +11,7 @@
 import { readFile } from "node:fs/promises";
 import { log } from "./logger.js";
 import { profilePath } from "./phase-registry.js";
+import { ALL_STACK_IDS } from "./types.js";
 import type { ProjectType, StackId } from "./types.js";
 
 /**
@@ -249,8 +250,37 @@ export function resolveProjectTypeCommand(
 }
 
 /**
+ * Profil imza kaynaklarını derle (case-insensitive — eski hardcode birleşim
+ * regex'i /i idi, davranış korunur). Kaynaklar loader'da doğrulandı → burada
+ * derleme hatası imkansız.
+ */
+export function compileMissingDepsSignatures(sources: readonly string[]): RegExp[] {
+  return sources.map((s) => new RegExp(s, "i"));
+}
+
+let unionSigsCache: RegExp[] | null = null;
+
+/**
+ * TÜM profillerin missing_deps_signatures BİRLEŞİMİ — stack bilinmediğinde
+ * (profil null) reaktif deps tespiti için fallback. Eski hardcode birleşim
+ * regex'inin sıfır-hardcode karşılığı. Bozuk profil → loadProfile THROW
+ * (görünür; sessizce birleşimden düşürülmez — KATI #4).
+ */
+export async function allMissingDepsSignatures(): Promise<RegExp[]> {
+  if (unionSigsCache) return unionSigsCache;
+  const seen = new Set<string>();
+  for (const id of ALL_STACK_IDS) {
+    const p = await loadProfile(id);
+    for (const s of p?.missing_deps_signatures ?? []) seen.add(s);
+  }
+  unionSigsCache = compileMissingDepsSignatures([...seen]);
+  return unionSigsCache;
+}
+
+/**
  * Test için cache temizleme — vitest'lerde profile-loader'ı izole tutmak için.
  */
 export function _clearProfileCache(): void {
   profileCache.clear();
+  unionSigsCache = null;
 }

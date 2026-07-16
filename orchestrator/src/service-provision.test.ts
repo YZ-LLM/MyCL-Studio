@@ -12,6 +12,11 @@ import {
   findComposeFile,
 } from "./service-provision.js";
 import { loadKnownServices } from "./provision-services.js";
+import {
+  allMissingDepsSignatures,
+  compileMissingDepsSignatures,
+  loadProfile,
+} from "./profile-loader.js";
 
 // Tespit testleri GERÇEK veri dosyasıyla (assets/provision/services.json) koşar —
 // böylece hem saf mantık hem sevk edilen tablo birlikte doğrulanır (anti-drift).
@@ -69,59 +74,77 @@ describe("detectMissingService — crash'ten eksik servisi tespit", () => {
   });
 });
 
-describe("detectMissingDeps — kurulmamış bağımlılık crash imzası", () => {
+describe("detectMissingDeps — kurulmamış bağımlılık crash imzası (imzalar PROFİLLERDEN)", () => {
   const CAVE_PKG = '{"dependencies":{"express":"^4","mysql2":"^3"}}';
-  it("cave gerçek crash: Cannot find module 'express' + package.json'da bildirilmiş → true", () => {
+  // İmzalar gerçek profillerden — uygunluk: kod + sevk edilen veri birlikte doğrulanır.
+  const sigsOf = async (stack: "node-npm" | "python-pip" | "php" | "dart" | "go" | "ruby" | "rust") =>
+    compileMissingDepsSignatures((await loadProfile(stack))?.missing_deps_signatures ?? []);
+
+  it("cave gerçek crash: Cannot find module 'express' + package.json'da bildirilmiş → true", async () => {
     const log =
       "Error: Cannot find module 'express'\nRequire stack:\n- /proj/app.js\n- /proj/bin/www\n    at Function._resolveFilename";
-    expect(detectMissingDeps(log, CAVE_PKG)).toBe(true);
+    expect(detectMissingDeps(log, CAVE_PKG, await sigsOf("node-npm"))).toBe(true);
   });
-  it("package.json okunamadı (boş) + bare paket → true (güvenli taraf: node_modules hiç yok)", () => {
-    expect(detectMissingDeps("Error: Cannot find module 'express'")).toBe(true);
+  it("package.json okunamadı (boş) + bare paket → true (güvenli taraf: node_modules hiç yok)", async () => {
+    expect(detectMissingDeps("Error: Cannot find module 'express'", "", await sigsOf("node-npm"))).toBe(true);
   });
-  it("scoped bildirilmiş paket → true", () => {
-    expect(detectMissingDeps("Error: Cannot find module '@nestjs/core'", '{"dependencies":{"@nestjs/core":"^10"}}')).toBe(
-      true,
-    );
+  it("scoped bildirilmiş paket → true", async () => {
+    expect(
+      detectMissingDeps("Error: Cannot find module '@nestjs/core'", '{"dependencies":{"@nestjs/core":"^10"}}', await sigsOf("node-npm")),
+    ).toBe(true);
   });
-  it("YANLIŞ-POZİTİF FIX: './' unutulmuş yerel yol (routes/db) package.json'da YOK → false (install çözmez)", () => {
+  it("YANLIŞ-POZİTİF FIX: './' unutulmuş yerel yol (routes/db) package.json'da YOK → false (install çözmez)", async () => {
     // require('routes/db') — bare görünür ama yerel dosya; 'routes' bir bağımlılık değil.
-    expect(detectMissingDeps("Error: Cannot find module 'routes/db'", CAVE_PKG)).toBe(false);
+    expect(detectMissingDeps("Error: Cannot find module 'routes/db'", CAVE_PKG, await sigsOf("node-npm"))).toBe(false);
   });
-  it("YEREL yol typo'su (./routes/db) → false", () => {
-    expect(detectMissingDeps("Error: Cannot find module './routes/db'", CAVE_PKG)).toBe(false);
+  it("YEREL yol typo'su (./routes/db) → false", async () => {
+    expect(detectMissingDeps("Error: Cannot find module './routes/db'", CAVE_PKG, await sigsOf("node-npm"))).toBe(false);
   });
-  it("mutlak yol (/abs/path) → false", () => {
-    expect(detectMissingDeps("Error: Cannot find module '/opt/app/missing'", CAVE_PKG)).toBe(false);
+  it("mutlak yol (/abs/path) → false", async () => {
+    expect(detectMissingDeps("Error: Cannot find module '/opt/app/missing'", CAVE_PKG, await sigsOf("node-npm"))).toBe(false);
   });
-  it("ESM node ERR_MODULE_NOT_FOUND → true", () => {
-    expect(detectMissingDeps("code: 'ERR_MODULE_NOT_FOUND'")).toBe(true);
+  it("ESM node ERR_MODULE_NOT_FOUND → true (node profili imzası)", async () => {
+    expect(detectMissingDeps("code: 'ERR_MODULE_NOT_FOUND'", "", await sigsOf("node-npm"))).toBe(true);
   });
-  it("Python ModuleNotFoundError → true", () => {
-    expect(detectMissingDeps("ModuleNotFoundError: No module named 'flask'")).toBe(true);
+  it("Python ModuleNotFoundError → python profili imzasıyla true; node imzalarıyla FALSE (kök hassasiyet)", async () => {
+    const log = "ModuleNotFoundError: No module named 'flask'";
+    expect(detectMissingDeps(log, "", await sigsOf("python-pip"))).toBe(true);
+    // Stack BİLİNİYORSA dar imza: Node projesinde Python imzası yanlış install tetiklemez.
+    expect(detectMissingDeps(log, "", await sigsOf("node-npm"))).toBe(false);
   });
-  it("PHP composer kurulmamış (vendor/autoload — paket-sistemine özgü) → true", () => {
-    expect(detectMissingDeps("Fatal error: require(): Failed opening 'vendor/autoload.php'")).toBe(true);
+  it("PHP composer kurulmamış (vendor/autoload — paket-sistemine özgü) → true", async () => {
+    expect(detectMissingDeps("Fatal error: require(): Failed opening 'vendor/autoload.php'", "", await sigsOf("php"))).toBe(true);
   });
-  it("Dart eksik paket (package: şeması) → true", () => {
-    expect(detectMissingDeps("Error: Couldn't resolve the package 'http' in 'package:http/http.dart'")).toBe(true);
+  it("Dart eksik paket (package: şeması) → true", async () => {
+    expect(
+      detectMissingDeps("Error: Couldn't resolve the package 'http' in 'package:http/http.dart'", "", await sigsOf("dart")),
+    ).toBe(true);
   });
-  it("Go eksik modül → true", () => {
-    expect(detectMissingDeps("no required module provides package github.com/foo/bar")).toBe(true);
+  it("Go eksik modül → true", async () => {
+    expect(detectMissingDeps("no required module provides package github.com/foo/bar", "", await sigsOf("go"))).toBe(true);
   });
-  it("YANLIŞ-POZİTİF: Ruby/PHP/Rust genel 'dosya bulunamadı' (yerel typo ile ayırt edilemez) → false", () => {
-    // Bu imzalar bilinçli ÇIKARILDI (mahkeme): yerel-modül typo'suyla aynı metni verir.
-    expect(detectMissingDeps("`require': cannot load such file -- ./config (LoadError)")).toBe(false);
-    expect(detectMissingDeps("error[E0433]: use of undeclared crate or module `foo`")).toBe(false);
+  it("YANLIŞ-POZİTİF: Ruby/Rust imzaları hem KENDİ (boş) listelerinde hem BİRLEŞİMDE yok → false", async () => {
+    // Mahkeme kararı VERİ olarak yaşıyor: bu profiller imza BİLDİRMEZ (yerel typo ile ayırt edilemez).
+    const rubyLog = "`require': cannot load such file -- ./config (LoadError)";
+    const rustLog = "error[E0433]: use of undeclared crate or module `foo`";
+    expect((await sigsOf("ruby")).length).toBe(0);
+    expect((await sigsOf("rust")).length).toBe(0);
+    const union = await allMissingDepsSignatures();
+    expect(detectMissingDeps(rubyLog, "", union)).toBe(false);
+    expect(detectMissingDeps(rustLog, "", union)).toBe(false);
   });
-  it("npx çalıştırılabilir yok → true", () => {
-    expect(detectMissingDeps("npm error could not determine executable to run")).toBe(true);
+  it("npx çalıştırılabilir yok → node imzasıyla + birleşimle true", async () => {
+    const log = "npm error could not determine executable to run";
+    expect(detectMissingDeps(log, "", await sigsOf("node-npm"))).toBe(true);
+    expect(detectMissingDeps(log, "", await allMissingDepsSignatures())).toBe(true);
   });
-  it("kod hatası (TypeError) deps-eksik DEĞİL → false", () => {
-    expect(detectMissingDeps("TypeError: Cannot read properties of undefined (reading 'x')")).toBe(false);
+  it("kod hatası (TypeError) deps-eksik DEĞİL → false (birleşimle bile)", async () => {
+    expect(
+      detectMissingDeps("TypeError: Cannot read properties of undefined (reading 'x')", "", await allMissingDepsSignatures()),
+    ).toBe(false);
   });
-  it("boş crash → false", () => {
-    expect(detectMissingDeps("")).toBe(false);
+  it("boş crash → false", async () => {
+    expect(detectMissingDeps("", "", await allMissingDepsSignatures())).toBe(false);
   });
 });
 

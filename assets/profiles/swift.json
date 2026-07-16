@@ -28,5 +28,6 @@
   "default_port": 8080,
   "manifest_files": [
     "Package.swift"
-  ]
+  ],
+  "missing_deps_signatures": []
 }

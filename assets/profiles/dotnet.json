@@ -31,5 +31,6 @@
     "*.csproj",
     "*.sln",
     "*.fsproj"
-  ]
+  ],
+  "missing_deps_signatures": []
 }

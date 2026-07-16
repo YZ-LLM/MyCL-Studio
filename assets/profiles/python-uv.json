@@ -32,5 +32,9 @@
   "manifest_files": [
     "pyproject.toml",
     "uv.lock"
+  ],
+  "missing_deps_signatures": [
+    "ModuleNotFoundError",
+    "No module named"
   ]
 }

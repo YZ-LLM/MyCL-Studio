@@ -29,5 +29,8 @@
     "pubspec.yaml",
     "pubspec.lock"
   ],
-  "deps_dir": ".dart_tool"
+  "deps_dir": ".dart_tool",
+  "missing_deps_signatures": [
+    "Couldn't resolve the package\\s+['\"]"
+  ]
 }

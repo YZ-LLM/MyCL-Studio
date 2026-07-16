@@ -29,5 +29,6 @@
   "manifest_files": [
     "Gemfile",
     "Gemfile.lock"
-  ]
+  ],
+  "missing_deps_signatures": []
 }

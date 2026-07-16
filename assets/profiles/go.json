@@ -29,5 +29,8 @@
   "manifest_files": [
     "go.mod",
     "go.sum"
+  ],
+  "missing_deps_signatures": [
+    "no required module provides package"
   ]
 }
