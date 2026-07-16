@@ -24,7 +24,7 @@ import {
   isProdPath,
   isCosmeticFile,
   isFeatureFile,
-  isBuildConfigFile,
+  isRuntimeProdFile,
 } from "./file-classify.js";
 import { getChangedFiles, getDiffSinceRef } from "./git.js";
 import { safeEnv } from "./safe-env.js";
@@ -163,6 +163,18 @@ export function isStaticOnlyChange(unifiedDiff: string): boolean {
 // Yaygın test runner pattern'leri. Faz 8 audit observer Bash command'ı bu
 // listeye karşı test eder; match olursa exit code 0→tdd-green, nonzero→tdd-red
 // yazar. Yeni runner gerekirse buraya ekle.
+/**
+ * SAF: repro-first'ün "runtime prod değişikliği yok" muafiyeti — değişen dosya listesi
+ * GÜVENİLİR (non-null, non-boş) ve İÇİNDE runtime prod dosyası YOK ise true.
+ * (test/config/kozmetik/manifest/feature karışımı → düzeltilecek prod kod-yolu bug'ı yok →
+ * kırmızı→yeşil repro imkansız/anlamsız.) null/boş liste → false (fail-safe: repro kalır).
+ * Export — birim testlenebilir (evaluateGate'teki tek generic muafiyetin çekirdeği).
+ */
+export function nonRuntimeProdExempt(changed: string[] | null): boolean {
+  if (!changed || changed.length === 0) return false;
+  return changed.every((f) => !isRuntimeProdFile(f));
+}
+
 const TEST_CMD_PATTERNS: RegExp[] = [
   /\bnpm\s+(test|t)\b/,
   /\bpnpm\s+(test|t)\b/,
@@ -727,71 +739,42 @@ export class Phase8Controller {
         reproRequired = true; // belirsizse güvenli taraf: repro iste
       }
     }
-    // GÖREV-SINIFI-DUYARLI escape (YZLLM gate-fix #1, 2026-06-19): değişiklik STATIC-ONLY ise (tip-only/
-    // ölü-kod/re-export — eklenen runtime statement YOK + yeni prod dosyası YOK) runtime kırmızı→yeşil
-    // İMKANSIZ → repro zorunluluğunu DÜŞÜR. Suite-green (tddOk) + tech-debt + AC kontrolleri AYNEN kalır →
-    // gate zayıflamaz, regresyon yine yakalanır. Sadece imkansız-repro döngüsü (Faz 11↔Faz 8) kırılır.
-    if (reproRequired && this.checkpointRef) {
-      try {
-        const diff = await getDiffSinceRef(this.state.project_root, this.checkpointRef);
-        // Yeni (untracked) prod dosyası diff'te görünmez → static-only sayma (olası runtime kod).
-        const hasNewProdFile = (changedForRepro ?? []).some((f) => isProdPath(f) && !diff.includes(f));
-        if (diff && !hasNewProdFile && isStaticOnlyChange(diff)) {
-          reproRequired = false;
-          await appendAudit(this.state.project_root, {
-            ts: Date.now(),
-            phase: 8,
-            event: "repro-static-only-exempt",
-            caller: "mycl-orchestrator",
-            detail: "tip-only/ölü-kod değişiklik — runtime red→green imkansız; suite-green regresyon guard'ı kalır",
-          }).catch((e) => log.error("phase-8", "repro-static-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
+    // TEK GENERIC MUAFİYET (YZLLM 2026-07-16, "çözümler her zaman generic"): eski üç reaktif
+    // görev-sınıfı bloğu (static-only 06-19, test-only samsung 06-20, config-only Vestel 06-21)
+    // tek kurala indi — repro zorunlu ⇔ değişenler içinde static olduğu KANITLANAMAYAN en az bir
+    // RUNTIME PROD dosyası var (isRuntimeProdFile = kaynak uzantı + !test + !kök-build-config).
+    //  - runtime prod YOK (test/config/kozmetik/manifest/feature karışımı dahil) → repro imkansız/anlamsız → muaf.
+    //  - runtime prod VAR + git checkpoint → diff runtime-prod dosyalara DARALTILMIŞ static-only kanıtı denenir
+    //    (tip-only/ölü-kod; test dosyasına eklenen runtime satır prod kanıtını artık bozmaz). Untracked yeni
+    //    prod dosyası diff'te görünmez → static sayılmaz (güvenli taraf).
+    //  - copy yolunda satır-diff kanıtı yok → runtime prod değiştiyse repro AYNEN zorunlu (fail-safe).
+    // changedForRepro null (tespit güvenilmez) → HİÇ muafiyet yok (fail-safe). Suite-green (tddOk) +
+    // tech-debt + AC-coverage kontrolleri AYNEN kalır → gate ZAYIFLAMAZ.
+    if (reproRequired && changedForRepro && changedForRepro.length > 0) {
+      let exemptCategory: string | null = null;
+      if (nonRuntimeProdExempt(changedForRepro)) {
+        exemptCategory = "runtime-prod-değişikliği-yok";
+      } else if (this.checkpointRef) {
+        try {
+          const runtimeProd = changedForRepro.filter(isRuntimeProdFile);
+          const diff = await getDiffSinceRef(this.state.project_root, this.checkpointRef, runtimeProd);
+          // Yeni (untracked) prod dosyası diff'te görünmez → static-only sayma (olası runtime kod).
+          const hasNewProdFile = runtimeProd.some((f) => !diff.includes(f));
+          if (diff && !hasNewProdFile && isStaticOnlyChange(diff)) exemptCategory = "static-only";
+        } catch {
+          /* belirsizse reproRequired aynı kalır (güvenli taraf) */
         }
-      } catch {
-        /* belirsizse reproRequired aynı kalır (güvenli taraf) */
       }
-    }
-    // GÖREV-SINIFI #2 (YZLLM 2026-06-20, samsung_BO canlı): fix YALNIZ test/non-prod dosya değiştirdiyse
-    // ortada düzeltilen bir PROD bug'ı YOKTUR → repro-first MUAF. AC-coverage gate-fail'i "eksik test ekle"
-    // der; "bug'ı yeniden üreten kırmızı→yeşil" İMKANSIZ + anlamsız (düzeltilecek prod davranışı yok) →
-    // sonsuz döngü. Prod dosyası değiştiyse repro AYNEN zorunlu; suite-green + AC-coverage + tech-debt
-    // kontrolleri burada DEĞİŞMEZ → gate zayıflamaz, yalnız imkansız-repro döngüsü kırılır.
-    if (
-      reproRequired &&
-      changedForRepro &&
-      changedForRepro.length > 0 &&
-      changedForRepro.every((f) => !isProdPath(f))
-    ) {
-      reproRequired = false;
-      await appendAudit(this.state.project_root, {
-        ts: Date.now(),
-        phase: 8,
-        event: "repro-test-only-exempt",
-        caller: "mycl-orchestrator",
-        detail: "yalnız test/non-prod dosya değişti — düzeltilecek prod bug yok; suite-green+AC-coverage guard kalır",
-      }).catch((e) => log.error("phase-8", "repro-test-only-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
-    }
-    // GÖREV-SINIFI #3 (YZLLM 2026-06-21, Vestel canlı): fix YALNIZ build/test-tooling CONFIG (+ test/
-    // kozmetik) dosyası değiştirdiyse — playwright.config.ts'e testMatch eklemek gibi — bu bir test-toplama/
-    // derleme ayarıdır, ÇALIŞAN PROD kod-yolu bug'ı DEĞİL → runtime kırmızı→yeşil repro İMKANSIZ/anlamsız.
-    // Mevcut iki muafiyet bunu kaçırıyordu: config dosyası '.ts' uzantısıyla prod sayılıyor (test-only düşmez)
-    // ve 'testMatch: ...' obje-property'si static-safe değil (static-only düşmez) → reproRequired=true kalıp
-    // imkansız-repro döngüsü (Faz 16↔Faz 8, 6 boşa tur). Suite-green + AC-coverage + tech-debt kontrolleri
-    // AYNEN kalır → gate ZAYIFLAMAZ. (Mahkeme reaktif safety-net; bu ise önden-çözme: hatayı kaynağında ele.)
-    if (
-      reproRequired &&
-      changedForRepro &&
-      changedForRepro.length > 0 &&
-      changedForRepro.every((f) => isBuildConfigFile(f) || isTestPath(f) || isCosmeticFile(f)) &&
-      changedForRepro.some((f) => isBuildConfigFile(f))
-    ) {
-      reproRequired = false;
-      await appendAudit(this.state.project_root, {
-        ts: Date.now(),
-        phase: 8,
-        event: "repro-config-only-exempt",
-        caller: "mycl-orchestrator",
-        detail: "yalnız build/test-config dosyası değişti — prod kod-yolu bug'ı yok; suite-green+AC-coverage guard kalır",
-      }).catch((e) => log.error("phase-8", "repro-config-only-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
+      if (exemptCategory) {
+        reproRequired = false;
+        await appendAudit(this.state.project_root, {
+          ts: Date.now(),
+          phase: 8,
+          event: "repro-exempt",
+          caller: "mycl-orchestrator",
+          detail: `kategori=${exemptCategory} dosya=${changedForRepro.length} — runtime kırmızı→yeşil imkansız/anlamsız; suite-green+AC-coverage+tech-debt guard'ları AYNEN kalır`,
+        }).catch((e) => log.error("phase-8", "repro-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
+      }
     }
     const reproOk = !reproRequired || hasReproRedThenGreen(p9);
     if (tddOk && debtOk && finalSuiteRun && reproOk && acCoverageOk) {

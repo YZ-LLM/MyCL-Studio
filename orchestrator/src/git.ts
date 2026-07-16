@@ -14,7 +14,7 @@
 //     bunu görmeli — hata GİZLENMEZ.
 
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { safeEnv } from "./safe-env.js";
 import { log } from "./logger.js";
 
@@ -468,12 +468,29 @@ export async function getChangedFiles(
  * içerik ister (getChangedFiles yalnız yol verir). since geçerli sha değilse HEAD. Hata → "" (fail-soft).
  * NOT: `git diff` UNTRACKED (yeni) dosyaları İÇERMEZ — yeni dosya = olası runtime kod → caller
  * static-only saymamalı (getChangedFiles untracked'ı listeler; fark = yeni dosya).
+ *
+ * `paths` (opsiyonel): diff'i bu GÖRELİ yollara daraltır (`--` sonrası → seçenek
+ * enjeksiyonu imkansız). Mutlak veya `..` içeren yol = güvenilmez girdi → ""
+ * (fail-safe: caller static-only sayamaz, repro zorunlu kalır).
  */
-export async function getDiffSinceRef(projectRoot: string, since?: string): Promise<string> {
+export async function getDiffSinceRef(
+  projectRoot: string,
+  since?: string,
+  paths?: string[],
+): Promise<string> {
   const base = since && /^[0-9a-f]{4,40}$/i.test(since) ? since : "HEAD";
-  const r = await runGit(projectRoot, ["diff", "--unified=0", "--relative", base, "--"]).catch(
-    () => null,
-  );
+  const args = ["diff", "--unified=0", "--relative", base, "--"];
+  if (paths && paths.length > 0) {
+    const invalid = paths.filter((p) => isAbsolute(p) || p.split(/[\\/]/).includes(".."));
+    if (invalid.length > 0) {
+      log.error("git", "getDiffSinceRef: güvenilmez path girdisi → boş diff (fail-safe)", {
+        invalid: invalid.slice(0, 5),
+      });
+      return "";
+    }
+    args.push(...paths);
+  }
+  const r = await runGit(projectRoot, args).catch(() => null);
   return r && r.code === 0 ? r.stdout : "";
 }
 

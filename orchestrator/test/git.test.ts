@@ -10,6 +10,7 @@ import {
   getBlameForLines,
   getChangedFiles,
   getCommitStats,
+  getDiffSinceRef,
   getRecentCommits,
   isGitRepo,
   isWorkingTreeClean,
@@ -361,5 +362,45 @@ describe("git · getChangedFiles", () => {
     } finally {
       await rm(plain, { recursive: true, force: true });
     }
+  });
+});
+
+describe("git · getDiffSinceRef paths filtresi (Faz 8 runtime-prod'a daraltılmış static kanıtı)", () => {
+  let dir: string;
+  let head: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "mycl-git-diff-"));
+    gitInit(dir);
+    await writeFile(join(dir, "prod.ts"), "export type A = 1;\n");
+    await writeFile(join(dir, "other.ts"), "export const x = 1;\n");
+    spawnSync("git", ["add", "."], { cwd: dir, stdio: "ignore" });
+    spawnSync("git", ["commit", "-m", "seed"], { cwd: dir, stdio: "ignore" });
+    head = (await getRecentCommits(dir, 1))[0].sha;
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("paths verilince diff yalnız o dosyaları içerir", async () => {
+    await writeFile(join(dir, "prod.ts"), "export type A = 2;\n");
+    await writeFile(join(dir, "other.ts"), "export const x = 2;\n");
+    const diff = await getDiffSinceRef(dir, head, ["prod.ts"]);
+    expect(diff).toContain("prod.ts");
+    expect(diff).not.toContain("other.ts");
+  });
+
+  it("paths yokken davranış eskisi gibi (tüm tracked değişiklikler)", async () => {
+    await writeFile(join(dir, "prod.ts"), "export type A = 2;\n");
+    await writeFile(join(dir, "other.ts"), "export const x = 2;\n");
+    const diff = await getDiffSinceRef(dir, head);
+    expect(diff).toContain("prod.ts");
+    expect(diff).toContain("other.ts");
+  });
+
+  it("mutlak veya ..-kaçışlı yol → '' (fail-safe: static-only sayılamaz, repro kalır)", async () => {
+    await writeFile(join(dir, "prod.ts"), "export type A = 2;\n");
+    expect(await getDiffSinceRef(dir, head, ["/etc/passwd"])).toBe("");
+    expect(await getDiffSinceRef(dir, head, ["../escape.ts"])).toBe("");
+    expect(await getDiffSinceRef(dir, head, ["a/../../escape.ts"])).toBe("");
   });
 });

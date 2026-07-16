@@ -10,6 +10,7 @@ import {
   isStaticSafeAddedLine,
   isTestCommand,
   isTestPath,
+  nonRuntimeProdExempt,
 } from "../src/phase-8.js";
 
 describe("isStaticSafeAddedLine (Faz 8 repro gate-fix #1 — eklenen satır runtime mı)", () => {
@@ -256,19 +257,40 @@ describe("isTestCommand", () => {
   });
 });
 
-describe("repro-first test-only muafiyeti — changedForRepro sınıflandırması (Part 1 conformance, cave döngüsü)", () => {
-  // phase-8:796 test-only muafiyeti: changedForRepro.every(f => !isProdPath(f)) → repro düşer. Part 1 (copy-diff)
-  // changedForRepro'yu git'siz de doldurunca cave (package.json) BU predikatla geçer; gate ZAYIFLAMAZ (prod → zorunlu).
-  const testOnlyExempt = (files: string[]): boolean => files.length > 0 && files.every((f) => !isProdPath(f));
+describe("nonRuntimeProdExempt — TEK generic repro muafiyeti (eski üç görev-sınıfı bloğunun yerini aldı)", () => {
+  // 2026-07-16: repro zorunlu ⇔ değişenlerde static olduğu kanıtlanamayan runtime prod dosyası var.
+  // Eski pin'lerin HEPSİ aynı sonucu vermeli (davranış koruma matrisi).
 
-  it("cave: yalnız package.json değişti → test-only MUAF (imkansız-repro döngüsü kırılır)", () => {
-    expect(testOnlyExempt(["package.json"])).toBe(true);
+  it("cave: yalnız package.json değişti → MUAF (imkansız-repro döngüsü kırılır)", () => {
+    expect(nonRuntimeProdExempt(["package.json"])).toBe(true);
   });
   it("prod runtime (.ts/.js) değişikliği → muaf DEĞİL (repro AYNEN zorunlu — gate çıtası düşmez)", () => {
-    expect(testOnlyExempt(["routes/db.js"])).toBe(false);
-    expect(testOnlyExempt(["src/app.ts"])).toBe(false);
+    expect(nonRuntimeProdExempt(["routes/db.js"])).toBe(false);
+    expect(nonRuntimeProdExempt(["src/app.ts"])).toBe(false);
   });
   it("karışık (package.json + prod .ts) → muaf DEĞİL (prod dosyası varsa repro zorunlu)", () => {
-    expect(testOnlyExempt(["package.json", "src/app.ts"])).toBe(false);
+    expect(nonRuntimeProdExempt(["package.json", "src/app.ts"])).toBe(false);
+  });
+  it("eski config-only vakası (Vestel): kök playwright.config.ts (+ test/kozmetik) → MUAF", () => {
+    expect(nonRuntimeProdExempt(["playwright.config.ts"])).toBe(true);
+    expect(nonRuntimeProdExempt(["vitest.config.ts", "src/app.test.ts", "style.css"])).toBe(true);
+  });
+  it("iç içe app-config RUNTIME olabilir → muaf DEĞİL (kök şartı korunur)", () => {
+    expect(nonRuntimeProdExempt(["src/app/app.config.ts"])).toBe(false);
+  });
+  it("eski test-only vakası (samsung): yalnız test dosyaları → MUAF", () => {
+    expect(nonRuntimeProdExempt(["src/foo.test.ts", "tests/bar.py"])).toBe(true);
+  });
+  it("feature + config karışımı → MUAF (ikisi de runtime değil; eski üç blok bunu kaçırıyordu)", () => {
+    expect(nonRuntimeProdExempt(["features/auth.feature", "vitest.config.ts"])).toBe(true);
+  });
+  it("null / boş liste → muaf DEĞİL (tespit güvenilmez → fail-safe repro kalır)", () => {
+    expect(nonRuntimeProdExempt(null)).toBe(false);
+    expect(nonRuntimeProdExempt([])).toBe(false);
+  });
+  it("DELTA (gate güçlenir): .php/.dart/.cs prod dosyası → muaf DEĞİL (eskiden test-only'den sızıyordu)", () => {
+    expect(nonRuntimeProdExempt(["app/Kernel.php"])).toBe(false);
+    expect(nonRuntimeProdExempt(["lib/main.dart"])).toBe(false);
+    expect(nonRuntimeProdExempt(["Services/Auth.cs"])).toBe(false);
   });
 });
