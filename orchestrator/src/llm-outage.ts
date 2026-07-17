@@ -17,14 +17,20 @@ import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 
 export const OUTAGE_RETRY_INTERVAL_MS = 5 * 60_000;
+/** Uzun beklemede ara yoklama (YZLLM 2026-07-17 "evet ekle"): reset 1 saatten uzaksa (örn. 7 günlük
+ *  pencere) o saate körü körüne kilitlenme — saatte bir yokla (erken açılma/kredi yükleme yakalanır);
+ *  reset yaklaşınca min() doğal olarak reset saatine kilitlenir. */
+export const LONG_WAIT_PROBE_INTERVAL_MS = 60 * 60_000;
 /** Reset saatine eklenen tampon — pencere açılırken sınırda yakalanmamak için. */
 const RESET_BUFFER_MS = 60_000;
 /** setTimeout alt sınırı — reset "hemen şimdi" görünse bile çok sık ateşleme olmasın. */
 const MIN_DELAY_MS = 5_000;
 
-/** SAF: bir sonraki deneme zamanı — reset gelecekteyse reset+tampon, değilse şimdi+5 dk. */
+/** SAF: bir sonraki deneme zamanı — reset gelecekteyse min(reset+tampon, şimdi+1 saat); değilse şimdi+5 dk. */
 export function computeRetryAtMs(knownResetMs: number | undefined, nowMs: number): number {
-  if (typeof knownResetMs === "number" && knownResetMs > nowMs) return knownResetMs + RESET_BUFFER_MS;
+  if (typeof knownResetMs === "number" && knownResetMs > nowMs) {
+    return Math.min(knownResetMs + RESET_BUFFER_MS, nowMs + LONG_WAIT_PROBE_INTERVAL_MS);
+  }
   return nowMs + OUTAGE_RETRY_INTERVAL_MS;
 }
 
@@ -81,10 +87,13 @@ export function armLlmOutageWait(reason: string, resume: () => Promise<void>): v
   const now = Date.now();
   const resetMs = getKnownResetMs(now);
   const at = computeRetryAtMs(resetMs, now);
+  const farReset = resetMs !== undefined && resetMs - now > LONG_WAIT_PROBE_INTERVAL_MS;
   emitChatMessage(
     "system",
     resetMs !== undefined
-      ? `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). Abonelik limiti ${fmtClock(resetMs)} civarı açılacak — o saatte kaldığım yerden OTOMATİK devam edeceğim (beklemeden sürdürmek istersen 'Çalıştır').`
+      ? farReset
+        ? `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). Abonelik limiti ${fmtClock(resetMs)} civarı açılacak (uzun pencere) — saatte bir yoklayacağım; erken açılırsa hemen, en geç o saatte kaldığım yerden OTOMATİK devam ederim.`
+        : `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). Abonelik limiti ${fmtClock(resetMs)} civarı açılacak — o saatte kaldığım yerden OTOMATİK devam edeceğim (beklemeden sürdürmek istersen 'Çalıştır').`
       : `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). 5 dakikada bir yeniden deneyeceğim — açılınca kaldığım yerden OTOMATİK devam ederim.`,
   );
   log.info("llm-outage", "bekle-ve-devam kuruldu", { at, resetKnown: resetMs !== undefined });

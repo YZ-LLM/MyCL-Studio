@@ -6,6 +6,7 @@ import {
   cancelLlmOutageWait,
   computeRetryAtMs,
   isLlmOutageWaiting,
+  LONG_WAIT_PROBE_INTERVAL_MS,
   OUTAGE_RETRY_INTERVAL_MS,
 } from "../src/llm-outage.js";
 import { noteCliRateLimitError, noteRateLimitEvent, resetCliRateLimitState } from "../src/cli-rate-limit.js";
@@ -15,9 +16,13 @@ describe("computeRetryAtMs (saf)", () => {
   it("reset bilinmiyor → şimdi + 5 dk", () => {
     expect(computeRetryAtMs(undefined, NOW)).toBe(NOW + OUTAGE_RETRY_INTERVAL_MS);
   });
-  it("reset gelecekte → reset + 1 dk tampon (kullanıcı: 'o zaman devam etsin')", () => {
-    const reset = NOW + 90 * 60_000;
+  it("reset yakında (<1 saat) → reset + 1 dk tampon (kullanıcı: 'o zaman devam etsin')", () => {
+    const reset = NOW + 30 * 60_000;
     expect(computeRetryAtMs(reset, NOW)).toBe(reset + 60_000);
+  });
+  it("reset UZAKTA (>1 saat, örn. 7 günlük pencere) → saatlik ara yoklama (YZLLM 'evet ekle')", () => {
+    const reset = NOW + 7 * 24 * 60 * 60_000;
+    expect(computeRetryAtMs(reset, NOW)).toBe(NOW + LONG_WAIT_PROBE_INTERVAL_MS);
   });
   it("reset geçmişte kalmış → 5 dk aralığına düş", () => {
     expect(computeRetryAtMs(NOW - 1000, NOW)).toBe(NOW + OUTAGE_RETRY_INTERVAL_MS);
@@ -45,15 +50,25 @@ describe("armLlmOutageWait / fire / cancel (sahte zamanlayıcı)", () => {
     expect(isLlmOutageWaiting()).toBe(false);
   });
 
-  it("AKTİF abonelik limiti + resetsAt biliniyor → deneme reset saatinde (5 dk'da değil)", async () => {
-    const resetSec = Math.floor((Date.now() + 60 * 60_000) / 1000); // 1 saat sonra
+  it("AKTİF abonelik limiti + resetsAt yakında → deneme reset saatinde (5 dk'da değil)", async () => {
+    const resetSec = Math.floor((Date.now() + 30 * 60_000) / 1000); // 30 dk sonra
     noteRateLimitEvent({ status: "allowed", resetsAt: resetSec });
     noteCliRateLimitError("usage-limit"); // aktif limit → _limitedUntilMs = resetsAt
     const resume = vi.fn(async () => {});
     armLlmOutageWait("abonelik limiti", resume);
     await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000); // 5 dk'da ateşlenmemeli
     expect(resume).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(56 * 60_000); // reset + tampon geçti
+    await vi.advanceTimersByTimeAsync(27 * 60_000); // reset + tampon geçti
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it("AKTİF limit + reset ÇOK uzakta (7 gün) → saatlik yoklama (7 gün körü körüne beklenmez)", async () => {
+    const resetSec = Math.floor((Date.now() + 7 * 24 * 60 * 60_000) / 1000);
+    noteRateLimitEvent({ status: "allowed", resetsAt: resetSec });
+    noteCliRateLimitError("usage-limit");
+    const resume = vi.fn(async () => {});
+    armLlmOutageWait("abonelik limiti (7 gün)", resume);
+    await vi.advanceTimersByTimeAsync(LONG_WAIT_PROBE_INTERVAL_MS + 1000); // 1 saat
     expect(resume).toHaveBeenCalledTimes(1);
   });
 

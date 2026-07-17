@@ -138,8 +138,10 @@ Her ajan rolünün backend'i Ayarlar'dan rol başına seçilir:
 - **Auto** — CLI ile başlar, abonelik kullanım limiti dolunca API'ye geçer, limit
   açılınca CLI'a döner. İkisi de tükenirse MyCL görünür mesajla durur ama **donmaz**:
   abonelik limitinin açılma saati biliniyorsa o saatte, bilinmiyorsa 5 dakikada bir
-  erişimi yeniden dener ve açılınca kaldığı işten **otomatik devam eder** (elle devam
-  edersen çift koşum olmaz; iptal edersen bekleme de iptal olur).
+  erişimi yeniden dener ve açılınca kaldığı işten **otomatik devam eder**. Açılma
+  saati çok uzaksa (ör. 7 günlük pencere) o saate kilitlenmez — saatte bir yoklar,
+  erken açılırsa hemen sürer (elle devam edersen çift koşum olmaz; iptal edersen
+  bekleme de iptal olur).
 
 Karmaşık işlerde Faz 5 birden çok bağımsız tasarım üreten **çok-ajanlı tasarım
 fan-out**'u kullanabilir; birbirinden bağımsız ≥2 modül varsa **Çoklu Ajan
