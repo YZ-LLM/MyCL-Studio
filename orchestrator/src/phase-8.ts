@@ -32,6 +32,7 @@ import { safeEnv } from "./safe-env.js";
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
 import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, changedFilesVsSnapshot, type FixSnapshot } from "./fix-snapshot.js";
+import { decideRevertOrKeep } from "./revert-decision.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
 import {
   readBehaviorBaseline,
@@ -269,6 +270,9 @@ export class Phase8Controller {
   // YZLLM 2026-06-12 (#2): bu denemenin regresyonu bir öncekiyle AYNI mı (model gücü çözmüyor) → gate'te
   // escalatable=false yapar (tırmanmayı keser). Anchor set eder, gate okur.
   private regressionRepeated = false;
+  // GERİ-AL-MI-TUT-MU kanıtı (YZLLM yol haritası "kararı MyCL versin"): SON anchor koşusunun baseline'a göre
+  // temizliği. null = anchor hiç koşmadı (erken fail/spawn faultu) → rollbackFixIfNeeded kanıtsızlıkta geri alır.
+  private anchorEvidence: { cleanVsBaseline: boolean; newRegressions: string[] } | null = null;
 
   private readonly state: State;
   private readonly config: MyclConfig;
@@ -922,6 +926,31 @@ export class Phase8Controller {
    */
   private async rollbackFixIfNeeded(): Promise<void> {
     if (!this.isFixMode || !this.fixSnapshot || this.fixSnapshot.method === "none") return;
+    // GERİ AL MI, TUT MU? — karar MyCL'de (YZLLM yol haritası). Eski davranış KOŞULSUZ geri almaktı;
+    // artık kanıta bakılır: suite yeşil ya da regresyonsuzsa (kapıyı düşüren test değil, yöntem/borç
+    // kontrolü) kazanılmış düzeltme TUTULUR; kanıt yoksa/regresyonda güvenli varsayılan GERİ AL.
+    const decision = decideRevertOrKeep({
+      baselineGreen: this.baseline?.green ?? null,
+      anchor: this.anchorEvidence,
+    });
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 8,
+      event: `revert-decision-${decision.action}`,
+      caller: "mycl-orchestrator",
+      detail: decision.reason_tr.slice(0, 300),
+    }).catch(() => {});
+    if (decision.action === "keep") {
+      // TUT: restore yok. Snapshot tek seferlik tüketilir + global rollback noktası da düşürülür —
+      // yoksa sonraki bir tükenme/rollback bu KANITLA-TEMİZ ilerlemeyi de silerdi (kararla çelişki).
+      this.fixSnapshot = null;
+      disarmRollback();
+      emitChatMessage(
+        "system",
+        `🧭 Geri alma kararı: düzeltmeyi TUTUYORUM — ${decision.reason_tr}. Kapı yine de geçilmedi; iş dürüstçe başarısız sayılır, sonraki deneme bu ilerlemenin üstüne kurulur.`,
+      );
+      return;
+    }
     const snap = this.fixSnapshot;
     const via = snap.method === "git" ? "checkpoint (git)" : "yedek (`~/.mycl/backups`)";
     // Snapshot ref'ini restore'dan ÖNCE temizleme (sessiz-fallback denetimi): eski kod restore başarısız
@@ -937,7 +966,7 @@ export class Phase8Controller {
       this.checkpointRef = null;
       emitChatMessage(
         "system",
-        `↩️ Başarısız/regresyonlu fix — değişiklikler ${via} üzerinden OTOMATİK geri alındı (MyCL state ve hata kataloğu korundu).`,
+        `↩️ Geri alma kararı: GERİ ALIYORUM — ${decision.reason_tr}. Değişiklikler ${via} üzerinden geri alındı (MyCL state ve hata kataloğu korundu).`,
       );
     } else {
       // Geri alma BAŞARISIZ → repo bozuk/regresyonlu fix'le KALDI. Sessizce "temiz" sanma: LOUD uyarı +
@@ -1063,10 +1092,12 @@ export class Phase8Controller {
     // YZLLM 2026-06-12: REGRESYON-farkında verdict. Kırmızı suite + baseline varsa → yalnız YENİ düşen test
     // (fix'in KIRDIĞI) gate'i düşürür; önceden-kırık/alakasız (başka özellik testi, boş placeholder dosya)
     // fix'in suçu DEĞİL. parser kırmızıda 0 fail çıkarırsa (runner anlaşılamadı) baseline'a güvenme → mutlak kal.
+    let anchorNewRegressions: string[] = [];
     if (!pass && this.baseline) {
       const after = parseFailures(`${res.stdout}\n${res.stderr}`);
       if (after.size > 0) {
         const reg = computeRegression(this.baseline.failures, after);
+        anchorNewRegressions = reg.regressed;
         if (reg.regressed.length === 0) {
           pass = true; // YENİ kırılma yok → fix temiz
           detailTail = `no-regression (pre-existing ${reg.preExistingCount} fail, fix added 0)`;
@@ -1096,6 +1127,9 @@ export class Phase8Controller {
         }
       }
     }
+    // GERİ-AL-MI-TUT-MU kanıtı: bu anchor'ın nihai hükmü (pass = yeşil YA DA regresyonsuz) + yeni kırılanlar.
+    // Kırmızı + parser 0 fail (runner anlaşılamadı) → cleanVsBaseline=false, regresyon boş → karar yine geri-al.
+    this.anchorEvidence = { cleanVsBaseline: pass, newRegressions: anchorNewRegressions };
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 8,
