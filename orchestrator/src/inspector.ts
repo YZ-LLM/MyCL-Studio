@@ -26,6 +26,8 @@ import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { modelForTier } from "./model-catalog.js";
 import { decideIntervention, type InterventionSignals, type InterventionDecision } from "./inspector-trigger.js";
 import { recordLesson, recallLessons, retractLesson, type Lesson } from "./experience-layer.js";
+import { distillAndStoreGlobalLesson } from "./lesson-distill.js";
+import { emitChatMessage } from "./ipc.js";
 import { backendForRole, claudeKeyForRole, type MyclConfig } from "./config.js";
 import { DECISION_PRINCIPLES } from "./agent-language.js";
 import { log } from "./logger.js";
@@ -506,7 +508,7 @@ export async function inspectGateFinding(
   const loop = opts.loop;
   // RECALL (Parça 2): bu sorun-imzasına benzer geçmiş dersleri getir → müfettişe İPUCU olarak ver
   // (RECORD ile aynı imza şeması). recallLessons retracted'i eler + verified'i önceler; best-effort.
-  const recalled = await recallLessons(`${opts.gateLabel} ${opts.errors.slice(0, 100)}`).catch(() => []);
+  const recalled = await recallLessons(opts.projectRoot, `${opts.gateLabel} ${opts.errors.slice(0, 100)}`).catch(() => []);
   const priorExperience = recalled.length > 0 ? formatLessonsForPrompt(recalled) : undefined;
   const ctx: InspectorContext = {
     intent: opts.intent ?? "Kod-kalite/gate incelemesi — amaç çalışan, kaliteli, sıfır-gerçek-borç kod.",
@@ -739,18 +741,38 @@ export function lessonContradictsRuling(lesson: Lesson, ruling: MahkemeRuling): 
 }
 
 export async function recordMahkemeLesson(opts: {
+  projectRoot: string;
   signature: string;
   problem: string;
   result: CheckpointResult;
   ruling: MahkemeRuling;
   ts: number;
+  /** Verilirse ve ders verified ise: sızdırmasız GENEL ders damıtması tetiklenir (fire-and-forget). */
+  config?: MyclConfig;
 }): Promise<void> {
   // RETRACT (zehirlenme önleme, Parça 2): mahkeme TAZE kanıtla, recall edilen bir derse ZIT karar verdiyse
   // o ders YANLIŞTI → geri-al (yanlış ders bir daha recall edilip yanıltmasın). Fuzzy-recall exact-record'la
   // örtüşmeyebilir → eski yanlış ders aksi halde kalıcı olurdu; çelişki = en güçlü "yanlış-ders" sinyali.
   for (const old of opts.result.recalledLessons ?? []) {
-    if (lessonContradictsRuling(old, opts.ruling)) await retractLesson(old.signature);
+    if (lessonContradictsRuling(old, opts.ruling)) await retractLesson(opts.projectRoot, old.signature);
   }
   const lesson = buildMahkemeLesson(opts);
-  if (lesson) await recordLesson(lesson);
+  if (lesson) {
+    await recordLesson(opts.projectRoot, lesson);
+    // SIZDIRMASIZ ÖĞRENME DÖNGÜSÜ (YZLLM 2026-07-16): yalnız VERIFIED (tam-tartışma) ders projeler-arası
+    // damıtmaya gider — çapraz proje etki alanında zayıf iddia taşınmaz. Fire-and-forget (ana akışı bozmaz);
+    // proje verisi leakGate'te yapısal olarak süzülür (lesson-distill.ts).
+    if (lesson.verified && opts.config) {
+      void distillAndStoreGlobalLesson(opts.config, {
+        projectRoot: opts.projectRoot,
+        problem: lesson.problem,
+        resolution: lesson.resolution,
+        principle: lesson.principle,
+      }).then((outcome) => {
+        if (outcome === "stored") {
+          emitChatMessage("system", "🌱 Genel ders kaydedildi — projeler arası, sızdırmasız (damıtılmış ilke; proje verisi taşınmaz).");
+        }
+      }).catch((e) => log.warn("inspector", "genel ders damıtma başarısız (non-fatal)", { error: String(e) }));
+    }
+  }
 }

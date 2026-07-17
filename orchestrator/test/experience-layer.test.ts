@@ -1,4 +1,5 @@
-// experience-layer — ders deposu (AŞAMA 3 temeli). MYCL_HOME izole (gerçek ~/.mycl kirlenmez).
+// experience-layer — ders deposu (AŞAMA 3 temeli). SIZDIRMASIZLIK: ham ders artık PROJE-YEREL
+// (<proje>/.mycl/lessons.jsonl) — depo testleri tmpdir'i proje kökü olarak kullanır.
 // İlkeler: ders=iddia (recall öneri, auto-uygula yok), geri-alınabilir (retracted hariç), verified önce.
 
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
@@ -34,50 +35,46 @@ describe("experience-layer · saf imza fonksiyonları", () => {
   });
 });
 
-describe("experience-layer · depo (MYCL_HOME izole)", () => {
-  let home: string;
-  const orig = process.env.MYCL_HOME;
+describe("experience-layer · depo (proje-yerel .mycl/lessons.jsonl)", () => {
+  let root: string;
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), "mycl-lessons-"));
-    process.env.MYCL_HOME = home;
+    root = await mkdtemp(join(tmpdir(), "mycl-lessons-"));
   });
   afterEach(async () => {
-    if (orig === undefined) delete process.env.MYCL_HOME;
-    else process.env.MYCL_HOME = orig;
-    await rm(home, { recursive: true, force: true }).catch(() => {});
+    await rm(root, { recursive: true, force: true }).catch(() => {});
   });
 
   it("record + recall round-trip (benzer imza)", async () => {
-    await recordLesson(L({ signature: "ts-prune Next framework-export false-positive", principle: "CLI -i" }));
-    const hits = await recallLessons("ts-prune Next export flag");
+    await recordLesson(root, L({ signature: "ts-prune Next framework-export false-positive", principle: "CLI -i" }));
+    const hits = await recallLessons(root, "ts-prune Next export flag");
     expect(hits.length).toBe(1);
     expect(hits[0].principle).toBe("CLI -i");
   });
 
   it("dedup: aynı imza → GÜNCELLER (çift kayıt değil)", async () => {
-    await recordLesson(L({ signature: "i18n password label", verified: false }));
-    await recordLesson(L({ signature: "i18n password label", verified: true, principle: "scanner i18n-skip" }));
-    const hits = await recallLessons("i18n password label");
+    await recordLesson(root, L({ signature: "i18n password label", verified: false }));
+    await recordLesson(root, L({ signature: "i18n password label", verified: true, principle: "scanner i18n-skip" }));
+    const hits = await recallLessons(root, "i18n password label");
     expect(hits.length).toBe(1);
     expect(hits[0].verified).toBe(true);
   });
 
   it("retracted ders → recall'da YOK (zehirlenme önleme)", async () => {
-    await recordLesson(L({ signature: "yanlış ders konu" }));
-    expect((await recallLessons("yanlış ders konu")).length).toBe(1);
-    expect(await retractLesson("yanlış ders konu")).toBe(true);
-    expect((await recallLessons("yanlış ders konu")).length).toBe(0);
+    await recordLesson(root, L({ signature: "yanlış ders konu" }));
+    expect((await recallLessons(root, "yanlış ders konu")).length).toBe(1);
+    expect(await retractLesson(root, "yanlış ders konu")).toBe(true);
+    expect((await recallLessons(root, "yanlış ders konu")).length).toBe(0);
   });
 
   it("verified ders öncelikli sıralanır", async () => {
-    await recordLesson(L({ signature: "konu A weak", verified: false }));
-    await recordLesson(L({ signature: "konu A strong", verified: true }));
-    const hits = await recallLessons("konu A", { minOverlap: 0.3 });
+    await recordLesson(root, L({ signature: "konu A weak", verified: false }));
+    await recordLesson(root, L({ signature: "konu A strong", verified: true }));
+    const hits = await recallLessons(root, "konu A", { minOverlap: 0.3 });
     expect(hits[0].verified).toBe(true); // verified önce
   });
 
   it("alakasız imza → recall boş (yanlış-uygulama önleme)", async () => {
-    await recordLesson(L({ signature: "ts-prune next export" }));
-    expect((await recallLessons("tamamen başka bir güvenlik konusu")).length).toBe(0);
+    await recordLesson(root, L({ signature: "ts-prune next export" }));
+    expect((await recallLessons(root, "tamamen başka bir güvenlik konusu")).length).toBe(0);
   });
 });

@@ -1536,6 +1536,8 @@ async function failPhase(
         ruling = mahkemeRuling(insp);
         // TECRÜBE-RECORD (Parça 2): mahkeme kararını derse çevir (sorun→kanıtlı-çözüm→ilke; best-effort).
         await recordMahkemeLesson({
+          projectRoot: runtime.state.project_root,
+          config: runtime.config,
           signature: `Faz ${n} ${(ctrl?.lastFailReason ?? message).slice(0, 100)}`,
           problem: ctrl?.lastFailReason ?? message,
           result: insp,
@@ -1650,6 +1652,8 @@ async function failPhase(
         const ruling = mahkemeRuling(insp);
         // TECRÜBE-RECORD (Parça 2): döngü-mahkemesi kararını derse çevir (best-effort).
         await recordMahkemeLesson({
+          projectRoot: runtime.state.project_root,
+          config: runtime.config,
           signature: `Faz ${n} ${(ctrl?.lastFailReason ?? message).slice(0, 100)}`,
           problem: ctrl?.lastFailReason ?? message,
           result: insp,
@@ -5979,6 +5983,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
                 emitChatMessage("system", `⚖️ Mahkeme (Faz 13 güvenlik — ${secMahkemeAction}): ${ruling.summary}`);
                 // TECRÜBE-RECORD (Parça 2): EFEKTİF aksiyonla (güvenlik-suppress→escalate=ders yok); proceed=gerçek-bulgu dersi.
                 await recordMahkemeLesson({
+                  projectRoot: state.project_root,
+                  config: cfg,
                   signature: `${phaseLabelTR(13, spec)} ${outcome.stderr.slice(0, 100)}`,
                   problem: outcome.stderr,
                   result: insp,
@@ -6237,6 +6243,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             const ruling = mahkemeRuling(insp);
             // TECRÜBE-RECORD (Parça 2): bu gate-mahkemesi kararını da derse çevir.
             await recordMahkemeLesson({
+              projectRoot: state.project_root,
+              config: cfg,
               signature: `${phaseLabelTR(next, spec)} ${outcome.stderr.slice(0, 100)}`,
               problem: outcome.stderr,
               result: insp,

@@ -19,6 +19,7 @@ import { extractFeatureChunks } from "../relevance/chunk-store.js";
 import { buildRelevantOrchestratorContext } from "../relevance/injectors.js";
 import { buildProjectFacts } from "../project-facts.js";
 import { readUserDirectives } from "../user-directives.js";
+import { formatGlobalLessonsTR, readGlobalLessons } from "../lesson-distill.js";
 import { loadCommunicationGuide } from "../communication-guide.js";
 import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
 import {
@@ -458,7 +459,7 @@ export async function buildAgentSystemPrompt(
   const staticPart = await loadStaticSystemPrompt();
   // Doğru-karar/recall: userMessage varsa relevance-tabanlı geri-çağırmayı da paralel
   // çek (ekstra gecikme gizlenir). Boş/triviyal → "" (bölüm eklenmez). Fail-safe.
-  const [ctx, conv, relevantRecall, facts, directives, commGuide] = await Promise.all([
+  const [ctx, conv, relevantRecall, facts, directives, commGuide, globalLessons] = await Promise.all([
     buildAgentContext(state),
     buildConversationContext(config, state),
     userMessage
@@ -475,6 +476,9 @@ export async function buildAgentSystemPrompt(
     // YZLLM 2026-06-27: kullanıcının iletişim rehberi (müfettiş.md) — orkestratör kullanıcıyla KONUŞAN ajan,
     // bu ilkelere TAM uyar (sade Türkçe, varsayım tuzağı, görünür filtre, anti-sycophancy, tek soru/tur...).
     loadCommunicationGuide(),
+    // SIZDIRMASIZ ÖĞRENME DÖNGÜSÜ (YZLLM 2026-07-16): başka projelerden damıtılmış GENEL dersler —
+    // proje verisi içermez (leakGate garantisi); ders=iddia, orkestratör uygularken yine doğrular.
+    readGlobalLessons().catch(() => []),
   ]);
   // Override verildiyse (otonom-cevap) cevaplanmakta olan askq'yi göster; yoksa askqStack tepesi (eski davranış).
   const askqSection = renderActiveAskqSection(opts?.activeAskq ?? getActiveAskq());
@@ -488,5 +492,9 @@ export async function buildAgentSystemPrompt(
   const commGuideSection = commGuide.trim()
     ? `\n\n---\n\n## KULLANICI İLETİŞİM REHBERİ (müfettiş.md — kullanıcıyla konuşurken bu ilkelere UY)\n${commGuide.trim()}`
     : "";
-  return `${staticPart}${commGuideSection}${directivesSection}\n${renderContextSection(ctx)}${factsSection}${convSection}${relevantRecall}${askqSection}`;
+  // Genel dersler İDDİA niteliğindedir (uygula ama kanıtla doğrula) — proje verisi içermez (leakGate).
+  const globalLessonsSection = globalLessons.length > 0
+    ? `\n\n---\n\n## GENEL DERSLER (başka projelerden sızdırmasız damıtılmış ilkeler — öneri, hakikat değil; uygularken kanıtla doğrula)\n${formatGlobalLessonsTR(globalLessons)}`
+    : "";
+  return `${staticPart}${commGuideSection}${directivesSection}${globalLessonsSection}\n${renderContextSection(ctx)}${factsSection}${convSection}${relevantRecall}${askqSection}`;
 }

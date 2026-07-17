@@ -358,6 +358,33 @@ başladığında işin metni zaten niyeti belli ettiği için MyCL "niyet bekliy
 istiyorsun?" diye ikinci kez sormaz — işi doğrudan işler. Kuyruk sürerken durum mesajını
 tek kaynak (kuyruk) yazar; ikinci bir karşılama mesajıyla çakışmaz.
 
+## Projeler arası öğrenme (sızdırmasız)
+
+MyCL bir projede yaşadığı sorun-çözüm tecrübesini iki katmanda saklar:
+
+- **Ham ders — proje yereli.** Mahkeme bir bulguyu karara bağlayınca sorun → kanıtlı
+  çözüm → ilke kaydı **o projenin** `.mycl/lessons.jsonl` dosyasına yazılır; benzer
+  sorun tekrar gelince müfettişe ipucu olarak geri çağrılır. Ham metin proje içeriği
+  taşıyabilir, bu yüzden **projenin dışına asla çıkmaz**.
+- **Genel ders — damıtılmış.** Yalnız çift-taraflı kanıtla doğrulanmış dersler bir
+  damıtıcıdan geçirilir: projeden tamamen bağımsız 1-2 cümlelik Türkçe ilke üretilir,
+  ardından **deterministik sızıntı kapısı** metni denetler — dosya yolu/adı, URL,
+  e-posta, proje adı, kod tanımlayıcısı (camelCase/snake_case) veya kod parçası
+  kokusu varsa ders **saklanmadan atılır** (kayıp sızıntıya tercih edilir). Geçen
+  ilkeler `~/.mycl/global-lessons.jsonl`'e yazılır ve her projede orkestratör
+  bağlamına "öneri, hakikat değil" etiketiyle enjekte edilir.
+
+Böylece projeler arasında **hiçbir proje verisi taşınmadan** mühendislik dersi taşınır.
+
+## Geri al mı, düzelt mi? Kararı MyCL verir
+
+Bir düzeltme turu kapıdan geçemediğinde MyCL eskisi gibi körlemesine geri almaz;
+kanıta bakar: test takımı **yeşilse** ya da kırıkların hepsi düzeltmeden önce de
+kırıksa (yeni kırılma yok) kazanılmış ilerleme **tutulur** ve sonraki deneme onun
+üstüne kurulur; düzeltme **yeni test kırdıysa** ya da ortada güvenilir test kanıtı
+yoksa değişiklikler bilinen temiz duruma **geri alınır**. Karar ve gerekçesi sohbette
+görünür, denetim izine yazılır.
+
 ## Resimli kullanım kılavuzu
 
 Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü Türkçe bir kullanım

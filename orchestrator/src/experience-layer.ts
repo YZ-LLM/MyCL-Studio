@@ -7,9 +7,8 @@
 //   - verified: yalnız düşman-doğrulanmış ders güçlü; doğrulanmamış = zayıf öneri.
 // Bu AŞAMA 3 TEMELİ: depo + recall (SAF, test-edilebilir). İnspector'a bağlama + populate = sonraki.
 
-import { appendFile, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { globalConfigDir } from "./paths.js";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { log } from "./logger.js";
 
 export interface Lesson {
@@ -31,8 +30,11 @@ export interface Lesson {
   ts: number;
 }
 
-function lessonsPath(): string {
-  return join(globalConfigDir(), "lessons.jsonl");
+// SIZDIRMASIZLIK (YZLLM 2026-07-16: "hiç bir veri sızıntısı olmaması lazım projeler arasında"): HAM ders
+// (problem/çözüm metni proje içeriği taşır) artık PROJE-YERELDİR — global ~/.mycl/lessons.jsonl KALDIRILDI.
+// Projeler arası yalnız damıtılmış + sızıntı-kapılı ilke taşınır (lesson-distill.ts).
+function lessonsPath(projectRoot: string): string {
+  return join(projectRoot, ".mycl", "lessons.jsonl");
 }
 
 /** İmza normalize (recall eşleşmesi): küçük harf, noktalama→boşluk, fazla boşluk sadeleştir. */
@@ -54,9 +56,9 @@ export function signatureOverlap(a: string, b: string): number {
   return common / Math.min(wa.size, wb.size);
 }
 
-async function readAllLessons(): Promise<Lesson[]> {
+async function readAllLessons(projectRoot: string): Promise<Lesson[]> {
   try {
-    const raw = await readFile(lessonsPath(), "utf-8");
+    const raw = await readFile(lessonsPath(projectRoot), "utf-8");
     return raw
       .split("\n")
       .filter(Boolean)
@@ -73,22 +75,26 @@ async function readAllLessons(): Promise<Lesson[]> {
   }
 }
 
-async function writeAll(all: Lesson[]): Promise<void> {
-  await writeFile(lessonsPath(), all.map((x) => JSON.stringify(x)).join("\n") + "\n", "utf-8");
+async function writeAll(projectRoot: string, all: Lesson[]): Promise<void> {
+  const path = lessonsPath(projectRoot);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, all.map((x) => JSON.stringify(x)).join("\n") + "\n", "utf-8");
 }
 
 /** Ders kaydet — aynı imza varsa GÜNCELLE (yeni kanıt/durum), yoksa append. */
-export async function recordLesson(lesson: Lesson): Promise<void> {
-  const all = await readAllLessons();
+export async function recordLesson(projectRoot: string, lesson: Lesson): Promise<void> {
+  const all = await readAllLessons(projectRoot);
   const idx = all.findIndex(
     (x) => normalizeSignature(x.signature) === normalizeSignature(lesson.signature),
   );
   try {
     if (idx >= 0) {
       all[idx] = lesson;
-      await writeAll(all);
+      await writeAll(projectRoot, all);
     } else {
-      await appendFile(lessonsPath(), JSON.stringify(lesson) + "\n", "utf-8");
+      const path = lessonsPath(projectRoot);
+      await mkdir(dirname(path), { recursive: true });
+      await appendFile(path, JSON.stringify(lesson) + "\n", "utf-8");
     }
   } catch (e) {
     log.warn("experience", "lesson kaydı başarısız (non-fatal)", { error: String(e) });
@@ -100,12 +106,13 @@ export async function recordLesson(lesson: Lesson): Promise<void> {
  * eşik üstü örtüşme; verified önce, sonra skor. Ders=iddia: çağıran bunu kanıtla teyit etmeli.
  */
 export async function recallLessons(
+  projectRoot: string,
   signature: string,
   opts?: { minOverlap?: number; limit?: number },
 ): Promise<Lesson[]> {
   const min = opts?.minOverlap ?? 0.4;
   const limit = opts?.limit ?? 3;
-  const all = await readAllLessons();
+  const all = await readAllLessons(projectRoot);
   return all
     .filter((l) => !l.retracted)
     .map((l) => ({ l, score: signatureOverlap(signature, l.signature) }))
@@ -116,15 +123,15 @@ export async function recallLessons(
 }
 
 /** Dersi geri-al (yanlış çıktı → zehirlenme önleme). Ders=iddia, hakikat değil → revize edilebilir. */
-export async function retractLesson(signature: string): Promise<boolean> {
-  const all = await readAllLessons();
+export async function retractLesson(projectRoot: string, signature: string): Promise<boolean> {
+  const all = await readAllLessons(projectRoot);
   const idx = all.findIndex(
     (x) => normalizeSignature(x.signature) === normalizeSignature(signature),
   );
   if (idx < 0) return false;
   all[idx] = { ...all[idx], retracted: true };
   try {
-    await writeAll(all);
+    await writeAll(projectRoot, all);
     return true;
   } catch (e) {
     log.warn("experience", "retract başarısız", { error: String(e) });
