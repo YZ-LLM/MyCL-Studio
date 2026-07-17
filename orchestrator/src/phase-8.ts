@@ -9,7 +9,8 @@
 
 import { exec } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
-import { relative, isAbsolute } from "node:path";
+import { relative, isAbsolute, join } from "node:path";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { appendAudit, appendHandoff, readAuditLogTail, readAcceptedFindings } from "./audit.js";
 import { currentSpecPath, currentSpecRelPath } from "./devs-paths.js";
@@ -929,10 +930,23 @@ export class Phase8Controller {
     // GERİ AL MI, TUT MU? — karar MyCL'de (YZLLM yol haritası). Eski davranış KOŞULSUZ geri almaktı;
     // artık kanıta bakılır: suite yeşil ya da regresyonsuzsa (kapıyı düşüren test değil, yöntem/borç
     // kontrolü) kazanılmış düzeltme TUTULUR; kanıt yoksa/regresyonda güvenli varsayılan GERİ AL.
-    const decision = decideRevertOrKeep({
-      baselineGreen: this.baseline?.green ?? null,
-      anchor: this.anchorEvidence,
-    });
+    // MAHKEME CRITICAL (2026-07-17): TUT ayrıca "silinmiş test yok" kanıtı ister — fail-isim diff'i
+    // test silmeyi göremez (kapsam kaybıyla sahte temiz). Yalnız anchor temizken hesaplanır (ucuz yol).
+    let deletedTestFiles: string[] | null = null;
+    if (this.anchorEvidence?.cleanVsBaseline) {
+      const changed =
+        this.fixSnapshot.method === "git"
+          ? await getChangedFiles(this.state.project_root, this.checkpointRef ?? undefined).catch(() => [])
+          : await changedFilesVsSnapshot(this.fixSnapshot, this.state.project_root).catch(() => null);
+      // Boş liste = "değişiklik görünmüyor" — fix modunda kuşkulu (getChangedFiles hata halinde de []
+      // döner) → null bırak (karar: geri al; no-op fix'te geri alma zararsızdır).
+      if (changed && changed.length > 0) {
+        deletedTestFiles = changed.filter(
+          (p) => isTestPath(p) && !existsSync(join(this.state.project_root, p)),
+        );
+      }
+    }
+    const decision = decideRevertOrKeep({ anchor: this.anchorEvidence, deletedTestFiles });
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 8,

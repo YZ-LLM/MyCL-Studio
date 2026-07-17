@@ -39,6 +39,15 @@ describe("leakGate — deterministik sızıntı kapısı (fail-closed)", () => {
     expect(leakGate("Oturum süresini getUserProfile fonksiyonu üzerinden doğrulamak gerekir, aksi halde yanılır.", "p").ok).toBe(false);
   });
 
+  it("MAHKEME: PascalCase tanımlayıcı → RED (AuthService eski regex'ten geçiyordu)", () => {
+    expect(leakGate("AuthService sınıfındaki oturum kontrolü her istekte yeniden doğrulanmalı, önbelleğe güvenme.", "p").ok).toBe(false);
+    expect(leakGate("OrderService ile PaymentGateway arasındaki sınırda hata yutulmamalı, yukarı taşınmalı.", "p").ok).toBe(false);
+  });
+
+  it("genel PascalCase teknoloji adları (TypeScript, GraphQL) → GEÇER", () => {
+    expect(leakGate("TypeScript projelerinde derleyici uyarısını bastırmak yerine tipin kendisini düzeltmek gerekir.", "p").ok).toBe(true);
+  });
+
   it("snake_case tanımlayıcı → RED", () => {
     expect(leakGate("Veri tabanı bağlantısını user_repository katmanında havuzla, yoksa bağlantı tükenir.", "p").ok).toBe(false);
   });
@@ -51,6 +60,10 @@ describe("leakGate — deterministik sızıntı kapısı (fail-closed)", () => {
 
   it("proje adı → RED (büyük/küçük harf duyarsız)", () => {
     expect(leakGate("Bu ders Arcelik projesindeki panel davranışından çıkarıldı, genel kural şudur.", "arcelik").ok).toBe(false);
+  });
+
+  it("MAHKEME: proje adının Türkçe aksanlı/ekli hali + klasör token'ı → RED", () => {
+    expect(leakGate("Arçelik'te görülen bu davranış aslında genel bir önbellek sorunudur, her yerde geçerli.", "arcelik-app").ok).toBe(false);
   });
 
   it("çok kısa / çok uzun → RED", () => {

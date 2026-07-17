@@ -24,7 +24,7 @@ import { emitClaudeStream, withClaudeStreamBanner } from "./ipc.js";
 import { log } from "./logger.js";
 import { selectEffortForTask, selectModelForTask } from "./model-catalog.js";
 import { globalConfigDir } from "./paths.js";
-import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
+import { ZERO_TOOLS_DISALLOWED } from "./tool-policy.js";
 
 export interface GlobalLesson {
   ts: number;
@@ -40,8 +40,12 @@ function globalLessonsPath(): string {
 
 // ───────── Sızıntı kapısı (SAF, deterministik, fail-closed) ─────────
 
-/** Genel çerçeve adları — dosya-uzantısı kuralına yanlış takılmasın ("Next.js" proje verisi değildir). */
-const FRAMEWORK_NAME_RE = /\b(node|next|vue|nuxt|angular|express|three|d3)\.js\b/gi;
+/** Genel teknoloji adları — dosya-uzantısı/PascalCase kurallarına yanlış takılmasın ("Next.js",
+ *  "TypeScript" proje verisi değildir). Bilinçli dar liste: genişletmek kolay, delik açmak zor olsun.
+ *  Çerçeve .js adları harf-duyarsız ("Next.js"/"next.js"); PascalCase adlar TAM yazımla (aksi delik açar). */
+const FRAMEWORK_JS_RE = /\b(node|next|vue|nuxt|angular|express|three|d3)\.js\b/gi;
+const TECH_NAME_RE =
+  /\b(TypeScript|JavaScript|GitHub|GitLab|PostgreSQL|MongoDB|MySQL|SQLite|GraphQL|WebSocket|WebSockets|OAuth|OpenAPI|RabbitMQ|PyPI|NuGet)\b/g;
 
 /** Kod-dosyası uzantıları — çıplak dosya adı bile (yol olmasa da) proje kokusudur. */
 const FILE_TOKEN_RE =
@@ -63,16 +67,25 @@ export function leakGate(text: string, projectName: string): LeakVerdict {
   if (/(^|[\s"'(])[/~][\w.-]+\/[\w./-]+/.test(t) || /\b[A-Za-z]:\\/.test(t)) {
     return { ok: false, reason: "dosya yolu" };
   }
-  const noFrameworks = t.replace(FRAMEWORK_NAME_RE, " ");
-  if (FILE_TOKEN_RE.test(noFrameworks)) return { ok: false, reason: "dosya adı" };
-  // Kod tanımlayıcısı kokusu: camelCase (küçük→BÜYÜK geçiş) veya snake_case. Yalın Türkçe ilke cümlesi
-  // bunları içermez; içeriyorsa damıtma yasağı deldi → at.
-  if (/\b[a-zçğıöşü][a-z0-9çğıöşü]*[A-ZÇĞİÖŞÜ]\w*\b/.test(noFrameworks)) {
-    return { ok: false, reason: "camelCase tanımlayıcı" };
+  const noTech = t.replace(FRAMEWORK_JS_RE, " ").replace(TECH_NAME_RE, " ");
+  if (FILE_TOKEN_RE.test(noTech)) return { ok: false, reason: "dosya adı" };
+  // Kod tanımlayıcısı kokusu: kelime İÇİNDE herhangi bir küçük→BÜYÜK geçiş (camelCase VE PascalCase —
+  // MAHKEME CRITICAL 2026-07-17: eski regex küçük harfle başlıyordu, "AuthService" geçiyordu) veya
+  // snake_case. Yalın Türkçe ilke cümlesi bunları içermez; içeriyorsa damıtma yasağı deldi → at.
+  if (/\b\w*[a-zçğıöşü][A-ZÇĞİÖŞÜ]\w*\b/.test(noTech)) {
+    return { ok: false, reason: "kod tanımlayıcısı (camelCase/PascalCase)" };
   }
-  if (/\b\w+_\w+\b/.test(noFrameworks)) return { ok: false, reason: "snake_case tanımlayıcı" };
-  const pn = projectName.trim().toLowerCase();
-  if (pn.length >= 3 && t.toLowerCase().includes(pn)) return { ok: false, reason: "proje adı" };
+  if (/\b\w+_\w+\b/.test(noTech)) return { ok: false, reason: "snake_case tanımlayıcı" };
+  // Proje adı: Türkçe aksan normalize (mahkeme MEDIUM: klasör "arcelik-app", metin "Arçelik'te") +
+  // ad token'larına böl (≥4 harf) — çekim eki almış geçişler substring'le yakalanır.
+  const trFold = (x: string) =>
+    x.toLowerCase().replace(/ç/g, "c").replace(/ğ/g, "g").replace(/ı/g, "i").replace(/ö/g, "o").replace(/ş/g, "s").replace(/ü/g, "u");
+  const tNorm = trFold(t);
+  const pnNorm = trFold(projectName.trim());
+  if (pnNorm.length >= 3 && tNorm.includes(pnNorm)) return { ok: false, reason: "proje adı" };
+  for (const tok of pnNorm.split(/[-_\s.]+/)) {
+    if (tok.length >= 4 && tNorm.includes(tok)) return { ok: false, reason: "proje adı parçası" };
+  }
   return { ok: true };
 }
 
@@ -161,19 +174,23 @@ export type DistillOutcome = "stored" | "duplicate" | "rejected" | "skip" | "err
 
 type LlmCall = (system: string, user: string) => Promise<string>;
 
-async function defaultLlmCall(config: MyclConfig, projectRoot: string): Promise<LlmCall> {
+async function defaultLlmCall(config: MyclConfig): Promise<LlmCall> {
   const model = selectModelForTask("classification", config.selected_models.model_tiers).modelId;
   const useCli = backendForRole(config, "orchestrator") === "cli";
+  // MAHKEME CRITICAL (2026-07-17): cwd PROJE DEĞİL — nötr ~/.mycl + SIFIR araç (Read/Grep/Glob dahil
+  // kapalı). Eski hali proje kökünde PURE_REASONING ile koşuyordu → model proje dosyalarını okuyup
+  // içeriği sözdizim izi bırakmadan parafraz edebilirdi (leakGate sözdizimseldir, semantiği göremez).
+  const neutralCwd = globalConfigDir();
   if (useCli) {
     return async (system, user) => {
-      const res = await withClaudeStreamBanner({ text: "cli-ders-damitma", model, cwd: projectRoot }, () =>
+      const res = await withClaudeStreamBanner({ text: "cli-ders-damitma", model, cwd: neutralCwd }, () =>
         runClaudeCli({
           systemPrompt: system,
           userMessage: user,
           modelId: model,
-          cwd: projectRoot,
-          // Saf metin dönüşümü — araç GEREKMEZ; proje okuma da kapalı (yeni sızıntı vektörü açma).
-          disallowedTools: PURE_REASONING_DISALLOWED_TOOLS,
+          cwd: neutralCwd,
+          // Girdisi zaten prompt'ta — araçsız (sızıntı vektörü açılmaz).
+          disallowedTools: ZERO_TOOLS_DISALLOWED,
           effort: selectEffortForTask("classification", config.claude_code_flags.effort),
           onText: (t) => emitClaudeStream({ sub: "text", text: t }),
           timeoutMs: 90_000,
@@ -214,7 +231,7 @@ export async function distillAndStoreGlobalLesson(
   llm?: LlmCall,
 ): Promise<DistillOutcome> {
   try {
-    const call = llm ?? (await defaultLlmCall(config, raw.projectRoot));
+    const call = llm ?? (await defaultLlmCall(config));
     const user = `Sorun: ${raw.problem.slice(0, 600)}\n\nÇözüm: ${raw.resolution.slice(0, 600)}\n\nYerel ilke: ${raw.principle.slice(0, 300)}`;
     const text = await call(DISTILL_SYSTEM_PROMPT, user);
     const parsed = parseDistilledLesson(text);

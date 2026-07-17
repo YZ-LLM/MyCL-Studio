@@ -38,6 +38,22 @@ export const READ_ONLY_DISALLOWED_TOOLS: string[] = [...WRITE_TOOLS, ...SUBAGENT
 export const PURE_REASONING_DISALLOWED_TOOLS: string[] = [...READ_ONLY_DISALLOWED_TOOLS, "Bash"];
 
 /**
+ * SIFIR-ARAÇ deny-list: saf metin dönüşümü (ör. ders damıtma) — OKUMA dahil hiçbir araç açılmaz.
+ * MAHKEME CRITICAL (2026-07-17): PURE_REASONING listesi Read/Grep/Glob'u kapatmıyordu → damıtıcı
+ * proje dosyalarını okuyup içeriği sözdizim izi bırakmadan parafraz edebilirdi (leakGate sözdizimseldir).
+ * Girdisi zaten prompt'ta olan çağrılar için tek doğru duruş: araçsız.
+ */
+export const ZERO_TOOLS_DISALLOWED: string[] = [
+  ...PURE_REASONING_DISALLOWED_TOOLS,
+  "Read",
+  "Grep",
+  "Glob",
+  "LS",
+  "WebFetch",
+  "WebSearch",
+];
+
+/**
  * Tehlikeli Bash desenleri — Bash AÇIK olan HER CLI çağrısında deny-list'e dahil edilmeli.
  *
  * YZLLM canlı-test 0620: codegen + analiz fazları non-interaktif `claude -p`'yi
