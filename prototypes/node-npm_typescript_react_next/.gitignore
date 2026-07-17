@@ -1,0 +1,38 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# MyCL error catalog (AC11) — runtime error DB, never tracked
+error_folder/
+
+# local databases
+*.db
+*.sqlite
+
+# test artifacts
+/coverage
+/playwright-report
+/test-results

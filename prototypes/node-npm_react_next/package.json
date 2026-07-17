@@ -1,0 +1,36 @@
+{
+  "name": "arcelik-back-office",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:frontend": "SEED_ON_INIT=1 NODE_OPTIONS=--experimental-sqlite next dev",
+    "dev:backend": "NODE_OPTIONS=--experimental-sqlite node backend/index.js",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "perf": "npm run build",
+    "db:init": "NODE_OPTIONS=--experimental-sqlite node error_folder/init-errors-db.js",
+    "test": "NODE_OPTIONS=--experimental-sqlite vitest run",
+    "test:integration": "NODE_OPTIONS=--experimental-sqlite vitest run --dir tests/integration",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@eslint/js": "^9.12.0",
+    "@playwright/test": "^1.61.0",
+    "concurrently": "^9.0.1",
+    "eslint": "^9.12.0",
+    "eslint-plugin-react": "^7.37.1",
+    "globals": "^15.11.0",
+    "vitest": "^2.1.3"
+  }
+}

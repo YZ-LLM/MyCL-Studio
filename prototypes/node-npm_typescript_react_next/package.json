@@ -1,0 +1,40 @@
+{
+  "name": "vestel-bo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_OPTIONS=--experimental-sqlite next dev --turbopack",
+    "build": "NODE_OPTIONS=--experimental-sqlite next build",
+    "start": "NODE_OPTIONS=--experimental-sqlite next start",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --dir tests/integration --passWithNoTests",
+    "test:e2e": "playwright test",
+    "perf": "npm run build"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
+    "jose": "^5.9.6",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hook-form": "^7.54.2",
+    "server-only": "^0.0.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@eslint/js": "^9.18.0",
+    "@playwright/test": "^1.61.0",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^2.1.8"
+  }
+}

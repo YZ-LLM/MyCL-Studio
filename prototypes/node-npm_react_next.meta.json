@@ -1,0 +1,94 @@
+{
+  "stack": "node-npm_react_next",
+  "createdAt": 1782131107070,
+  "nodeVersion": "v22.12.0",
+  "fileCount": 97,
+  "full": true,
+  "modules": [
+    {
+      "name": "ayarlar sayfası",
+      "path": "app/(app)/ayarlar/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "hata-kodlari sayfası",
+      "path": "app/(app)/hata-kodlari/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "kilavuz sayfası",
+      "path": "app/(app)/kilavuz/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "urunler/[id]/duzenle sayfası",
+      "path": "app/(app)/urunler/[id]/duzenle/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "urunler sayfası",
+      "path": "app/(app)/urunler/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "urunler/yeni sayfası",
+      "path": "app/(app)/urunler/yeni/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "auth/login API",
+      "path": "app/api/auth/login/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "auth/logout API",
+      "path": "app/api/auth/logout/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "auth/session API",
+      "path": "app/api/auth/session/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "auth/verify API",
+      "path": "app/api/auth/verify/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "errors API",
+      "path": "app/api/errors/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "log-error API",
+      "path": "app/api/log-error/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "products/[id] API",
+      "path": "app/api/products/[id]/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "products API",
+      "path": "app/api/products/route.js",
+      "kind": "api"
+    },
+    {
+      "name": "dogrulama sayfası",
+      "path": "app/dogrulama/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "login sayfası",
+      "path": "app/login/page.jsx",
+      "kind": "page"
+    },
+    {
+      "name": "ana sayfa",
+      "path": "app/page.jsx",
+      "kind": "page"
+    }
+  ]
+}
