@@ -47,6 +47,12 @@ Yeni bir katı kural konuşulduğunda buraya ekle (tek doğruluk kaynağı budur
     ÇIKARACAK şekilde düzeltirim. "Projeyi çalıştırmak/incelemek üzereyim" = SERT DUR noktası → dur, yeniden
     yönlen. Fix'lerimi hedef projeye karşı DEĞİL, birim testleriyle (tmpdir/mock) doğrularım. (Ben MyCL
     kaynağını geliştiririm; projeyle etkileşim MyCL'in runtime işidir — bu #5'in dokunma-sınırı hâli.)
+14. **Davranış regresyonu kontrolü — kullanıcı bundan nefret ediyor (2026-07-17).** Her değişiklikten
+    sonra ÖNCEKİ davranışların korunduğunu AÇIKÇA kontrol et: kaldırdığın/yeniden yazdığın her dalın eski
+    davranışını listele ve "yeni akışta bu durumda ne oluyor?" sorusuna KANITLA cevap ver; bir davranışı
+    bilerek değiştiriyorsan yerine geçen mekanizmayı AYNI işte kur (boş bırakma). Mahkemeye her zaman
+    "davranış regresyonu" merceği ver. Canlı ders: z.ai söküldü, üçüncü halkanın örttüğü "iki kanal da
+    kapalı" durumuna otomatik devam konmadı → MyCL 2 saat dondu.
 
 ## Geliştirme sonrası gate (DEĞİŞMEZ KURAL)
 

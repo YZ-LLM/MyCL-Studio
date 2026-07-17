@@ -136,7 +136,10 @@ Her ajan rolünün backend'i Ayarlar'dan rol başına seçilir:
   OpenAI anahtarı yok). Ağır (Python kaynak kurulumu); API anahtarı yoksa veya
   kurulamıyorsa görünür uyarı + devre dışı (varsayılan **kapalı**).
 - **Auto** — CLI ile başlar, abonelik kullanım limiti dolunca API'ye geçer, limit
-  açılınca CLI'a döner. İkisi de tükenirse MyCL görünür mesajla dürüstçe durur.
+  açılınca CLI'a döner. İkisi de tükenirse MyCL görünür mesajla durur ama **donmaz**:
+  abonelik limitinin açılma saati biliniyorsa o saatte, bilinmiyorsa 5 dakikada bir
+  erişimi yeniden dener ve açılınca kaldığı işten **otomatik devam eder** (elle devam
+  edersen çift koşum olmaz; iptal edersen bekleme de iptal olur).
 
 Karmaşık işlerde Faz 5 birden çok bağımsız tasarım üreten **çok-ajanlı tasarım
 fan-out**'u kullanabilir; birbirinden bağımsız ≥2 modül varsa **Çoklu Ajan

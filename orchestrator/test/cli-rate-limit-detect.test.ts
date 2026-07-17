@@ -21,3 +21,12 @@ describe("detectCliRateLimit (rate-limit-as-error tespiti — dar)", () => {
     expect(detectCliRateLimit("")).toBeNull();
   });
 });
+
+describe("detectCliRateLimit — session limit (YZLLM 2026-07-17 canlı cave donması)", () => {
+  it("yeni CLI metni 'You've hit your session limit · resets 6pm' → usage-limit", () => {
+    expect(detectCliRateLimit("You've hit your session limit · resets 6pm (Europe/Istanbul)")).toBe("usage-limit");
+  });
+  it("'session limit' geçmeyen sıradan hata → null (yanlış pozitif yok)", () => {
+    expect(detectCliRateLimit("session expired, please login again")).toBeNull();
+  });
+});

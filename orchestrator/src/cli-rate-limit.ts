@@ -154,6 +154,9 @@ export function detectCliRateLimit(text: string): string | null {
   const t = (text ?? "").toLowerCase();
   if (!t) return null;
   if (/usage[ _-]?limit/.test(t)) return "usage-limit";
+  // YZLLM 2026-07-17 (canlı cave donması): yeni claude CLI metni "You've hit your session limit ·
+  // resets 6pm" — eski imzalar bunu KAÇIRIYORDU → limit hiç kaydedilmiyor, reset saati bilinmiyordu.
+  if (/session[ _-]?limit/.test(t)) return "usage-limit";
   // NOT: çıplak "429" eklenmedi — satır no ("file.ts:429") yanlış-pozitifi; "too many requests" gerçek 429'u kapsar.
   if (/rate[ _-]?limit|too many requests/.test(t)) return "rate-limit";
   return null;
@@ -238,6 +241,17 @@ export function resetCliRateLimitState(): void {
 /** Test/teşhis: aktif limitedUntil (ms) veya undefined. */
 export function getCliLimitedUntilMs(): number | undefined {
   return _limitedUntilMs;
+}
+
+/**
+ * Bilinen GELECEK abonelik reset zamanı (ms) — aktif limit ya da son görülen resetsAt.
+ * llm-outage bekle-ve-devam zamanlayıcısı bunu okur (YZLLM 2026-07-17: "aboneliğin ne
+ * zaman açılacağını biliyorsa o zaman devam etsin"). Geçmişte kaldıysa undefined.
+ */
+export function getKnownResetMs(nowMs: number = Date.now()): number | undefined {
+  if (typeof _limitedUntilMs === "number" && _limitedUntilMs > nowMs) return _limitedUntilMs;
+  if (typeof _lastResetsAtMs === "number" && _lastResetsAtMs > nowMs) return _lastResetsAtMs;
+  return undefined;
 }
 
 // ───────────────────────── Faz-içi kesintisiz retry (Auto Mode) ─────────────────────────

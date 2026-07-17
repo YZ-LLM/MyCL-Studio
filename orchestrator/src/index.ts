@@ -204,6 +204,8 @@ import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
+import { armLlmOutageWait, cancelLlmOutageWait } from "./llm-outage.js";
+import { detectCliRateLimit } from "./cli-rate-limit.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
 import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk, isAutonomouslyAnswerableAskq, isCourtFirstAskqId, matchAnswerToOption, stripDestructiveOptions, pickConservativeDefault, shouldStopAutoAnswer } from "./auto-answer.js";
@@ -1226,6 +1228,29 @@ async function applyRecalledPhaseScope(proposed: number[], rec: AnswerMemoryReco
   await handleAskqAnswer(askqId, rec.answer);
 }
 
+/**
+ * LLM kesintisi devam kapanışı (YZLLM 2026-07-17 "5 dk'da bir denesin / reset saatinde devam etsin"):
+ * kesilen fazı, erişim dönünce OTOMATİK yeniden koşar. Emniyetler: pipeline zaten koşuyorsa (kullanıcı
+ * 'Çalıştır'a bastı) ya da faz manuel ilerletildiyse ÇİFT koşum yok — görünür not + atla.
+ */
+function makePhaseOutageResume(n: PhaseId): () => Promise<void> {
+  return async () => {
+    if (_pipelineDepth > 0) {
+      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — pipeline zaten çalışıyor (elle devam edilmiş).");
+      return;
+    }
+    if (!runtime.state || runtime.state.current_phase !== n) {
+      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — durum bu arada değişmiş (faz elle ilerletilmiş ya da proje değişmiş).");
+      return;
+    }
+    if (n >= 1) {
+      await advanceToNextPhase((n - 1) as PhaseId); // kesilen fazı yeniden koş
+    } else {
+      emitChatMessage("system", "ℹ️ Faz 0 kesilmişti — devam için işi yeniden başlat ('Çalıştır' ya da mesaj).");
+    }
+  };
+}
+
 async function failPhase(
   n: PhaseId,
   ctrl?: FailReasonHolder,
@@ -1280,15 +1305,16 @@ async function failPhase(
       }
       return;
     }
-    // Claude (abonelik + API) İKİSİ DE tükendi/limitli → dürüst dur (z.ai yedeği 2026-07-16'da kaldırıldı).
+    // Claude (abonelik + API) İKİSİ DE tükendi/limitli → dürüst dur + BEKLE-VE-DEVAM (YZLLM 2026-07-17,
+    // canlı cave 2 saat donması: z.ai sökümü "dur"u getirmiş, otomatik devamı getirmemişti — regresyon).
     emitChatMessage(
       "system",
       "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** ve çalışan abonelik (`claude`) da yok/limitli — bu " +
-        "bir ortam sorunu, proje hatası DEĞİL. Plans & Billing'den kredi yükleyin VEYA `claude` aboneliğinizin " +
-        "limitinin açılmasını bekleyin; sonra **'Çalıştır'** ile devam edin. Otomatik tırmanma/analiz " +
-        "YAPMADIM — hepsi bir sağlayıcı gerektirir, aynı hatayı verirdi.",
+        "bir ortam sorunu, proje hatası DEĞİL. Otomatik tırmanma/analiz YAPMADIM — hepsi bir sağlayıcı " +
+        "gerektirir, aynı hatayı verirdi.",
     );
-    return; // STOP — escalation YOK, analiz YOK, fix YOK.
+    armLlmOutageWait("abonelik limitli + API kredisi yetersiz", makePhaseOutageResume(n));
+    return; // STOP — escalation YOK, analiz YOK, fix YOK; devam zamanlayıcısı kuruldu.
   }
   // GEÇİCİ API YÜKÜ (YZLLM 2026-06-17 canlı bulgu): "529 Overloaded" = Anthropic API aşırı-yük, GEÇİCİ. 5-deneme +
   // ~67s backoff sonrası bile sürüyorsa PROJE/KOD hatası DEĞİL → oto-çözüm/debug/tweak ANLAMSIZ. (Canlı kanıt:
@@ -1298,10 +1324,11 @@ async function failPhase(
     emitChatMessage(
       "system",
       "⏳ **Anthropic API şu an çok yoğun (529 Overloaded)** — 5 deneme + backoff'a rağmen geçmedi. Bu GEÇİCİ bir " +
-        "yük (proje/kod hatası DEĞİL). Birkaç dakika bekleyip **'Çalıştır'** ile aynı işi tekrar başlat. Debug/düzeltme " +
-        "YAPMADIM — hepsi yine API gerektirir, aynı hatayı verirdi.",
+        "yük (proje/kod hatası DEĞİL). Debug/düzeltme YAPMADIM — hepsi yine API gerektirir, aynı hatayı verirdi.",
     );
-    return; // STOP — oto-çözüm/debug/tweak YOK (geçici API yükü; ajanı boşa kurcalamaya sokma).
+    // BEKLE-VE-DEVAM (YZLLM 2026-07-17): geçici yükte de donup kullanıcıyı bekleme — 5 dk'da bir dene.
+    armLlmOutageWait("API 529 Overloaded", makePhaseOutageResume(n));
+    return; // STOP — oto-çözüm/debug/tweak YOK (geçici API yükü); devam zamanlayıcısı kuruldu.
   }
   // GENEL ORTAM hatası (YZLLM 2026-06-11, E2BIG-döngüsü logu): E2BIG/port-dolu/komut-yok/spawn → PROJE hatası DEĞİL,
   // model zayıflığı DEĞİL. Debug/oto-çözüm döngüsü (proje kodunu kurcalar) ANLAMSIZ + ajan döngüye girer (logda
@@ -1784,6 +1811,7 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // (answer_askq top-of-stack'i proje kontrolsüz yönlendirir; pendingPlan onayı AKTİF projenin kuyruğuna
   // yazar). Proje değişiminde HEPSİNİ temizle — eski projenin sorusu yeni projede yaşayamaz.
   clearActiveAskq();
+  cancelLlmOutageWait(); // eski projenin bekle-ve-devam zamanlayıcısı yeni projede ateşlenemez
   runtime.pendingDast = null;
   runtime.pendingFullTest = null;
   runtime.pendingMaintenance = null;
@@ -3254,7 +3282,14 @@ async function handleUserMessageInner(text: string): Promise<void> {
   // Agent fail → kullanıcıya graceful chat mesajı + retry yolu. Single source
   // of truth prensibi: agent dosyalardan okuyor (state.json, audit, brief,
   // spec, memory), runtime-only intent state (pendingIntent) artık yok.
-  try {
+  // BEKLE-VE-DEVAM için yeniden çağrılabilir kapanış (YZLLM 2026-07-17): iki LLM kanalı da kapalıyken
+  // bu tur kaybolmasın — erişim dönünce AYNI metinle yeniden denenir (aşağıdaki catch arm eder).
+  const respondAndExecute = async (): Promise<void> => {
+    // Kapanış sonradan (bekle-ve-devam zamanlayıcısından) da çağrılır → durumu O ANKİ haliyle doğrula.
+    if (!runtime.config || !runtime.state) {
+      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — proje/yapılandırma bu arada değişmiş.");
+      return;
+    }
     const decision = await respondAsOrchestrator(
       runtime.config,
       runtime.state,
@@ -3273,6 +3308,9 @@ async function handleUserMessageInner(text: string): Promise<void> {
       return;
     }
     await executeAgentDecision(decision, text);
+  };
+  try {
+    await respondAndExecute();
   } catch (err) {
     log.warn("orchestrator", "agent failed", err);
     const msg = ((err as Error).message ?? "bilinmeyen hata").slice(0, 120);
@@ -3287,6 +3325,10 @@ async function handleUserMessageInner(text: string): Promise<void> {
           `• Sidebar'dan ilgili Faz'a tıkla → "✅ Çalıştır" seç (manuel tetik)\n\n` +
           `Sorun devam ederse Settings'ten daha güçlü model (Sonnet) seçebilirsin.`,
       );
+    } else if (isApiAccountError(msg) || detectCliRateLimit(msg) !== null) {
+      // İki kanal da kapalı sınıfı (kredi bitti / abonelik limiti) → tur KAYBOLMAZ: bekle-ve-devam
+      // aynı mesajı erişim dönünce yeniden dener (YZLLM 2026-07-17, canlı cave 2 saat donması).
+      armLlmOutageWait(msg, respondAndExecute);
     } else {
       emitChatMessage(
         "system",
@@ -3977,6 +4019,7 @@ async function executeDispatchedIntent(
   }
   if (outcome.action === "cancel_pipeline") {
     log.info("orchestrator", "pipeline cancelled");
+    cancelLlmOutageWait(); // kullanıcı işi iptal etti → bekle-ve-devam zamanlayıcısı da iptal
     // v15.7 (2026-05-27): R4-01 — pending_* alanları temizle ki D2_WAITING /
     // pending_ui_tweak / pending_backend_fix orphan kalmasın. Aksi halde
     // sonraki user_message handleCommandDirect "askq cevabı bekliyor"
