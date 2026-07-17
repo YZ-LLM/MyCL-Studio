@@ -5,9 +5,11 @@ import {
   formatFullTestReport,
   fixTasksFromReport,
   runFullTest,
+  sweepOneRoute,
   type FullTestReport,
 } from "../src/full-test.js";
 import type { State } from "../src/types.js";
+import { PNG } from "pngjs";
 
 describe("classifySuiteResult", () => {
   it("exit 0 → pass", () => {
@@ -114,5 +116,97 @@ describe("formatFullTestReport + fixTasksFromReport", () => {
       ),
     };
     expect(fixTasksFromReport(r2)).toHaveLength(0);
+  });
+});
+
+describe("sweepOneRoute — rota-yerel dinleyiciler (mahkeme bulgusu: geç olay yanlış rotaya yazılmasın)", () => {
+  // Sahte SweepPage: dinleyici kayıt defteri görünür → tak/sök davranışı doğrulanabilir.
+  function makeFakePage(opts?: { shot?: Buffer; gotoImpl?: (page: FakePage) => Promise<void> }) {
+    return new FakePage(opts?.shot ?? pngBuffer(true), opts?.gotoImpl);
+  }
+  class FakePage {
+    consoleHandlers = new Set<(m: { type(): string; text(): string }) => void>();
+    responseHandlers = new Set<(r: { status(): number; url(): string }) => void>();
+    constructor(
+      private shot: Buffer,
+      private gotoImpl?: (page: FakePage) => Promise<void>,
+    ) {}
+    on(event: "console" | "response", h: never): void {
+      if (event === "console") this.consoleHandlers.add(h);
+      else this.responseHandlers.add(h);
+    }
+    off(event: "console" | "response", h: never): void {
+      if (event === "console") this.consoleHandlers.delete(h);
+      else this.responseHandlers.delete(h);
+    }
+    async goto(): Promise<void> {
+      await this.gotoImpl?.(this);
+    }
+    async waitForTimeout(): Promise<void> {}
+    async screenshot(): Promise<Buffer> {
+      return this.shot;
+    }
+    emitConsoleError(text: string): void {
+      for (const h of this.consoleHandlers) h({ type: () => "error", text: () => text });
+    }
+    emitResponse(status: number, url: string): void {
+      for (const h of this.responseHandlers) h({ status: () => status, url: () => url });
+    }
+  }
+  function pngBuffer(noise: boolean): Buffer {
+    const img = new PNG({ width: 20, height: 20 });
+    for (let i = 0; i < img.data.length; i += 4) {
+      img.data[i] = noise ? (i * 37) % 256 : 200;
+      img.data[i + 1] = noise ? (i * 53) % 256 : 200;
+      img.data[i + 2] = noise ? (i * 11) % 256 : 200;
+      img.data[i + 3] = 255;
+    }
+    return PNG.sync.write(img);
+  }
+  const BASE = "http://localhost:3000";
+
+  it("rota sırasında gelen konsol hatası O rotaya yazılır", async () => {
+    const page = makeFakePage({ gotoImpl: async (p) => p.emitConsoleError("boom") });
+    const r = await sweepOneRoute(page, BASE, "/a");
+    expect(r.opened).toBe(true);
+    expect(r.issues.map((i) => i.problem).join()).toContain("konsol hatası: boom");
+  });
+
+  it("rota bitince dinleyiciler sökülür → geç olay SONRAKİ rotaya sızmaz", async () => {
+    const page = makeFakePage();
+    const a = await sweepOneRoute(page, BASE, "/a");
+    expect(a.issues).toHaveLength(0);
+    // /a'dan GEÇ gelen olaylar (dinleyici yok artık) — hiçbir yere yazılMAMALI.
+    expect(page.consoleHandlers.size).toBe(0);
+    expect(page.responseHandlers.size).toBe(0);
+    page.emitConsoleError("geç olay");
+    page.emitResponse(500, `${BASE}/a/api`);
+    const b = await sweepOneRoute(page, BASE, "/b");
+    expect(b.issues).toHaveLength(0);
+  });
+
+  it("goto patlarsa: açılamadı + opened:false + dinleyiciler yine sökülür (finally)", async () => {
+    const page = makeFakePage({
+      gotoImpl: async () => {
+        throw new Error("net::ERR_CONNECTION_REFUSED");
+      },
+    });
+    const r = await sweepOneRoute(page, BASE, "/kirik");
+    expect(r.opened).toBe(false);
+    expect(r.issues[0]?.problem).toContain("açılamadı");
+    expect(page.consoleHandlers.size).toBe(0);
+    expect(page.responseHandlers.size).toBe(0);
+  });
+
+  it("≥400 yanıt → başarısız istek bulgusu", async () => {
+    const page = makeFakePage({ gotoImpl: async (p) => p.emitResponse(503, `${BASE}/api/x`) });
+    const r = await sweepOneRoute(page, BASE, "/a");
+    expect(r.issues.map((i) => i.problem).join()).toContain("başarısız istek: 503");
+  });
+
+  it("tek renk ekran görüntüsü → neredeyse boş sayfa bulgusu", async () => {
+    const page = makeFakePage({ shot: pngBuffer(false) });
+    const r = await sweepOneRoute(page, BASE, "/bos");
+    expect(r.issues.map((i) => i.problem).join()).toContain("neredeyse boş");
   });
 });

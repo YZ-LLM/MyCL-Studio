@@ -103,9 +103,67 @@ export function classifySuiteResult(
   };
 }
 
-interface RouteSweepIssue {
+export interface RouteSweepIssue {
   route: string;
   problem: string;
+}
+
+/** sweepOneRoute'un ihtiyaç duyduğu asgari Playwright Page yüzeyi (birim test edilebilirlik). */
+export interface SweepPage {
+  on(event: "console", handler: (m: { type(): string; text(): string }) => void): unknown;
+  on(event: "response", handler: (r: { status(): number; url(): string }) => void): unknown;
+  off(event: "console", handler: (m: { type(): string; text(): string }) => void): unknown;
+  off(event: "response", handler: (r: { status(): number; url(): string }) => void): unknown;
+  goto(url: string, opts: { waitUntil: "domcontentloaded"; timeout: number }): Promise<unknown>;
+  waitForTimeout(ms: number): Promise<void>;
+  screenshot(opts: { fullPage: boolean }): Promise<Buffer>;
+}
+
+/**
+ * Tek rotayı tarar: konsol hataları + ≥400 yanıtlar + neredeyse boş sayfa.
+ * Dinleyiciler ROTA-YEREL takılır ve finally'de sökülür — önceki rotadan geç gelen olay
+ * sonraki rotaya YAZILMAZ (mahkeme bulgusu: sayfa-ömürlü paylaşılan dinleyici + ortak dizi,
+ * rota geçişinde olayı yanlış rotaya mal edebiliyordu).
+ */
+export async function sweepOneRoute(
+  page: SweepPage,
+  baseUrl: string,
+  route: string,
+): Promise<{ opened: boolean; issues: RouteSweepIssue[] }> {
+  const issues: RouteSweepIssue[] = [];
+  const consoleErrors: string[] = [];
+  const badResponses: string[] = [];
+  const onConsole = (m: { type(): string; text(): string }) => {
+    if (m.type() === "error") consoleErrors.push(m.text().slice(0, 160));
+  };
+  const onResponse = (r: { status(): number; url(): string }) => {
+    if (r.status() >= 400) badResponses.push(`${r.status()} ${r.url().slice(0, 120)}`);
+  };
+  page.on("console", onConsole);
+  page.on("response", onResponse);
+  let opened = false;
+  try {
+    await page.goto(new URL(route, baseUrl).toString(), {
+      waitUntil: "domcontentloaded",
+      timeout: ROUTE_TIMEOUT_MS,
+    });
+    await page.waitForTimeout(ROUTE_SETTLE_MS);
+    opened = true;
+    const shot = await page.screenshot({ fullPage: false });
+    if (isNearlyBlank(shot)) issues.push({ route, problem: "sayfa neredeyse boş görünüyor (tek renk)" });
+    if (consoleErrors.length > 0) {
+      issues.push({ route, problem: `konsol hatası: ${consoleErrors[0]}${consoleErrors.length > 1 ? ` (+${consoleErrors.length - 1})` : ""}` });
+    }
+    if (badResponses.length > 0) {
+      issues.push({ route, problem: `başarısız istek: ${badResponses[0]}${badResponses.length > 1 ? ` (+${badResponses.length - 1})` : ""}` });
+    }
+  } catch (err) {
+    issues.push({ route, problem: `açılamadı: ${String(err).slice(0, 100)}` });
+  } finally {
+    page.off("console", onConsole);
+    page.off("response", onResponse);
+  }
+  return { opened, issues };
 }
 
 /** Rota taraması — her rotada konsol hataları + ≥400 yanıtlar + neredeyse boş sayfa. */
@@ -138,40 +196,15 @@ async function sweepRoutes(baseUrl: string, projectRoot: string): Promise<FullTe
   try {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-    const consoleErrors: string[] = [];
-    const badResponses: string[] = [];
-    page.on("console", (m) => {
-      if (m.type() === "error") consoleErrors.push(m.text().slice(0, 160));
-    });
-    page.on("response", (r) => {
-      if (r.status() >= 400) badResponses.push(`${r.status()} ${r.url().slice(0, 120)}`);
-    });
     const startedAt = Date.now();
     for (const route of routes) {
       if (Date.now() - startedAt > ROUTE_BUDGET_MS) {
         issues.push({ route, problem: "süre bütçesi aşıldı — bu tur taranamadı" });
         continue;
       }
-      consoleErrors.length = 0;
-      badResponses.length = 0;
-      try {
-        await page.goto(new URL(route, baseUrl).toString(), {
-          waitUntil: "domcontentloaded",
-          timeout: ROUTE_TIMEOUT_MS,
-        });
-        await page.waitForTimeout(ROUTE_SETTLE_MS);
-        sweptCount++;
-        const shot = await page.screenshot({ fullPage: false });
-        if (isNearlyBlank(shot)) issues.push({ route, problem: "sayfa neredeyse boş görünüyor (tek renk)" });
-        if (consoleErrors.length > 0) {
-          issues.push({ route, problem: `konsol hatası: ${consoleErrors[0]}${consoleErrors.length > 1 ? ` (+${consoleErrors.length - 1})` : ""}` });
-        }
-        if (badResponses.length > 0) {
-          issues.push({ route, problem: `başarısız istek: ${badResponses[0]}${badResponses.length > 1 ? ` (+${badResponses.length - 1})` : ""}` });
-        }
-      } catch (err) {
-        issues.push({ route, problem: `açılamadı: ${String(err).slice(0, 100)}` });
-      }
+      const r = await sweepOneRoute(page, baseUrl, route);
+      if (r.opened) sweptCount++;
+      issues.push(...r.issues);
     }
   } catch (err) {
     return {
