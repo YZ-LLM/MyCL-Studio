@@ -1311,7 +1311,8 @@ async function failPhase(
       "system",
       "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** ve çalışan abonelik (`claude`) da yok/limitli — bu " +
         "bir ortam sorunu, proje hatası DEĞİL. Otomatik tırmanma/analiz YAPMADIM — hepsi bir sağlayıcı " +
-        "gerektirir, aynı hatayı verirdi.",
+        "gerektirir, aynı hatayı verirdi. Beklemeden çözmek istersen **Plans & Billing'den kredi yükle** — " +
+        "yüklersen ilk denemede kendiliğinden devam ederim.",
     );
     armLlmOutageWait("abonelik limitli + API kredisi yetersiz", makePhaseOutageResume(n));
     return; // STOP — escalation YOK, analiz YOK, fix YOK; devam zamanlayıcısı kuruldu.
@@ -3328,7 +3329,15 @@ async function handleUserMessageInner(text: string): Promise<void> {
     } else if (isApiAccountError(msg) || detectCliRateLimit(msg) !== null) {
       // İki kanal da kapalı sınıfı (kredi bitti / abonelik limiti) → tur KAYBOLMAZ: bekle-ve-devam
       // aynı mesajı erişim dönünce yeniden dener (YZLLM 2026-07-17, canlı cave 2 saat donması).
-      armLlmOutageWait(msg, respondAndExecute);
+      // MAHKEME CRITICAL: gecikmeli koşum handleUserMessage'ın re-entrancy kilidinden GEÇMEZ →
+      // meşguliyet/askq korumasını burada kur (makePhaseOutageResume'un ikizi); atlama GÖRÜNÜR.
+      armLlmOutageWait(msg, async () => {
+        if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
+          emitChatMessage("system", "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor). Mesajını istersen yeniden yaz.");
+          return;
+        }
+        await respondAndExecute();
+      });
     } else {
       emitChatMessage(
         "system",
@@ -7885,6 +7894,9 @@ async function handleRunPhase(
   phaseId: PhaseId,
   mode: "only_run" | "advance",
 ): Promise<void> {
+  // MAHKEME HIGH (2026-07-17): kullanıcı elle devam ediyor → bekle-ve-devam zamanlayıcısı iptal
+  // (aksi halde reset saatinde insan + zamanlayıcı AYNI fazı iki kez koşturabilirdi).
+  cancelLlmOutageWait();
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
     return;

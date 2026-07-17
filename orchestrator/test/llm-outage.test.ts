@@ -8,7 +8,7 @@ import {
   isLlmOutageWaiting,
   OUTAGE_RETRY_INTERVAL_MS,
 } from "../src/llm-outage.js";
-import { noteRateLimitEvent, resetCliRateLimitState } from "../src/cli-rate-limit.js";
+import { noteCliRateLimitError, noteRateLimitEvent, resetCliRateLimitState } from "../src/cli-rate-limit.js";
 
 describe("computeRetryAtMs (saf)", () => {
   const NOW = 1_000_000_000_000;
@@ -45,15 +45,25 @@ describe("armLlmOutageWait / fire / cancel (sahte zamanlayıcı)", () => {
     expect(isLlmOutageWaiting()).toBe(false);
   });
 
-  it("resetsAt biliniyor → deneme reset saatinde (5 dk'da değil)", async () => {
+  it("AKTİF abonelik limiti + resetsAt biliniyor → deneme reset saatinde (5 dk'da değil)", async () => {
     const resetSec = Math.floor((Date.now() + 60 * 60_000) / 1000); // 1 saat sonra
     noteRateLimitEvent({ status: "allowed", resetsAt: resetSec });
+    noteCliRateLimitError("usage-limit"); // aktif limit → _limitedUntilMs = resetsAt
     const resume = vi.fn(async () => {});
     armLlmOutageWait("abonelik limiti", resume);
     await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000); // 5 dk'da ateşlenmemeli
     expect(resume).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(56 * 60_000); // reset + tampon geçti
     expect(resume).toHaveBeenCalledTimes(1);
+  });
+
+  it("MAHKEME: aktif limit YOK (yalnız servis edilmiş event'ten resetsAt görüldü) → 5 dk aralığı", async () => {
+    const resetSec = Math.floor((Date.now() + 60 * 60_000) / 1000);
+    noteRateLimitEvent({ status: "allowed", resetsAt: resetSec }); // blok DEĞİL — sadece gözlem
+    const resume = vi.fn(async () => {});
+    armLlmOutageWait("API 529", resume);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(resume).toHaveBeenCalledTimes(1); // ilgisiz pencere resetine kilitlenmedi
   });
 
   it("resume patlarsa deneme kaybolmaz → 5 dk sonra tekrar", async () => {

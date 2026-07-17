@@ -244,13 +244,15 @@ export function getCliLimitedUntilMs(): number | undefined {
 }
 
 /**
- * Bilinen GELECEK abonelik reset zamanı (ms) — aktif limit ya da son görülen resetsAt.
- * llm-outage bekle-ve-devam zamanlayıcısı bunu okur (YZLLM 2026-07-17: "aboneliğin ne
- * zaman açılacağını biliyorsa o zaman devam etsin"). Geçmişte kaldıysa undefined.
+ * Bilinen GELECEK abonelik reset zamanı (ms) — YALNIZ aktif limit varken. llm-outage
+ * bekle-ve-devam zamanlayıcısı bunu okur (YZLLM 2026-07-17: "aboneliğin ne zaman
+ * açılacağını biliyorsa o zaman devam etsin"). MAHKEME HIGH: _lastResetsAtMs'e DÜŞME —
+ * o değer servis edilmiş (allowed) event'lerden de dolar; abonelik bloklu DEĞİLKEN
+ * (örn. geçici 529) beklemeyi ilgisiz bir pencere resetine saatlerce kilitlerdi.
+ * Aktif limit yoksa undefined → çağıran 5 dk aralığına düşer (kullanıcının isteği).
  */
 export function getKnownResetMs(nowMs: number = Date.now()): number | undefined {
   if (typeof _limitedUntilMs === "number" && _limitedUntilMs > nowMs) return _limitedUntilMs;
-  if (typeof _lastResetsAtMs === "number" && _lastResetsAtMs > nowMs) return _lastResetsAtMs;
   return undefined;
 }
 
