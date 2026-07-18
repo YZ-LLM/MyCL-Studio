@@ -188,11 +188,12 @@ export class Phase0Controller {
    *  çevirir (1-2 tur). Yoksa (doğrudan kullanıcı debug'ı) normal D1 araştırması.
    *  user_selected: kullanıcının error-analysis'te SEÇTİĞİ çözüm → D1 bu yönü onurladıysa
    *  D2 tekrar SORMAZ, doğrudan uygular (çift-soru fix'i, YZLLM 2026-07-03). */
-  private readonly priorAnalysis?: { solutions_tr: string[]; user_selected?: string };
+  /** ANA KURAL (2026-07-18): bu alan YALNIZ İNGİLİZCE taşır — D1 (main) promptuna gömülür. */
+  private readonly priorAnalysis?: { solutions: string[]; user_selected?: string };
   constructor(
     deps: PhaseDeps & {
       bugReport: string;
-      priorAnalysis?: { solutions_tr: string[]; user_selected?: string };
+      priorAnalysis?: { solutions: string[]; user_selected?: string };
     },
   ) {
     this.state = deps.state;
@@ -363,7 +364,7 @@ export class Phase0Controller {
     // YÜKSEK-ÖNCELİKLİ KANIT olarak ver + "DOĞRULA, yeniden türetme" diye yönlendir → D1
     // 1-2 turda yapılandırılmış fix_options üretir (auto-apply routing/güvenlik KORUNUR),
     // 10-18 tur sıfırdan-araştırma + hipotez fan-out'u YAPMAZ (~5dk israf önlenir).
-    const hasPrior = (this.priorAnalysis?.solutions_tr.length ?? 0) > 0;
+    const hasPrior = (this.priorAnalysis?.solutions.length ?? 0) > 0;
     if (hasPrior) {
       // user_selected (YZLLM 2026-07-03 "aynı şeyi 2 kere sordu"): kullanıcı error-analysis'te ZATEN bir yön
       // seçtiyse D1 recommended_index'i onu uygulayan option yapmalı + user_choice_feasible=true dönmeli →
@@ -375,7 +376,7 @@ export class Phase0Controller {
         "Verify them against the code with at most 1-2 targeted Read/Grep calls, then call " +
         "report_root_cause mapping them into structured fix_options with plan_kind. Do NOT start a " +
         "fresh open-ended investigation.\n" +
-        this.priorAnalysis!.solutions_tr.map((s, i) => `${i + 1}. ${s}`).join("\n") +
+        this.priorAnalysis!.solutions.map((s, i) => `${i + 1}. ${s}`).join("\n") +
         (userSel
           ? `\n\n### USER ALREADY CHOSE THIS DIRECTION\nThe user has ALREADY selected this fix direction: "${userSel}". ` +
             "Strict rule: user_choice_feasible=true means EXACTLY 'recommended_index points to the option that " +

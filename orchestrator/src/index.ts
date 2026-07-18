@@ -206,6 +206,7 @@ import { detectStack, handleCommandIntent } from "./intent-router/handlers/comma
 import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting } from "./llm-outage.js";
+import { translate } from "./translator.js";
 import { shouldKickQueue, startLivenessWatchdog } from "./liveness-watchdog.js";
 import { detectCliRateLimit } from "./cli-rate-limit.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
@@ -1176,6 +1177,26 @@ async function handleReuseConfirmAnswer(id: string, sel: string): Promise<void> 
  * (OPT_ACCEPT_CONTINUE/QUEUE/STOP_MANUAL) HİÇ ulaşmaz → blocking:false + acceptContinuePhase yokluğu güvenli
  * (çözüm yönü executeDispatchedIntent debug akışına gider; güvenlik-kabul dalı gerektirmez).
  */
+/**
+ * ANA KURAL SINIR ÇEVİRİSİ (YZLLM 2026-07-18: "main ajan ile iletişim tamamen İngilizce"): main'e
+ * (Faz 0/8 promptları) gidecek TÜRKÇE kaynaklı metni (kullanıcının seçtiği/yazdığı çözüm, recall
+ * kaydı) İngilizceye çevirir. Çeviri patlarsa ORİJİNAL metin + görünür not (sessiz fallback yok;
+ * Faz 0'ın kendi bugReport tr-to-en ağı ikinci hat). Zaten İngilizce kısa metinde de zararsızdır
+ * (translator EN→EN verbatim döner).
+ */
+async function toEnglishForMain(text: string): Promise<string> {
+  const t = text.trim();
+  if (!t || !runtime.config) return t;
+  try {
+    const r = await translate(runtime.config, t, "tr-to-en");
+    return r.text;
+  } catch (e) {
+    log.warn("orchestrator", "main sınır çevirisi başarısız — orijinal iletildi", { error: String(e).slice(0, 120) });
+    emitChatMessage("system", "🌐 Çevirmen erişilemedi — seçilen çözüm metni main ajana özgün haliyle iletildi (Faz 0 kendi çeviri ağıyla telafi eder).");
+    return t;
+  }
+}
+
 async function applyRecalledErrorAnswer(
   n: PhaseId,
   sig: string,
@@ -1189,6 +1210,8 @@ async function applyRecalledErrorAnswer(
     sig,
     options: [rec.answer],
     solutions_tr: [rec.answer],
+    // ANA KURAL: recall kaydı TR — main'e giden eşlenik burada çevrilir (gösterim TR kalır).
+    solutions_en: [await toEnglishForMain(rec.answer)],
     fromRecall: true,
   };
   await handleAskqAnswer(pid, rec.answer);
@@ -4026,7 +4049,8 @@ async function executeDispatchedIntent(
   // Faz 0 sıfırdan araştırmaz, doğrular (handoff'ta çözüm kaybını önler).
   // user_selected (YZLLM 2026-07-03 "aynı şeyi 2 kere sordu"): kullanıcının error-analysis'te SEÇTİĞİ çözüm →
   // Faz 0 D2 tekrar SORMAZ, D1 bu yönü onurladıysa doğrudan uygular (çift-soru kesilir).
-  priorAnalysis?: { solutions_tr: string[]; user_selected?: string },
+  // ANA KURAL: priorAnalysis YALNIZ İNGİLİZCE taşır (main'e gider — Faz 0 D1 promptuna gömülür).
+  priorAnalysis?: { solutions: string[]; user_selected?: string },
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
@@ -7481,18 +7505,23 @@ export async function handleAskqAnswer(
     }
     // FIX B (YZLLM 2026-07-01): kullanıcının seçtiği çözümü bu hata-imzasına KAYDET → aynı hata tekrar fail
     // ederse error-analysis "bu denendi, tekrarlama" olarak görür (aynı-soru döngüsü kırılır, farklı yön önerilir).
-    if (cached.sig) recordSolutionChoice(cached.phase, cached.sig, sel);
+    // ANA KURAL (YZLLM 2026-07-18): main'e giden HER metin İngilizce. Seçim TR etikettir (gösterim);
+    // EN eşleniği indeks hizasından bulunur, yoksa (serbest TR cevap / eski format) sınırda çevrilir.
+    const selIdx = cached.solutions_tr.indexOf(sel);
+    const selEn =
+      (selIdx >= 0 ? cached.solutions_en?.[selIdx] : undefined) ?? (await toEnglishForMain(sel));
+    const solutionsEn =
+      cached.solutions_en ?? (await Promise.all(cached.solutions_tr.map((s2) => toEnglishForMain(s2))));
+    if (cached.sig) recordSolutionChoice(cached.phase, cached.sig, selEn);
     // Diğer her seçim ("Çöz" jeneriği veya somut bir çözüm metni) → mevcut debug
-    // akışı (Faz 0 / debug_triage). bugReport = hata + seçilen yön + öneriler.
+    // akışı (Faz 0 / debug_triage). Kullanıcıya TR gösterilir; main'e EN gider.
     emitChatMessage(
       "system",
       `🔧 Çözüm uygulanıyor: **${sel}** — debug akışı (Faz 0) başlatılıyor.`,
     );
     const bugReport =
-      `Faz ${cached.phase} başarısız oldu.\nSeçilen çözüm yönü: ${sel}` +
-      (cached.solutions_tr.length > 0
-        ? `\nÖnerilen çözümler:\n${cached.solutions_tr.join("\n")}`
-        : "");
+      `Phase ${cached.phase} failed.\nChosen fix direction: ${selEn}` +
+      (solutionsEn.length > 0 ? `\nProposed solutions:\n${solutionsEn.join("\n")}` : "");
     const fakeOutcome: DispatchOutcome = {
       handled: false,
       action: "debug_triage",
@@ -7504,8 +7533,8 @@ export async function handleAskqAnswer(
     // Orkestratörün ZATEN bulduğu çözümleri + kullanıcının SEÇTİĞİNİ yapılandırılmış taşı → Faz 0 D1
     // yeniden türetmez DOĞRULAR + D2 tekrar SORMAZ (çift-soru fix'i, YZLLM 2026-07-03).
     await executeDispatchedIntent(bugReport, fakeOutcome, {
-      solutions_tr: cached.solutions_tr,
-      user_selected: sel,
+      solutions: solutionsEn,
+      user_selected: selEn,
     });
     return;
   }

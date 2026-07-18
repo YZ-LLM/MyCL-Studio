@@ -20,6 +20,7 @@ import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
+import { translate } from "./translator.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { resolveLlmClient, isApiAccountError } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
@@ -81,9 +82,16 @@ export interface CodeRef {
  * İlişkili düşük-seviye sonuçlar TEK finding'te gruplanır (20 semgrep satırı = 3 finding, 20 değil).
  */
 export interface ErrorFinding {
+  /** GÖSTERİM metni (TR) — translator doldurur; çeviri yoksa geçici olarak EN orijinali taşır. */
   summary_tr: string;
   detail_tr?: string;
   solutions_tr: string[];
+  // ANA KURAL (YZLLM 2026-07-18): main ile iletişim TAMAMEN İngilizce. _en = DOĞRULUK KAYNAĞI —
+  // fix-dispatch/Faz 0 prior-analysis bu alanları kullanır; _tr YALNIZ kullanıcı gösterimi.
+  summary_en?: string;
+  detail_en?: string;
+  /** solutions_tr ile indeks hizalı EN orijinaller (dispatch'te main'e giden metin). */
+  solutions_en?: string[];
   best_index: number;
   code_ref?: CodeRef;
 }
@@ -118,8 +126,10 @@ export interface PendingErrorAnalysis {
   sig?: string;
   /** Sıralı askq seçenekleri (UI'daki sırayla — index eşlemesi için). */
   options: string[];
-  /** Ajanın önerdiği çözümler (TR). "Çöz" → debug akışına bunlar bağlam olur. */
+  /** Ajanın önerdiği çözümler (TR — kullanıcı gösterimi). "Çöz" → debug akışına bunlar bağlam olur. */
   solutions_tr: string[];
+  /** solutions_tr ile indeks hizalı EN orijinaller — main'e (Faz 0/8) giden metin BUNLARDIR (ANA KURAL). */
+  solutions_en?: string[];
   /**
    * Güvenlik-baseline Unit 2: "Kabul et, devam et" seçilirse phase-N-complete
    * (detail:"security_accepted_by_user") yazılıp advanceToNextPhase(N) çağrılacak faz.
@@ -274,25 +284,42 @@ function parseCodeRefLoose(obj: unknown): CodeRef | null {
   return { file: file.trim(), startLine, endLine, snippet };
 }
 
-/** SAF: bir finding objesini doğrula (summary_tr zorunlu; boşsa null). */
+/** SAF: bir finding objesini doğrula. _en alanları DOĞRULUK KAYNAĞIDIR (yeni şema); model eski _tr
+ *  şemasıyla dönerse geriye uyumla kabul edilir (_en boş kalır → dispatch sınırı tr-to-en çevirir).
+ *  _en kaynaklıysa _tr geçici olarak EN kopyadır — localizeFinding çeviriyle değiştirir. */
 function parseOneFinding(obj: unknown): ErrorFinding | null {
   if (typeof obj !== "object" || obj === null) return null;
   const o = obj as Record<string, unknown>;
-  const summary = o.summary_tr;
-  if (typeof summary !== "string" || summary.trim() === "") return null;
-  const rawSolutions = o.solutions_tr;
-  const solutions_tr = Array.isArray(rawSolutions)
-    ? rawSolutions.filter((s): s is string => typeof s === "string").map((s) => s.trim()).filter((s) => s !== "")
-    : [];
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+  const list = (v: unknown): string[] =>
+    Array.isArray(v)
+      ? v.filter((s): s is string => typeof s === "string").map((s) => s.trim()).filter((s) => s !== "")
+      : [];
+  const summary_en = str(o.summary_en);
+  const summary = summary_en ?? str(o.summary_tr);
+  if (!summary) return null;
+  const solutions_en = list(o.solutions_en);
+  const enSource = summary_en !== undefined || solutions_en.length > 0;
+  const solutions = enSource && solutions_en.length > 0 ? solutions_en : list(o.solutions_tr);
   const rawBest = o.best_index;
   const best_index =
-    typeof rawBest === "number" && Number.isInteger(rawBest) && rawBest >= 0 && rawBest < solutions_tr.length
+    typeof rawBest === "number" && Number.isInteger(rawBest) && rawBest >= 0 && rawBest < solutions.length
       ? rawBest
       : 0;
-  const rawDetail = o.detail_tr;
-  const detail_tr = typeof rawDetail === "string" && rawDetail.trim() !== "" ? rawDetail.trim() : undefined;
+  const detail_en = str(o.detail_en);
+  const detail = detail_en ?? str(o.detail_tr);
   const code_ref = parseCodeRefLoose(o.code_ref);
-  return { summary_tr: summary.trim(), detail_tr, solutions_tr, best_index, ...(code_ref ? { code_ref } : {}) };
+  return {
+    summary_tr: summary, // _en kaynaklıysa geçici EN — localizeFinding TR'ye çevirir
+    detail_tr: detail,
+    solutions_tr: solutions,
+    ...(summary_en !== undefined ? { summary_en } : {}),
+    ...(detail_en !== undefined ? { detail_en } : {}),
+    ...(enSource && solutions.length > 0 ? { solutions_en: solutions } : {}),
+    best_index,
+    ...(code_ref ? { code_ref } : {}),
+  };
 }
 
 export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
@@ -316,11 +343,14 @@ export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
   if (findings.length > MAX_FINDINGS) {
     const head = findings.slice(0, MAX_FINDINGS - 1);
     const tail = findings.slice(MAX_FINDINGS - 1);
-    const mergedSolutions = Array.from(new Set(tail.flatMap((f) => f.solutions_tr)));
+    const mergedSolutions = Array.from(new Set(tail.flatMap((f) => f.solutions_en ?? f.solutions_tr)));
+    const fallbackFix = "Fix all remaining findings at their source";
     head.push({
       summary_tr: `Diğer ${tail.length} güvenlik bulgusu (birlikte ele alınacak)`,
       detail_tr: tail.map((f, i) => `${i + 1}. ${f.summary_tr}`).join("\n"),
-      solutions_tr: mergedSolutions.length > 0 ? mergedSolutions : ["Kalan bulguların hepsini kaynağında düzelt"],
+      solutions_tr: mergedSolutions.length > 0 ? mergedSolutions : [fallbackFix],
+      summary_en: `${tail.length} additional findings (handled together)`,
+      solutions_en: mergedSolutions.length > 0 ? mergedSolutions : [fallbackFix],
       best_index: 0,
     });
     findings = head;
@@ -334,6 +364,42 @@ export function parseErrorAnalysisBlock(text: string): ErrorAnalysis | null {
     best_index: head.best_index,
     findings,
   };
+}
+
+/**
+ * GÖSTERİM ÇEVİRİSİ (ANA KURAL, YZLLM 2026-07-18): analiz artık İngilizce üretir (_en = kaynak);
+ * kullanıcıya gösterilecek _tr alanlarını TRANSLATOR doldurur. Yalnız _en'i olan ve henüz
+ * çevrilmemiş (_tr === _en) alanlar çevrilir; cache aynı stringi bir kez çevirir. Herhangi bir
+ * çeviri patlarsa false döner (caller BİR kez görünür not basar — sessiz fallback yok) ve _tr
+ * EN orijinalinde kalır (içerik kaybolmaz, yalnız dili İngilizce kalır).
+ */
+export async function localizeFinding(
+  config: MyclConfig,
+  f: ErrorFinding,
+  cache: Map<string, string>,
+): Promise<boolean> {
+  let ok = true;
+  const toTr = async (en: string): Promise<string> => {
+    const hit = cache.get(en);
+    if (hit !== undefined) return hit;
+    try {
+      const r = await translate(config, en, "en-to-tr");
+      cache.set(en, r.text);
+      return r.text;
+    } catch (e) {
+      ok = false;
+      log.warn("error-analysis", "gösterim çevirisi başarısız — EN gösterilecek", { error: String(e).slice(0, 120) });
+      return en;
+    }
+  };
+  if (f.summary_en && f.summary_tr === f.summary_en) f.summary_tr = await toTr(f.summary_en);
+  if (f.detail_en && f.detail_tr === f.detail_en) f.detail_tr = await toTr(f.detail_en);
+  if (f.solutions_en) {
+    for (let i = 0; i < f.solutions_tr.length; i++) {
+      if (f.solutions_tr[i] === f.solutions_en[i]) f.solutions_tr[i] = await toTr(f.solutions_en[i]!);
+    }
+  }
+  return ok;
 }
 
 /** Snippet için okunacak bağlam satır sayısı (finding satırının etrafı). */
@@ -405,6 +471,7 @@ export function emitBlockingFindingAskq(
       sig: opts.sig,
       options: optionLabels,
       solutions_tr: finding.solutions_tr,
+      solutions_en: finding.solutions_en,
       acceptContinuePhase: opts.acceptContinuePhase,
       code_ref: finding.code_ref,
       auto_selected_solution: best.trim(),
@@ -429,6 +496,7 @@ export function emitBlockingFindingAskq(
     sig: opts.sig,
     options: optionLabels,
     solutions_tr: finding.solutions_tr,
+    solutions_en: finding.solutions_en,
     acceptContinuePhase: opts.acceptContinuePhase,
     code_ref: finding.code_ref,
   };
@@ -485,14 +553,15 @@ export function buildErrorAnalysisPrompt(
     "passwords, and a vulnerable 3rd-party calendar dependency = 3 DISTINCT problems), emit ONE `findings` entry",
     "per DISTINCT problem — GROUP related low-level results into a single finding (3 problems, NOT 20 separate",
     "semgrep lines). If there is only ONE problem, `findings` has exactly ONE entry.",
-    '{"kind":"error_analysis","blocking":<true|false>,"findings":[{"summary_tr":"<1-2 SHORT plain-language sentences IN TURKISH: what broke, in human terms — NO file paths, line numbers, or code>","detail_tr":"<fuller technical explanation IN TURKISH (file/line/code OK) — shown ONLY on demand via Details; PREFER filling it for a code-level failure; use \"\" only for a pure environment error>","solutions_tr":["<a SHORT plain-language DIRECTION IN TURKISH — a few words, NOT a full patch, no line numbers/code/endpoint paths>","<option 2>"],"best_index":<0-based index of the solution YOU would apply>,"code_ref":{"file":"<repo-relative path this finding is about>","startLine":<1-based line>,"endLine":<1-based end line>}}]}',
+    '{"kind":"error_analysis","blocking":<true|false>,"findings":[{"summary_en":"<1-2 SHORT plain-language sentences IN ENGLISH: what broke, in human terms — NO file paths, line numbers, or code>","detail_en":"<fuller technical explanation IN ENGLISH (file/line/code OK) — shown ONLY on demand via Details; PREFER filling it for a code-level failure; use \"\" only for a pure environment error>","solutions_en":["<a SHORT plain-language DIRECTION IN ENGLISH — a few words, NOT a full patch, no line numbers/code/endpoint paths>","<option 2>"],"best_index":<0-based index of the solution YOU would apply>,"code_ref":{"file":"<repo-relative path this finding is about>","startLine":<1-based line>,"endLine":<1-based end line>}}]}',
     "",
     "`code_ref` is OPTIONAL per finding: include it ONLY when the finding points to a SPECIFIC place in the",
     "project's source (so the developer can press \"Kodu göster\"). OMIT `code_ref` for findings with no single",
     "code location (e.g. a dependency CVE from npm-audit). Do NOT include a snippet — MyCL fills it from disk.",
     "",
-    "Rules: summary_tr, detail_tr, and every solutions_tr entry MUST be in Turkish (the developer reads Turkish).",
-    "summary_tr = the PLAIN essence for a non-technical reader (no file:line, no code). detail_tr = the technical",
+    "Rules: summary_en, detail_en, and every solutions_en entry MUST be in English — NEVER write Turkish.",
+    "A SEPARATE translator renders Turkish for the user; you must not translate yourself.",
+    "summary_en = the PLAIN essence for a non-technical reader (no file:line, no code). detail_en = the technical",
     "detail (file/line/code allowed — shown only on demand); if none, use \"\". Each solution is a distinct SHORT",
     "DIRECTION (a few words — not a restatement of the error, not a full patch/step-by-step). 2-4 solutions per finding.",
     'Do NOT include a "queue it" / "re-analyze" option — MyCL adds those automatically.',
@@ -692,6 +761,31 @@ export async function analyzeAndAskError(
     for (const f of analysis.findings) {
       f.code_ref = await resolveCodeRef(state.project_root, f.code_ref);
     }
+    // GÖSTERİM ÇEVİRİSİ (ANA KURAL 2026-07-18): _en kaynak → _tr'yi translator doldurur. TÜM findings
+    // burada çevrilir (kuyruk gösterimi senkron kalsın); kısa metinler + cache → maliyet küçük.
+    {
+      const trCache = new Map<string, string>();
+      let allOk = true;
+      for (const f of analysis.findings) {
+        if (!(await localizeFinding(config, f, trCache))) allOk = false;
+      }
+      if (!allOk) {
+        emitChatMessage("system", "🌐 Çevirmen şu an erişilemedi — bu hata analizi İngilizce gösteriliyor (içerik tam).");
+        await appendAudit(state.project_root, {
+          ts: Date.now(),
+          phase: errCtx.phase,
+          event: "error-analysis-translate-failed",
+          caller: "mycl-orchestrator",
+          detail: "en-to-tr gösterim çevirisi başarısız — EN gösterildi",
+        }).catch(() => {});
+      }
+      // Üst-seviye ayna alanları head finding'ten TAZELE (çeviri sonrası).
+      const head0 = analysis.findings[0]!;
+      analysis.summary_tr = head0.summary_tr;
+      analysis.detail_tr = head0.detail_tr;
+      analysis.solutions_tr = head0.solutions_tr;
+      analysis.best_index = head0.best_index;
+    }
     const headCodeRef = analysis.findings[0]?.code_ref;
 
     // Güvenlik-baseline Unit 2: allowAcceptContinue (blocking gate) → blocking'e zorla
@@ -738,6 +832,7 @@ export async function analyzeAndAskError(
         blocking,
         options: optionLabels,
         solutions_tr: analysis.solutions_tr,
+        solutions_en: analysis.findings[0]?.solutions_en,
         acceptContinuePhase: errCtx.acceptContinuePhase,
         auto_selected_solution: best.trim(),
         findings: analysis.findings,
@@ -791,6 +886,7 @@ export async function analyzeAndAskError(
       blocking,
       options: optionLabels,
       solutions_tr: analysis.solutions_tr,
+      solutions_en: analysis.findings[0]?.solutions_en,
       acceptContinuePhase: errCtx.acceptContinuePhase,
       findings: analysis.findings,
       code_ref: headCodeRef,
