@@ -62,12 +62,16 @@ export function filterRecentLines(
   }
   let capped = kept.length > maxLines ? kept.slice(-maxLines) : kept;
   // Bayt bütçesi: EN YENİ satırlardan geriye doğru biriktir — bütçeyi aşan eski kuyruk atılır.
+  // MAHKEME (2026-07-18): gerçek UTF-8 bayt ölç (line.length UTF-16 birimi — Türkçe/emoji 2×'e sapıyordu).
   let total = 0;
   let start = capped.length;
-  while (start > 0 && total + capped[start - 1]!.length + 1 <= maxBytes) {
-    total += capped[start - 1]!.length + 1;
+  while (start > 0 && total + Buffer.byteLength(capped[start - 1]!, "utf8") + 1 <= maxBytes) {
+    total += Buffer.byteLength(capped[start - 1]!, "utf8") + 1;
     start--;
   }
+  // MAHKEME CRITICAL (2026-07-18): EN YENİ tek satır bütçeyi tek başına aşıyorsa eski hal TÜM dosyayı
+  // siliyordu (start hiç azalmaz → boş çıktı → writeFile boş yazar). En az 1 (en yeni) satır HER ZAMAN korunur.
+  if (start === capped.length && capped.length > 0) start = capped.length - 1;
   if (start > 0) capped = capped.slice(start);
   return capped.length ? capped.join("\n") + "\n" : "";
 }
@@ -84,7 +88,12 @@ export async function pruneOldLogs(globalDir: string): Promise<void> {
       const content = await fs.readFile(path, "utf8");
       const filtered = filterRecentLines(content, cutoff);
       if (filtered.length < content.length) {
-        await fs.writeFile(path, filtered, "utf8");
+        // MAHKEME HIGH (2026-07-18): doğrudan writeFile yarıda kesilirse dosya bozulurdu; geçici dosya +
+        // atomik rename. (Eş zamanlı append penceresi teoride 1 satır kaybedebilir — gözlem logu, kabul
+        // edilen dar sınır; kritik proje verisi değil.)
+        const tmp = `${path}.prune-tmp`;
+        await fs.writeFile(tmp, filtered, "utf8");
+        await fs.rename(tmp, path);
         log.info("log-retention", "budandı", {
           file: name,
           before: content.length,

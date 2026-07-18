@@ -573,14 +573,23 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
     const dedupedChat = chatMessages.filter((m) => !existingMsgTs.has(m.ts));
     const dedupedTr = translations.filter((t) => !existingTrTs.has(t.ts));
     const dedupedCc = ccEvents.filter((c) => !existingCcTs.has(c.ts));
-    const newMessages = stableSort([...dedupedChat, ...state.messages]);
-    const newTranslations = stableSort([...dedupedTr, ...state.translations]);
-    const newCcEvents = stableSort([...dedupedCc, ...state.ccEvents]);
+    // MAHKEME HIGH (2026-07-18, erişilebilirlik): eski toplu yeniden-numaralama TÜM mesaj id'lerini
+    // değiştiriyordu → React key'leri kayıp, her mesaj REMOUNT → role="log" hepsini yeniden duyuruyordu
+    // (eski mesaj yükleyince duyuru fırtınası). Artık mevcut kayıtların id'si/objesi AYNEN korunur;
+    // yalnız yeni yüklenen ESKİ kayıtlar mevcut minimumun ALTINDA (negatif) benzersiz id alır —
+    // canlı yeni mesajın length+1 id'si pozitif maksimumun üstünde kalmaya devam eder (çakışma yok).
+    const withStableIds = <T extends { id: number }>(older: T[], existing: T[]): T[] => {
+      const minId = existing.reduce((a, x) => Math.min(a, x.id), 0);
+      return older.map((x, i) => ({ ...x, id: minId - older.length + i }));
+    };
+    const newMessages = stableSort([...withStableIds(dedupedChat, state.messages), ...state.messages]);
+    const newTranslations = stableSort([...withStableIds(dedupedTr, state.translations), ...state.translations]);
+    const newCcEvents = stableSort([...withStableIds(dedupedCc, state.ccEvents), ...state.ccEvents]);
     return {
       ...state,
-      messages: newMessages.map((m, i) => ({ ...m, id: i + 1 })),
-      translations: newTranslations.map((t, i) => ({ ...t, id: i + 1 })),
-      ccEvents: newCcEvents.map((c, i) => ({ ...c, id: i + 1 })),
+      messages: newMessages,
+      translations: newTranslations,
+      ccEvents: newCcEvents,
       historyLoaded: true,
       oldestLoadedTs:
         d.oldest_returned_ts > 0 ? d.oldest_returned_ts : state.oldestLoadedTs,

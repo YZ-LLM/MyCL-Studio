@@ -62,3 +62,22 @@ describe("bayt bütçesi (2026-07-18 hızlı oturumlar — 2.1.208 esinli)", () 
     expect(filterRecentLines(content, 0)).toBe(content);
   });
 });
+
+describe("MAHKEME düzeltmeleri (2026-07-18)", () => {
+  it("CRITICAL: bütçeyi tek başına aşan EN YENİ satır dosyayı SİLDİRMEZ — en az 1 satır korunur", () => {
+    const now = Date.now();
+    const huge = JSON.stringify({ ts: now, blob: "y".repeat(5000) });
+    const out = filterRecentLines(huge + "\n", 0, 100_000, 1000);
+    expect(out).not.toBe(""); // tüm dosya silinmiyor
+    expect(out).toContain("y".repeat(100)); // en yeni satır duruyor
+  });
+
+  it("bayt ölçümü UTF-8: Türkçe karakterler gerçek bayt sayısıyla bütçelenir", () => {
+    const now = Date.now();
+    const line = (i: number) => JSON.stringify({ ts: now, m: `ç${i}${"ş".repeat(50)}` }); // ~2× UTF-8
+    const content = Array.from({ length: 20 }, (_, i) => line(i)).join("\n") + "\n";
+    const out = filterRecentLines(content, 0, 100_000, 500);
+    expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(500 + line(19).length + 2); // gerçek bayt sınırında
+    expect(out).toContain('"m":"ç19'); // en yeni korunur
+  });
+});
