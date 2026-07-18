@@ -1689,7 +1689,11 @@ function App() {
           leftPanelsOpen={leftPanelsOpen}
           onToggleTaskQueueClick={() => setTaskQueueOpen((o) => !o)}
           taskQueueOpen={taskQueueOpen}
-          taskQueueCount={mainState.taskQueue.length}
+          taskQueueCount={
+          // 2026-07-18: rozet = AKTİF iş (running+pending) — "bekleyen iş var mı" sinyali;
+          // done+dropped saymak panel sayaçlarıyla çelişiyordu (bilinçli davranış değişikliği).
+          mainState.taskQueue.filter((t) => t.status !== "done" && t.status !== "dropped").length
+        }
           onAgentTeamClick={() => setAgentTeamOpen((o) => !o)}
           agentTeamOpen={agentTeamOpen}
           tokenTotals={mainState.tokenTotals}

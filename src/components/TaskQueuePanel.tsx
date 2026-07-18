@@ -10,7 +10,7 @@
 // ✅ tamam / ⏳ bekliyor / ⏹️ düştü), öncelik ve tamamlanma-zamanı gösterilir.
 // "Tamamlanınca zamanını yaz ve UYGULANAMASIN" → done işler KİLİTLİ (Uygula yok).
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useEscapeToClose, useOutsideClickClose } from "../hooks/useDismissable";
 import type { ReactNode } from "react";
 import type { TaskQueueItem, TaskStatus } from "../types/events";
@@ -106,16 +106,21 @@ export function TaskQueuePanel({
   const panelRef = useRef<HTMLElement | null>(null);
   useEscapeToClose(open, onClose);
   useOutsideClickClose(open, onClose, panelRef);
+  // Sekmeler (YZLLM 2026-07-18: "tamamlananları tamamlananlar diye bi sekme yap oraya koy"):
+  // Aktif = running+pending; Tamamlananlar = done+dropped (düşen işin "Yeniden Ekle" butonu orada
+  // görünür kalır). Panel her açılışta Aktif'te başlar; otomatik sekme değiştirme yok (sürpriz olmasın).
+  const [tab, setTab] = useState<"active" | "done">("active");
   if (!open) return null;
-  const sorted = [...items].sort(compareTasks);
-  const activeCount = items.filter((i) => statusOf(i) !== "done" && statusOf(i) !== "dropped").length;
+  const isDoneish = (i: TaskQueueItem) => statusOf(i) === "done" || statusOf(i) === "dropped";
+  const activeItems = items.filter((i) => !isDoneish(i));
+  const doneItems = items.filter(isDoneish);
+  const shown = tab === "active" ? activeItems : doneItems;
+  const sorted = [...shown].sort(compareTasks);
 
   return (
     <aside ref={panelRef} className="task-queue-drawer" aria-label="İş Kuyruğu">
       <header className="task-queue-header">
-        <span className="task-queue-title">
-          📋 İş Kuyruğu ({activeCount} aktif / {items.length})
-        </span>
+        <span className="task-queue-title">📋 İş Kuyruğu</span>
         <button
           type="button"
           className="task-queue-close"
@@ -125,11 +130,35 @@ export function TaskQueuePanel({
           ×
         </button>
       </header>
-      <div className="task-queue-warning">
-        İş-listesindeki işler öncelik sırasıyla TEK TEK pipeline'dan (Faz 1→17) otomatik geçer.
+      <div className="task-queue-tabs" role="tablist" aria-label="İş kuyruğu sekmeleri">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "active"}
+          className="task-queue-tab"
+          onClick={() => setTab("active")}
+        >
+          Aktif ({activeItems.length})
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "done"}
+          className="task-queue-tab"
+          onClick={() => setTab("done")}
+        >
+          Tamamlananlar ({doneItems.length})
+        </button>
       </div>
+      {tab === "active" && (
+        <div className="task-queue-warning">
+          İş-listesindeki işler öncelik sırasıyla TEK TEK pipeline'dan (Faz 1→17) otomatik geçer.
+        </div>
+      )}
       {sorted.length === 0 ? (
-        <div className="task-queue-empty">Henüz iş eklenmedi.</div>
+        <div className="task-queue-empty">
+          {tab === "active" ? "Aktif iş yok." : "Henüz tamamlanan iş yok."}
+        </div>
       ) : (
         <ul className="task-queue-list">
           {sorted.map((item) => {
