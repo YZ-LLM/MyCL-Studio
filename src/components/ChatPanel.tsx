@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AskqCard, type AskqOption } from "./AskqCard";
-import { fmtTs } from "../utils/format";
+import { fmtTsParts } from "../utils/format";
 
 /**
  * Plain-text mesajda URL'leri tespit edip <a> ile sarmalar. Markdown render
@@ -456,7 +456,7 @@ export function ChatPanel({
         {(() => {
           const renderMsg = (m: ChatMessage) => {
             const highlighted = selectedTs === m.ts ? " highlighted" : "";
-            const tsLabel = fmtTs(m.ts);
+            const tsParts = fmtTsParts(m.ts);
             // Bu mesajdan ÖNCE faz çizgisi koyulacak mı + faz-jump scroll hedefi mi.
             const divPhase = dividerBeforeMsgId.get(m.id);
             const tRef = m.id === scrollTargetMsgId ? scrollTargetRef : undefined;
@@ -497,7 +497,12 @@ export function ChatPanel({
                     onClick={() => onMessageSelected(m.ts)}
                     className={highlighted ? "msg-wrap highlighted" : "msg-wrap"}
                   >
-                    {tsLabel && <span className="msg-ts">{tsLabel}</span>}
+                    {tsParts && (
+                    <span className="msg-ts date-badge">
+                      <span className="date-badge-date">{tsParts.date}</span>
+                      <span className="date-badge-time">{tsParts.time}</span>
+                    </span>
+                  )}
                     <ErrorMessage msg={m} onShowCode={onShowCode} />
                     {replyBtn}
                     {copyBtn}
@@ -513,7 +518,12 @@ export function ChatPanel({
                   className={`msg ${m.role}${highlighted}`}
                   onClick={() => onMessageSelected(m.ts)}
                 >
-                  {tsLabel && <span className="msg-ts">{tsLabel}</span>}
+                  {tsParts && (
+                    <span className="msg-ts date-badge">
+                      <span className="date-badge-date">{tsParts.date}</span>
+                      <span className="date-badge-time">{tsParts.time}</span>
+                    </span>
+                  )}
                   {linkifyText(splitSentences(m.text))}
                   {/* YZLLM 2026-06-30: sade mesaj + istenirse "Detay göster" (hata-analizi teknik açıklaması).
                       YZLLM 2026-07-05 (Feature B): code_ref varsa yanında "Kodu göster" (salt-okunur kod popup'ı). */}

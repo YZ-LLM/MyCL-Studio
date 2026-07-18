@@ -1,3 +1,4 @@
+import { fmtTsParts } from "../utils/format";
 // TokenTimelinePanel — faz-bazında token harcaması zaman çizelgesi (sağ drawer).
 //
 // Veri: cost.jsonl (CostRecord[]) — backend cost_phase (canlı) + cost_history (açılış).
@@ -15,6 +16,28 @@ interface Props {
   /** Tam-pipeline öngörüsü (orkestratör hesaplar: per-faz medyan). null = yetersiz veri. */
   forecast: PipelinePrediction | null;
   onClose: () => void;
+}
+
+/** Lokal rozet — App.css .date-badge görsel sabitlerinin inline kopyası (bu dosya bilinçli
+ *  App.css'siz; bkz. dosya başlığı). Tarih/model vurgusu (YZLLM 2026-07-18 "badge'ler olsun"). */
+function Badge({ children, strong }: { children: ReactNode; strong?: boolean }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "0px 6px",
+        borderRadius: 8,
+        fontSize: 10,
+        background: "rgba(110,118,129,0.16)",
+        border: "1px solid var(--border, #333)",
+        color: strong ? "var(--fg, #ddd)" : "var(--fg-dim, #999)",
+        fontWeight: strong ? 700 : 400,
+        marginRight: 4,
+      }}
+    >
+      {children}
+    </span>
+  );
 }
 
 function recTotal(c: CostRecord): number {
@@ -164,6 +187,14 @@ export function TokenTimelinePanel({ open, costs, forecast, onClose }: Props): R
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                     <span>
+                      {(() => {
+                        const tp = fmtTsParts(c.ts);
+                        return tp ? (
+                          <Badge strong>
+                            {tp.date} {tp.time.slice(0, 5)}
+                          </Badge>
+                        ) : null;
+                      })()}
                       Faz {c.phase}
                       {c.iteration > 1 ? ` (iter ${c.iteration})` : ""} · {c.turns} tur
                       {c.duration_ms ? ` · ${fmtDur(c.duration_ms)}` : ""}
@@ -191,13 +222,15 @@ export function TokenTimelinePanel({ open, costs, forecast, onClose }: Props): R
                   <div style={{ fontSize: 10, color: "var(--fg-dim, #888)", marginTop: 2 }}>
                     ↧ {fmt(c.input_tokens)} · ↥ {fmt(c.output_tokens)}
                     {c.cache_read_input_tokens > 0 ? ` · cache ${fmt(c.cache_read_input_tokens)}` : ""}
-                    {c.model ? ` · ${shortModel(c.model)}` : ""}
+                    {c.model ? <> · <Badge>{shortModel(c.model)}</Badge></> : null}
                   </div>
                   {c.model_usage && Object.keys(c.model_usage).length > 1 && (
                     <div style={{ fontSize: 9, color: "var(--fg-dim, #777)", marginTop: 1 }}>
-                      {Object.entries(c.model_usage)
-                        .map(([m, u]) => `${shortModel(m)}: ${fmt(u.input_tokens + u.output_tokens)}`)
-                        .join(" · ")}
+                      {Object.entries(c.model_usage).map(([m, u]) => (
+                        <Badge key={m}>
+                          {shortModel(m)}: {fmt(u.input_tokens + u.output_tokens)}
+                        </Badge>
+                      ))}
                     </div>
                   )}
                 </li>

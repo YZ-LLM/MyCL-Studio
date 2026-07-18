@@ -1805,6 +1805,27 @@ select:focus {
   user-select: none;
 }
 
+/* ── Tarih rozeti (2026-07-18): silik zaman damgası yerine görünür pill. .msg-ts yerleşimi
+   (block/margin) korur; görsel pill .date-badge'den gelir. ── */
+.date-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: rgba(110, 118, 129, 0.16);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  opacity: 1;
+  user-select: none;
+}
+.date-badge .date-badge-date {
+  font-weight: 700;
+  color: var(--fg);
+  margin-right: 5px;
+}
+
+
 /* ===== Lazy load spinner (Feature 3) ===== */
 .lazy-loading {
   padding: 8px 12px;

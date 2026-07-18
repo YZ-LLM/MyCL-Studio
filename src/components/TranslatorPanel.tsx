@@ -1,7 +1,7 @@
 // TranslatorPanel — Sağ üst panel: TR↔EN çeviri log'u. Spec §4.3.
 
 import { useEffect, useRef } from "react";
-import { fmtTs } from "../utils/format";
+import { fmtTsParts } from "../utils/format";
 
 export interface TranslationEntry {
   id: number;
@@ -87,14 +87,14 @@ export function TranslatorPanel({ entries, modelLabel, highlightWindow }: Props)
                 }
               : undefined;
             if (inWindow) firstAssocSeen = true;
-            const tsLabel = fmtTs(e.ts);
+            const tsParts = fmtTsParts(e.ts);
             return (
               <div
                 key={e.id}
                 ref={refCb}
                 className={`translator-entry${inWindow ? " associated" : ""}`}
               >
-                {tsLabel && <span className="msg-ts">{tsLabel}</span>}
+                {tsParts && (<span className="msg-ts date-badge"><span className="date-badge-date">{tsParts.date}</span><span className="date-badge-time">{tsParts.time}</span></span>)}
                 <div className="translator-input-line">
                   &gt; {dirTag} {e.input}
                 </div>

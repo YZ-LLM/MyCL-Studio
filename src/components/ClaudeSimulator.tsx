@@ -5,7 +5,7 @@
 // (ADR-009 — Claude'un perspektifinde Türkçe yok).
 
 import { useEffect, useRef, useState } from "react";
-import { fmtTs } from "../utils/format";
+import { fmtTsParts } from "../utils/format";
 
 export type CCEventKind =
   | "init"
@@ -96,12 +96,12 @@ function RequestEventBlock({
   ev,
   associated,
   refCb,
-  tsLabel,
+  tsParts,
 }: {
   ev: CCEvent;
   associated: boolean;
   refCb?: (el: HTMLDivElement | null) => void;
-  tsLabel?: string;
+  tsParts?: { date: string; time: string } | null;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -110,7 +110,7 @@ function RequestEventBlock({
       className={`cc-event request${associated ? " associated" : ""}`}
       style={{ borderLeft: "3px solid var(--accent)", paddingLeft: 8, marginTop: 4 }}
     >
-      {tsLabel && <span className="msg-ts">{tsLabel}</span>}
+      {tsParts && (<span className="msg-ts date-badge"><span className="date-badge-date">{tsParts.date}</span><span className="date-badge-time">{tsParts.time}</span></span>)}
       <div
         onClick={() => setOpen((p) => !p)}
         style={{ cursor: "pointer", color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: 11 }}
@@ -273,9 +273,12 @@ export function ClaudeSimulator({ events, banner, modelLabel, highlightWindow }:
                   : undefined;
               if (inWindow) firstAssocSeen = true;
               const assoc = inWindow ? " associated" : "";
-              const tsLabel = fmtTs(e.ts);
-              const tsSpan = tsLabel ? (
-                <span className="msg-ts">{tsLabel}</span>
+              const tsParts = fmtTsParts(e.ts);
+              const tsSpan = tsParts ? (
+                <span className="msg-ts date-badge">
+                  <span className="date-badge-date">{tsParts.date}</span>
+                  <span className="date-badge-time">{tsParts.time}</span>
+                </span>
               ) : null;
 
               if (e.sub === "request") {
@@ -285,7 +288,7 @@ export function ClaudeSimulator({ events, banner, modelLabel, highlightWindow }:
                     ev={e}
                     associated={inWindow}
                     refCb={refCb}
-                    tsLabel={tsLabel}
+                    tsParts={tsParts}
                   />
                 );
               }
