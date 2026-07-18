@@ -29,7 +29,10 @@ efor seviyesi ve özellik bayrakları yapılandırılır.
   çalışacağına ve faz geçişlerine karar verir.
 - **Translator** — Türkçe ↔ İngilizce çeviri yapar (iki yön).
 - **Main (codegen)** — fazların asıl işini İngilizce yapar; yalnızca o anki
-  görevi bilir.
+  görevi bilir. **Main ile iletişim tamamen İngilizcedir (ana kural):** hata
+  analizi İngilizce üretilir ve kullanıcıya çevirmen üzerinden Türkçe gösterilir;
+  seçilen çözüm metinleri main'e giderken İngilizce eşlenikleriyle taşınır,
+  Türkçe kaynaklı cevaplar sınırda çevrilir (çevirmen erişilemezse görünür not).
 
 Her role ayrı API anahtarı atanabilir. Anahtarlar proje dışında, platforma özel
 config dizinindeki `secrets.json` içinde saklanır (izinler `0600`; konumlar için
@@ -407,6 +410,19 @@ kırıksa (yeni kırılma yok) kazanılmış ilerleme **tutulur** ve sonraki den
 üstüne kurulur; düzeltme **yeni test kırdıysa** ya da ortada güvenilir test kanıtı
 yoksa değişiklikler bilinen temiz duruma **geri alınır**. Karar ve gerekçesi sohbette
 görünür, denetim izine yazılır.
+
+## Arayüz: rozetler, sekmeler, panel kapatma
+
+- **Tarih rozetleri.** Chat, çeviri ve Claude akış panellerindeki mesaj zaman
+  damgaları silik etiket yerine görünür rozettir (tarih koyu vurgulu). Token
+  Zaman Çizelgesi'nde her faz satırı tarih+saat rozeti taşır ve model adları
+  model başına rozet olarak görünür.
+- **İş kuyruğu sekmeleri.** Kuyruk paneli "Aktif" (çalışan + bekleyen) ve
+  "Tamamlananlar" (biten + düşen) sekmelerine ayrılır; sağ bardaki rozet artık
+  yalnız aktif işleri sayar.
+- **Panel kapatma.** Sağdan açılan paneller (İş Kuyruğu, Token Zaman Çizelgesi,
+  Ajan Takımı) ve modallar ESC ile ya da dışarı tıklayınca kapanır; birden çok
+  panel açıkken ESC yalnız en son açılanı kapatır.
 
 ## Erişilebilirlik ve hafif oturumlar
 
