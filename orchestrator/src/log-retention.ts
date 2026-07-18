@@ -11,6 +11,10 @@ import { log } from "./logger.js";
 
 const SIX_MONTHS_MS = 180 * 24 * 60 * 60 * 1000;
 const MAX_LINES = 100_000; // ts-budamadan sonra güvenlik tavanı (devasa dosyayı kesin sınırla)
+// HIZLI OTURUMLAR (YZLLM 2026-07-18, Claude Code 2.1.208 esinli "shrinking transcripts"): satır tavanı
+// uzun satırlarda onlarca MB'a izin veriyordu (canlı: trace.log 49 MB) → ek BAYT bütçesi. En yeni
+// satırlar korunur (kuyruktan biriktir); proje logları yine DOKUNULMAZ (2026-06-20 kuralı).
+export const MAX_BYTES_PER_LOG = 8 * 1024 * 1024;
 
 /** ~/.mycl altındaki budanacak GLOBAL loglar. Proje logları (<proje>/.mycl) burada YOK. */
 const GLOBAL_LOGS = ["trace.log", "session-transcripts.jsonl", "audit.log", "tauri-stderr.log"];
@@ -44,14 +48,27 @@ export function lineTimestamp(line: string): number | null {
  * SAF: içeriği cutoff'tan eski (datable) satırlardan arındır + son MAX_LINES ile sınırla.
  * Tarihlenemeyen satır KORUNUR (kör veri kaybı yok). Test edilebilir.
  */
-export function filterRecentLines(content: string, cutoffMs: number, maxLines = MAX_LINES): string {
+export function filterRecentLines(
+  content: string,
+  cutoffMs: number,
+  maxLines = MAX_LINES,
+  maxBytes = MAX_BYTES_PER_LOG,
+): string {
   const kept: string[] = [];
   for (const line of content.split("\n")) {
     if (line.trim() === "") continue;
     const ts = lineTimestamp(line);
     if (ts === null || ts >= cutoffMs) kept.push(line); // datable-eski → at; diğer → tut
   }
-  const capped = kept.length > maxLines ? kept.slice(-maxLines) : kept;
+  let capped = kept.length > maxLines ? kept.slice(-maxLines) : kept;
+  // Bayt bütçesi: EN YENİ satırlardan geriye doğru biriktir — bütçeyi aşan eski kuyruk atılır.
+  let total = 0;
+  let start = capped.length;
+  while (start > 0 && total + capped[start - 1]!.length + 1 <= maxBytes) {
+    total += capped[start - 1]!.length + 1;
+    start--;
+  }
+  if (start > 0) capped = capped.slice(start);
   return capped.length ? capped.join("\n") + "\n" : "";
 }
 

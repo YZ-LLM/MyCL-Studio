@@ -447,7 +447,9 @@ export function ChatPanel({
           )}
         </div>
       </div>
-      <div className="chat-messages" ref={scrollRef} onScroll={handleScroll}>
+      {/* ERİŞİLEBİLİRLİK (2026-07-18, Claude Code 2.1.208 ekran okuyucu modu esinli): role="log" —
+          eklenen her mesaj ekran okuyucuya kibarca (polite) duyurulur; görsel davranış değişmez. */}
+      <div className="chat-messages" ref={scrollRef} onScroll={handleScroll} role="log" aria-label="Sohbet geçmişi">
         {loadingOlder && (
           <div className="lazy-loading">Daha eski mesajlar yükleniyor…</div>
         )}
@@ -550,6 +552,8 @@ export function ChatPanel({
       {runningBanner && (
         <div
           className="running-banner"
+          role="status"
+          aria-label="Çalışma durumu"
           data-testid="running-banner"
           title={runningBanner.detail ?? ""}
         >
@@ -590,6 +594,7 @@ export function ChatPanel({
         <textarea
           className="composer-input"
           data-testid="composer-input"
+          aria-label="MyCL'e mesaj yaz"
           placeholder={
             composerPlaceholder ?? "MyCL'e yaz... (Enter gönderir, Shift+Enter alt satır)"
           }

@@ -44,3 +44,21 @@ describe("log-retention · filterRecentLines", () => {
     expect(filterRecentLines(old, cutoff)).toBe("");
   });
 });
+
+describe("bayt bütçesi (2026-07-18 hızlı oturumlar — 2.1.208 esinli)", () => {
+  it("uzun satırlarda satır tavanı yetmez: bütçe aşılınca EN YENİ satırlar korunur", () => {
+    const now = Date.now();
+    const line = (i: number) => JSON.stringify({ ts: now, msg: `satır-${i}-${"x".repeat(100)}` });
+    const content = Array.from({ length: 50 }, (_, i) => line(i)).join("\n") + "\n";
+    const out = filterRecentLines(content, 0, 100_000, 1000); // ~1KB bütçe → yalnız son birkaç satır
+    expect(out.length).toBeLessThanOrEqual(1000 + 1);
+    expect(out).toContain("satır-49"); // en yeni korunur
+    expect(out).not.toContain("satır-0"); // en eski atılır
+  });
+
+  it("bütçe içindeyse hiçbir satır atılmaz", () => {
+    const now = Date.now();
+    const content = `${JSON.stringify({ ts: now, a: 1 })}\n${JSON.stringify({ ts: now, a: 2 })}\n`;
+    expect(filterRecentLines(content, 0)).toBe(content);
+  });
+});

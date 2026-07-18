@@ -103,7 +103,8 @@ export function PhaseSidebar({
   return (
     <aside className="phase-sidebar" data-testid="phase-sidebar">
       <div className="phase-sidebar-header">Fazlar</div>
-      <div className="phase-sidebar-list">
+      {/* ERİŞİLEBİLİRLİK (2026-07-18): faz listesi gezinme bölgesi; aktif faz aria-current ile duyurulur. */}
+      <nav className="phase-sidebar-list" aria-label="Pipeline fazları">
         {/* Faz 0 — Hata Ayıklama (Debug Triage). Pipeline DIŞI/standalone; en üstte,
             ayrı 🐛 rozetiyle. Tek başına "çalıştır" akışı yok — tıklanınca kullanıcıya
             hatayı chat'e yazması söylenir (orchestrator otomatik debug_triage'a yönlendirir). */}
@@ -116,6 +117,7 @@ export function PhaseSidebar({
               type="button"
               data-testid="phase-item-0"
               className={`phase-item standalone${isCurrent0 ? " current" : ""}`}
+              aria-current={isCurrent0 ? "step" : undefined}
               disabled={disabled}
               onClick={() => onPhaseClick(0 as PhaseId)}
               title="Faz 0 — Hata Ayıklama (Debug Triage). Pipeline dışı, standalone. Yaşadığın hatayı chat'e yaz; debug akışı otomatik başlar."
@@ -147,6 +149,7 @@ export function PhaseSidebar({
               type="button"
               data-testid={`phase-item-${id}`}
               className={`phase-item${isCurrent ? " current" : ""}${isOptional ? "" : " required"}${gateFailed ? " gate-failed" : ""}${isOutOfScope ? " phase-item-inactive" : ""}`}
+              aria-current={isCurrent ? "step" : undefined}
               onClick={() => handleSingle(id)}
               onDoubleClick={() => handleDouble(id)}
               title={`Faz ${id} — ${typeLabel}${isOptional ? " (opsiyonel)" : " (zorunlu)"}. ${isOutOfScope ? "Bu iterasyonun kapsamı DIŞINDA — çalışmayacak. " : ""}TEK tık: bu fazın chat'teki ilk mesajına git · ÇİFT tık: fazı çalıştır${gateFailed ? " — ⚠ bu gate başarısız (akış soft devam etti, sonuç tam doğrulanmadı)" : ""}`}
@@ -161,7 +164,7 @@ export function PhaseSidebar({
             </button>
           );
         })}
-      </div>
+      </nav>
     </aside>
   );
 }

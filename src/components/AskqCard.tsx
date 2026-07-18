@@ -45,8 +45,10 @@ export function AskqCard({
       });
     };
     return (
-      <div className="askq-card msg" data-testid="askq-card">
-        <div className="askq-question">{question}</div>
+      <div className="askq-card msg" data-testid="askq-card" role="group" aria-label="MyCL sorusu">
+        {/* role="alert": soru belirdiği anda ekran okuyucuya kesintili (assertive) duyurulur —
+            cevap beklendiği kaçmasın (2.1.208 ekran okuyucu modu esinli). Görsel değişiklik yok. */}
+        <div className="askq-question" role="alert">{question}</div>
         <div className="askq-options askq-multi">
           {options.map((o) => {
             const value = optValue(o);
@@ -87,8 +89,8 @@ export function AskqCard({
   }
 
   return (
-    <div className="askq-card msg" data-testid="askq-card">
-      <div className="askq-question">{question}</div>
+    <div className="askq-card msg" data-testid="askq-card" role="group" aria-label="MyCL sorusu">
+      <div className="askq-question" role="alert">{question}</div>
       {suggestedOption && (
         <div className="askq-suggestion" title="Orkestra ajanının önerisi">
           <span className="askq-suggestion-icon" aria-hidden>🤖</span>

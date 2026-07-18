@@ -8917,6 +8917,12 @@ async function main(): Promise<void> {
   // İş 6 (YZLLM 2026-06-20): GLOBAL logları (~/.mycl) 6 aydan eski satırlardan buda — PROJE
   // logları (<proje>/.mycl) ASLA silinmez. Fail-soft, non-blocking (boot'u geciktirmez).
   void pruneOldLogs(globalConfigDir()).catch(() => {});
+  // HIZLI OTURUMLAR (2026-07-18): budama yalnız boot'ta koşuyordu — günlerce açık kalan oturumda
+  // loglar sınırsız büyüyordu. 6 saatte bir tekrarla (unref: kapanışı engellemez; fail-soft).
+  const logPruneTimer = setInterval(() => {
+    void pruneOldLogs(globalConfigDir()).catch(() => {});
+  }, 6 * 60 * 60_000);
+  logPruneTimer.unref?.();
   const app = new App({
     loadI18n,
     startRuntimeHttpServer,

@@ -408,6 +408,18 @@ kırıksa (yeni kırılma yok) kazanılmış ilerleme **tutulur** ve sonraki den
 yoksa değişiklikler bilinen temiz duruma **geri alınır**. Karar ve gerekçesi sohbette
 görünür, denetim izine yazılır.
 
+## Erişilebilirlik ve hafif oturumlar
+
+- **Ekran okuyucu desteği.** Sohbet geçmişi bir günlük bölgesi olarak işaretlidir:
+  her yeni mesaj ekran okuyucuya kendiliğinden duyurulur; MyCL bir soru sorduğunda
+  soru kesintili (öncelikli) okunur. Faz listesi gezinme bölgesidir ve aktif faz
+  "şu anki adım" olarak bildirilir; çalışma göstergesi, mesaj kutusu ve araç
+  çubuğu da etiketlidir. Görsel davranış değişmez — destek her zaman açıktır.
+- **Hafif oturumlar.** MyCL'in genel günlükleri (izleme, oturum dökümleri) yaş
+  sınırına ek olarak dosya başına bayt bütçesiyle sınırlanır ve budama yalnız
+  açılışta değil, açık kalan oturumda birkaç saatte bir de koşar — günlerce açık
+  uygulamada disk şişmez. Proje içi günlüklere dokunulmaz.
+
 ## Resimli kullanım kılavuzu
 
 Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü Türkçe bir kullanım
