@@ -204,7 +204,8 @@ import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
-import { armLlmOutageWait, cancelLlmOutageWait } from "./llm-outage.js";
+import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting } from "./llm-outage.js";
+import { shouldKickQueue, startLivenessWatchdog } from "./liveness-watchdog.js";
 import { detectCliRateLimit } from "./cli-rate-limit.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
@@ -1229,6 +1230,42 @@ async function applyRecalledPhaseScope(proposed: number[], rec: AnswerMemoryReco
 }
 
 /**
+ * CANLILIK GARANTİSİ (YZLLM 2026-07-18: "hiç bir zaman durmayacağını ve döngüye girmeyeceğini garanti
+ * etmeliyiz"): otonom modda (oto-cevap/hiçbir-şey-sorma) bir terminal-dur noktası işi ASKIDA BIRAKMAZ.
+ *  - Kuyruk işi aktifse: hiçbir şey yapmaz — reconcile işi pending+attempts'e döndürür, merdiven sahiplenir.
+ *  - Kuyruk-DIŞI akışsa (doğrudan mesaj/Çalıştır): işi kuyruğa alır (attempts=1 + neden) → merdiven
+ *    (farklı yaklaşım + tavan 3 + canlandırma) sahiplenir; drain reconcile'da kendiliğinden sürer.
+ * Manuel modda dokunmaz (dur + rehber = kullanıcı sürer; bu donma değil, tasarım). Döngü garantisi
+ * merdivenin tavanından gelir (tavanlı iş otomatik seçilmez → aynı iş sonsuz dönemez).
+ */
+async function ensureAutonomousContinuation(reason: string): Promise<void> {
+  if (!autoAnswerSuggested()) return;
+  if (!runtime.state) return;
+  if (runtime.currentTaskId || runtime.currentBatch) {
+    _drainActive = true; // reconcile bu işi pending'e döndürüp kuyruğu sürdürsün
+    return;
+  }
+  const text = _lastDevelopText?.trim();
+  if (!text) return; // devam ettirilecek somut iş metni yok → genel emniyet ağı (bekçi) kalır
+  const root = runtime.state.project_root;
+  await appendTask(root, {
+    id: randomUUID(),
+    ts: Date.now(),
+    text: text.slice(0, 300),
+    status: "pending",
+    source: "auto",
+    attempts: 1,
+    last_fail: reason.slice(0, 200),
+  }).catch((e) => log.warn("orchestrator", "canlılık: iş kuyruğa alınamadı", e));
+  await emitQueueChangedFor(root);
+  emitChatMessage(
+    "system",
+    "🧭 Durmuyorum: yarım kalan iş kuyruğa alındı — daraltılmış/farklı yaklaşımla otomatik yeniden denenecek.",
+  );
+  _drainActive = true;
+}
+
+/**
  * LLM kesintisi devam kapanışı (YZLLM 2026-07-17 "5 dk'da bir denesin / reset saatinde devam etsin"):
  * kesilen fazı, erişim dönünce OTOMATİK yeniden koşar. Emniyetler: pipeline zaten koşuyorsa (kullanıcı
  * 'Çalıştır'a bastı) ya da faz manuel ilerletildiyse ÇİFT koşum yok — görünür not + atla.
@@ -1365,7 +1402,12 @@ async function failPhase(
       });
       if (decision === "stop") {
         emitChatMessage("system", `⛔ ${environmentErrorAdvice(envReason)}`);
-        return; // STOP — proje-fix döngüsüne GİRME (mevcut davranış birebir).
+        // CANLILIK (YZLLM 2026-07-18): otonom modda ortam hatasında da donma — iş kuyruğa girer;
+        // yeniden denemede ajan ortam engelini FARKLI yoldan aşmayı dener (ör. farklı port/araç kurulumu).
+        await ensureAutonomousContinuation(
+          `ortam hatası: ${envReason.slice(0, 120)} — aynı yolu tekrarlama, engeli farklı yoldan aş (ör. farklı port/eksik aracı kur/komutu değiştir)`,
+        );
+        return; // STOP — proje-fix döngüsüne GİRME (mevcut davranış birebir; devam kuyruk merdiveninde).
       }
       if (decision === "escalate") {
         emitChatMessage(
@@ -1399,6 +1441,11 @@ async function failPhase(
       `⏱️ Faz ${n} keşfi zaman bütçesini aştı — ajan projede çok arama yaptı, sonuçlandıramadı. Proje çok büyükse ya ` +
         `da istek çok genişse **daha net/dar bir istekle 'Çalıştır'** ile tekrar dene. (Kod hatası değil; otomatik ` +
         `düzeltme/ilerletme YAPMADIM.)`,
+    );
+    // CANLILIK (YZLLM 2026-07-18): otonom modda burada donma — iş kuyruğa girer, yeniden denemede ajana
+    // "keşfi DAR tut" bağlamı gider (merdiven tavanı 3 → sonsuz bütçe yakımı da yok).
+    await ensureAutonomousContinuation(
+      `Faz ${n} keşif zaman bütçesi aşıldı — keşfi DAR tut: en fazla birkaç hedefli arama yap, sonra mevcut proje haritası/bilgiyle KARAR ver (açık uçlu tarama yapma)`,
     );
     return; // STOP — deep-solve/mahkeme/advance YOK (boşa döngü + boş-niyet ilerletme önlenir).
   }
@@ -4164,10 +4211,15 @@ async function executeDispatchedIntent(
  * set kalır → sürücü sıradaki işe geçmez; kullanıcı cevabıyla resume → pipeline-end
  * → sonraki iş otomatik başlar. Böylece interaktif park'larda kuyruk bozulmaz.
  */
+// Kuyruk-dışı geliştirme akışının son iş metni — bir terminal-dur noktasında işi kuyruğa alıp
+// (ensureAutonomousContinuation) devam ettirebilmek için (YZLLM 2026-07-18 canlılık garantisi).
+let _lastDevelopText: string | null = null;
+
 async function runDevelopIteration(
   text: string,
   opts?: { seedIntent?: string; startPhase?: PhaseId },
 ): Promise<void> {
+  _lastDevelopText = text;
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
     return;
@@ -8849,6 +8901,34 @@ async function main(): Promise<void> {
     gracefulShutdown,
   });
   await app.start();
+  // CANLILIK BEKÇİSİ (YZLLM 2026-07-18 "hiç bir zaman durmayacağını garanti etmeliyiz"): bilinen dur
+  // noktaları devam mekanizmalarına bağlı; bu, KAÇIRILMIŞ dur noktaları için yapısal emniyet ağı —
+  // sistem tamamen boşta + meşru bekleme yok (askq/park/kesinti zamanlayıcısı) + seçilebilir iş varsa
+  // kuyruğu GÖRÜNÜR sürdürür. Döngü üretemez: attempts tavanını doldurmuş işler seçilemez.
+  startLivenessWatchdog(async () => {
+    if (!runtime.state) return;
+    const pendingOk =
+      nextPendingTask(await readTasks(runtime.state.project_root).catch(() => [])) !== null;
+    const snap = {
+      busy: _handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || _draining,
+      askqOpen: getActiveAskq() !== null || isPipelineParked(),
+      outageWaiting: isLlmOutageWaiting(),
+      hasPending: pendingOk,
+    };
+    if (!shouldKickQueue(snap)) return;
+    emitChatMessage(
+      "system",
+      "🫀 Canlılık bekçisi: sistem boşta ama bekleyen iş var — kuyruğu sürdürüyorum (donma yok).",
+    );
+    await appendAuditModule(runtime.state.project_root, {
+      ts: Date.now(),
+      phase: runtime.state.current_phase as PhaseId,
+      event: "liveness-watchdog-kick",
+      caller: "mycl-orchestrator",
+      detail: "boşta + bekleyen iş + devam mekanizması yok → kuyruk sürüldü",
+    }).catch(() => {});
+    await kickWorkQueue();
+  });
 }
 
 void main();

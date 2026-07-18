@@ -363,6 +363,16 @@ başladığında işin metni zaten niyeti belli ettiği için MyCL "niyet bekliy
 istiyorsun?" diye ikinci kez sormaz — işi doğrudan işler. Kuyruk sürerken durum mesajını
 tek kaynak (kuyruk) yazar; ikinci bir karşılama mesajıyla çakışmaz.
 
+**Canlılık garantisi — donmaz, döngüye de girmez.** Otonom modda (Oto-cevap /
+"Hiçbir şey sorma") hiçbir dur noktası sistemi askıda bırakmaz: keşif bütçesi
+aşımı, ortam hatası, sağlayıcı kesintisi gibi terminal duraklarda iş kuyruğa
+alınır ve uygun devam mekanizması (yeniden deneme merdiveni ya da bekle-ve-devam
+zamanlayıcısı) sahiplenir. Bunların kaçırdığı bir durum olursa **canlılık
+bekçisi** devreye girer: birkaç dakikada bir sistemi yoklar; tamamen boşta +
+bekleyen iş var + meşru bir bekleme (açık soru, kesinti zamanlayıcısı) yoksa
+kuyruğu görünür mesajla sürdürür. Ters yönde döngü garantisi deneme tavanından
+gelir: aynı iş en fazla üç kez otomatik denenir, sonrası görünür bekleme.
+
 **İş düşürülmez — çözülene kadar denenir.** Bir iş tamamlanamadığında (kesinti, boş
 build, takılan kapı…) MyCL onu "düştü" diye kenara atmaz: iş kuyruğa **geri konur** ve
 bir sonraki denemede önceki başarısızlığın nedeni ajana verilip **farklı bir yaklaşımla**
