@@ -83,7 +83,7 @@ import {
   taskStatus,
 } from "./task-queue/store.js";
 import { intakeAndEnqueue } from "./task-queue/intake.js";
-import type { TaskQueueItem } from "./task-queue/types.js";
+import { MAX_TASK_AUTO_RETRIES, type TaskQueueItem } from "./task-queue/types.js";
 import {
   beginPhaseCost,
   clearActiveAskq,
@@ -1602,9 +1602,20 @@ async function failPhase(
               "system",
               `⛔ Müfettiş art arda ${_escalateAcceptChain} fazda değerlendirme üretemedi (sistematik erişim sorunu — sağlayıcı ` +
                 `sınırı/anahtar olabilir). Pipeline'ı DURDURDUM: bu iş "tamamlandı" SAYILMADI (sahte-yeşil önlendi). ` +
-                "Sağlayıcı/anahtarı düzeltince işi yeniden ver (kuyruğa tekrar eklenmeli).",
+                "İş kuyruğa geri dönecek; erişim düzelince kaldığı yerden OTOMATİK denenecek.",
             );
-            return; // advanceToNextPhase YOK → halt; görev done sayılmaz
+            // YZLLM 2026-07-18: drain'i kapat (aynı ölü sağlayıcıyla sıradaki işleri de yakmasın) +
+            // bekle-ve-devam kur — erişim dönünce kuyruk kendiliğinden sürer (iş düşürülmez, pending'e döner).
+            _drainActive = false;
+            armLlmOutageWait("müfettiş sistematik erişim sorunu", async () => {
+              if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
+                emitChatMessage("system", "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor).");
+                return;
+              }
+              _drainActive = true;
+              await reconcileAndDrainTasks();
+            });
+            return; // advanceToNextPhase YOK → halt; görev done sayılmaz (reconcile pending'e döndürür)
           }
         }
         await appendAuditModule(runtime.state.project_root, {
@@ -4554,6 +4565,30 @@ async function tryStartTaskBatch(): Promise<boolean> {
   return true;
 }
 
+/**
+ * YZLLM 2026-07-18 ("kuyrukta 'düştü' işaretleme seçeneğini kaldır. sorunları çözmeye çalışsın.
+ * çözemiyorsa bakış açısını değiştirsin. kuralları çiğnemeden çözsün."): MyCL kendi başarısızlığında
+ * işi ASLA düşürmez — pending'e döndürür (attempts+1 + neden), yeniden denemede ajana FARKLI yaklaşım
+ * talimatı verilir. Tavan (MAX_TASK_AUTO_RETRIES) dolunca otomatik seçim durur ama iş kuyrukta GÖRÜNÜR
+ * bekler (kaybolmaz; sonsuz döngü/token yakımı da yok). 'dropped' YALNIZ kullanıcı iptalinde kalır.
+ */
+async function returnTaskToPending(projectRoot: string, taskId: string, failNote: string): Promise<number> {
+  const current = (await readTasks(projectRoot).catch(() => [])).find((t) => t.id === taskId);
+  const attempts = (current?.attempts ?? 0) + 1;
+  await patchTask(projectRoot, taskId, {
+    status: "pending",
+    attempts,
+    last_fail: failNote.slice(0, 200),
+  });
+  emitChatMessage(
+    "system",
+    attempts < MAX_TASK_AUTO_RETRIES
+      ? `↩️ İş tamamlanamadı — kuyruğa GERİ kondu (deneme ${attempts}/${MAX_TASK_AUTO_RETRIES}); bir sonraki denemede FARKLI yaklaşım kullanılacak. Neden: ${failNote.slice(0, 120)}`
+      : `⏸️ İş ${attempts} denemede tamamlanamadı — kuyrukta bekliyor (düşürülmedi, otomatik tekrar da edilmeyecek). Yeni bir talimat verirsen o bilgiyle yeniden ele alırım. Son neden: ${failNote.slice(0, 120)}`,
+  );
+  return attempts;
+}
+
 async function startNextPendingTask(): Promise<boolean> {
   if (!runtime.state) return false;
   if (runtime.currentTaskId) return false; // #4: canlı/parkta işi EZME
@@ -4573,18 +4608,26 @@ async function startNextPendingTask(): Promise<boolean> {
   // YZLLM 2026-06-15: üst bar + "İş" kutusu o anki işi göstersin (iş başında set et;
   // eskiden yalnız Faz 1 sonunda doluyordu → işlenirken boş kalıyordu). Metin zaten TR.
   emitIterationIntent(next.text);
+  const attempts = next.attempts ?? 0;
   emitChatMessage(
     "system",
-    `▶️ İş başlıyor (öncelik ${next.priority ?? "—"}): _"${next.text.slice(0, 90)}"_`,
+    `▶️ İş başlıyor (öncelik ${next.priority ?? "—"}${attempts > 0 ? `, deneme ${attempts + 1}/${MAX_TASK_AUTO_RETRIES}` : ""}): _"${next.text.slice(0, 90)}"_`,
   );
+  // BAKIŞ AÇISI DEĞİŞİMİ (YZLLM 2026-07-18): önceki deneme(ler) tamamlanamadıysa ajana nedeni + "aynı
+  // yaklaşımı tekrarlama" talimatı ver — kurallar aynen geçerli (sahte yeşil yok, atlama yok).
+  const retryContext =
+    attempts > 0
+      ? `\n\n[YENİDEN DENEME ${attempts + 1}/${MAX_TASK_AUTO_RETRIES}] Bu iş daha önce tamamlanamadı. Son neden: ${next.last_fail ?? "kaydedilmedi"}. AYNI yaklaşımı tekrarlama — sorunu FARKLI bir bakış açısıyla ele al (farklı kök neden hipotezi, farklı yöntem); kuralları çiğnemeden, sahte yeşile kaçmadan çöz.`
+      : "";
+  const taskPrompt = `${next.text}${retryContext}`;
   // Güvenlik/pentest sistem-işi → niyet bulgudan türetildi → from_phase'ten (Faz 3) başla, Faz 1/2 atla.
   if (next.source === "security" && typeof next.from_phase === "number" && next.from_phase > 1) {
-    await runDevelopIteration(next.text, {
-      seedIntent: next.text,
+    await runDevelopIteration(taskPrompt, {
+      seedIntent: taskPrompt,
       startPhase: next.from_phase as PhaseId,
     });
   } else {
-    await runDevelopIteration(next.text);
+    await runDevelopIteration(taskPrompt);
   }
   return true;
 }
@@ -4611,7 +4654,9 @@ async function onBatchMaybeComplete(projectRoot: string): Promise<void> {
     if (projectOk && files.length > 0) {
       await patchTask(projectRoot, tid, { status: "done", completed_at: Date.now() });
     } else {
-      await patchTask(projectRoot, tid, { status: "dropped" });
+      // YZLLM 2026-07-18: düşürme yok → pending + fail-set (yeniden KÜMElenmez; sıralı, farklı yaklaşımla denenir).
+      _batchFailedIds.add(tid);
+      await returnTaskToPending(projectRoot, tid, "paralel kümede dosya kanıtı üretilmedi");
       dropped++;
     }
   }
@@ -4619,7 +4664,7 @@ async function onBatchMaybeComplete(projectRoot: string): Promise<void> {
   if (dropped > 0) {
     emitChatMessage(
       "system",
-      `⛔ Paralel kümedeki ${dropped} iş dosya kanıtı üretmedi — 'Düştü' işaretlendi (yeniden eklenebilir; sahte tamamlanma kilidi).`,
+      `⚠️ Paralel kümedeki ${dropped} iş dosya kanıtı üretmedi — kuyruğa geri kondu, SIRALI ve farklı yaklaşımla yeniden denenecek (sahte tamamlanma kilidi).`,
     );
   }
 }
@@ -4632,7 +4677,8 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   // HÂLÂ 'dropped' olan drain-işi kurtarılır (çözülmüş/alakasız işe dokunulmaz; _drainTaskId yeni iş başlayınca üzerine yazılır).
   if (!doneId && _drainTaskId) {
     const rescue = (await readTasks(projectRoot).catch(() => [])).find((t) => t.id === _drainTaskId);
-    if (rescue?.status === "dropped") doneId = _drainTaskId;
+    // 2026-07-18: mid-flow kesilen iş artık 'pending'e döner (dropped değil) → yeşil-son kurtarması ikisini de kapsar.
+    if (rescue && (rescue.status === "dropped" || rescue.status === "pending")) doneId = _drainTaskId;
   }
   runtime.currentTaskId = null;
   _drainTaskId = null;
@@ -4643,11 +4689,11 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   // gösterir, retry edilmez, sıradaki iş başlar (sahte-tamamlanma; kullanıcının en büyük korkusu). Boş-build → 'dropped'
   // (UI'da "Yeniden Ekle" görünür → kullanıcı sorunu çözüp yeniden gönderebilir). Bkz MEMORY project_faz5_skip_false_green.
   if (!(await hasDeliverable(projectRoot))) {
-    await patchTask(projectRoot, doneId, { status: "dropped" });
+    await returnTaskToPending(projectRoot, doneId, "boş build — hiç uygulama/kaynak dosyası üretilmedi (sahte tamamlanma kilidi)");
     await emitQueueChangedFor(projectRoot);
     emitChatMessage(
       "system",
-      "⛔ İş 'Tamamlandı' DAMGALANMADI — boş build (hiç uygulama/kaynak dosyası üretilmedi). 'Düştü' olarak işaretlendi; sorunu çözüp yeniden gönderebilirsin.",
+      "⛔ İş 'Tamamlandı' DAMGALANMADI — boş build (hiç uygulama/kaynak dosyası üretilmedi). İş kuyruğa geri kondu; bir sonraki denemede farklı yaklaşım kullanılacak.",
     );
     return;
   }
@@ -4682,7 +4728,8 @@ async function reconcileAndDrainTasks(): Promise<void> {
         // park DEĞİL → iş tamamlanmadan durdu (terminal fail/abort) → düşür, devam et.
         const id = runtime.currentTaskId;
         runtime.currentTaskId = null;
-        await patchTask(root, id, { status: "dropped" }); // retriable DEĞİL → sonsuz-retry yok
+        // YZLLM 2026-07-18: düşürme YOK — pending + attempts (tavan dolunca otomatik seçilmez, görünür bekler).
+        await returnTaskToPending(root, id, "pipeline iş tamamlanmadan durdu (terminal hata/kesinti)");
         // YZLLM 2026-07-03 (mahkeme — kritik): düşen iş BAYAT iterasyon-state'i (current_phase/intent_summary/spec/
         // iteration_started_at) bırakıyordu → SONRAKİ kuyruk işi bunları devralıp (wasPipelineCompleted reset'i proje-
         // ömründe ilk tamamlamadan ÖNCE hiç koşmaz) yanlış resume + yanlış clarify-enjeksiyonu yapıyordu (kapat-aç'ta
@@ -4701,12 +4748,8 @@ async function reconcileAndDrainTasks(): Promise<void> {
           updated_at: Date.now(),
         };
         await saveState(runtime.state);
-        clearClarifyLog(root); // düşen işin clarify Q&A'sı sonraki işe SIZMASIN
+        clearClarifyLog(root); // yarım işin clarify Q&A'sı sonraki denemeye SIZMASIN
         await emitQueueChangedFor(root);
-        emitChatMessage(
-          "system",
-          "⏹ Çalışan iş tamamlanmadan durdu — kuyrukta 'düştü' işaretlendi (gerekirse yeniden ekle).",
-        );
       }
       // ⚡ Aktif paralel küme (2026-07-16): birleşik pipeline parktaysa dur; park DEĞİLSE
       // tamamlanmadan durmuş (terminal fail) → işleri BİR KEZ pending'e döndür (tek-atış

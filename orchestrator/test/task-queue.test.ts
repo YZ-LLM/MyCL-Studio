@@ -16,7 +16,7 @@ import {
   taskStatus,
 } from "../src/task-queue/store.js";
 import { parseSplitBlock } from "../src/task-queue/intake.js";
-import type { TaskQueueItem } from "../src/task-queue/types.js";
+import { MAX_TASK_AUTO_RETRIES, type TaskQueueItem } from "../src/task-queue/types.js";
 
 describe("task-queue store", () => {
   let projectRoot: string;
@@ -146,5 +146,44 @@ describe("intake parseSplitBlock", () => {
   it("geçerli blok + boş tasks → [] (null DEĞİL): salt onay/gözlem ya da hepsi zaten kuyrukta (YZLLM 2026-06-15)", () => {
     // Boş tasks LLM'in KASITLI sinyali (yeni iş yok) → caller ham-metni tek-iş yapıp duplicate üretmesin.
     expect(parseSplitBlock('```json\n{"kind":"task_split","tasks":[]}\n```')).toEqual([]);
+  });
+});
+
+describe("düşürme yok → yeniden deneme merdiveni (YZLLM 2026-07-18: 'kuyrukta düştü işaretlemeyi kaldır, çözsün')", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "mycl-taskq-retry-"));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("attempts + last_fail patch-fold ile taşınır (pending'e dönüş kaydı)", async () => {
+    await appendTask(root, { id: "t1", ts: 1, text: "iş", status: "running", source: "auto" });
+    await patchTask(root, "t1", { status: "pending", attempts: 1, last_fail: "boş build" });
+    const t = (await readTasks(root)).find((x) => x.id === "t1");
+    expect(t?.status).toBe("pending");
+    expect(t?.attempts).toBe(1);
+    expect(t?.last_fail).toBe("boş build");
+  });
+
+  it("attempts < tavan → otomatik seçilir; tavana ulaşan iş SEÇİLMEZ ama pending KALIR (kaybolmaz)", async () => {
+    await appendTask(root, { id: "cap", ts: 1, text: "takılan iş", status: "pending", source: "auto" });
+    await appendTask(root, { id: "ok", ts: 2, text: "sıradaki iş", status: "pending", source: "auto" });
+    await patchTask(root, "cap", { attempts: 2 }); // 2 < 3 → hâlâ seçilebilir (öncelik/FIFO gereği ilk o)
+    let items = await readTasks(root);
+    expect(nextPendingTask(items)?.id).toBe("cap");
+    await patchTask(root, "cap", { attempts: MAX_TASK_AUTO_RETRIES }); // tavan doldu
+    items = await readTasks(root);
+    expect(nextPendingTask(items)?.id).toBe("ok"); // tavanlı iş atlanır, sıradaki seçilir
+    expect(items.find((x) => x.id === "cap")?.status ?? "pending").toBe("pending"); // düşürülmedi
+  });
+
+  it("tavanlı iş tek başınaysa → seçim null (sonsuz döngü yok) ama kuyrukta görünür durur", async () => {
+    await appendTask(root, { id: "solo", ts: 1, text: "çözülemeyen", status: "pending", source: "auto" });
+    await patchTask(root, "solo", { attempts: MAX_TASK_AUTO_RETRIES, last_fail: "3 farklı yaklaşım da tamamlanamadı" });
+    const items = await readTasks(root);
+    expect(nextPendingTask(items)).toBeNull();
+    expect(items).toHaveLength(1);
   });
 });

@@ -363,6 +363,14 @@ başladığında işin metni zaten niyeti belli ettiği için MyCL "niyet bekliy
 istiyorsun?" diye ikinci kez sormaz — işi doğrudan işler. Kuyruk sürerken durum mesajını
 tek kaynak (kuyruk) yazar; ikinci bir karşılama mesajıyla çakışmaz.
 
+**İş düşürülmez — çözülene kadar denenir.** Bir iş tamamlanamadığında (kesinti, boş
+build, takılan kapı…) MyCL onu "düştü" diye kenara atmaz: iş kuyruğa **geri konur** ve
+bir sonraki denemede önceki başarısızlığın nedeni ajana verilip **farklı bir yaklaşımla**
+yeniden ele alınır — kurallar aynen geçerli (sahte yeşil yok, atlama yok). Üç farklı
+yaklaşım da tamamlanamazsa iş kuyrukta görünür şekilde bekler (kaybolmaz, sonsuz döngüye
+de girmez); yeni bir talimat verince o bilgiyle sürer. "Düştü" durumu yalnız senin
+iptalinde kullanılır.
+
 ## Projeler arası öğrenme (sızdırmasız)
 
 MyCL bir projede yaşadığı sorun-çözüm tecrübesini iki katmanda saklar:

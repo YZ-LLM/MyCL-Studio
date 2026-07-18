@@ -9,6 +9,7 @@ import { open as openSync } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { enrichRecord } from "../record-context.js";
 import {
+  MAX_TASK_AUTO_RETRIES,
   TASK_SOURCES,
   TASK_STATUSES,
   TaskQueueError,
@@ -69,7 +70,7 @@ export async function removeTask(
 export async function patchTask(
   projectRoot: string,
   taskId: string,
-  patch: Pick<TaskQueuePatch, "priority" | "status" | "started_at" | "completed_at">,
+  patch: Pick<TaskQueuePatch, "priority" | "status" | "started_at" | "completed_at" | "attempts" | "last_fail">,
 ): Promise<void> {
   const record: TaskQueuePatch = { _patch: taskId, ts: Date.now(), ...patch };
   await appendLine(queuePath(projectRoot), record);
@@ -116,6 +117,8 @@ export async function readTasks(
         merged.status = obj.status as TaskStatus;
       if (typeof obj.started_at === "number") merged.started_at = obj.started_at;
       if (typeof obj.completed_at === "number") merged.completed_at = obj.completed_at;
+      if (typeof obj.attempts === "number") merged.attempts = obj.attempts;
+      if (typeof obj.last_fail === "string") merged.last_fail = obj.last_fail;
       patches.set(obj._patch, merged);
       continue;
     }
@@ -131,6 +134,8 @@ export async function readTasks(
         item.status = obj.status as TaskStatus;
       if (typeof obj.started_at === "number") item.started_at = obj.started_at;
       if (typeof obj.completed_at === "number") item.completed_at = obj.completed_at;
+      if (typeof obj.attempts === "number") item.attempts = obj.attempts;
+      if (typeof obj.last_fail === "string") item.last_fail = obj.last_fail;
       if (typeof obj.source === "string" && TASK_SOURCES.has(obj.source as TaskSource))
         item.source = obj.source as TaskSource;
       if (typeof obj.from_phase === "number") item.from_phase = obj.from_phase;
@@ -155,7 +160,11 @@ export function taskStatus(item: TaskQueueItem): TaskStatus {
  * yüksek; alan yoksa Infinity = en sona) sonra eklenme zamanı (FIFO). Yoksa null.
  */
 export function nextPendingTask(items: TaskQueueItem[]): TaskQueueItem | null {
-  const pending = items.filter((it) => taskStatus(it) === "pending");
+  // YZLLM 2026-07-18 ("düşürme, çöz"): MAX_TASK_AUTO_RETRIES'i doldurmuş işler otomatik SEÇİLMEZ ama
+  // kuyrukta pending olarak GÖRÜNÜR kalır (kaybolmaz) — kullanıcı yeni talimat verince/elle tetikleyince sürer.
+  const pending = items.filter(
+    (it) => taskStatus(it) === "pending" && (it.attempts ?? 0) < MAX_TASK_AUTO_RETRIES,
+  );
   if (pending.length === 0) return null;
   pending.sort((a, b) => {
     const pa = a.priority ?? Number.POSITIVE_INFINITY;

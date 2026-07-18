@@ -12,9 +12,11 @@
  *  - pending : kuyrukta, henüz işlenmedi.
  *  - running : şu an Faz 1'den itibaren işleniyor.
  *  - done    : tamamlandı (Faz 4 sonrasına geçip pipeline'ı bitirdi) → KİLİTLİ, tekrar uygulanamaz.
- *  - dropped : (a) erken fazlar (1-4) gürültü/uygulanamaz buldu → Faz 4'ü geçemedi, VEYA (b) pipeline sonuna ulaştı
- *              ama DELIVERABLE ÜRETMEDİ (boş-build → 'done' KİLİDİ yerine 'dropped'; sahte-tamamlanma önleme, 2026-07-14).
- *              İki durumda da UI "Yeniden Ekle" gösterir → kullanıcı sorunu çözüp yeniden gönderebilir.
+ *  - dropped : YALNIZ kullanıcı iptali (YZLLM 2026-07-18: "kuyrukta 'düştü' işaretleme seçeneğini kaldır —
+ *              sorunları çözmeye çalışsın; çözemiyorsa bakış açısını değiştirsin"). MyCL kendi başarısızlığında
+ *              işi ASLA düşürmez: iş `pending`'e döner (attempts+1, last_fail dolar) ve FARKLI yaklaşımla
+ *              yeniden denenir; MAX_TASK_AUTO_RETRIES aşılırsa otomatik seçilmez ama kuyrukta GÖRÜNÜR bekler
+ *              (kaybolmaz; kullanıcı yeni talimatla sürdürür). Eski kayıtlardaki dropped değerleri geçerli kalır.
  */
 export type TaskStatus = "pending" | "running" | "done" | "dropped";
 
@@ -48,7 +50,15 @@ export interface TaskQueueItem {
   /** YZLLM 2026-06-19: güvenlik/pentest sistem-işi bu fazdan BAŞLAR (niyet bulgudan türetildiği için
    *  Faz 1/2 atlanır → genelde 3=Mühendislik Brifingi). Yoksa normal akış (Faz 1). */
   from_phase?: number;
+  /** Tamamlanamayan otomatik deneme sayısı (YZLLM 2026-07-18 "düşürme, çöz"): her pending'e dönüşte +1.
+   *  MAX_TASK_AUTO_RETRIES'e ulaşınca otomatik seçim durur (iş kuyrukta görünür bekler, kaybolmaz). */
+  attempts?: number;
+  /** Son tamamlanamama nedeni (kısa) — yeniden denemede ajana "farklı yaklaşım" bağlamı olarak verilir. */
+  last_fail?: string;
 }
+
+/** Bir işin ard arda otomatik yeniden denenme tavanı — sonrası görünür bekleme (sonsuz döngü/token yakımı yok). */
+export const MAX_TASK_AUTO_RETRIES = 3;
 
 /** Tombstone: silinen task'ı işaretler. Read tarafı bunu filter eder. */
 export interface TaskQueueTombstone {
@@ -68,6 +78,8 @@ export interface TaskQueuePatch {
   status?: TaskStatus;
   started_at?: number;
   completed_at?: number;
+  attempts?: number;
+  last_fail?: string;
 }
 
 /** Geçerli durum değerleri — patch/parse doğrulaması için. */
