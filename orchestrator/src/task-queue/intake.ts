@@ -18,8 +18,8 @@ import { emitChatMessage, emitClaudeStream, withClaudeStreamBanner } from "../ip
 import { log } from "../logger.js";
 import { selectEffortForTask, selectModelForTask } from "../model-catalog.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "../tool-policy.js";
-import { appendTask, readTasks, taskStatus } from "./store.js";
-import type { TaskQueueItem } from "./types.js";
+import { appendTask, patchTask, readTasks, taskStatus } from "./store.js";
+import { MAX_TASK_AUTO_RETRIES, type TaskQueueItem } from "./types.js";
 
 export interface SplitTask {
   /** İşin net, kendi başına anlaşılır Türkçe ifadesi (Faz 1'e tek başına girer). */
@@ -157,7 +157,7 @@ export async function intakeAndEnqueue(
   if (!clean) return []; // boş/yalnız-boşluk talep → iş yok (boş-text task üretme)
   // Bekleyen işleri ÖNCE oku — hem LLM'e semantik-dedup için ver (parafrazı yakalar) hem aşağıdaki
   // kelime-örtüşme backstop'una. (YZLLM 2026-06-15: "zaten listede varsa ekleme".)
-  const acceptedTexts: string[] = (
+  const pendingItems: TaskQueueItem[] = (
     await readTasks(projectRoot).catch((e) => {
       // readTasks ENOENT'i [] yapar → bu catch yalnız GERÇEK hatayı (bozuk kuyruk dosyası) maskeler.
       // Sessiz [] = yinelenen-iş kontrolü DEVRE DIŞI → aynı iş tekrar eklenebilir (sessiz-fallback denetimi).
@@ -165,9 +165,36 @@ export async function intakeAndEnqueue(
       emitChatMessage("system", "⚠️ İş kuyruğu okunamadı (dosya bozuk olabilir) — yinelenen-iş kontrolü bu sefer atlandı; aynı iş iki kez eklenebilir.");
       return [];
     })
-  )
-    .filter((it) => taskStatus(it) === "pending")
-    .map((it) => it.text);
+  ).filter((it) => taskStatus(it) === "pending");
+  const acceptedTexts: string[] = pendingItems.map((it) => it.text);
+  // CANLANDIRMA (MAHKEME CRITICAL 2026-07-18): deneme tavanına ulaşıp bekleyen (donuk) bir işe benzeyen
+  // YENİ talimat, dedup'ta sessizce yutuluyordu → "yeni talimat verirsen sürerim" vaadi karşılıksızdı.
+  // Artık dedup bir donuk işle eşleşirse iş CANLANDIRILIR: attempts sıfırlanır + yeni talimat last_fail
+  // notuna yazılır (bir sonraki koşumda ajana bağlam olarak gider) → kuyruk kendiliğinden sürer.
+  const cappedPending = pendingItems.filter((it) => (it.attempts ?? 0) >= MAX_TASK_AUTO_RETRIES);
+  const reviveIfCapped = async (text: string): Promise<boolean> => {
+    let best: TaskQueueItem | null = null;
+    let bestScore = 0;
+    for (const it of cappedPending) {
+      const sc = textSimilarity(it.text, text);
+      if (sc > bestScore) {
+        bestScore = sc;
+        best = it;
+      }
+    }
+    if (best && bestScore > 0.5) {
+      await patchTask(projectRoot, best.id, {
+        attempts: 0,
+        last_fail: `iş beklemedeydi; kullanıcı yeni talimat verdi: ${text.slice(0, 120)}`,
+      });
+      emitChatMessage(
+        "system",
+        `🔄 Bekleyen iş yeni talimatınla CANLANDIRILDI (deneme sayacı sıfırlandı, farklı yaklaşımla sürecek): _"${best.text.slice(0, 80)}"_`,
+      );
+      return true;
+    }
+    return false;
+  };
   const split = await splitTasks(config, projectRoot, clean, acceptedTexts).catch((e: unknown) => {
     log.warn("task-intake", "bölme başarısız (fail-soft → tek iş)", e);
     return null;
@@ -188,6 +215,7 @@ export async function intakeAndEnqueue(
     for (const t of split) if (t.already_queued) droppedTexts.push(t.text);
     tasks = split.filter((t) => !t.already_queued);
   }
+  for (const dt of droppedTexts) await reviveIfCapped(dt);
   const now = Date.now();
   const items: TaskQueueItem[] = [];
   let skipped = droppedTexts.length;
@@ -196,6 +224,7 @@ export async function intakeAndEnqueue(
     if (acceptedTexts.some((e) => textSimilarity(e, t.text) > 0.7)) {
       skipped++;
       droppedTexts.push(t.text);
+      await reviveIfCapped(t.text);
       continue;
     }
     const item: TaskQueueItem = {

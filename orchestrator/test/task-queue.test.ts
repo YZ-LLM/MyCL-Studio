@@ -15,7 +15,7 @@ import {
   nextAutoPendingTask,
   taskStatus,
 } from "../src/task-queue/store.js";
-import { parseSplitBlock } from "../src/task-queue/intake.js";
+import { intakeAndEnqueue, parseSplitBlock } from "../src/task-queue/intake.js";
 import { MAX_TASK_AUTO_RETRIES, type TaskQueueItem } from "../src/task-queue/types.js";
 
 describe("task-queue store", () => {
@@ -185,5 +185,29 @@ describe("düşürme yok → yeniden deneme merdiveni (YZLLM 2026-07-18: 'kuyruk
     const items = await readTasks(root);
     expect(nextPendingTask(items)).toBeNull();
     expect(items).toHaveLength(1);
+  });
+});
+
+describe("donuk iş canlandırma (MAHKEME 2026-07-18: yeni talimat dedup'ta yutulmasın)", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "mycl-taskq-revive-"));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("tavanlı işe benzeyen yeni talimat → iş canlanır (attempts=0 + yeni talimat notu), çift kayıt yok", async () => {
+    await appendTask(root, { id: "stuck", ts: 1, text: "giriş sayfası hatası düzelt", status: "pending", source: "auto" });
+    await patchTask(root, "stuck", { attempts: MAX_TASK_AUTO_RETRIES, last_fail: "boş build" });
+    // LLM yok (boş config) → splitTasks fail-soft tek-iş yolu → Jaccard dedup eşleşir → canlandırma.
+    const added = await intakeAndEnqueue({} as never, root, "giriş sayfası hatası düzelt lütfen");
+    expect(added).toHaveLength(0); // yeni kayıt eklenmedi (dedup)
+    const items = await readTasks(root);
+    expect(items).toHaveLength(1); // çift kayıt yok
+    const stuck = items[0]!;
+    expect(stuck.attempts).toBe(0); // canlandı → yeniden otomatik seçilebilir
+    expect(stuck.last_fail).toContain("yeni talimat");
+    expect(nextPendingTask(items)?.id).toBe("stuck");
   });
 });

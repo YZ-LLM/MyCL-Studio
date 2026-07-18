@@ -1235,11 +1235,23 @@ async function applyRecalledPhaseScope(proposed: number[], rec: AnswerMemoryReco
  */
 function makePhaseOutageResume(n: PhaseId): () => Promise<void> {
   return async () => {
-    if (_pipelineDepth > 0) {
-      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — pipeline zaten çalışıyor (elle devam edilmiş).");
+    if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
+      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor).");
       return;
     }
-    if (!runtime.state || runtime.state.current_phase !== n) {
+    if (!runtime.state) {
+      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — proje bu arada değişmiş.");
+      return;
+    }
+    // KUYRUK YOLU (mahkeme CRITICAL 2026-07-18): kesinti bir kuyruk işini vurduysa reconcile işi çoktan
+    // pending'e döndürmüştür (currentTaskId=null, drain kapalı) → fazı değil KUYRUĞU sürdür (iş, deneme
+    // bağlamıyla baştan ele alınır; aynı ölü sağlayıcıya art arda faz koşup deneme yakılmaz).
+    if (!runtime.currentTaskId && nextPendingTask(await readTasks(runtime.state.project_root).catch(() => []))) {
+      _drainActive = true;
+      await reconcileAndDrainTasks();
+      return;
+    }
+    if (runtime.state.current_phase !== n) {
       emitChatMessage("system", "ℹ️ Otomatik devam atlandı — durum bu arada değişmiş (faz elle ilerletilmiş ya da proje değişmiş).");
       return;
     }
@@ -1314,6 +1326,7 @@ async function failPhase(
         "gerektirir, aynı hatayı verirdi. Beklemeden çözmek istersen **Plans & Billing'den kredi yükle** — " +
         "yüklersen ilk denemede kendiliğinden devam ederim.",
     );
+    _drainActive = false; // MAHKEME CRITICAL: sıradaki işler aynı ölü sağlayıcıyla denemelerini yakmasın
     armLlmOutageWait("abonelik limitli + API kredisi yetersiz", makePhaseOutageResume(n));
     return; // STOP — escalation YOK, analiz YOK, fix YOK; devam zamanlayıcısı kuruldu.
   }
@@ -1328,6 +1341,7 @@ async function failPhase(
         "yük (proje/kod hatası DEĞİL). Debug/düzeltme YAPMADIM — hepsi yine API gerektirir, aynı hatayı verirdi.",
     );
     // BEKLE-VE-DEVAM (YZLLM 2026-07-17): geçici yükte de donup kullanıcıyı bekleme — 5 dk'da bir dene.
+    _drainActive = false; // MAHKEME CRITICAL: 529 sürerken kuyruk denemeleri hızla yakılmasın
     armLlmOutageWait("API 529 Overloaded", makePhaseOutageResume(n));
     return; // STOP — oto-çözüm/debug/tweak YOK (geçici API yükü); devam zamanlayıcısı kuruldu.
   }
@@ -1607,14 +1621,7 @@ async function failPhase(
             // YZLLM 2026-07-18: drain'i kapat (aynı ölü sağlayıcıyla sıradaki işleri de yakmasın) +
             // bekle-ve-devam kur — erişim dönünce kuyruk kendiliğinden sürer (iş düşürülmez, pending'e döner).
             _drainActive = false;
-            armLlmOutageWait("müfettiş sistematik erişim sorunu", async () => {
-              if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
-                emitChatMessage("system", "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor).");
-                return;
-              }
-              _drainActive = true;
-              await reconcileAndDrainTasks();
-            });
+            armLlmOutageWait("müfettiş sistematik erişim sorunu", makePhaseOutageResume(n));
             return; // advanceToNextPhase YOK → halt; görev done sayılmaz (reconcile pending'e döndürür)
           }
         }
@@ -4471,7 +4478,9 @@ async function tryStartTaskBatch(): Promise<boolean> {
   if (runtime.currentTaskId || runtime.currentBatch) return false;
   const root = runtime.state.project_root;
   const pending = (await readTasks(root).catch(() => [] as TaskQueueItem[]))
-    .filter((t) => taskStatus(t) === "pending" && !_batchFailedIds.has(t.id))
+    // MAHKEME CRITICAL (2026-07-18): attempts tavanı SIRALI seçimle aynı — tavanlı iş kümeye de girmez
+    // (aksi halde 'otomatik seçilmez' garantisi paralel yoldan deliniyordu, attempts sınırsız artıyordu).
+    .filter((t) => taskStatus(t) === "pending" && !_batchFailedIds.has(t.id) && (t.attempts ?? 0) < MAX_TASK_AUTO_RETRIES)
     .sort(
       (a, b) =>
         (a.priority ?? Number.POSITIVE_INFINITY) - (b.priority ?? Number.POSITIVE_INFINITY) || a.ts - b.ts,
@@ -4616,8 +4625,8 @@ async function startNextPendingTask(): Promise<boolean> {
   // BAKIŞ AÇISI DEĞİŞİMİ (YZLLM 2026-07-18): önceki deneme(ler) tamamlanamadıysa ajana nedeni + "aynı
   // yaklaşımı tekrarlama" talimatı ver — kurallar aynen geçerli (sahte yeşil yok, atlama yok).
   const retryContext =
-    attempts > 0
-      ? `\n\n[YENİDEN DENEME ${attempts + 1}/${MAX_TASK_AUTO_RETRIES}] Bu iş daha önce tamamlanamadı. Son neden: ${next.last_fail ?? "kaydedilmedi"}. AYNI yaklaşımı tekrarlama — sorunu FARKLI bir bakış açısıyla ele al (farklı kök neden hipotezi, farklı yöntem); kuralları çiğnemeden, sahte yeşile kaçmadan çöz.`
+    attempts > 0 || next.last_fail
+      ? `\n\n[YENİDEN ELE ALMA${attempts > 0 ? ` — DENEME ${attempts + 1}/${MAX_TASK_AUTO_RETRIES}` : ""}] Bu iş daha önce tamamlanamadı/bekletildi. Son not: ${next.last_fail ?? "kaydedilmedi"}. AYNI yaklaşımı tekrarlama — sorunu FARKLI bir bakış açısıyla ele al (farklı kök neden hipotezi, farklı yöntem); kuralları çiğnemeden, sahte yeşile kaçmadan çöz.`
       : "";
   const taskPrompt = `${next.text}${retryContext}`;
   // Güvenlik/pentest sistem-işi → niyet bulgudan türetildi → from_phase'ten (Faz 3) başla, Faz 1/2 atla.

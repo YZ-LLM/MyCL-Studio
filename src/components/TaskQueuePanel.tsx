@@ -12,6 +12,7 @@
 
 import type { ReactNode } from "react";
 import type { TaskQueueItem, TaskStatus } from "../types/events";
+import { MAX_TASK_AUTO_RETRIES } from "../types/events";
 
 interface Props {
   open: boolean;
@@ -164,10 +165,28 @@ export function TaskQueuePanel({
                   {/* YZLLM 2026-06-15: iş-listesindeki HER iş (manuel/auto) sırayla
                       otomatik işlenir → "Uygula" yok (eskiden manuel-tetik + duplicate
                       riskiydi); bekleyen işler "⏳ Sırada" gösterir, "Sil" ile çıkarılır. */}
-                  {st === "pending" && (
+                  {st === "pending" && (item.attempts ?? 0) < MAX_TASK_AUTO_RETRIES && (
                     <span className="task-queue-auto-hint" title="Sırayla otomatik pipeline'dan geçecek">
                       ⏳ Sırada
                     </span>
+                  )}
+                  {st === "pending" && (item.attempts ?? 0) >= MAX_TASK_AUTO_RETRIES && (
+                    <>
+                      <span
+                        className="task-queue-auto-hint"
+                        title={`${item.attempts} denemede tamamlanamadı — otomatik denenmeyecek.${item.last_fail ? ` Son neden: ${item.last_fail}` : ""}`}
+                      >
+                        ⏸️ Bekliyor (otomatik denenmez)
+                      </span>
+                      <button
+                        type="button"
+                        className="task-queue-btn task-queue-btn-readd"
+                        onClick={() => onItemReadd(item)}
+                        title="Deneme sayacını sıfırlayıp işi farklı yaklaşımla yeniden ele aldır"
+                      >
+                        Tekrar Dene
+                      </button>
+                    </>
                   )}
                   {isDone && (
                     <span className="task-queue-locked" title="Tamamlandı — tekrar uygulanamaz">

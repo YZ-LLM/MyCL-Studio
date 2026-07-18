@@ -148,7 +148,15 @@ export interface TaskQueueItem {
   /** Kaynak: manuel (İş Ekle), auto (çok-problem ayrıştırma), security (güvenlik bulgusu),
    *  full-test (Full Test bulgusu), maintenance (bakım turu bulgusu), plan (plan modu adımı). */
   source?: "manual" | "auto" | "security" | "full-test" | "maintenance" | "plan";
+  /** Tamamlanamayan otomatik deneme sayısı (2026-07-18 "düşürme, çöz"). MAX_TASK_AUTO_RETRIES'e
+   *  ulaşınca otomatik seçilmez — panel "⏸️ Bekliyor" gösterir, "Tekrar Dene" canlandırır. */
+  attempts?: number;
+  /** Son tamamlanamama nedeni (kısa) — panelde ipucu olarak gösterilir. */
+  last_fail?: string;
 }
+
+/** Backend orchestrator/src/task-queue/types.ts MAX_TASK_AUTO_RETRIES aynası (tek anlam: otomatik deneme tavanı). */
+export const MAX_TASK_AUTO_RETRIES = 3;
 export interface TaskQueueLoadedEvent {
   kind: "task_queue_loaded";
   data: { items: TaskQueueItem[] };
