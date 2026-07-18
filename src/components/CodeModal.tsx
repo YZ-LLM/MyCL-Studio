@@ -7,6 +7,7 @@
 // YZLLM 2026-07-07: kod artık DİLE GÖRE renklenir (highlightSnippet) — HTML özel, diğer kodlar ortak tokenizer;
 // dosya uzantısından dil tespiti (langFromFile). Renkler .hl-* class'ları (App.css, dark tema). Bilinmeyen → düz.
 
+import { useEscapeToClose } from "../hooks/useDismissable";
 import { highlightSnippet, langFromFile } from "./syntax.js";
 
 interface CodeRef {
@@ -23,6 +24,8 @@ interface Props {
 }
 
 export function CodeModal({ open, codeRef, onClose }: Props) {
+  // ESC ile kapat (2026-07-18, ortak hook — dış-tık zaten vardı). Hook erken return'den ÖNCE.
+  useEscapeToClose(open, onClose);
   // Kapanınca (veya code_ref yokken) içerik gösterme.
   if (!open || !codeRef) return null;
   const title =

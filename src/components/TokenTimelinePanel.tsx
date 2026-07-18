@@ -4,6 +4,8 @@
 // Her faz bir satır: input/output/cache token + tur sayısı + toplam'a oranlı bar.
 // Kendi-içinde inline-styled (App.css bağımlılığı yok); açılır-kapanır.
 
+import { useRef } from "react";
+import { useEscapeToClose, useOutsideClickClose } from "../hooks/useDismissable";
 import type { ReactNode } from "react";
 import type { CostRecord, PipelinePrediction } from "../types/events";
 
@@ -42,6 +44,10 @@ function shortModel(m: string): string {
 }
 
 export function TokenTimelinePanel({ open, costs, forecast, onClose }: Props): ReactNode {
+  // Kapatma davranışları (2026-07-18): ESC + dışarı tık. Hook'lar erken return'den ÖNCE (Hooks kuralı).
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEscapeToClose(open, onClose);
+  useOutsideClickClose(open, onClose, panelRef);
   if (!open) return null;
 
   // Kronolojik (fazların koştuğu sıra). Aynı faz birden çok iterasyonda olabilir.
@@ -61,6 +67,7 @@ export function TokenTimelinePanel({ open, costs, forecast, onClose }: Props): R
 
   return (
     <aside
+      ref={panelRef}
       aria-label="Token Zaman Çizelgesi"
       style={{
         position: "fixed",

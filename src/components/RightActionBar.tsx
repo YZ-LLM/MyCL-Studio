@@ -72,7 +72,7 @@ export function RightActionBar({
   onSettingsClick,
 }: Props) {
   return (
-    <nav className="right-action-bar" data-testid="right-action-bar" aria-label="Eylemler">
+    <nav className="right-action-bar" data-testid="right-action-bar" aria-label="Eylemler" data-dismiss-ignore>
       {onExecuteClick && (
         <button
           type="button"

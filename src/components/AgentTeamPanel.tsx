@@ -5,7 +5,8 @@
 // (agent_event started/token_usage/completed'dan türer; freshRun'da sıfırlanır). Ana ajan onların yöneticisi;
 // takım üyeleri İngilizce çalışır (çevirmen yalnız kullanıcı↔orkestratör arası). Self-contained inline-styled.
 
-import { useEffect, useReducer } from "react";
+import { useEscapeToClose, useOutsideClickClose } from "../hooks/useDismissable";
+import { useEffect, useReducer, useRef } from "react";
 import type { ReactNode } from "react";
 import type { AgentRun } from "../App";
 
@@ -58,6 +59,10 @@ export function AgentTeamPanel({ open, runs, onClose }: Props): ReactNode {
     return () => clearInterval(id);
   }, [open, hasRunning]);
 
+  // Kapatma davranışları (2026-07-18): ESC + dışarı tık (hook'lar koşulsuz — Hooks kuralı).
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEscapeToClose(open, onClose);
+  useOutsideClickClose(open, onClose, panelRef);
   if (!open) return null;
 
   // Takıma (group) göre grupla; grup içinde başlangıç sırasına göre.
@@ -74,6 +79,7 @@ export function AgentTeamPanel({ open, runs, onClose }: Props): ReactNode {
 
   return (
     <aside
+      ref={panelRef}
       aria-label="Ajan Takımı"
       data-testid="agent-team-panel"
       style={{

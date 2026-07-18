@@ -1,5 +1,6 @@
 // Settings — ayarlar paneli. Tab'lar: Modeller, API Keys, Hakkında.
 
+import { useEscapeToClose } from "../hooks/useDismissable";
 import { useEffect, useMemo, useState } from "react";
 import { t as i18nT } from "../i18n";
 import type { ModelInfo, AgentBackend, AgentBackends, ModelTiers, DesignWorkflowMode } from "../types/events";
@@ -286,16 +287,8 @@ export function Settings({
     [],
   );
 
-  // ESC tuşu ile kapat (forceModelSetup hariç). Bu hook erken return'den ÖNCE
-  // olmalı — Hooks Rules: aynı sırada her render.
-  useEffect(() => {
-    if (!open || forceModelSetup) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, forceModelSetup, onClose]);
+  // ESC ile kapat (forceModelSetup hariç) — 2026-07-18'de ortak hook'a taşındı (LIFO).
+  useEscapeToClose(open, onClose, !forceModelSetup);
 
   if (!open) return null;
 

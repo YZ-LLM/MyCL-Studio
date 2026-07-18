@@ -10,6 +10,8 @@
 // ✅ tamam / ⏳ bekliyor / ⏹️ düştü), öncelik ve tamamlanma-zamanı gösterilir.
 // "Tamamlanınca zamanını yaz ve UYGULANAMASIN" → done işler KİLİTLİ (Uygula yok).
 
+import { useRef } from "react";
+import { useEscapeToClose, useOutsideClickClose } from "../hooks/useDismissable";
 import type { ReactNode } from "react";
 import type { TaskQueueItem, TaskStatus } from "../types/events";
 import { MAX_TASK_AUTO_RETRIES } from "../types/events";
@@ -100,12 +102,16 @@ export function TaskQueuePanel({
   onItemReadd,
   onItemDelete,
 }: Props): ReactNode {
+  // Kapatma davranışları (2026-07-18): ESC + dışarı tık (hook'lar erken return'den ÖNCE — Hooks kuralı).
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEscapeToClose(open, onClose);
+  useOutsideClickClose(open, onClose, panelRef);
   if (!open) return null;
   const sorted = [...items].sort(compareTasks);
   const activeCount = items.filter((i) => statusOf(i) !== "done" && statusOf(i) !== "dropped").length;
 
   return (
-    <aside className="task-queue-drawer" aria-label="İş Kuyruğu">
+    <aside ref={panelRef} className="task-queue-drawer" aria-label="İş Kuyruğu">
       <header className="task-queue-header">
         <span className="task-queue-title">
           📋 İş Kuyruğu ({activeCount} aktif / {items.length})

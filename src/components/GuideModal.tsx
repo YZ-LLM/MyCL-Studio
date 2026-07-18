@@ -5,6 +5,7 @@
 // Son-kullanıcı uygulamayı bu kılavuzdan öğrenir. Markdown render minimal
 // (harici lib yok): başlık / liste / paragraf.
 
+import { useEscapeToClose } from "../hooks/useDismissable";
 import type { ReactNode } from "react";
 
 interface Props {
@@ -53,6 +54,8 @@ function renderMarkdown(md: string): ReactNode[] {
 }
 
 export function GuideModal({ open, content, onClose, title }: Props) {
+  // ESC ile kapat (2026-07-18, ortak hook — dış-tık zaten vardı). Hook erken return'den ÖNCE.
+  useEscapeToClose(open, onClose);
   if (!open) return null;
   const hasContent = content.trim().length > 0;
   return (

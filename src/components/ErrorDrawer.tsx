@@ -4,7 +4,8 @@
 // mesajlarından role:"error" ve role:"system" + "❌" prefix filtrelenir.
 // Her satır expand-collapse; detail varsa açılır.
 
-import { useEffect, useState } from "react";
+import { useEscapeToClose } from "../hooks/useDismissable";
+import { useState } from "react";
 import type { ChatMessage } from "./ChatPanel";
 
 interface Props {
@@ -24,19 +25,9 @@ function formatTime(ts: number): string {
 export function ErrorDrawer({ open, errors, onClose }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
-  // v15.7 (2026-05-27): Esc tuşu ile kapat (tooltip "Esc" yazıyordu ama
-  // implement edilmemişti — kalite kontrol bulgusu).
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  // v15.7: Esc ile kapat — 2026-07-18'de ortak hook'a taşındı (LIFO: birden çok panel
+  // açıkken ESC yalnız en son açılanı kapatır). Dış-tık bilinçli YOK (alt drawer; chat'e tıklama doğal).
+  useEscapeToClose(open, onClose);
 
   if (!open) return null;
 
