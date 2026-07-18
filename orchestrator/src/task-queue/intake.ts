@@ -268,7 +268,7 @@ function textWords(s: string): Set<string> {
  * 500" vs "Sipariş güncelleme 500" → eski 0.80 (silinir), Jaccard 0.67 (eşik 0.7'nin altı →
  * korunur). Birleşim paydası bu alt-küme tuzağını kapatır; yalnız neredeyse-aynı metinler elenir.
  */
-function textSimilarity(a: string, b: string): number {
+export function textSimilarity(a: string, b: string): number {
   const wa = textWords(a);
   const wb = textWords(b);
   if (wa.size === 0 || wb.size === 0) return 0;

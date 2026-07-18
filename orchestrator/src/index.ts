@@ -84,6 +84,7 @@ import {
 } from "./task-queue/store.js";
 import { intakeAndEnqueue } from "./task-queue/intake.js";
 import { MAX_TASK_AUTO_RETRIES, type TaskQueueItem } from "./task-queue/types.js";
+import { textSimilarity } from "./task-queue/intake.js";
 import {
   beginPhaseCost,
   clearActiveAskq,
@@ -1242,12 +1243,23 @@ async function ensureAutonomousContinuation(reason: string): Promise<void> {
   if (!autoAnswerSuggested()) return;
   if (!runtime.state) return;
   if (runtime.currentTaskId || runtime.currentBatch) {
-    _drainActive = true; // reconcile bu işi pending'e döndürüp kuyruğu sürdürsün
+    // Kuyruk işi: reconcile pending+attempts'e döndürecek (merdiven sahiplenir). SOMUT rehberlik
+    // (mahkeme MEDIUM 2026-07-18): jenerik "tamamlanmadan durdu" notu bu nedeni EZMESİN → sonraki
+    // returnTaskToPending bu nedeni kullansın (tek seferlik).
+    _pendingStopReason = reason;
     return;
   }
   const text = _lastDevelopText?.trim();
   if (!text) return; // devam ettirilecek somut iş metni yok → genel emniyet ağı (bekçi) kalır
   const root = runtime.state.project_root;
+  // MAHKEME HIGH (2026-07-18): intake dedup'undan geçmeyen doğrudan append, tekrar eden STOP'ta aynı
+  // işi kuyruğa katlayabilirdi (tavan 3×N'e çıkar). Bekleyenlerle benzerlik kontrolü — varsa ekleme.
+  const pendingNow = (await readTasks(root).catch(() => [])).filter((t) => taskStatus(t) === "pending");
+  if (pendingNow.some((t) => textSimilarity(t.text, text) > 0.7)) {
+    emitChatMessage("system", "🧭 Durmuyorum: bu iş zaten kuyrukta bekliyor — merdiven sahiplenecek (çift kayıt eklemedim).");
+    _drainActive = true;
+    return;
+  }
   await appendTask(root, {
     id: randomUUID(),
     ts: Date.now(),
@@ -1264,6 +1276,10 @@ async function ensureAutonomousContinuation(reason: string): Promise<void> {
   );
   _drainActive = true;
 }
+
+// Son terminal-dur nedeni (tek seferlik) — reconcile'ın jenerik orphan notu yerine SOMUT rehberlik
+// last_fail'e taşınsın (mahkeme MEDIUM 2026-07-18: 'farklı yaklaşım' notu tam gerektiği anda eziliyordu).
+let _pendingStopReason: string | null = null;
 
 /**
  * LLM kesintisi devam kapanışı (YZLLM 2026-07-17 "5 dk'da bir denesin / reset saatinde devam etsin"):
@@ -1878,6 +1894,8 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   // yazar). Proje değişiminde HEPSİNİ temizle — eski projenin sorusu yeni projede yaşayamaz.
   clearActiveAskq();
   cancelLlmOutageWait(); // eski projenin bekle-ve-devam zamanlayıcısı yeni projede ateşlenemez
+  _lastDevelopText = null; // MAHKEME CRITICAL (2026-07-18): eski projenin iş metni yeni projeye SIZAMAZ
+  _pendingStopReason = null;
   runtime.pendingDast = null;
   runtime.pendingFullTest = null;
   runtime.pendingMaintenance = null;
@@ -4094,6 +4112,8 @@ async function executeDispatchedIntent(
   if (outcome.action === "cancel_pipeline") {
     log.info("orchestrator", "pipeline cancelled");
     cancelLlmOutageWait(); // kullanıcı işi iptal etti → bekle-ve-devam zamanlayıcısı da iptal
+    _lastDevelopText = null; // iptal edilen işin metni sonraki bir STOP'ta kuyruğa geri sızamaz
+    _pendingStopReason = null;
     // v15.7 (2026-05-27): R4-01 — pending_* alanları temizle ki D2_WAITING /
     // pending_ui_tweak / pending_backend_fix orphan kalmasın. Aksi halde
     // sonraki user_message handleCommandDirect "askq cevabı bekliyor"
@@ -4743,6 +4763,7 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   }
   runtime.currentTaskId = null;
   _drainTaskId = null;
+  _lastDevelopText = null; // iş kapandı → metni bayatlamadan bırak (çapraz-iş devam enjeksiyonu olmasın)
   if (!doneId) return; // kuyruk-dışı iterasyon (resume/doğrudan develop) → no-op
   // SAHTE-TAMAMLANMA KİLİT KORUMASI (YZLLM 2026-07-14, güvenilirlik denetimi): deliverable YOKSA görevi 'done'
   // (KİLİTLİ, "tekrar uygulanamaz") DAMGALAMA. emitVerificationSummary aynı hasDeliverable sinyaliyle "boş build →
@@ -4790,7 +4811,10 @@ async function reconcileAndDrainTasks(): Promise<void> {
         const id = runtime.currentTaskId;
         runtime.currentTaskId = null;
         // YZLLM 2026-07-18: düşürme YOK — pending + attempts (tavan dolunca otomatik seçilmez, görünür bekler).
-        await returnTaskToPending(root, id, "pipeline iş tamamlanmadan durdu (terminal hata/kesinti)");
+        // Somut STOP nedeni varsa (ensureAutonomousContinuation bıraktı) onu taşı — jenerik not ezmesin.
+        const stopReason = _pendingStopReason ?? "pipeline iş tamamlanmadan durdu (terminal hata/kesinti)";
+        _pendingStopReason = null;
+        await returnTaskToPending(root, id, stopReason);
         // YZLLM 2026-07-03 (mahkeme — kritik): düşen iş BAYAT iterasyon-state'i (current_phase/intent_summary/spec/
         // iteration_started_at) bırakıyordu → SONRAKİ kuyruk işi bunları devralıp (wasPipelineCompleted reset'i proje-
         // ömründe ilk tamamlamadan ÖNCE hiç koşmaz) yanlış resume + yanlış clarify-enjeksiyonu yapıyordu (kapat-aç'ta
