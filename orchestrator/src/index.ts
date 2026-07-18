@@ -1835,8 +1835,8 @@ async function failPhase(
   if (runtime.pendingErrorAnalysis) runtime.pendingErrorAnalysis.sig = sig;
   const pendingAuto = runtime.pendingErrorAnalysis;
   if (pendingAuto?.auto_selected_solution) {
-    // FIX B: oto-seçilen çözümü de sig-başına kaydet (sayaç girişte artırıldı; burada yalnız kararı biriktir).
-    recordSolutionChoice(n, sig, pendingAuto.auto_selected_solution);
+    // FIX B kaydı BURADA YAPILMAZ (mahkeme HIGH 2026-07-18): aşağıdaki handleAskqAnswer aynı (phase,sig)
+    // için EN çeviriyi kaydediyor; buradaki TR kayıt çift + dil-karışık priorSolutions üretiyordu.
     // Aynı routing'i (askq-cevap dalı) otomatik sür — soru kartı hiç açılmadı.
     const routed = await handleAskqAnswer(pendingAuto.id, pendingAuto.auto_selected_solution)
       .then(() => true)
@@ -4343,10 +4343,16 @@ async function runDevelopIteration(
   // Güvenlik/pentest SİSTEM-İŞİ (YZLLM 2026-06-19): niyet bulgudan türetildiği için Faz 1 (niyet) + Faz 2
   // (hassasiyet) ATLA, seed'lenmiş intent_summary ile doğrudan startPhase'ten (genelde Faz 3) başla.
   if (opts?.seedIntent && opts.startPhase && opts.startPhase > 1) {
+    // MAHKEME CRITICAL (2026-07-18, ANA KURAL): bu dal Faz 1'i (ve oradaki tr-to-en çeviri kapısını)
+    // ATLAR; intent_summary buradan Faz 3+ MAIN promptlarına gömülür. Türkçe kaynaklı seedIntent
+    // (güvenlik işi metni + kuyruk [YENİDEN ELE ALMA] bloğu) main'e gitmeden İngilizceye çevrilir
+    // (toEnglishForMain fail-soft: çeviri patlarsa orijinal + görünür not). intent_summary_raw
+    // kullanıcı-görünür ham metin olarak TR kalır.
+    const seedEn = await toEnglishForMain(opts.seedIntent);
     const iterTs = runtime.state.iteration_started_at ?? Date.now();
     runtime.state = {
       ...runtime.state,
-      intent_summary: opts.seedIntent,
+      intent_summary: seedEn,
       intent_summary_raw: opts.seedIntent,
       current_phase: opts.startPhase,
       iteration_started_at: iterTs,

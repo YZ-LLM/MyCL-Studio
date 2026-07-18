@@ -185,7 +185,7 @@ export function TaskQueuePanel({
                       {SOURCE_BADGE[item.source]}
                     </span>
                   )}
-                  <span className="task-queue-item-ts">
+                  <span className="task-queue-item-ts date-badge">
                     {isDone && item.completed_at
                       ? `✓ ${formatTs(item.completed_at)}${
                           formatDuration(item.started_at, item.completed_at)
