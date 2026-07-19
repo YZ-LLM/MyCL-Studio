@@ -12,7 +12,7 @@ import { resolveLlmClient } from "./claude-api.js";
 import { runClaudeCli } from "./cli-run.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { loadMessages, type HistoryEntry } from "./history-loader.js";
-import { emitChatMessage } from "./ipc.js";
+import { emit } from "./ipc.js";
 import { log } from "./logger.js";
 import { selectEffortForTask, selectModelForTask } from "./model-catalog.js";
 import { ZERO_TOOLS_DISALLOWED } from "./tool-policy.js";
@@ -93,19 +93,26 @@ export async function runChatSummary(
   config: MyclConfig,
   projectRoot: string,
   // MAHKEME CRITICAL (2026-07-19): özet sürerken kullanıcı PROJE DEĞİŞTİRİRSE sonuç yanlış projenin
-  // chat'ine/geçmişine yazılırdı (emitChatMessage aktif köke yazar). Çağıran "hâlâ aynı proje mi"
-  // kapısını verir; değilse emit YOK (yanlış projeye mesaj basmaktan iyidir) + log.
+  // paneline yazılırdı. Çağıran "hâlâ aynı proje mi" kapısını verir; değilse emit YOK + log.
   stillRelevant?: () => boolean,
 ): Promise<void> {
-  const say = (role: "system" | "assistant", text: string): void => {
+  // AYRI SÜREÇ (YZLLM 2026-07-19: "özeti chat ekranında değil sağ panelde göster; ayrı süreç, iterasyonu
+  // etkilemesin"): özet artık chat_message DEĞİL, özel `chat_summary` event'i yayar → sohbete/history'ye
+  // yazılmaz (iterasyonu ve gelecekteki özetleri kirletmez), yalnız sağ panelde görünür.
+  const push = (
+    data:
+      | { state: "running"; count: number }
+      | { state: "done"; text: string; ts: number }
+      | { state: "error"; message: string },
+  ): void => {
     if (stillRelevant && !stillRelevant()) {
       log.warn("chat-summary", "proje değişti — özet çıktısı basılmadı (yanlış projeye yazmamak için)");
       return;
     }
-    emitChatMessage(role, text);
+    emit("chat_summary", data);
   };
   if (_running) {
-    say("system", "🧾 Özet zaten hazırlanıyor — bitince chat'e düşecek.");
+    push({ state: "error", message: "Özet zaten hazırlanıyor — bitmesini bekle." });
     return;
   }
   _running = true;
@@ -113,20 +120,20 @@ export async function runChatSummary(
     const result = await loadMessages(projectRoot, { since_ts: 0, limit: 400 }).catch(() => null);
     const entries = extractChatEntries(result?.events ?? []);
     if (entries.length === 0) {
-      say("system", "🧾 Özetlenecek konuşma bulunamadı (geçmiş boş).");
+      push({ state: "error", message: "Özetlenecek konuşma bulunamadı (geçmiş boş)." });
       return;
     }
     const { selected, truncated } = selectEntriesForSummary(entries);
     const { system, user } = buildChatSummaryPrompt(selected, truncated);
-    say("system", `🧾 Sohbet özeti hazırlanıyor (${selected.length} mesaj)…`);
+    push({ state: "running", count: selected.length });
     const model = selectModelForTask("orchestration", config.selected_models.model_tiers).modelId;
     const useCli = backendForRole(config, "orchestrator") === "cli";
     let text: string;
     if (useCli) {
-      // MAHKEME HIGH (2026-07-19): withClaudeStreamBanner BİLEREK yok — jenerik banner slotu
-      // paylaşımlı; özet, koşan bir fazın banner'ını erken kapatıp token sayaçlarını sıfırlıyordu.
-      // Meşguliyeti "hazırlanıyor…" chat mesajı anlatır; sonuç yine chat'e düşer.
-      // onText de BİLEREK yok: Türkçe özet akışı "Main Ajan" başlıklı panele düşerdi.
+      // AYRI SÜREÇ: runClaudeCli her seferinde AYRI bir OS süreci başlatır (kalıcı oturuma/pipeline'a
+      // dokunmaz). withClaudeStreamBanner + onText BİLEREK yok — jenerik banner slotu paylaşımlı;
+      // özet koşan bir fazın banner'ını kapatıp token sayaçlarını sıfırlıyordu (mahkeme HIGH). Panel
+      // kendi "hazırlanıyor…" durumunu gösterir; sonuç `chat_summary` event'iyle panele düşer.
       const res = await runClaudeCli({
         systemPrompt: system,
         userMessage: user,
@@ -138,7 +145,7 @@ export async function runChatSummary(
         timeoutMs: 180_000,
       });
       if (!res.ok) {
-        say("system", `🧾 Özet hazırlanamadı: ${String(res.error).slice(0, 140)}`);
+        push({ state: "error", message: `Özet hazırlanamadı: ${String(res.error).slice(0, 140)}` });
         return;
       }
       text = res.text;
@@ -163,13 +170,13 @@ export async function runChatSummary(
     }
     const clean = text.trim();
     if (!clean) {
-      say("system", "🧾 Özet hazırlanamadı (boş yanıt) — tekrar dene.");
+      push({ state: "error", message: "Özet hazırlanamadı (boş yanıt) — tekrar dene." });
       return;
     }
-    say("assistant", `🧾 **Sohbet özeti**\n\n${clean}`);
+    push({ state: "done", text: clean, ts: Date.now() });
   } catch (err) {
     log.warn("chat-summary", "özet koşumu hata", { error: String(err) });
-    say("system", `🧾 Özet hazırlanamadı: ${String(err).slice(0, 140)}`);
+    push({ state: "error", message: `Özet hazırlanamadı: ${String(err).slice(0, 140)}` });
   } finally {
     _running = false;
   }

@@ -78,6 +78,7 @@ export type OrchestratorEvent =
   | OpenProjectRequestEvent
   | AutoAnswerModeEvent
   | DirectiveReplyEvent
+  | ChatSummaryEvent
   | ErrorEvent;
 
 /** Orkestratör → frontend: bu projeyi aç (ör. okunamayan proje erişilebilir konuma kopyalandı → kopyayı aç). */
@@ -438,6 +439,19 @@ export interface CostForecastEvent {
   kind: "cost_forecast";
   data: { forecast: PipelinePrediction | null };
 }
+
+/** 🧾 Sohbet özeti (2026-07-19): AYRI event kanalı — chat/history'ye YAZILMAZ, yalnız sağ Özet
+ *  panelinde gösterilir (iterasyonu ve gelecekteki özetleri kirletmez). */
+export interface ChatSummaryEvent {
+  kind: "chat_summary";
+  data:
+    | { state: "running"; count: number }
+    | { state: "done"; text: string; ts: number }
+    | { state: "error"; message: string };
+}
+
+/** Frontend mainState.chatSummary alanı — son özet durumu (null = hiç istenmedi). */
+export type ChatSummaryState = ChatSummaryEvent["data"];
 
 export interface ClaudeUsage {
   input_tokens: number;

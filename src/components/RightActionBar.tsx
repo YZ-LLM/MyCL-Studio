@@ -31,8 +31,9 @@ interface Props {
   onToggleLeftClick?: () => void;
   leftPanelsOpen?: boolean;
   onToggleTaskQueueClick?: () => void;
-  /** 🧾 Özet (2026-07-19): sohbet geçmişini özetletir (salt okuma). */
+  /** 🧾 Özet (2026-07-19): sağ Özet panelini aç/kapat. */
   onSummarizeChat?: () => void;
+  summaryOpen?: boolean;
   taskQueueOpen?: boolean;
   taskQueueCount?: number;
   /** YZLLM 2026-06-27: "Ajan Takımı" popup'ını aç/kapat (çoklu-ajan takımları + faz/süre/token). */
@@ -64,6 +65,7 @@ export function RightActionBar({
   leftPanelsOpen,
   onToggleTaskQueueClick,
   onSummarizeChat,
+  summaryOpen,
   taskQueueOpen,
   taskQueueCount,
   onAgentTeamClick,
@@ -123,9 +125,9 @@ export function RightActionBar({
         <button
           type="button"
           onClick={onSummarizeChat}
-          className="rab-btn"
-          title="Sohbeti özetle — yapılanlar, kararlar, hatalar, bekleyenler (önemli yerler atlanmaz)"
-          aria-label="Sohbeti özetle"
+          className={`rab-btn${summaryOpen ? " rab-active" : ""}`}
+          title="Sohbet özeti panelini aç/kapat — yapılanlar, kararlar, hatalar, bekleyenler (ayrı süreç; önemli yerler atlanmaz)"
+          aria-label="Sohbet özeti paneli"
         >
           🧾 Özet
         </button>

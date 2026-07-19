@@ -32,9 +32,11 @@ import type {
   PipelineEndEvent,
   PipelinePrediction,
   TaskQueueItem,
+  ChatSummaryState,
 } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
 import { TokenTimelinePanel } from "./components/TokenTimelinePanel";
+import { SummaryPanel } from "./components/SummaryPanel";
 import { AgentTeamPanel } from "./components/AgentTeamPanel";
 import { ErrorDrawer } from "./components/ErrorDrawer";
 import {
@@ -248,6 +250,8 @@ interface MainState {
   /** Akış sonu DÜRÜST hüküm (pipeline_end). null = henüz akış bitmedi / yeni akış.
    *  PARTIAL/FAIL ise sidebar başarısız gate'lere ⚠️ basar, header çip gösterir. */
   pipelineVerdict: PipelineEndEvent["data"] | null;
+  /** 🧾 Sohbet özeti (ayrı süreç) — sağ Özet panelinde gösterilir; null = hiç istenmedi. */
+  chatSummary: ChatSummaryState | null;
 }
 
 const INITIAL_STATE: MainState = {
@@ -286,6 +290,7 @@ const INITIAL_STATE: MainState = {
   costTimeline: [],
   costForecast: null,
   pipelineVerdict: null,
+  chatSummary: null,
 };
 
 function reduce(state: MainState, ev: OrchestratorEvent): MainState {
@@ -413,6 +418,10 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
   if (ev.kind === "cost_forecast") {
     // Tam-pipeline öngörüsü (per-faz medyan; orkestratör hesaplar). null = yetersiz veri.
     return { ...state, costForecast: ev.data.forecast };
+  }
+  if (ev.kind === "chat_summary") {
+    // 🧾 Ayrı süreç özeti — sağ panele düşer (chat'e/history'ye yazılmaz).
+    return { ...state, chatSummary: ev.data };
   }
   if (ev.kind === "cost_history") {
     // load_costs yanıtı — geçmiş tüm faz-cost'u (proje açılışı). Tümünü değiştir.
@@ -907,6 +916,7 @@ function App() {
   const [tokenTimelineOpen, setTokenTimelineOpen] = useState(false);
   // Ajan Takımı popup'ı (YZLLM 2026-06-27): çoklu-ajan takımları + faz/süre/token drawer'ı aç/kapat.
   const [agentTeamOpen, setAgentTeamOpen] = useState(false);
+  const [summaryPanelOpen, setSummaryPanelOpen] = useState(false);
   // v15.7 (2026-05-25): Feature flags (Playwright vb.). Backend read_features → features_value event ile dolur.
   const [features, setFeatures] = useState<{
     playwright_enabled: boolean;
@@ -1689,7 +1699,8 @@ function App() {
           leftPanelsOpen={leftPanelsOpen}
           onToggleTaskQueueClick={() => setTaskQueueOpen((o) => !o)}
           taskQueueOpen={taskQueueOpen}
-          onSummarizeChat={() => void orch.send({ kind: "summarize_chat" })}
+          onSummarizeChat={() => setSummaryPanelOpen((o) => !o)}
+          summaryOpen={summaryPanelOpen}
         taskQueueCount={
           // 2026-07-18: rozet = AKTİF iş (running+pending) — "bekleyen iş var mı" sinyali;
           // done+dropped saymak panel sayaçlarıyla çelişiyordu (bilinçli davranış değişikliği).
@@ -1743,6 +1754,12 @@ function App() {
         open={agentTeamOpen}
         runs={mainState.agentRuns}
         onClose={() => setAgentTeamOpen(false)}
+      />
+      <SummaryPanel
+        open={summaryPanelOpen}
+        summary={mainState.chatSummary}
+        onClose={() => setSummaryPanelOpen(false)}
+        onGenerate={() => void orch.send({ kind: "summarize_chat" })}
       />
       <ErrorDrawer
         open={errorDrawerOpen}

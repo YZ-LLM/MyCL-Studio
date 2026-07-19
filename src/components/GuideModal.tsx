@@ -16,7 +16,7 @@ interface Props {
   title?: string;
 }
 
-function renderMarkdown(md: string): ReactNode[] {
+export function renderMarkdown(md: string): ReactNode[] {
   const out: ReactNode[] = [];
   const lines = md.split("\n");
   lines.forEach((line, i) => {
