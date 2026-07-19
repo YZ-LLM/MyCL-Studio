@@ -8757,7 +8757,8 @@ ipcRouter.register("summarize_chat", async () => {
     emitChatMessage("system", "🧾 Özet için önce bir proje aç.");
     return;
   }
-  void runChatSummary(runtime.config, runtime.state.project_root);
+  const summaryRoot = runtime.state.project_root;
+  void runChatSummary(runtime.config, summaryRoot, () => runtime.state?.project_root === summaryRoot);
 });
 // 🗺️ Plan Modu (2026-07-16): composer pili — AÇIKKEN kullanıcı mesajları plana çevrilir.
 ipcRouter.register("set_plan_mode", async (data: unknown) => {
