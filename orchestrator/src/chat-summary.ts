@@ -12,7 +12,7 @@ import { resolveLlmClient } from "./claude-api.js";
 import { runClaudeCli } from "./cli-run.js";
 import { backendForRole, type MyclConfig } from "./config.js";
 import { loadMessages, type HistoryEntry } from "./history-loader.js";
-import { emitChatMessage, emitClaudeStream, withClaudeStreamBanner } from "./ipc.js";
+import { emitChatMessage, withClaudeStreamBanner } from "./ipc.js";
 import { log } from "./logger.js";
 import { selectEffortForTask, selectModelForTask } from "./model-catalog.js";
 import { ZERO_TOOLS_DISALLOWED } from "./tool-policy.js";
@@ -118,7 +118,8 @@ export async function runChatSummary(config: MyclConfig, projectRoot: string): P
           // Girdi zaten prompt'ta — araçsız (proje okuması gereksiz; hızlı + sızıntı yüzeyi yok).
           disallowedTools: ZERO_TOOLS_DISALLOWED,
           effort: selectEffortForTask("orchestration", config.claude_code_flags.effort),
-          onText: (t) => emitClaudeStream({ sub: "text", text: t }),
+          // onText BİLEREK yok: Türkçe özet akışı "Main Ajan" başlıklı panele düşerdi (kullanıcı
+          // dün bunu dil ihlali olarak gördü). Banner meşguliyeti gösterir; sonuç chat'e düşer.
           timeoutMs: 180_000,
         }),
       );
