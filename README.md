@@ -423,6 +423,10 @@ görünür, denetim izine yazılır.
 - **Panel kapatma.** Sağdan açılan paneller (İş Kuyruğu, Token Zaman Çizelgesi,
   Ajan Takımı) ve modallar ESC ile ya da dışarı tıklayınca kapanır; birden çok
   panel açıkken ESC yalnız en son açılanı kapatır.
+- **🧾 Özet.** Sağ bardaki Özet butonu sohbet geçmişini önemli hiçbir şeyi
+  atlamadan Türkçe özetler: yapılan işler, alınan kararlar, hatalar ve
+  çözümleri, bekleyen işler ve açık sorular, önemli uyarılar. Döküm çok
+  uzunsa en yeni kısım özetlenir ve bu, özetin başında belirtilir.
 
 ## Erişilebilirlik ve hafif oturumlar
 

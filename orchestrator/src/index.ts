@@ -207,6 +207,7 @@ import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting } from "./llm-outage.js";
 import { translate } from "./translator.js";
+import { runChatSummary } from "./chat-summary.js";
 import { shouldKickQueue, startLivenessWatchdog } from "./liveness-watchdog.js";
 import { detectCliRateLimit } from "./cli-rate-limit.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
@@ -8748,6 +8749,15 @@ ipcRouter.register("run_full_test", async () => {
 // 🔧 Bakım Turu (2026-07-16): aynı desen — buton onay askq'ı açar.
 ipcRouter.register("run_maintenance", async () => {
   await handleRunMaintenanceRequest();
+});
+// 🧾 Özet (2026-07-19): sohbet geçmişini önemli yerleri atlamadan Türkçe özetler (salt okuma;
+// orkestratör rolü — dil hattına uygun, main'e hiçbir şey gitmez). Fire-and-forget: pipeline'ı bloklamaz.
+ipcRouter.register("summarize_chat", async () => {
+  if (!runtime.state || !runtime.config) {
+    emitChatMessage("system", "🧾 Özet için önce bir proje aç.");
+    return;
+  }
+  void runChatSummary(runtime.config, runtime.state.project_root);
 });
 // 🗺️ Plan Modu (2026-07-16): composer pili — AÇIKKEN kullanıcı mesajları plana çevrilir.
 ipcRouter.register("set_plan_mode", async (data: unknown) => {

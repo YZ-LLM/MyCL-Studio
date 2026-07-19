@@ -541,6 +541,7 @@ export type OrchestratorCommand =
   | { kind: "run_dast" }
   | { kind: "run_full_test" }
   | { kind: "run_maintenance" }
+  | { kind: "summarize_chat" }
   | { kind: "set_plan_mode"; data: { enabled: boolean } }
   // v15.7 (2026-05-25): intent_direct kaldırıldı — classifier ve sidebar
   // intent button'ları yok artık.
