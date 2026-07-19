@@ -143,6 +143,7 @@ export async function runChatSummary(
         disallowedTools: ZERO_TOOLS_DISALLOWED,
         effort: selectEffortForTask("orchestration", config.claude_code_flags.effort),
         timeoutMs: 180_000,
+        sideTask: true, // AYRI SÜREÇ: token'lar koşan fazın maliyet kovasına yazılmaz (mahkeme HIGH)
       });
       if (!res.ok) {
         push({ state: "error", message: `Özet hazırlanamadı: ${String(res.error).slice(0, 140)}` });

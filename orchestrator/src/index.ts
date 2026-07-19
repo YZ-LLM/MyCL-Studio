@@ -8754,7 +8754,8 @@ ipcRouter.register("run_maintenance", async () => {
 // orkestratör rolü — dil hattına uygun, main'e hiçbir şey gitmez). Fire-and-forget: pipeline'ı bloklamaz.
 ipcRouter.register("summarize_chat", async () => {
   if (!runtime.state || !runtime.config) {
-    emitChatMessage("system", "🧾 Özet için önce bir proje aç.");
+    // MAHKEME MEDIUM (2026-07-19): chat_message YERİNE özet kanalı — özet asla sohbete/history'ye yazmaz.
+    emit("chat_summary", { state: "error", message: "Özet için önce bir proje aç." });
     return;
   }
   const summaryRoot = runtime.state.project_root;

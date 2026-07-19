@@ -16,6 +16,16 @@ describe("F1 cost threading", () => {
     takePhaseCost(); // önceki testten kalan kovayı temizle
   });
 
+  it("sideTask:true → AYRI SÜREÇ token'ı faz kovasına YAZILMAZ (YZLLM 'iterasyonu etkilemesin')", () => {
+    beginPhaseCost(5, 1);
+    recordTokenUsage({ input_tokens: 100, output_tokens: 50, model: "claude-opus-4-8" }); // gerçek faz turu
+    recordTokenUsage({ input_tokens: 9999, output_tokens: 9999, model: "claude-opus-4-8" }, { sideTask: true }); // özet
+    const b = takePhaseCost();
+    expect(b!.turns).toBe(1); // yalnız gerçek faz turu sayıldı
+    expect(b!.input_tokens).toBe(100); // özetin 9999'u kovaya girmedi
+    expect(b!.output_tokens).toBe(50);
+  });
+
   it("total_cost_usd + model → kovada birikir (çok turn)", () => {
     beginPhaseCost(5, 1);
     recordTokenUsage({ input_tokens: 100, output_tokens: 50, total_cost_usd: 0.012, model: "claude-opus-4-8" });

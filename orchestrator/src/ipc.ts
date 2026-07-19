@@ -316,7 +316,13 @@ export function takePhaseCost(): PhaseCostBucket | null {
   return b;
 }
 
-export function recordTokenUsage(usage: ClaudeUsage): void {
+/**
+ * @param opts.sideTask 🧾 Özet gibi AYRI süreçler için (YZLLM 2026-07-19 "iterasyonu etkilemesin"):
+ *   true → session toplamı yine gerçek harcamayı yansıtır AMA aktif faz maliyet kovasına (Token
+ *   Timeline / Katman Maliyeti) VE ajan-run atfına EKLENMEZ — özetin token'ları koşan bir fazın
+ *   muhasebesine karışmaz (mahkeme HIGH 2026-07-19).
+ */
+export function recordTokenUsage(usage: ClaudeUsage, opts?: { sideTask?: boolean }): void {
   sessionTokenTotals.input_tokens += usage.input_tokens;
   sessionTokenTotals.output_tokens += usage.output_tokens;
   sessionTokenTotals.cache_creation_input_tokens +=
@@ -325,6 +331,8 @@ export function recordTokenUsage(usage: ClaudeUsage): void {
     usage.cache_read_input_tokens ?? 0;
   sessionTokenTotals.api_calls += 1;
   emit("token_totals", { ...sessionTokenTotals });
+
+  if (opts?.sideTask) return; // ayrı süreç → faz kovası + ajan atfı YOK (iterasyonu etkileme)
 
   if (activePhaseCost) {
     activePhaseCost.turns += 1;

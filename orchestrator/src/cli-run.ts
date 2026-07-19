@@ -60,6 +60,9 @@ export interface CliRunOpts {
    * (nesting riski). Açıkça `false` → asla sarma; `true` → her zaman sar (yalnız darwin + flag açık).
    */
   folderGuard?: boolean;
+  /** 🧾 AYRI SÜREÇ (2026-07-19): true → token kullanımı session toplamına yazılır ama aktif faz maliyet
+   *  kovasına/ajan atfına EKLENMEZ (özet koşan iterasyonun muhasebesini kirletmesin). */
+  sideTask?: boolean;
 }
 
 export interface CliRunResult {
@@ -253,7 +256,10 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
           // F1: faz-maliyet kovasını CLI modunda da doldur (eskiden yalnız API yolu
           // doldururdu → CLI'da panel boştu) + gerçek $ + model. Aktif kova yoksa no-op.
           const costUsd = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
-          recordTokenUsage({ ...u, total_cost_usd: costUsd, model: opts.modelId });
+          recordTokenUsage(
+            { ...u, total_cost_usd: costUsd, model: opts.modelId },
+            { sideTask: opts.sideTask },
+          );
         }
       }
     });

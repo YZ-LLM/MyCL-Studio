@@ -1178,6 +1178,10 @@ function App() {
     historyRequestedRef.current = false;
     setProjectPath(path);
     setMainState({ ...INITIAL_STATE });
+    // MAHKEME MEDIUM (2026-07-19): proje değişince Özet panelini kapat — açık kalırsa panelin
+    // autoGenDone ref'i bayat kalıp yeni projede "hazırlanıyor…" ekranında asılı kalıyordu (chatSummary
+    // INITIAL_STATE ile null'a döner ama ref sıfırlanmaz). Kapatma → ref sıfırlanır → yeniden aç = temiz.
+    setSummaryPanelOpen(false);
   };
 
   // Orkestratör "şu projeyi aç" istedi (okunamayan proje erişilebilir konuma kopyalandı → kopyayı aç).
