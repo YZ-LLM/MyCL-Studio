@@ -41,27 +41,33 @@ export function isEddRateLimited(err: unknown): boolean {
 }
 
 /**
- * SAF: progress'te "pending" ama GÜNCEL enumeration'da analyzable-pending OLMAYAN birimler (HAYALET pending).
+ * SAF: progress'te "pending" ama GÜNCEL enumeration'da analyzable-pending OLMAYAN birimleri sınıflar (HAYALET pending).
  * Neden (YZLLM 2026-07-19, canlı cave: `routes/*- Copy.js` yedek dosyaları 13.07'de pending işaretlenip sonra
  * SİLİNDİ): bir birim analiz EDİLMEDEN silinir/binary-too-large/gitignored/secret olursa runEdd döngüsüne giremez
  * (pendingUnits `analyzable && enumeration'da var` ister) VE reconcileEddStaleness yalnız `done` kayıtlarını
  * uzlaştırır → birim SONSUZA pending kalır → EDD hiç "0 pending"e ulaşamaz → her açılışta boşa re-run + yanlış
- * "N kaldı, bir sonraki açılışta devam" vaadi. Bu birimleri GÖRÜNÜR unanalyzable'a çevir (gerçek sebep) → EDD
- * gerçekten tamamlanır. GENUINE pending (dosya var + analyzable) DOKUNULMAZ. Test edilebilir.
+ * "N kaldı, bir sonraki açılışta devam" vaadi. GENUINE pending (dosya var + analyzable) DOKUNULMAZ.
+ *
+ * İKİ KATEGORİ (MAHKEME CRITICAL 2026-07-19): (1) nonAnalyzable — enumeration'da VAR ama analyzable:false
+ * (stat edildi, silinme kuşkusu YOK) → doğrudan güvenli. (2) notEnumerated — enum'da HİÇ yok; bu "silinmiş"
+ * OLABİLİR ama enumerate GEÇİCİ bir I/O hatasında (EMFILE/EACCES → walk sessiz return) var olan dosyayı da
+ * kaçırabilir → çağıran bunu safeSourceHash ile DOĞRUDAN teyit etmeli (yalnız ENOENT = silinmiş), yoksa gerçek
+ * pending'i kalıcı "silinmiş" damgalar (rate-limit sonrası büyük backlog'ta veri kaybı). Test edilebilir.
  */
-export function ghostPendingUnits(
+export function classifyGhostPending(
   cur: Map<string, EddUnitRecord>,
   units: SourceUnit[],
-): { unit: string; reason: string }[] {
+): { nonAnalyzable: { unit: string; reason: string }[]; notEnumerated: string[] } {
   const enumByUnit = new Map(units.map((u) => [u.unit, u]));
-  const out: { unit: string; reason: string }[] = [];
+  const nonAnalyzable: { unit: string; reason: string }[] = [];
+  const notEnumerated: string[] = [];
   for (const [unit, rec] of cur) {
     if (rec.status !== "pending") continue;
     const eu = enumByUnit.get(unit);
-    if (!eu) out.push({ unit, reason: "deleted-before-analysis" });
-    else if (!eu.analyzable) out.push({ unit, reason: eu.reason ?? "not-analyzable" });
+    if (!eu) notEnumerated.push(unit);
+    else if (!eu.analyzable) nonAnalyzable.push({ unit, reason: eu.reason ?? "not-analyzable" });
   }
-  return out;
+  return { nonAnalyzable, notEnumerated };
 }
 
 /** Batch başına birim (küçük → agent bol tur/wall-clock; parse güvenilir; resume granülerliği ince). */
@@ -166,12 +172,27 @@ async function runEdd(config: MyclConfig, state: State): Promise<void> {
   const cur0 = await readEddProgress(root);
   // HAYALET PENDING uzlaşması (YZLLM 2026-07-19): analiz edilmeden silinen/analiz-dışı olmuş pending birimleri
   // GÖRÜNÜR unanalyzable'a çevir → yoksa EDD sonsuza "N kaldı" der + her açılış boşa re-run eder (canlı cave bug).
-  const ghosts = ghostPendingUnits(cur0, units);
-  for (const g of ghosts) await patchEddUnit(root, g.unit, { status: "unanalyzable", reason: g.reason });
-  if (ghosts.length > 0) {
-    log.info("edd/engine", "hayalet pending → unanalyzable (silinmiş/analiz-dışı olmuş)", { count: ghosts.length });
+  const { nonAnalyzable, notEnumerated } = classifyGhostPending(cur0, units);
+  let ghostCount = 0;
+  // (1) enumeration'da VAR + analyzable:false → doğrudan güvenli (stat edildi, silinme kuşkusu yok).
+  for (const g of nonAnalyzable) {
+    await patchEddUnit(root, g.unit, { status: "unanalyzable", reason: g.reason });
+    ghostCount++;
   }
-  const cur = ghosts.length > 0 ? await readEddProgress(root) : cur0;
+  // (2) enum'da YOK → MAHKEME CRITICAL: geçici enum eksikliği (EMFILE/EACCES) gerçek pending'i "silinmiş"
+  // sanmasın → safeSourceHash ile DOĞRUDAN teyit; yalnız ENOENT (h.gone) silinmiş sayılır. Diğer hata / dosya
+  // var → DOKUNMA (pending kalır, sonraki tur kendi düzelir; kalıcı sessiz veri kaybı yok).
+  for (const unit of notEnumerated) {
+    const h = await safeSourceHash(join(root, ...unit.split("/")));
+    if (h.gone) {
+      await patchEddUnit(root, unit, { status: "unanalyzable", reason: "deleted-before-analysis" });
+      ghostCount++;
+    }
+  }
+  if (ghostCount > 0) {
+    log.info("edd/engine", "hayalet pending → unanalyzable (silinmiş/analiz-dışı olmuş)", { count: ghostCount });
+  }
+  const cur = ghostCount > 0 ? await readEddProgress(root) : cur0;
   const pendingUnits = units.filter((u) => u.analyzable && cur.get(u.unit)?.status === "pending");
   const initial = summarizeProgress(cur);
   const totalBatches = Math.ceil(pendingUnits.length / BATCH_SIZE);
@@ -230,7 +251,13 @@ async function runEdd(config: MyclConfig, state: State): Promise<void> {
  * (davranış-onay-gate.ts:206) → foreign'de consent kararı YOK → bu tetik EDD ile hiç çakışmaz (uygulanamaz, atlanır).
  */
 /** reconcile'ın yeniden-analize-açtığı unanalyzable sebepleri (dosya geri gelirse REVIVE edilir; ilk-enumerate binary/too-large DEĞİL). */
-const RECONCILE_UNANALYZABLE_REASONS = new Set(["deleted-after-analysis", "too-large-after-analysis"]);
+const RECONCILE_UNANALYZABLE_REASONS = new Set([
+  "deleted-after-analysis",
+  "too-large-after-analysis",
+  // MAHKEME (2026-07-19) ikincil emniyet ağı: hayalet-pending temizliğinin işaretlediği silinmiş birim dosyası
+  // geri gelirse (kopya restore) → pending'e canlan (yeniden analiz). Yanlış-pozitif olsa da kendi kendini düzeltir.
+  "deleted-before-analysis",
+]);
 
 export async function reconcileEddStaleness(
   root: string,
