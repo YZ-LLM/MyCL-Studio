@@ -153,6 +153,38 @@ select:focus {
   flex-shrink: 0;
 }
 
+/* ActivityBar — "Şu an ne yapıyor" kalıcı durum şeridi (YZLLM 2026-07-20). Header'ın altında sabit,
+   hiç kaybolmaz; tona göre sol kenar rengi (çalışıyor/bekliyor/boşta). */
+.activity-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  color: var(--fg);
+  flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.activity-bar.activity-running { border-left-color: var(--accent); }
+.activity-bar.activity-waiting { border-left-color: #e3b341; }
+.activity-bar.activity-idle { border-left-color: var(--border-strong); opacity: 0.85; }
+.activity-dot { font-size: 12px; flex-shrink: 0; }
+.activity-dot.spin { animation: activity-spin 1.6s linear infinite; display: inline-block; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+.activity-prefix { color: var(--fg-dim); flex-shrink: 0; }
+.activity-text {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 .app-header button,
 .app-header input,
 .app-header .header-action {

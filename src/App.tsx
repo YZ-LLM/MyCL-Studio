@@ -36,6 +36,7 @@ import type {
 } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
 import { TokenTimelinePanel } from "./components/TokenTimelinePanel";
+import { ActivityBar } from "./components/ActivityBar";
 import { SummaryPanel } from "./components/SummaryPanel";
 import { AgentTeamPanel } from "./components/AgentTeamPanel";
 import { ErrorDrawer } from "./components/ErrorDrawer";
@@ -1602,6 +1603,14 @@ function App() {
         onPhaseIndicatorClick={() => setErrorDrawerOpen((o) => !o)}
         errorCount={errorEntries.length}
         pipelineVerdict={mainState.pipelineVerdict?.verdict ?? null}
+      />
+      <ActivityBar
+        phase={mainState.phase}
+        phaseName={phasesList.find((p) => p.id === mainState.phase)?.name_tr ?? ""}
+        phaseStatus={mainState.phaseStatus}
+        runningLabel={mainState.runningBanner?.label ?? null}
+        runningDetail={mainState.runningBanner?.detail ?? null}
+        hasAskq={mainState.pendingAskq !== null}
       />
       <div
         className={

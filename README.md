@@ -361,6 +361,12 @@ açarsan MyCL baştan başlamaz — kaldığı **fazdan** (spec/kod/test/güvenl
 o iterasyonun önceki kararlarını hatırlar. Niyet-toplama (Faz 1/2) soruları da bu iterasyon
 için kalıcı tutulur; yeniden açıldığında zaten yanıtladıklarını **tekrar sormaz**.
 
+**Şu an ne yapıyor? — kalıcı durum şeridi.** Header'ın hemen altında, hiç
+kaybolmayan bir "📍 Şu an: …" şeridi MyCL'in o anki canlı aktivitesini gösterir:
+hangi faz + ne yaptığı (ör. "Faz 13 · Güvenlik — semgrep taraması"), senden cevap
+mı beklediği, yoksa boşta mı olduğu. Sol kenar rengi tonu belli eder (çalışıyor /
+bekliyor / boşta). Kayan sohbete karışmaz, her an görünür.
+
 **Açılışta durum + yapman gereken özeti.** Bir proje açtığında (özellikle mevcut
 projeyi entegre ettiğinde) MyCL son mesajında **her zaman** kısa bir "📍 Durum /
 Yapman gereken" özeti yazar: ne durumda olduğunu (analiz sürüyor, önceki iş
