@@ -59,7 +59,6 @@ import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import {
   detectInterruptedPhase2To9Pure,
   decideBootQueueAction,
-  shouldRunBootStatusCheck,
 } from "./resume-detection.js";
 import { clearClarifyLog } from "./clarify-log.js";
 import { SerialWorkQueue } from "./serial-queue.js";
@@ -222,6 +221,8 @@ import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
 import { maybeRunEdd } from "./edd/engine.js";
+import { readEddProgress, summarizeProgress } from "./edd/progress.js";
+import { composeOpenStatus, formatOpenStatus } from "./open-status.js";
 import { attachEddCodegenNote } from "./edd/codegen-note.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
@@ -1895,6 +1896,48 @@ async function emitConfigStatus(): Promise<boolean> {
 }
 
 async function handleOpenProject(path: string, integrate = false): Promise<void> {
+  await handleOpenProjectInner(path, integrate);
+  // "HER ZAMAN durum özeti" (YZLLM 2026-07-19): tüm açılış/resume/kuyruk dallarından SONRA, kullanıcı
+  // ne durumda olduğunu + ne yapması gerektiğini TEK bakışta görsün. Deterministik, fail-soft.
+  await emitOpenStatusSummary().catch((e) => log.warn("orchestrator", "açılış durum özeti başarısız", { error: String(e) }));
+}
+
+/**
+ * DETERMİNİSTİK açılış durum özeti — state + kuyruk + EDD anlık görüntüsünden "📍 Durum / Yapman gereken"
+ * mesajı basar. Eski LLM boot-narrator'ın (runBootStatusCheck) yerini alır: o kuyrukta iş varken susuyordu
+ * (her-zaman garantisi yoktu) + token yakıyordu + prompt-kırılgandı. ASLA throw etmez (caller yutar).
+ */
+async function emitOpenStatusSummary(): Promise<void> {
+  const st = runtime.state;
+  if (!st) return;
+  const root = st.project_root;
+  const tasks = await readTasks(root).catch(() => []);
+  const running =
+    tasks.find((t) => t.id === runtime.currentTaskId) ?? tasks.find((t) => t.status === "running") ?? null;
+  const pendingCount = tasks.filter((t) => (t.status ?? "pending") === "pending" && (t.attempts ?? 0) < MAX_TASK_AUTO_RETRIES).length;
+  const isForeign = st.origin === "foreign";
+  let eddDone = 0, eddTotal = 0, eddPending = 0;
+  if (isForeign) {
+    try {
+      const e = summarizeProgress(await readEddProgress(root));
+      eddDone = e.done; eddTotal = e.total; eddPending = e.pending;
+    } catch { /* edd yoksa 0 kalır */ }
+  }
+  const status = composeOpenStatus({
+    currentPhase: st.current_phase,
+    intentEmpty: !st.intent_summary || st.intent_summary.trim() === "",
+    isForeign,
+    pendingDiagnostic: st.pending_diagnostic != null,
+    pendingUiReview: st.pending_ui_review === true,
+    runningTaskText: running?.text ?? null,
+    pendingTaskCount: pendingCount,
+    eddDone, eddTotal, eddPending,
+    neverAsk: isNeverAsk(),
+  });
+  emitChatMessage("assistant", formatOpenStatus(status));
+}
+
+async function handleOpenProjectInner(path: string, integrate = false): Promise<void> {
   log.info("orchestrator", "open_project", { path, integrate });
   // Yeni proje → güvenlik yakınsama-kırıcı durumunu sıfırla (eski projenin sayacı taşınmasın).
   _securityFindingsPrev = null;
@@ -2350,9 +2393,9 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
       // kuyruk sürücüsü (emitInitialTaskQueue) "İş başlıyor / 🔄 Yeni iterasyon / 📍 kaldığım yerden devam"ı zaten
       // anlatır; boot-check kuyruğu bilmediği için `cp=1 + intent boş → "Niyet bekleniyor"` deyip kullanıcıdan İKİNCİ
       // kez niyet istiyordu. Karar saf shouldRunBootStatusCheck'e taşındı (resume-detection.ts, birim-test'li).
-      if (shouldRunBootStatusCheck(st, hasPendingQueueWork)) {
-        void runBootStatusCheck(runtime.config, st);
-      }
+      // ESKİ LLM boot-narrator KALDIRILDI (2026-07-19): deterministik emitOpenStatusSummary (wrapper sonda)
+      // her açılışta "Durum + Yapman gereken"i basar → kuyruk-varken-susma + token + prompt-kırılganlığı bitti.
+      void st; void hasPendingQueueWork;
     }
   } catch (err) {
     log.error("orchestrator", "open_project failed", err);
@@ -2360,91 +2403,6 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
   }
 }
 
-/**
- * v15.6 boot durum özeti: kullanıcı projeyi açtığında agent state'i okur,
- * yarıda kalan iş varsa TEK CÜMLE ile özetleyip ne yapılması gerektiğini
- * söyler. Sadece `chat` action'ı kabul edilir — boot'ta phase tetikleme,
- * askq sorma, hafıza önerme YOK. Background fire-and-forget (await çağrı
- * yeri void).
- */
-async function runBootStatusCheck(
-  cfg: MyclConfig,
-  st: State,
-): Promise<void> {
-  // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10, mahkeme düzeltmesi): buraya ULAŞILDIYSA yukarıdaki resume yolları (Faz 1/6/2-9)
-  // ZATEN return etti → burada resume edilecek yarıda kalmış iş YOK (eski detectInterruptedPhase1 dalı ÖLÜ koddu +
-  // narrator'ı sessizce atlıyordu = regresyon). Narrator yine ÇALIŞIR (bilgilendirici durum korunur) ama never-ask'ta
-  // "Devam mı yeni iş mi?" gibi KARAR SORUSU üretmez (aşağıdaki neverAskNote matrisi ezer) — otonom modda kullanıcıya
-  // soru yok; mid-iş zaten oto-sürer, yalnız durum bildirir.
-  const neverAskNote = isNeverAsk()
-    ? "\n\n## HİÇBİR ŞEY SORMA MODU AKTİF (üstteki matrisi EZER)\n" +
-      "Kullanıcı 'hiçbir şey sorma' modunu açtı → ona KARAR SORUSU SORMA. 'Devam mı yeni iş mi?', 'ne yapmak " +
-      "istersin?', 'onaylıyor musun?' KESİNLİKLE YASAK. Yarıda kalan iş zaten otomatik kaldığı yerden sürer. " +
-      "Yalnızca: (a) durum temizse reason='boot clean' (sessiz geç); (b) gerçekten yeni bir hedef gerekiyorsa TEK " +
-      "bilgilendirici cümle yaz ('önceki iş tamamlandı/yarıda kaldı; yeni bir hedef verdiğinde başlarım') — soru " +
-      "işaretiyle BİTİRME, seçenek sunma."
-    : "";
-  try {
-    const decision = await respondAsOrchestrator(
-      cfg,
-      st,
-      "[BOOT_CHECK] Kullanıcı projeyi yeni açtı, henüz bir mesaj yazmadı. " +
-        "TÜM gerekli bilgi YUKARIDAKİ `## CURRENT CONTEXT (live snapshot)` " +
-        "bölümünde — current_phase, pending_ui_tweak, dev_server_pid, " +
-        "spec_approved, intent_summary, was_pipeline_completed, son 10 audit " +
-        "event hepsi orada. **Read/Bash KULLANMA, dosya tekrar okuma** — " +
-        "context yeterli. DİREKT `decide_action` çağır.\n\n" +
-        "## YASAK 1: iterasyon numarası söyleme\n" +
-        "Kullanıcı iterasyon sayacını umursamıyor — teknik fazlalık. ASLA " +
-        "'6. iterasyon', 'iteration 5', 'N. iterasyon' deme.\n\n" +
-        "## YASAK 2: gelecek söz verme\n" +
-        "Boot check SADECE `chat` action'ı yapabilirsin — phase tetikleyemezsin, " +
-        "dev server başlatamazsın, askq açamazsın. Bu yüzden 'dev server " +
-        "başlayacak', 'haber veririm', 'şimdi X yapıyorum', 'tarayıcıyı " +
-        "açacağım' gibi GELECEK VAADLERİ KESİNLİKLE YASAK. Söylediğini " +
-        "yapamadığın için kullanıcı söz tutulmadığını görür.\n" +
-        "Sadece (a) ŞU ANKİ DURUMU özetle ve (b) KULLANICININ YAPACAĞI eylemi " +
-        "söyle (örn. sidebar'dan tıklama, mesaj yazma).\n\n" +
-        "## Event yorumlama\n" +
-        "- `iteration-N-start` = yeni iterasyon başladı, niyet bekleniyor.\n" +
-        "- `phase-17-complete` = pipeline tamamlandı.\n" +
-        "- `tdd-red`, `phase-N-fail` = test failure → yarıda kalmış iş VAR.\n\n" +
-        "## Karar matrisi (söylem örnekleri)\n" +
-        "- current_phase ∈ [2..16] (mid-pipeline, yarıda) → bu faz OTOMATİK kaldığı " +
-        "yerden devam eder; kullanıcının bir şey yapmasına gerek YOK. Kullanıcıya " +
-        "ASLA 'faza tıkla / Sadece Çalıştır seç / devam etmek için ...' DEME — " +
-        "bekletme/yönlendirme YASAK (YZLLM 2026-06-13). reason='boot clean' (sessiz geç).\n" +
-        "- pending_ui_tweak set → bu otomatik ele alınır; kullanıcıya 'tıkla / " +
-        "yazman yeterli / devam etmek için ...' DEME (YZLLM 2026-06-13: bekletme/" +
-        "yönlendirme yok). reason='boot clean' (sessiz geç).\n" +
-        "- pending_diagnostic set → 'Debug çözüm seçimi bekliyor — chat'te " +
-        "askq açılacak.'\n" +
-        "- current_phase=1 + intent_summary boş → 'Niyet bekleniyor — ne " +
-        "yapmak istersin?'\n" +
-        "- current_phase=1 + son `tdd-red`/`phase-N-fail` var → 'Önceki " +
-        "[faz adı] çalışmasında [kısa özet] yarıda kaldı. Devam mı yeni iş mi?'\n" +
-        "- current_phase=1 + audit boş + iteration_count=1 → reason='boot clean'\n\n" +
-        "action='chat' + reason ile 1-2 cümle Türkçe özet. ZORUNLU: " +
-        "action='chat', iterasyon numarası söyleme, gelecek söz verme, " +
-        "başka action seçme, phase tetikleme, askq sorma, hafıza önerme." +
-        neverAskNote,
-    );
-    if (decision.action === "chat") {
-      // Şema reason'ı zorunlu, message_to_user'ı opsiyonel tutar — ajan
-      // çoğu zaman sadece reason doldurur. executeAgentDecision ile aynı
-      // fallback pattern: message_to_user ?? reason.
-      const raw = decision.message_to_user ?? decision.reason ?? "";
-      const msg = raw.trim();
-      // "boot clean" sentinel: ajan durum temiz dediğinde mesaj emit etme.
-      const isClean = /^boot[\s\-_]?clean\b/i.test(msg) || msg.length < 5;
-      if (!isClean) {
-        emitChatMessage("assistant", msg);
-      }
-    }
-  } catch (err) {
-    log.warn("orchestrator", "boot status check failed", err);
-  }
-}
 
 /**
  * v15.6 (2026-05-24): Mid-Phase 1 tespiti — uygulama kapanırsa Phase 1

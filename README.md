@@ -361,6 +361,13 @@ açarsan MyCL baştan başlamaz — kaldığı **fazdan** (spec/kod/test/güvenl
 o iterasyonun önceki kararlarını hatırlar. Niyet-toplama (Faz 1/2) soruları da bu iterasyon
 için kalıcı tutulur; yeniden açıldığında zaten yanıtladıklarını **tekrar sormaz**.
 
+**Açılışta durum + yapman gereken özeti.** Bir proje açtığında (özellikle mevcut
+projeyi entegre ettiğinde) MyCL son mesajında **her zaman** kısa bir "📍 Durum /
+Yapman gereken" özeti yazar: ne durumda olduğunu (analiz sürüyor, önceki iş
+kaldığı yerden sürüyor, yeni iş bekliyor, faz otomatik ilerliyor…) ve senin ne
+yapman gerektiğini (bekle / hedef yaz / soruyu yanıtla) tek bakışta gösterir.
+Bu özet deterministiktir — LLM'e sorulmaz, token yakmaz.
+
 **İş kuyruğundan iş alınca tekrar niyet sormaz.** İş kuyruğundan bir iş işlenmeye
 başladığında işin metni zaten niyeti belli ettiği için MyCL "niyet bekliyorum, ne yapmak
 istiyorsun?" diye ikinci kez sormaz — işi doğrudan işler. Kuyruk sürerken durum mesajını
