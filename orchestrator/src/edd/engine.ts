@@ -15,7 +15,7 @@ import type { State } from "../types.js";
 import { listIgnoredUntrackedFiles } from "../git.js";
 import { emitChatMessage } from "../ipc.js";
 import { log } from "../logger.js";
-import { enumerateSourceUnits } from "./enumerate.js";
+import { enumerateSourceUnits, type SourceUnit } from "./enumerate.js";
 import { safeSourceHash } from "./source-hash.js";
 import {
   appendEddUnit,
@@ -38,6 +38,30 @@ export function isEddRateLimited(err: unknown): boolean {
   // satır no ("file.ts:429") veya JSON pozisyonu ("position 429") gerçek analiz-hatasını yanlışlıkla rate-limit sayar
   // (mahkeme 2026-07-12). Gerçek rate-limit mesajları zaten "rate limit"/"rate_limit_error"/"too many requests" içerir.
   return /rate.?limit|rate_limit_error|too many requests|kota|kredi|credit balance/i.test(s) || isApiAccountError(s);
+}
+
+/**
+ * SAF: progress'te "pending" ama GÜNCEL enumeration'da analyzable-pending OLMAYAN birimler (HAYALET pending).
+ * Neden (YZLLM 2026-07-19, canlı cave: `routes/*- Copy.js` yedek dosyaları 13.07'de pending işaretlenip sonra
+ * SİLİNDİ): bir birim analiz EDİLMEDEN silinir/binary-too-large/gitignored/secret olursa runEdd döngüsüne giremez
+ * (pendingUnits `analyzable && enumeration'da var` ister) VE reconcileEddStaleness yalnız `done` kayıtlarını
+ * uzlaştırır → birim SONSUZA pending kalır → EDD hiç "0 pending"e ulaşamaz → her açılışta boşa re-run + yanlış
+ * "N kaldı, bir sonraki açılışta devam" vaadi. Bu birimleri GÖRÜNÜR unanalyzable'a çevir (gerçek sebep) → EDD
+ * gerçekten tamamlanır. GENUINE pending (dosya var + analyzable) DOKUNULMAZ. Test edilebilir.
+ */
+export function ghostPendingUnits(
+  cur: Map<string, EddUnitRecord>,
+  units: SourceUnit[],
+): { unit: string; reason: string }[] {
+  const enumByUnit = new Map(units.map((u) => [u.unit, u]));
+  const out: { unit: string; reason: string }[] = [];
+  for (const [unit, rec] of cur) {
+    if (rec.status !== "pending") continue;
+    const eu = enumByUnit.get(unit);
+    if (!eu) out.push({ unit, reason: "deleted-before-analysis" });
+    else if (!eu.analyzable) out.push({ unit, reason: eu.reason ?? "not-analyzable" });
+  }
+  return out;
 }
 
 /** Batch başına birim (küçük → agent bol tur/wall-clock; parse güvenilir; resume granülerliği ince). */
@@ -139,7 +163,15 @@ async function runEdd(config: MyclConfig, state: State): Promise<void> {
     else await appendEddUnit(root, { unit: u.unit, status: "unanalyzable", reason: u.reason, ts: Date.now() });
   }
 
-  const cur = await readEddProgress(root);
+  const cur0 = await readEddProgress(root);
+  // HAYALET PENDING uzlaşması (YZLLM 2026-07-19): analiz edilmeden silinen/analiz-dışı olmuş pending birimleri
+  // GÖRÜNÜR unanalyzable'a çevir → yoksa EDD sonsuza "N kaldı" der + her açılış boşa re-run eder (canlı cave bug).
+  const ghosts = ghostPendingUnits(cur0, units);
+  for (const g of ghosts) await patchEddUnit(root, g.unit, { status: "unanalyzable", reason: g.reason });
+  if (ghosts.length > 0) {
+    log.info("edd/engine", "hayalet pending → unanalyzable (silinmiş/analiz-dışı olmuş)", { count: ghosts.length });
+  }
+  const cur = ghosts.length > 0 ? await readEddProgress(root) : cur0;
   const pendingUnits = units.filter((u) => u.analyzable && cur.get(u.unit)?.status === "pending");
   const initial = summarizeProgress(cur);
   const totalBatches = Math.ceil(pendingUnits.length / BATCH_SIZE);
