@@ -45,8 +45,6 @@ export interface OpenStatusInput {
   eddDone: number;
   eddTotal: number;
   eddPending: number;
-  /** Hiçbir şey sorma modu açık mı (yönlendirme cümlesi ton'u yumuşar). */
-  neverAsk: boolean;
 }
 
 export interface OpenStatus {

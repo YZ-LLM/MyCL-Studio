@@ -1895,11 +1895,19 @@ async function emitConfigStatus(): Promise<boolean> {
   }
 }
 
+// Resume/redirect dalları KENDİ durum mesajını (state+action) bastığında true → jenerik özet BASTIRILIR
+// (MAHKEME CRITICAL 2026-07-19: fire-and-forget resume state'i güncellemeden jenerik özet BAYAT okuyup
+// ÇELİŞKİLİ mesaj basıyordu — "niyet bekliyorum" + "devam ediyorum"). Her açılış başında sıfırlanır.
+let _openStatusHandledInline = false;
+
 async function handleOpenProject(path: string, integrate = false): Promise<void> {
   await handleOpenProjectInner(path, integrate);
   // "HER ZAMAN durum özeti" (YZLLM 2026-07-19): tüm açılış/resume/kuyruk dallarından SONRA, kullanıcı
-  // ne durumda olduğunu + ne yapması gerektiğini TEK bakışta görsün. Deterministik, fail-soft.
-  await emitOpenStatusSummary().catch((e) => log.warn("orchestrator", "açılış durum özeti başarısız", { error: String(e) }));
+  // ne durumda olduğunu + ne yapması gerektiğini TEK bakışta görsün. Deterministik, fail-soft. Resume dalı
+  // kendi durum+action mesajını bastıysa (inline) jenerik özet ATLA (çelişki/çift-durum önleme).
+  if (!_openStatusHandledInline) {
+    await emitOpenStatusSummary().catch((e) => log.warn("orchestrator", "açılış durum özeti başarısız", { error: String(e) }));
+  }
 }
 
 /**
@@ -1932,13 +1940,13 @@ async function emitOpenStatusSummary(): Promise<void> {
     runningTaskText: running?.text ?? null,
     pendingTaskCount: pendingCount,
     eddDone, eddTotal, eddPending,
-    neverAsk: isNeverAsk(),
   });
   emitChatMessage("assistant", formatOpenStatus(status));
 }
 
 async function handleOpenProjectInner(path: string, integrate = false): Promise<void> {
   log.info("orchestrator", "open_project", { path, integrate });
+  _openStatusHandledInline = false; // her açılışta taze; inline resume dalları set eder
   // Yeni proje → güvenlik yakınsama-kırıcı durumunu sıfırla (eski projenin sayacı taşınmasın).
   _securityFindingsPrev = null;
   _securityNoProgress = 0;
@@ -1978,6 +1986,7 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
     emitError("Bir faz çalışıyor — önce mevcut projeyi kapatın", {
       phase: runtime.state?.current_phase,
     });
+    _openStatusHandledInline = true; // emitError durum+action'ı söyledi → jenerik özet basma
     return;
   }
   try {
@@ -2141,8 +2150,9 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
     if (interrupted && !hasPendingQueueWork) {
       emitChatMessage(
         "system",
-        `Niyet toplama yarıda kalmıştı — devam ediyorum (niyet: "${interrupted.intentText.slice(0, 100)}").\n\nBirkaç soru tekrar gelebilir; cevaplarsın, Faz 2'ye geçilir.`,
+        `📍 **Durum:** Niyet toplama yarıda kalmıştı — kaldığım yerden devam ediyorum (niyet: "${interrupted.intentText.slice(0, 100)}").\n**Yapman gereken:** Gelen soruları yanıtla; farklı bir hedef istersen yazman yeterli.`,
       );
+      _openStatusHandledInline = true;
       void restartPhase1WithIntent(interrupted.intentText).catch((e) => {
         log.error("orchestrator", "boot-resume restartPhase1WithIntent failed", e);
         emitError("Önceki oturum sürdürülemedi", String(e));
@@ -2176,8 +2186,9 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
     ) {
       emitChatMessage(
         "system",
-        "Faz 6 (UI İncelemesi) entegre modunda atlanıyor — kaldığım yerden (Faz 7) devam ediyorum.",
+        "📍 **Durum:** Faz 6 (UI İncelemesi) entegre modunda atlanıyor — Faz 7'den otomatik devam ediyorum.\n**Yapman gereken:** Bir şey yapmana gerek yok; yeni bir hedef için yazman yeterli.",
       );
+      _openStatusHandledInline = true;
       void advanceToNextPhase(6 as PhaseId).catch((e) => {
         log.error("orchestrator", "boot integrate Faz6 unpark failed", e);
         emitError("Önceki oturum sürdürülemedi", String(e));
@@ -2202,6 +2213,7 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
       // YZLLM 2026-07-03: resume gövdesi resumeInterruptedPhase'e ÇIKARILDI (kuyruk-güdümlü orphan resume ile
       // PAYLAŞIMLI). Bu (unbound) çağrı byte-eşdeğer: spec-yok→Faz 4 fallback + ensurePendingIterationDir +
       // advanceToNextPhase(phaseId-1) + aynı "📍 Faz N yarıda kalmıştı" mesajı helper içinde.
+      _openStatusHandledInline = true; // resumeInterruptedPhase kendi durum mesajını basar → jenerik özet atla
       void resumeInterruptedPhase(interrupted29.phaseId).catch((e) => {
         log.error("orchestrator", "boot-resume advanceToNextPhase failed", e);
         emitError("Önceki oturum sürdürülemedi", String(e));

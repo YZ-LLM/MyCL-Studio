@@ -14,7 +14,6 @@ const base: OpenStatusInput = {
   eddDone: 0,
   eddTotal: 0,
   eddPending: 0,
-  neverAsk: false,
 };
 
 describe("composeOpenStatus — öncelik sırası", () => {
