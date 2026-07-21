@@ -27,7 +27,7 @@ import { modelForTier } from "./model-catalog.js";
 import { decideIntervention, type InterventionSignals, type InterventionDecision } from "./inspector-trigger.js";
 import { recordLesson, recallLessons, retractLesson, type Lesson } from "./experience-layer.js";
 import { distillAndStoreGlobalLesson } from "./lesson-distill.js";
-import { emitChatMessage } from "./ipc.js";
+import { emitChatMessage, emitPhaseRunning, emitPhaseIdle } from "./ipc.js";
 import { backendForRole, claudeKeyForRole, type MyclConfig } from "./config.js";
 import { DECISION_PRINCIPLES } from "./agent-language.js";
 import { log } from "./logger.js";
@@ -479,7 +479,41 @@ export async function runInspectorCheckpoint(
  * i18n-etiketi / sezgisel-yanlış — Faz 8 i18n & Faz 11 ts-prune stall sınıfı). isGateFix yumuşak
  * sinyali + severity (güvenlik→high) müdahale-seçimini sürer. ŞİMDİLİK gözlem (caller akışı değiştirmez).
  */
-export async function inspectGateFinding(
+/**
+ * GÖRÜNÜRLÜK (YZLLM 2026-07-21, canlı cave "3 dakika sürdü niye"): mahkeme (müfettiş LLM'i, kod okuyup Bash
+ * repro yaparak 1-3 dk bulgu doğrular) BANNER'SIZ koşuyordu → UI donmuş görünüyordu. Her mahkeme çağrısını
+ * sticky banner ile sar (ActivityBar + chat "⚖️ Mahkeme…" gösterir). ASLA throw'u yutmaz (finally yalnız idle).
+ */
+async function withMahkemeBanner<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  emitPhaseRunning(label);
+  try {
+    return await fn();
+  } finally {
+    emitPhaseIdle();
+  }
+}
+
+/** Gate bulgu mahkemesi — sticky banner ile (görünürlük); çekirdek inspectGateFindingInner. */
+export function inspectGateFinding(
+  config: MyclConfig,
+  opts: Parameters<typeof inspectGateFindingInner>[1],
+): Promise<CheckpointResult> {
+  return withMahkemeBanner(`⚖️ Mahkeme: ${opts.gateLabel} bulgusu bağımsız doğrulanıyor…`, () =>
+    inspectGateFindingInner(config, opts),
+  );
+}
+
+/** Netleştirme mahkemesi — sticky banner ile (görünürlük); çekirdek inspectClarifyInner. */
+export function inspectClarify(
+  config: MyclConfig,
+  opts: Parameters<typeof inspectClarifyInner>[1],
+): Promise<ClarifyRuling> {
+  return withMahkemeBanner("⚖️ Mahkeme: soru gerçekten gerekli mi, doğrulanıyor…", () =>
+    inspectClarifyInner(config, opts),
+  );
+}
+
+async function inspectGateFindingInner(
   config: MyclConfig,
   opts: {
     projectRoot: string;
@@ -599,7 +633,7 @@ export function parseClarifyVerdict(text: string, validOptions: string[]): Clari
  * ilkelerden çıkarılabilir → ilerle). Tek-geçiş (savunulacak işlenmiş karar yok). Fail-closed: müfettiş
  * üretemez/parse edilemez/geçersiz cevap → insana sor. Kör auto-pick DEĞİL → sonsuz-clarify döngüsü yok.
  */
-export async function inspectClarify(
+async function inspectClarifyInner(
   config: MyclConfig,
   opts: { projectRoot: string; intent: string; trajectory: string; question: string; options: string[] },
 ): Promise<ClarifyRuling> {
