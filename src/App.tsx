@@ -1599,7 +1599,9 @@ function App() {
         phase={mainState.phase}
         // YZLLM 2026-06-12: model GERÇEKTEN çalışırken (runningBanner aktif) header "çalışıyor" göstersin —
         // bayat "yanıt bekleniyor" (askq cevaplandıktan sonra kalan) yanıltmasın. runningBanner canlı gerçek.
-        status={mainState.runningBanner ? "running" : mainState.phaseStatus}
+        // MAHKEME MEDIUM (2026-07-21): açık askq VARKEN "cevap bekliyorum" ÖNCELİKLİ olmalı — yoksa header
+        // "çalışıyor" derken ActivityBar "senden cevap bekliyorum" der (çelişki). İki gösterge aynı hükmü versin.
+        status={mainState.pendingAskq ? "waiting" : mainState.runningBanner ? "running" : mainState.phaseStatus}
         onPhaseIndicatorClick={() => setErrorDrawerOpen((o) => !o)}
         errorCount={errorEntries.length}
         pipelineVerdict={mainState.pipelineVerdict?.verdict ?? null}

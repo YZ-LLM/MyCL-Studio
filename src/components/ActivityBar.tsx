@@ -42,6 +42,12 @@ export function composeActivity(i: ActivityInput): Activity {
     const text = labelHasPhase ? `${i.runningLabel}${d}` : `${p} — ${i.runningLabel}${d}`;
     return { icon: "⚙️", tone: "running", text };
   }
+  // MAHKEME MEDIUM (2026-07-21): mid-pipeline faz (Faz 0 + 2..16) phaseStatus="running" ama banner henüz
+  // gelmemişse (askq cevabı işleniyor / banner'lar arası kısa pencere) YANLIŞ "boşta" DEME → nötr "çalışıyor".
+  // Faz 1 istisna: orası niyet bekleme fazı; banner yoksa gerçekten kullanıcıyı bekliyordur → "boşta" doğru.
+  if (i.phaseStatus === "running" && i.phase !== 1) {
+    return { icon: "⚙️", tone: "running", text: `${p} — çalışıyor…` };
+  }
   return { icon: "💤", tone: "idle", text: `${p} — boşta, yeni iş bekliyorum` };
 }
 
