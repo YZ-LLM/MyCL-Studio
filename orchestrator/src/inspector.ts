@@ -498,7 +498,9 @@ export function inspectGateFinding(
   config: MyclConfig,
   opts: Parameters<typeof inspectGateFindingInner>[1],
 ): Promise<CheckpointResult> {
-  return withMahkemeBanner(`⚖️ Mahkeme: ${opts.gateLabel} bulgusu bağımsız doğrulanıyor…`, () =>
+  // MAHKEME LOW (2026-07-21): label gateLabel ("Faz N: …") İÇERMEZ — ActivityBar zaten faz-prefiksi ekliyor,
+  // yoksa "Faz 13 · Güvenlik — ⚖️ Mahkeme: Faz 13: Güvenlik…" çift-Faz olurdu. Faz bağlamı prefiksten gelir.
+  return withMahkemeBanner("⚖️ Mahkeme: bulgu bağımsız doğrulanıyor (gerçek mi false-positive mi)…", () =>
     inspectGateFindingInner(config, opts),
   );
 }
