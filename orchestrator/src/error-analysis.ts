@@ -25,7 +25,7 @@ import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { resolveLlmClient, isApiAccountError } from "./claude-api.js";
 import { backendForRole, orchestratorModelId, type MyclConfig } from "./config.js";
 import { buildProjectFacts } from "./project-facts.js";
-import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream, withClaudeStreamBanner } from "./ipc.js";
+import { type AskqOption, emitAskq, emitChatMessage, emitClaudeStream, emitPhaseRunning, emitPhaseIdle, withClaudeStreamBanner } from "./ipc.js";
 import { describeTouchedForFiles } from "./foreign-write-consent.js";
 import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES, USER_FACING_CLARITY_RULE } from "./agent-language.js";
 import { log } from "./logger.js";
@@ -681,7 +681,13 @@ export async function analyzeAndAskError(
     // Proje-gerçeklerini ajana ver (YZLLM: "proje bilgisini cömertçe ver → daha iyi yanıt"; ajan JS/TS bilsin).
     const facts = await buildProjectFacts(state.project_root).catch(() => null);
     const factsSummary = facts?.summary;
-    emitChatMessage("system", "🔎 Hata analiz ediliyor (orkestratör)…");
+    // CANLI BUG (YZLLM 2026-07-21 ekran: şerit "boşta" derken orkestratör analiz ediyordu): eskiden tek-atış
+    // emitChatMessage'dı → API yolunda (Anthropic SDK, withClaudeStreamBanner YOK) hiç çalışan-banner yayılmıyor
+    // → ActivityBar runningLabel=null görüp 1-3 dk boyunca "boşta" sanıyordu. Kurulu desen (emitPhaseRunning,
+    // örn. "🔎 Soru cevaplanıyor…") ile STICKY banner: hem şerit "çalışıyor" gösterir hem heartbeat "Ns sürüyor".
+    // Alttaki finally emitPhaseIdle GARANTİ kapatır (banner sızıntısı yok). CLI yolunun withClaudeStreamBanner'ı
+    // korunur (App generic-guard: bu spesifik banner'ı ezmez/silmez).
+    emitPhaseRunning("🔎 Hata analiz ediliyor (orkestratör)…");
     let analysisText: string;
     if (useCli) {
       // Banner sızıntısı fix (2026-07-13): init→stop tek primitifte → analiz bittiğinde/patladığında banner temizlenir.
@@ -904,5 +910,9 @@ export async function analyzeAndAskError(
       detail: String(err).slice(0, 200),
     }).catch(() => {});
     return null;
+  } finally {
+    // Analiz bitti (başarı/erken-return/hata fark etmez) → çalışan-banner GARANTİ kapanır (sızıntı yok, KATI #6).
+    // Sonuç askq açarsa ActivityBar zaten "senden cevap bekliyorum"a geçer; auto-resolve'da caller fix banner'ı açar.
+    emitPhaseIdle();
   }
 }
