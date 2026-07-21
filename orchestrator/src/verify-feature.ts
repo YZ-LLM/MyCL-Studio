@@ -111,6 +111,19 @@ export function containsMocking(content: string): boolean {
   );
 }
 
+/**
+ * SAF (MAHKEME BULGU 2 — false-green guard): üretilen E2E gerçekten bir şey doğruluyor mu? Playwright'ta
+ * exit-code 0, `test.skip`/`test.fixme` gövdesi ya da hiç `expect()` olmayan boş test için de 0'dır → "pass"
+ * SAHTE olur. Mekanik asgari çıta: en az bir `expect(` VAR + `test.skip`/`test.fixme`/`describe.skip` YOK.
+ * (LLM prompt'u zaten güçlü assertion istiyor; bu onun mekanik yedeği — correct-by-construction, KATI #6.)
+ */
+export function hasSubstantiveTest(content: string): boolean {
+  if (/\b(?:test|describe|it)\.(?:skip|fixme)\s*\(/.test(content)) return false; // atlanmış test = doğrulama değil
+  // expect( VEYA expect.soft( / expect.poll( (Playwright soft-assertion & polling) — hepsi gerçek assertion.
+  if (!/\bexpect(?:\.\w+)?\s*\(/.test(content)) return false; // hiç assertion yok = vacuous
+  return true;
+}
+
 /** Üretilen spec'ten `test('...')` / `test("...")` başlıklarını çıkar. */
 export function extractTestTitles(content: string): string[] {
   const titles: string[] = [];
@@ -464,6 +477,214 @@ export async function verifyFeatureHandler(
     };
   }
   return { statePatch: dev.statePatch };
+}
+
+// ───────── GERÇEK-APP DOĞRULAMA KAPISI (YZLLM 2026-07-21) ─────────
+// verifyFeatureHandler'ın ikizi: "özellik yarat + kalıcı-durum doğrula" yerine "BİLDİRİLEN BUG çözüldü mü?"
+// yani orijinal semptomu gerçek çalışan uygulamada yeniden üretmeyi dener; DOĞRU davranış artık geçerliyse
+// yeşil, bug hâlâ üretiliyorsa KIRMIZI (sahte-yeşil yasak). Aynı private altyapıyı (dev-server/Playwright/
+// codegen/mock-guard/runGeneratedTest) reuse eder. Sonuç ayrımlı: pass | fail | cannot_run (dürüst "kanıtlayamadım").
+
+export interface RealAppVerifyMarker {
+  bug_intent_tr: string;
+  root_cause_tr?: string;
+  fix_label?: string;
+}
+
+export type RealAppGateOutcome =
+  | { outcome: "pass" }
+  | { outcome: "fail"; failSnippet: string }
+  | {
+      outcome: "cannot_run";
+      // "error" = doğrulama işi beklenmedik istisna verdi (caller try/catch'i sentezler) → done ENGELLENİR, sessiz done değil.
+      reason: "no_dev_server" | "no_playwright" | "codegen_failed" | "not_found" | "error";
+    };
+
+/** SAF: bug-repro doğrulama sistem prompt'u — buildSystemPrompt'un MOCK-YASAK + kalıcı-durum ilkelerini
+ *  korur ama "özellik yarat" yerine "bildirilen bug çözüldü mü" hedefler. Test edilebilir (string). */
+export function buildBugGateSystemPrompt(
+  bugEn: string,
+  slug: string,
+  snapshot: string,
+  authConfigured: boolean,
+  context: { rootCause?: string; fixLabel?: string },
+): string {
+  const ctx = [
+    context.rootCause ? `Diagnosed root cause: ${context.rootCause}` : "",
+    context.fixLabel ? `Applied fix: ${context.fixLabel}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return `You are MyCL Studio's REAL-APP bug-verification agent. A bug was reported and a fix was just applied. Write ONE Playwright E2E test that reproduces the reported scenario against the RUNNING app and proves the bug is GONE (correct behavior now holds), then stop.
+
+REPORTED BUG (English): ${bugEn}
+${ctx ? `\n${ctx}\n` : ""}
+HARD RULES:
+- Write the test to EXACTLY this path: tests/${slug}.spec.ts
+- The file's FIRST line must be exactly: // MyCL generated E2E
+- Use Read / Grep / Glob to LOCATE the real page, route, and component involved in this bug. Ground every selector/URL in code you actually read — do NOT guess.
+- **NO MOCKING — ABSOLUTELY FORBIDDEN.** No \`page.route\`, \`route.fulfill\`, \`route.abort\`, \`routeFromHAR\`, MSW/\`setupServer\`, \`vi.mock\`/\`jest.mock\`. Hit the REAL running backend. Mocking proves nothing about whether the bug is fixed.
+- **REPRODUCE THE EXACT REPORTED SCENARIO**, then assert the CORRECT behavior. E.g. if the report is "the /profile search returns empty for a valid same-day date range + name", the test must: navigate to /profile, submit that exact filter combination against real data, and ASSERT the result set is NOT empty (the matching rows appear). Observe the real DOM/result, not a toast.
+- **If the bug is STILL present, leave the test RED — do NOT weaken assertions to make it pass. A green test that doesn't actually reproduce the reported scenario is a LIE.**
+- baseURL is set in playwright.config.ts — use relative navigation (page.goto('/...')).
+${
+  authConfigured
+    ? `- This app requires login. Read .mycl/auth.json and replicate the login flow from tests/smoke.spec.ts BEFORE reproducing the bug.`
+    : `- No login credentials configured (.mycl/auth.json placeholder/missing). If the bug is behind login, the test may stop at the login wall — still write the most meaningful reproduction you can.`
+}
+
+IF YOU CANNOT REPRODUCE OR CANNOT REALLY TEST:
+- If you genuinely cannot locate the involved page/route/data seeding, OR cannot verify against the REAL backend without mocking, DO NOT fabricate a test and DO NOT write the file. End your turn with a short plain-text explanation. The absence of the file signals "could not verify" — far better than a fake pass.
+
+RATIONALIZATIONS → REBUTTALS:
+- "I'll mock the API for reliability." → A mocked API tests your mock, not the fix. FORBIDDEN.
+- "The page loaded, so it's probably fine." → Reproduce the EXACT scenario and assert the correct data/behavior.
+- "No seed data for this input, I'll assert empty is fine." → Empty may BE the bug. Seed/choose data that SHOULD match, then assert non-empty. If you cannot get matching data, explain instead of asserting the buggy state as correct.
+- "I can't find the selector, I'll guess." → Ground it in code or explain.
+
+APP STRUCTURE (auto-generated snapshot):
+${snapshot}
+
+Work: explore with Read/Grep, then Write tests/${slug}.spec.ts (or explain why you can't). Use Bash only to inspect; do NOT run the test yourself — MyCL runs it after you finish.`;
+}
+
+/**
+ * IMPURE: fix iterasyonu sonunda ORİJİNAL buga karşı gerçek-app doğrulaması. verifyFeatureHandler
+ * altyapısını reuse eder. pass → bug gerçekten gitti; fail → bug sürüyor (caller re-attempt); cannot_run →
+ * dürüst "kanıtlayamadım" (Playwright/dev-server yok / codegen üretmedi) → caller done DAMGALAMAZ (KATI #4).
+ */
+export async function runRealAppBugGate(
+  marker: RealAppVerifyMarker,
+  deps: { state: State; config: MyclConfig },
+): Promise<{ result: RealAppGateOutcome; statePatch?: Partial<State> }> {
+  const { state, config } = deps;
+  emitChatMessage("system", "🔬 Gerçek uygulama doğrulaması (E2E) — bildirilen bug gerçekten çözüldü mü, çalışan app'te kontrol ediyorum… (~1-3 dk)");
+
+  // TR bug → EN (main ajan İngilizce çalışır).
+  let bugEn: string;
+  try {
+    const tr = await translate(config, marker.bug_intent_tr, "tr-to-en");
+    bugEn = tr.text.trim() || marker.bug_intent_tr;
+  } catch (err) {
+    log.warn("verify-feature", "bug-gate translate failed; using TR", err);
+    bugEn = marker.bug_intent_tr;
+  }
+
+  // Dev server
+  const dev = await ensureDevServerAlive(state);
+  if (!dev.alive) {
+    return { result: { outcome: "cannot_run", reason: "no_dev_server" } };
+  }
+  if (dev.statePatch?.dev_server_pid && state.dev_server_pid !== dev.statePatch.dev_server_pid) {
+    await saveState({ ...state, ...dev.statePatch, updated_at: Date.now() });
+  }
+
+  // Playwright + scaffold + auth
+  if (state.stack?.startsWith("node-")) {
+    const pw = await ensurePlaywrightInstalled(state.project_root, state.stack);
+    if (!pw.ok) {
+      return { result: { outcome: "cannot_run", reason: "no_playwright" }, statePatch: dev.statePatch };
+    }
+  }
+  let defaultPort = 5173;
+  let devCommand: string | null = null;
+  try {
+    const profile = state.stack ? await loadProfile(state.stack) : null;
+    if (profile?.default_port) defaultPort = profile.default_port;
+    devCommand = profile?.commands?.dev ?? null;
+  } catch {
+    /* default */
+  }
+  await ensurePlaywrightScaffold(state.project_root, defaultPort, devCommand);
+  await ensureAuthTemplate(state.project_root);
+  const pre = await assessPhase16Verification(state.project_root);
+  const authConfigured = pre.authStatus === "configured";
+
+  const snapshot = await buildCodebaseSnapshot(state.project_root);
+  const slug = slugifyFeature(`bug ${bugEn}`);
+  const specRel = join("tests", `${slug}.spec.ts`);
+  const specAbs = join(state.project_root, specRel);
+  const toolCtx: ToolContext = { project_root: state.project_root };
+  const modelId = config.selected_models.main;
+  const apiKey = config.api_keys.main;
+  const sysPrompt = buildBugGateSystemPrompt(bugEn, slug, snapshot, authConfigured, {
+    rootCause: marker.root_cause_tr,
+    fixLabel: marker.fix_label,
+  });
+
+  // Test üretimi
+  await clearHistory(state.project_root, VERIFY_PHASE_ID);
+  const codegenOutcome = await runCodegen(
+    sysPrompt,
+    `Write the Playwright E2E test that reproduces this bug scenario and proves it is fixed: ${bugEn}. Target file: ${specRel}.`,
+    { state, config, modelId, apiKey, toolCtx },
+  );
+  if (codegenOutcome.kind === "failed" || codegenOutcome.kind === "aborted") {
+    return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+  }
+  if (!(await fileExists(specAbs))) {
+    // Ajan senaryoyu bulamadı/üretemedi → dürüst "kanıtlayamadım" (sahte-yeşil DEĞİL).
+    return { result: { outcome: "cannot_run", reason: "not_found" }, statePatch: dev.statePatch };
+  }
+
+  // Mock-guard (2 deneme) — mock'lu test gerçek doğrulama değil.
+  let specContent = await safeRead(specAbs);
+  if (containsMocking(specContent)) {
+    await clearHistory(state.project_root, VERIFY_PHASE_ID);
+    await runCodegen(
+      sysPrompt +
+        `\n\nYOUR PREVIOUS ATTEMPT USED MOCKING — FORBIDDEN. Rewrite ${specRel} with NO mocking: reproduce the scenario against the real backend and assert the corrected behavior.`,
+      `Rewrite ${specRel} — NO mocking, real backend reproduction of: ${bugEn}.`,
+      { state, config, modelId, apiKey, toolCtx },
+    );
+    specContent = await safeRead(specAbs);
+    if (containsMocking(specContent)) {
+      return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+    }
+  }
+
+  // Substance-guard (MAHKEME BULGU 2, tek deneme): boş/atlanmış test yeşil geçse de HİÇBİR ŞEY doğrulamaz →
+  // sahte-pass. Assertion içeren gerçek bir test iste; hâlâ vacuous ise → cannot_run (doğrulayamadım, done değil).
+  if (!containsMocking(specContent) && !hasSubstantiveTest(specContent)) {
+    await clearHistory(state.project_root, VERIFY_PHASE_ID);
+    await runCodegen(
+      sysPrompt +
+        `\n\nYOUR PREVIOUS ATTEMPT WAS VACUOUS — it had no real assertion (missing expect(...) or used test.skip/test.fixme). A test that asserts nothing proves nothing. Rewrite ${specRel} so it reproduces the reported scenario and asserts the CORRECT behavior with at least one concrete expect(...). No skipped tests.`,
+      `Rewrite ${specRel} with a real assertion (expect) reproducing: ${bugEn}.`,
+      { state, config, modelId, apiKey, toolCtx },
+    );
+    specContent = await safeRead(specAbs);
+    if (containsMocking(specContent) || !hasSubstantiveTest(specContent)) {
+      return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+    }
+  }
+
+  // Çalıştır (+ tek tamir denemesi: selector/assertion gerçek uygulamaya göre)
+  let run = await runGeneratedTest(state.project_root, specRel);
+  if (!run.ok) {
+    await clearHistory(state.project_root, VERIFY_PHASE_ID);
+    await runCodegen(
+      sysPrompt +
+        `\n\nPREVIOUS RUN OUTPUT:\n<<<\n${run.output.slice(-1500)}\n>>>\nFix ONLY selectors/assertions/navigation that are wrong about the app — do NOT weaken the correctness assertion. If the BUG itself is still present (not a test error), keep the test correct so it reports the real failure.`,
+      `Fix the test at ${specRel} (selectors only, keep bug-assertion intact) for: ${bugEn}.`,
+      { state, config, modelId, apiKey, toolCtx },
+    );
+    run = await runGeneratedTest(state.project_root, specRel);
+  }
+
+  if (run.ok) {
+    // MAHKEME BULGU 2: selector-fix tamiri assertion'ı zayıflatmış / testi atlamış olabilir → yeşil "pass" YALAN.
+    // Final spec'i tazeleyip mock/substance'ı SON KEZ doğrula; kırıksa pass DEĞİL cannot_run (dürüst kanıtlayamadım).
+    const finalSpec = await safeRead(specAbs);
+    if (containsMocking(finalSpec) || !hasSubstantiveTest(finalSpec)) {
+      return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+    }
+    return { result: { outcome: "pass" }, statePatch: dev.statePatch };
+  }
+  return {
+    result: { outcome: "fail", failSnippet: extractFailSnippet(run.output) },
+    statePatch: dev.statePatch,
+  };
 }
 
 interface CodegenDeps {

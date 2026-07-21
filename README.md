@@ -173,6 +173,16 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   sonuca toplanır: PASS / PARTIAL / FAIL. Araç yokluğundan atlanan boyutlar
   "doğrulanmadı" diye işaretlenir; patlayan bir kapı sessizce "tamamlandı"
   sayılmaz (yan menüde ⚠️, başlıkta kısmî/başarısız çip).
+- **Gerçek uygulama doğrulaması (bug fix'leri için)** — bir hata düzeltmesi
+  "çözüldü" sayılmadan önce, gerçek çalışan uygulamada bildirilen sorunun
+  GERÇEKTEN gittiği Playwright E2E ile doğrulanır (birim testi yeşili ≠ çalışan
+  uygulama yeşili — düzeltme yalnız birim/repro testleriyle geçtiği hâlde gerçek
+  arayüzde sorun sürebiliyordu). Sorun hâlâ görülüyorsa iş "Tamamlandı"
+  damgalanmaz, kuyruğa geri döner (bir sonraki denemede farklı yaklaşım);
+  Playwright yoksa / doğrulama koşulamazsa sessiz "tamamlandı" değil, görünür
+  "yalnız birim doğrulandı, çalışan uygulamada kanıtlanmadı" (PARTIAL) işaretlenir
+  ("Tekrar Dene" ile yeniden başlatılabilir). Tarayıcıdan sürülebilen (web/masaüstü)
+  düzeltmelerde, çalışma-zamanı ya da arayüz dosyası değiştiğinde çalışır.
 - **Düşman-gözü inceleme** (Faz 9) — bulan ve çürüten ajanlar birlikte çalışır;
   yanlış-pozitif bulgular elenir, gerçek riskler otomatik düzeltmeye yönlenir.
 - **Mahkeme** (müfettiş ↔ orkestratör) — opsiyonel bağımsız denetim katmanı: bir

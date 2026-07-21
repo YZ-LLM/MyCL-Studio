@@ -229,7 +229,8 @@ import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { runParallelModules } from "./module-parallel/dispatch.js";
 import { makeScopedCodegenWorker } from "./module-parallel/worker.js";
 import { candidatesToModules, judgeBatch, MAX_BATCH } from "./task-batch.js";
-import { isGitRepo, isWorkingTreeClean } from "./git.js";
+import { isGitRepo, isWorkingTreeClean, getChangedFiles } from "./git.js";
+import { realAppGateDecision, buildRealAppVerifyMarker } from "./realapp-gate-signal.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
@@ -245,7 +246,7 @@ import {
   ensurePlaywrightInstalled,
   ensurePlaywrightScaffold,
 } from "./playwright-setup.js";
-import { verifyFeatureHandler } from "./verify-feature.js";
+import { verifyFeatureHandler, runRealAppBugGate, type RealAppGateOutcome } from "./verify-feature.js";
 import {
   blindspotLensDecision,
   decisionIsConsequential,
@@ -755,8 +756,20 @@ async function emitVerificationSummary(state: State): Promise<void> {
       else skipped.push(label);
     } else if (done) passed.push(dim);
   }
+  // GERÇEK-APP DOĞRULAMA (mekanik faz değil → ayrı event'ler; YZLLM 2026-07-21): fix'in bildirilen bug'ı
+  // gerçek çalışan uygulamada çözdüğü kanıtlandı mı? pass=doğrulandı, skipped=araç yok (sarı), fail=aşağıda ❌.
+  const realappPass = thisIter.some((e) => e.event === "realapp-verify-pass");
+  const realappSkip = thisIter.find((e) => e.event === "realapp-verify-skipped");
+  const realappFail = thisIter.some((e) => e.event === "realapp-verify-fail");
+  if (realappPass) passed.push("Gerçek uygulama (bildirilen sorun)");
+  else if (realappSkip) skipped.push(`Gerçek uygulama (${realappSkip.detail ? String(realappSkip.detail) : "koşulamadı"})`);
   const lines = [`🔎 **Doğrulama özeti**`];
   if (passed.length) lines.push(`✅ Doğrulandı: ${passed.join(", ")}`);
+  if (realappFail) {
+    lines.push(
+      `❌ **Gerçek uygulama doğrulaması BAŞARISIZ** — bildirilen sorun çalışan uygulamada hâlâ görülüyor; bu koşu YEŞİL DEĞİL (iş kuyruğa geri kondu).`,
+    );
+  }
   if (notApplicable.length) {
     // Nötr ton — uyarı DEĞİL. Stack bu boyuta sahip değil (ör. JS projesinde ts-prune) → "geçti sayılmaz" korkutması yanlış.
     lines.push(`➖ Uygulanamaz: ${notApplicable.join(", ")} — bu stack/proje türü için geçerli değil (eksiklik değil).`);
@@ -2167,7 +2180,8 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
       log.info("orchestrator", "boot: headless ui-tweak discarded (headless:false hard rule)", {
         tweak: runtime.state.pending_ui_tweak.slice(0, 80),
       });
-      runtime.state = { ...runtime.state, pending_ui_tweak: undefined, updated_at: Date.now() };
+      // Tweak atılıyor → onunla eşleşen gerçek-app doğrulama marker'ı da atılmalı (orphan marker sonraki koşuda patlamasın).
+      runtime.state = { ...runtime.state, pending_ui_tweak: undefined, pending_realapp_verify: undefined, updated_at: Date.now() };
       await saveState(runtime.state);
       emitChatMessage(
         "system",
@@ -4125,6 +4139,7 @@ async function executeDispatchedIntent(
         pending_ui_tweak: undefined,
         pending_ui_review: undefined,
         pending_backend_fix: undefined,
+        pending_realapp_verify: undefined,
         updated_at: Date.now(),
       };
       await saveState(runtime.state);
@@ -4286,6 +4301,8 @@ async function runDevelopIteration(
       pending_backend_fix: undefined,
       pending_migrations: undefined,
       pending_diagnostic: undefined,
+      // Gerçek-app doğrulama marker'ı iterasyon-spesifik — bayat marker yeni iterasyona sızmasın.
+      pending_realapp_verify: undefined,
       // v15.6: needed_phases scope iterasyon-spesifiktir — yeni iterasyonda
       // Faz 3 LLM tekrar önerir, kullanıcı tekrar onaylar.
       needed_phases: undefined,
@@ -4782,6 +4799,175 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   }
   await patchTask(projectRoot, doneId, { status: "done", completed_at: Date.now() });
   await emitQueueChangedFor(projectRoot);
+}
+
+/**
+ * GERÇEK-APP DOĞRULAMA KAPISI (YZLLM 2026-07-21) — pipeline sonunda, emitVerificationSummary/
+ * onTaskMaybeComplete ÖNCESİNDE çağrılır. Canlı kök: cave /profile "boş sonuç" fix'i Faz 8'i
+ * "complete score=100" damgaladı ama bug SÜRDÜ — çünkü yalnız BİRİM-suite yeşili doğrulandı, gerçek
+ * çalışan uygulama hiç görülmedi. Bu kapı bir fix iterasyonunun (ui-only/backend-only) bıraktığı
+ * pending_realapp_verify marker'ını tüketip bildirilen bug'ın gerçek app'te GERÇEKTEN çözüldüğünü
+ * Playwright E2E ile doğrular (birim-yeşil ≠ app-yeşil).
+ *   pass       → sessiz devam (onTaskMaybeComplete 'done' damgalar).
+ *   fail       → done ENGELLENİR + returnTaskToPending (attempts+1 → farklı yaklaşımla oto-retry). audit -fail → PARTIAL.
+ *   cannot_run → done ENGELLENİR + patchTask(pending, attempts:MAX) (oto-retry YOK; görünür bekler + "Tekrar Dene"). audit -skipped → PARTIAL.
+ * KATI #14: marker yoksa / farklı iterasyon / config yok / karar "koşma" → SIFIR davranış değişikliği.
+ *
+ * KAPSAM SINIRI (mahkeme BULGU 3): kapı YALNIZ pipeline-sonuna (advanceToNextPhase next===null) ulaşan fix
+ * iterasyonlarında koşar; marker da yalnız Faz 0 debug fix-routing'de (ui-only/backend-only) set edilir. Diğer
+ * fix yolları YAPISAL olarak buraya ULAŞMAZ ve KASITLI olarak farklı doğrulama modeline sahiptir: (a) Faz 6
+ * revise_ui → Faz 6'da kullanıcı incelemesine PARKEDER (insan gözüyle doğrular, KATI #9); (b) Faz 9 risk-fix
+ * (seri + paralel worktree) → kendi Phase5/7/8 controller döngüsünde çalışır, pipeline-sonu next===null'a girmez
+ * (tam pipeline'ın Faz 16 E2E'siyle kapsanır). Bu yolları buraya bağlamak ayrı bir iş (risk-fix'in "repro
+ * senaryosu" yok, risk açıklaması var) — bilinçli kapsam-dışı, regresyon değil (bu yollar öncesinde de gerçek-app
+ * doğrulanmıyordu).
+ */
+async function runRealAppGateAtPipelineEnd(stateIn: State): Promise<void> {
+  const marker = stateIn.pending_realapp_verify;
+  if (!marker) return; // marker yok → greenfield/non-fix/kozmetik → no-op (eski davranış korunur)
+
+  // Marker'ı HER durumda TÜKET (tek-uçuş) — sonraki iterasyonda tekrar tetiklenmesin.
+  let state: State = { ...stateIn, pending_realapp_verify: undefined };
+  runtime.state = state;
+  await saveState(state);
+
+  const curIter = state.iteration_count ?? 1;
+  if (marker.created_iter !== curIter) {
+    log.warn("realapp-gate", "bayat marker (farklı iterasyon) — atlandı", {
+      created_iter: marker.created_iter,
+      curIter,
+    });
+    return;
+  }
+  const cfg = runtime.config;
+  if (!cfg) {
+    log.warn("realapp-gate", "config yok → gerçek-app doğrulama atlandı (no-op)");
+    return;
+  }
+
+  // Sinyalleri topla → SAF karar (realapp-gate-signal.ts).
+  const playwrightEnabled = cfg.features.playwright_enabled !== false;
+  const hasUiSpecSignal = await shouldRunMechanical(state.project_root, "has_ui").catch(() => true);
+  let changedFiles: string[] | null = null;
+  if (marker.checkpoint_ref) {
+    try {
+      changedFiles = await getChangedFiles(state.project_root, marker.checkpoint_ref);
+    } catch {
+      changedFiles = null; // tespit edilemedi → realAppGateDecision fail-open (koş)
+    }
+  }
+  const decision = realAppGateDecision({
+    isFixIteration: true, // marker YALNIZ fix dallarında (ui-only/backend-only) set edilir
+    projectType: state.project_type,
+    hasUiSpecSignal,
+    changedFiles,
+    playwrightEnabled,
+  });
+  if (!decision.run) {
+    log.info("realapp-gate", `gerçek-app doğrulama koşmuyor: ${decision.reason}`);
+    return; // done normal (eski davranış)
+  }
+
+  // Doğrulamayı koş — verify-feature.ts altyapısı (dev-server + Playwright + codegen + mock-guard).
+  // MAHKEME HIGH (2 müfettiş): çağrı ÇIPLAK bırakılırsa (kardeş pipeline-end çağrılarının hepsi .catch'li) bir
+  // istisna pipeline'ı çökertir + marker zaten tüketilmiş olduğundan doğrulama KALICI kaybolur + işin gerçek
+  // nedeni jenerik "terminal hata"yla örtülür. İstisna → cannot_run("error"): done ENGELLENİR (sessiz done değil).
+  let result: RealAppGateOutcome;
+  let statePatch: Partial<State> | undefined;
+  try {
+    const r = await runRealAppBugGate(
+      {
+        bug_intent_tr: marker.bug_intent_tr,
+        root_cause_tr: marker.root_cause_tr,
+        fix_label: marker.fix_label,
+      },
+      { state, config: cfg },
+    );
+    result = r.result;
+    statePatch = r.statePatch;
+  } catch (err) {
+    log.error("realapp-gate", "gerçek-app doğrulama işi beklenmedik istisna verdi → cannot_run(error), done engellenir", err);
+    result = { outcome: "cannot_run", reason: "error" };
+    statePatch = undefined;
+  }
+  if (statePatch) {
+    state = { ...state, ...statePatch };
+    runtime.state = state;
+    await saveState(state);
+  }
+
+  const nowTs = Date.now();
+  if (result.outcome === "pass") {
+    await appendAuditModule(state.project_root, {
+      ts: nowTs,
+      phase: 16 as PhaseId,
+      event: "realapp-verify-pass",
+      caller: "mycl-orchestrator",
+      detail: marker.fix_label ?? marker.bug_intent_tr.slice(0, 80),
+    });
+    emitChatMessage(
+      "system",
+      "✅ Gerçek uygulama doğrulaması geçti — bildirilen sorun çalışan uygulamada gerçekten çözüldü.",
+    );
+    return; // done normal (onTaskMaybeComplete 'done' damgalar)
+  }
+
+  // fail / cannot_run → done'ı ENGELLE: currentTaskId + _drainTaskId null → onTaskMaybeComplete no-op.
+  const taskId = runtime.currentTaskId ?? _drainTaskId;
+  runtime.currentTaskId = null;
+  _drainTaskId = null;
+
+  if (result.outcome === "fail") {
+    await appendAuditModule(state.project_root, {
+      ts: nowTs,
+      phase: 16 as PhaseId,
+      event: "realapp-verify-fail",
+      caller: "mycl-orchestrator",
+      detail: result.failSnippet.slice(0, 200),
+    });
+    emitChatMessage(
+      "system",
+      "❌ Gerçek uygulama doğrulaması BAŞARISIZ — bildirilen sorun çalışan uygulamada HÂLÂ görülüyor. İş 'Tamamlandı' DAMGALANMADI; kuyruğa geri kondu, bir sonraki denemede farklı bir yaklaşım kullanılacak.",
+    );
+    if (taskId) {
+      await returnTaskToPending(
+        state.project_root,
+        taskId,
+        `gerçek-app doğrulaması: sorun sürüyor — ${result.failSnippet.slice(0, 120)}`,
+      );
+      await emitQueueChangedFor(state.project_root);
+    }
+    return;
+  }
+
+  // cannot_run → dürüst "kanıtlayamadım" (ortamsal engel) → done ENGELLE + oto-retry YOK (3× boşa koşturma).
+  const reasonTR: Record<typeof result.reason, string> = {
+    no_dev_server: "dev server ayağa kalkmadı",
+    no_playwright: "Playwright kurulamadı",
+    codegen_failed: "doğrulama testi üretilemedi",
+    not_found: "senaryo/sayfa bulunamadı",
+    error: "doğrulama beklenmedik hata verdi",
+  };
+  const why = reasonTR[result.reason];
+  await appendAuditModule(state.project_root, {
+    ts: nowTs,
+    phase: 16 as PhaseId,
+    event: "realapp-verify-skipped",
+    caller: "mycl-orchestrator",
+    detail: result.reason,
+  });
+  emitChatMessage(
+    "system",
+    `⚠️ Gerçek uygulama doğrulaması KOŞULAMADI (${why}) — fix yalnız birim testleriyle doğrulandı, çalışan uygulamada KANITLANMADI. İş 'Tamamlandı' damgalanmadı; kuyrukta görünür bekliyor (otomatik denenmez; "Tekrar Dene" ile yeniden başlatabilirsin).`,
+  );
+  if (taskId) {
+    await patchTask(state.project_root, taskId, {
+      status: "pending",
+      attempts: MAX_TASK_AUTO_RETRIES,
+      last_fail: `gerçek-app doğrulaması koşulamadı: ${why}`,
+    });
+    await emitQueueChangedFor(state.project_root);
+  }
 }
 
 /**
@@ -5314,6 +5500,42 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         runtime.state = state;
         await saveState(state);
       }
+      // GERÇEK-APP DOĞRULAMA KAPISI (YZLLM 2026-07-21): bir fix iterasyonu bug'ı çözdüğünü iddia ediyorsa
+      // birim-yeşil ≠ app-yeşil — gerçek çalışan uygulamada bildirilen bug'ın çözüldüğünü Playwright E2E ile
+      // doğrula. emitVerificationSummary ÖNCESİNDE: audit event'i (pass/fail/skipped) özet + hükme yansısın.
+      // Marker yoksa/karar "koşma" → no-op (KATI #14). Fail/cannot_run done'ı engeller (task kuyruğa döner).
+      try {
+        await runRealAppGateAtPipelineEnd(state);
+      } catch (err) {
+        // FAIL-CLOSED (mahkeme HIGH, 2 müfettiş): gate gövdesindeki çıplak await'ler (saveState/appendAudit/
+        // task-queue — AuditError/TaskQueueError atabilir) pipeline'ı çökertip marker'ı KALICI kaybettirebilirdi.
+        // Kardeş pipeline-end çağrılarının hepsi .catch'li; bu da öyle olmalı AMA done'ı da ENGELLE (sessiz done
+        // YASAK): audit realapp-verify-skipped(gate-error) → PARTIAL + task pending + görünür uyarı.
+        log.error("orchestrator", "runRealAppGateAtPipelineEnd beklenmedik istisna — fail-closed, done engelleniyor", err);
+        const gateErrTaskId = runtime.currentTaskId ?? _drainTaskId;
+        runtime.currentTaskId = null;
+        _drainTaskId = null;
+        emitChatMessage(
+          "system",
+          "⚠️ Gerçek uygulama doğrulaması beklenmedik bir hatayla kesildi — iş 'Tamamlandı' damgalanmadı (dürüst kalış); \"Tekrar Dene\" ile yeniden başlatabilirsin.",
+        );
+        await appendAuditModule(state.project_root, {
+          ts: Date.now(),
+          phase: 16 as PhaseId,
+          event: "realapp-verify-skipped",
+          caller: "mycl-orchestrator",
+          detail: "gate-error",
+        }).catch(() => {});
+        if (gateErrTaskId) {
+          await patchTask(state.project_root, gateErrTaskId, {
+            status: "pending",
+            attempts: MAX_TASK_AUTO_RETRIES,
+            last_fail: "gerçek-app doğrulama beklenmedik hata",
+          }).catch(() => {});
+          await emitQueueChangedFor(state.project_root).catch(() => {});
+        }
+      }
+      state = runtime.state ?? state; // gate marker'ı tüketti + statePatch uygulamış olabilir → yerel state tazele
       // #1 deliği (YZLLM 2026-06-11): sessiz gate-atlama şeffaflığı. Pipeline bitince hangi kalite boyutunun
       // GERÇEKTEN doğrulandığını, hangisinin ATLANDIĞINI (araç yok / uygulanamaz) açıkça göster — atlanan gate
       // "geçti" gibi görünmesin. Kullanıcı neyin doğrulanmadığını bilerek kabul etsin.
@@ -5493,6 +5715,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           pending_backend_fix: undefined,
           pending_migrations: undefined,
           pending_diagnostic: undefined,
+          pending_realapp_verify: undefined,
           needed_phases: undefined,
           needed_phases_proposed: undefined,
           updated_at: Date.now(),
@@ -7830,6 +8053,18 @@ export async function handleAskqAnswer(
         ...runtime.state,
         pending_ui_tweak: fixPayload,
         fix_checkpoint_ref: fixCheckpointRef,
+        // GERÇEK-APP DOĞRULAMA MARKER'ı (YZLLM 2026-07-21): pipeline sonunda bu fix'in gerçek çalışan uygulamada
+        // bug'ı çözdüğünü doğrula (birim-yeşil ≠ app-yeşil). checkpoint marker'da taşınır (fix_checkpoint_ref
+        // gate'ten ÖNCE tüketilir). Marker mantığı SAF buildRealAppVerifyMarker'da (test edilir): error-analysis
+        // gate-fix → BOŞ (kurulmaz; sentetik repro hedefi + nested'de orijinal marker korunur), aksi → kullanıcı-şikayeti hedefli.
+        ...buildRealAppVerifyMarker({
+          fromErrorAnalysis: !!pending.from_error_analysis,
+          bugReportTr: pending.bug_report_tr,
+          rootCauseTr: pending.rootCauseTR,
+          fixLabel: selected.label,
+          checkpointRef: fixCheckpointRef,
+          iteration: runtime.state.iteration_count ?? 1,
+        }),
         pending_diagnostic: undefined,
         current_phase: 4 as PhaseId,
         updated_at: Date.now(),
@@ -7845,6 +8080,17 @@ export async function handleAskqAnswer(
         ...runtime.state,
         pending_backend_fix: fixPayload,
         fix_checkpoint_ref: fixCheckpointRef,
+        // GERÇEK-APP DOĞRULAMA MARKER'ı (YZLLM 2026-07-21): canlı vaka backend .ts fix'iydi ama UI'dan gözlendi
+        // (buildCustomerSearchQuery → /profile boş) → backend-only fix de doğrulanmalı. SAF buildRealAppVerifyMarker
+        // (test edilir): error-analysis gate-fix → BOŞ (bkz ui-only dalı — sentetik repro hedefi, gereksiz blok).
+        ...buildRealAppVerifyMarker({
+          fromErrorAnalysis: !!pending.from_error_analysis,
+          bugReportTr: pending.bug_report_tr,
+          rootCauseTr: pending.rootCauseTR,
+          fixLabel: selected.label,
+          checkpointRef: fixCheckpointRef,
+          iteration: runtime.state.iteration_count ?? 1,
+        }),
         pending_diagnostic: undefined,
         current_phase: 7 as PhaseId,
         updated_at: Date.now(),
@@ -8618,6 +8864,7 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
         verdict: verdict.verdict,
         gateFailures: verdict.gateFailures.map((g) => g.phase),
         securitySkipped: verdict.securitySkipped,
+        realAppSkipped: verdict.realAppSkipped,
       });
     } else {
       // FROZEN-GOAL #16: verdict hesaplanamadı (audit okunamadı; üstte görünür uyarı verildi) → pipeline_end

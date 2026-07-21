@@ -239,8 +239,13 @@ export async function extractStockedModules(state: State, config: MyclConfig): P
     const stack = state.stack;
     if (!stack || stack === "unknown") return;
     const verdict = computeVerdict(await readAuditLog(state.project_root));
-    if (!verdict.completed || verdict.gateFailures.length > 0 || verdict.securitySkipped.length > 0) {
-      return; // yalnız tam-doğrulanmış koşu (çöp/yarım modül yok)
+    if (
+      !verdict.completed ||
+      verdict.gateFailures.length > 0 ||
+      verdict.securitySkipped.length > 0 ||
+      verdict.realAppSkipped.length > 0
+    ) {
+      return; // yalnız tam-doğrulanmış koşu (çöp/yarım modül yok; gerçek-app kanıtlanmamışı da stoklama)
     }
     if (backendForRole(config, "orchestrator") !== "cli") {
       emitChatMessage(

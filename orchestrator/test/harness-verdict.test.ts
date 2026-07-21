@@ -139,6 +139,33 @@ describe("harness-verdict · computeVerdict", () => {
     expect(r.gateFailures[0]!.event).toBe("security-fail");
   });
 
+  it("gerçek-app doğrulama KOŞAMADI (realapp-verify-skipped) → false-green değil, PARTIAL (KATI #4)", () => {
+    // Gate patlamadı ama Playwright/dev-server yok → fix yalnız birim-doğrulandı, çalışan app kanıtlanmadı.
+    const events = [...cleanRun(), ev(16, "realapp-verify-skipped", "no_playwright")];
+    const r = computeVerdict(events);
+    expect(r.verdict).toBe("PARTIAL");
+    expect(r.exitCode).toBe(2);
+    expect(r.gateFailures).toEqual([]);
+    expect(r.securitySkipped).toEqual([]);
+    expect(r.realAppSkipped).toContain("realapp-verify-skipped");
+    expect(r.summary).toMatch(/gerçek uygulama doğrulaması koşamadı/);
+  });
+
+  it("gerçek-app doğrulama BAŞARISIZ (realapp-verify-fail) → gate-fail yolundan PARTIAL (realAppSkipped değil)", () => {
+    // -fail zaten -fail→PARTIAL yolundan geçer; realAppSkipped'a DÜŞMEZ (o yalnız -skipped).
+    const events = [...cleanRun(), ev(16, "realapp-verify-fail", "bug sürüyor")];
+    const r = computeVerdict(events);
+    expect(r.verdict).toBe("PARTIAL");
+    expect(r.gateFailures.map((g) => g.phase)).toContain(16);
+    expect(r.realAppSkipped).toEqual([]);
+  });
+
+  it("temiz koşuda realAppSkipped boş → PASS (regresyon: yeni alan eski davranışı bozmaz)", () => {
+    const r = computeVerdict(cleanRun());
+    expect(r.verdict).toBe("PASS");
+    expect(r.realAppSkipped).toEqual([]);
+  });
+
   it("BOŞ-BUILD: tamamlandı + tüm gate yeşil AMA deliverable yok → FAIL (sahte-yeşil koruması, 2026-06-24)", () => {
     // Canlı kanıt: Faz 5 yanlış atlandı → app HİÇ kurulmadı → gate'ler yoklukta sahte-geçti → PASS/PARTIAL.
     expect(computeVerdict(cleanRun(), { deliverableExists: false }).verdict).toBe("FAIL");

@@ -3,9 +3,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  buildBugGateSystemPrompt,
   buildFailureBugReport,
   containsMocking,
   extractTestTitles,
+  hasSubstantiveTest,
   slugifyFeature,
 } from "../src/verify-feature.js";
 
@@ -70,6 +72,43 @@ describe("verify-feature · containsMocking (yanlış-yeşil guard)", () => {
   });
 });
 
+describe("verify-feature · hasSubstantiveTest (MAHKEME BULGU 2 — vacuous-test guard)", () => {
+  it("gerçek expect içeren test → true", () => {
+    const real = `
+      test('profil arama sonuç döner', async ({ page }) => {
+        await page.goto('/profile');
+        await page.locator('#search').fill('Ali');
+        await page.locator('button[type=submit]').click();
+        await expect(page.locator('table tbody tr')).not.toHaveCount(0);
+      });`;
+    expect(hasSubstantiveTest(real)).toBe(true);
+  });
+
+  it("hiç expect yok (vacuous) → false", () => {
+    const noAssert = `
+      test('sayfa açılıyor', async ({ page }) => {
+        await page.goto('/profile');
+        await page.locator('#search').fill('Ali');
+      });`;
+    expect(hasSubstantiveTest(noAssert)).toBe(false);
+  });
+
+  it("test.skip / test.fixme / describe.skip → false (atlanmış = doğrulama değil)", () => {
+    expect(hasSubstantiveTest("test.skip('x', async () => { await expect(1).toBe(1); })")).toBe(false);
+    expect(hasSubstantiveTest("test.fixme('x', async () => { await expect(1).toBe(1); })")).toBe(false);
+    expect(hasSubstantiveTest("describe.skip('grp', () => { test('y', () => expect(2).toBe(2)) })")).toBe(false);
+  });
+
+  it("test.only (atlamaz, çalışır) + expect → true", () => {
+    expect(hasSubstantiveTest("test.only('x', async () => { await expect(page).toHaveURL('/x'); })")).toBe(true);
+  });
+
+  it("expect.soft( / expect.poll( (Playwright) → true (gerçek assertion, MAHKEME v2)", () => {
+    expect(hasSubstantiveTest("expect.soft(await page.locator('tr').count()).toBeGreaterThan(0)")).toBe(true);
+    expect(hasSubstantiveTest("await expect.poll(() => page.locator('tr').count()).toBeGreaterThan(0)")).toBe(true);
+  });
+});
+
 describe("verify-feature · extractTestTitles", () => {
   it("tek + çift tırnak test başlıklarını çıkarır", () => {
     const src = `
@@ -85,6 +124,44 @@ describe("verify-feature · extractTestTitles", () => {
   it("test.skip/test.only başlıklarını da çıkarır; test yoksa boş", () => {
     expect(extractTestTitles("test.skip('x', () => {})")).toEqual(["x"]);
     expect(extractTestTitles("// hiç test yok")).toEqual([]);
+  });
+});
+
+describe("verify-feature · buildBugGateSystemPrompt (gerçek-app doğrulama)", () => {
+  const prompt = buildBugGateSystemPrompt(
+    "The /profile customer search returns empty for a valid same-day range + name",
+    "bug-profile-search",
+    "app structure snapshot here",
+    false,
+    { rootCause: "buildCustomerSearchQuery over-constrains the range", fixLabel: "widen date range boundary" },
+  );
+
+  it("bildirilen bug'ı İngilizce enjekte eder + kök neden + fix etiketi bağlamı", () => {
+    expect(prompt).toContain("/profile customer search returns empty");
+    expect(prompt).toContain("buildCustomerSearchQuery over-constrains");
+    expect(prompt).toContain("widen date range boundary");
+  });
+
+  it("MOCK YASAK + hedef test yolu + '// MyCL generated E2E' ilk satır kuralı içerir", () => {
+    expect(prompt).toMatch(/NO MOCKING/i);
+    expect(prompt).toContain("page.route");
+    expect(prompt).toContain("tests/bug-profile-search.spec.ts");
+    expect(prompt).toContain("// MyCL generated E2E");
+  });
+
+  it("bug hâlâ varsa KIRMIZI bırak (sahte-yeşil yasağı) + 'empty may BE the bug' mantığı", () => {
+    expect(prompt).toMatch(/leave the test RED|do NOT weaken/i);
+    expect(prompt).toMatch(/Empty may BE the bug/i);
+  });
+
+  it("auth yoksa kimlik-bilgisi yok uyarısı; auth varsa .mycl/auth.json yönergesi", () => {
+    expect(prompt).toMatch(/No login credentials configured/i);
+    const authed = buildBugGateSystemPrompt("bug x", "slug-x", "snap", true, {});
+    expect(authed).toContain(".mycl/auth.json");
+  });
+
+  it("kanıtlayamıyorsa dosya YAZMAMA yönergesi (sahte-test üretme)", () => {
+    expect(prompt).toMatch(/DO NOT fabricate a test and DO NOT write the file/i);
   });
 });
 

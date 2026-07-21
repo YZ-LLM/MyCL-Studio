@@ -787,6 +787,8 @@ export class Phase0Controller {
           phase: "D2_WAITING",
           askq_id: askqId,
           rootCauseTR,
+          bug_report_tr: this.bugReport, // gerçek-app doğrulama repro hedefi (kullanıcının orijinal şikayeti)
+          from_error_analysis: !!this.priorAnalysis, // error-analysis gate-fix → gerçek-app kapısı kurulmasın
           options: optionsTR,
           affected,
           ts: Date.now(),
@@ -820,6 +822,8 @@ export class Phase0Controller {
         phase: "D2_WAITING",
         askq_id: askqId,
         rootCauseTR,
+        bug_report_tr: this.bugReport, // gerçek-app doğrulama repro hedefi (kullanıcının orijinal şikayeti)
+        from_error_analysis: !!this.priorAnalysis, // error-analysis gate-fix → gerçek-app kapısı kurulmasın
         options: optionsTR,
         affected,
         auto_selected_label: chosen.label,

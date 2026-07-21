@@ -27,6 +27,12 @@ export interface HarnessVerdict {
    * koruması (PASS yerine PARTIAL).
    */
   securitySkipped: string[];
+  /**
+   * Gerçek-app doğrulama kapısı KOŞMASI gerekiyordu ama koşamadı (Playwright/dev-server yok /
+   * codegen üretemedi — `realapp-verify-skipped`). Boş değilse: fix yalnız birim-doğrulandı,
+   * çalışan uygulamada kanıtlanmadı → çıplak PASS değil PARTIAL (false-green koruması, KATI #4).
+   */
+  realAppSkipped: string[];
   /** Süreç çıkış kodu: 0=PASS, 2=PARTIAL, 1=FAIL. */
   exitCode: 0 | 1 | 2;
   summary: string;
@@ -48,6 +54,14 @@ function isSecuritySkip(e: AuditEvent): boolean {
   // gerçek event'le eşleşmiyordu → güvenlik fazı atlansa bile PASS verilebiliyordu (false-green).
   // Phase'e bağlamak (mechanical-runner skip'leri phase=opts.phaseId yazar) drift-proof.
   return e.phase === 13;
+}
+
+/**
+ * SAF (YZLLM 2026-07-21): gerçek-app doğrulama kapısı KOŞAMADI mı (ortamsal engel). Yalnız
+ * `realapp-verify-skipped` — `realapp-verify-fail` zaten `-fail`→PARTIAL yolundan geçer, burada değil.
+ */
+function isRealAppSkip(e: AuditEvent): boolean {
+  return e.event === "realapp-verify-skipped";
 }
 
 /**
@@ -84,6 +98,7 @@ export function computeVerdict(
       completed,
       gateFailures: [],
       securitySkipped: [],
+      realAppSkipped: [],
       exitCode: 1,
       summary:
         "Pipeline tamamlandı AMA hiçbir deliverable/uygulama dosyası üretilmedi — boş build YEŞİL sayılamaz (gate'ler yoklukta sahte-geçti).",
@@ -109,6 +124,11 @@ export function computeVerdict(
     ...new Set(events.filter((e) => isSecuritySkip(e)).map((e) => e.event)),
   ];
 
+  // false-green koruması: gerçek-app doğrulama kapısı koşamadı (ortamsal) — birim yeşil ama app kanıtlanmadı.
+  const realAppSkipped = [
+    ...new Set(events.filter((e) => isRealAppSkip(e)).map((e) => e.event)),
+  ];
+
   let verdict: Verdict;
   let exitCode: 0 | 1 | 2;
   let summary: string;
@@ -130,11 +150,26 @@ export function computeVerdict(
     summary = `Pipeline tamamlandı ve gate'ler patlamadı AMA güvenlik taraması atlandı (${securitySkipped.join(
       ", ",
     )}) — "tam tarandı" sayılmaz.`;
+  } else if (realAppSkipped.length > 0) {
+    // Gate'ler patlamadı AMA gerçek-app doğrulama kapısı koşamadı (Playwright/dev-server yok) →
+    // fix yalnız birim-doğrulandı, çalışan uygulamada kanıtlanmadı → çıplak PASS değil PARTIAL (KATI #4).
+    verdict = "PARTIAL";
+    exitCode = 2;
+    summary =
+      "Pipeline tamamlandı ve gate'ler patlamadı AMA gerçek uygulama doğrulaması koşamadı (Playwright/dev-server yok) — fix yalnız birim-doğrulandı, çalışan app'te kanıtlanmadı.";
   } else {
     verdict = "PASS";
     exitCode = 0;
     summary = "Pipeline tamamlandı; tüm gate'ler yeşil.";
   }
 
-  return { verdict, completed, gateFailures, securitySkipped, exitCode, summary };
+  return {
+    verdict,
+    completed,
+    gateFailures,
+    securitySkipped,
+    realAppSkipped,
+    exitCode,
+    summary,
+  };
 }

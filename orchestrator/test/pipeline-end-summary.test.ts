@@ -20,6 +20,7 @@ function verdict(partial: Partial<HarnessVerdict>): HarnessVerdict {
     completed: true,
     gateFailures: [],
     securitySkipped: [],
+    realAppSkipped: [],
     exitCode: 0,
     summary: "",
     ...partial,

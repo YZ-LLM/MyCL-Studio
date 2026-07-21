@@ -511,6 +511,22 @@ export interface State {
    */
   fix_checkpoint_ref?: string;
   /**
+   * GERÇEK-APP DOĞRULAMA KAPISI (YZLLM 2026-07-21): UI/runtime-gözlenen bir bug-fix iterasyonunun sonunda
+   * (pipeline-end) gerçek çalışan uygulamada (Playwright E2E, orijinal buga karşı) doğrulama koşulacağını
+   * işaretler. fix-routing set eder; pipeline-end kapısı tüketir. `fix_checkpoint_ref` gate'ten ÖNCE
+   * tüketildiği için değişen-dosya tespiti için checkpoint'i BURADA taşırız. `pending_ui_tweak` deseninin ikizi.
+   */
+  pending_realapp_verify?: {
+    /** Orijinal bug raporu (verify testinin hedefi; kullanıcının şikayeti). */
+    bug_intent_tr: string;
+    root_cause_tr?: string;
+    fix_label?: string;
+    /** Fix-öncesi git checkpoint (değişen-dosya tespiti; yoksa fail-open). */
+    checkpoint_ref?: string;
+    /** Bayat-marker koruması: farklı iterasyonda tüketilmesin. */
+    created_iter: number;
+  };
+  /**
    * Toplam UI tweak iterasyon sayısı; Phase 6 başarıyla tamamlandığında
    * sıfırlanır. MAX_UI_TWEAKS (5) aşıldığında force-complete Phase 7'e geçer.
    */
@@ -530,6 +546,20 @@ export interface State {
         phase: "D2_WAITING";
         askq_id: string;
         rootCauseTR: string;
+        /**
+         * Kullanıcının ORİJİNAL bug şikayeti (gözlenen semptom, TR) — gerçek-app doğrulama kapısının repro
+         * hedefi. rootCauseTR teknik teşhistir ("fonksiyon X tarih aralığını yanlış karşılaştırıyor");
+         * bug_report_tr kullanıcının gördüğüdür ("profil aramasında sonuç gelmiyor") → E2E'nin reprodükleyeceği
+         * senaryo BUDUR. Eski state.json'da olmayabilir → tüketen taraf rootCauseTR'ye düşer (geriye-uyumlu).
+         */
+        bug_report_tr?: string;
+        /**
+         * Bu teşhis error-analysis akışından mı geldi (bir gate FAİLİNİ düzeltmek için, priorAnalysis ile) yoksa
+         * kullanıcının doğrudan bug bildiriminden mi. Error-analysis'te bug_report_tr sentetik "Phase N failed…"
+         * metnidir (repro senaryosu YOK) → gerçek-app doğrulama kapısı bu fix'lerde KURULMAZ (gate zaten yeniden
+         * koşup doğrular; anlamsız repro hedefiyle iş gereksiz bloklanmasın). MAHKEME v2 HIGH regresyon fix'i.
+         */
+        from_error_analysis?: boolean;
         options: Array<{
           label: string;
           description: string;
