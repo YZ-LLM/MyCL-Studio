@@ -487,6 +487,8 @@ export async function verifyFeatureHandler(
 
 export interface RealAppVerifyMarker {
   bug_intent_tr: string;
+  /** Zaten-İngilizce repro hedefi (tam-develop sentezi) — verilirse TR→EN çeviri ATLANIR. */
+  bug_intent_en?: string;
   root_cause_tr?: string;
   fix_label?: string;
 }
@@ -560,14 +562,19 @@ export async function runRealAppBugGate(
   const { state, config } = deps;
   emitChatMessage("system", "🔬 Gerçek uygulama doğrulaması (E2E) — bildirilen bug gerçekten çözüldü mü, çalışan app'te kontrol ediyorum… (~1-3 dk)");
 
-  // TR bug → EN (main ajan İngilizce çalışır).
+  // TR bug → EN (main ajan İngilizce çalışır). bug_intent_en verilmişse (tam-develop sentezi, intent_summary zaten
+  // İngilizce) çeviriyi ATLA — İngilizceyi TR→EN çevirmeni bozar/no-op yapar.
   let bugEn: string;
-  try {
-    const tr = await translate(config, marker.bug_intent_tr, "tr-to-en");
-    bugEn = tr.text.trim() || marker.bug_intent_tr;
-  } catch (err) {
-    log.warn("verify-feature", "bug-gate translate failed; using TR", err);
-    bugEn = marker.bug_intent_tr;
+  if (marker.bug_intent_en?.trim()) {
+    bugEn = marker.bug_intent_en.trim();
+  } else {
+    try {
+      const tr = await translate(config, marker.bug_intent_tr, "tr-to-en");
+      bugEn = tr.text.trim() || marker.bug_intent_tr;
+    } catch (err) {
+      log.warn("verify-feature", "bug-gate translate failed; using TR", err);
+      bugEn = marker.bug_intent_tr;
+    }
   }
 
   // Dev server

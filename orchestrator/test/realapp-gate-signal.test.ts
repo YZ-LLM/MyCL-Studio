@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   realAppGateDecision,
   buildRealAppVerifyMarker,
+  decideFullDevelopGate,
   type RealAppGateSignals,
+  type FullDevelopGateSignals,
 } from "../src/realapp-gate-signal.js";
 
 const base: RealAppGateSignals = {
@@ -99,5 +101,52 @@ describe("buildRealAppVerifyMarker (MAHKEME v2 — regresyon-guard)", () => {
   it("bug_report_tr yok (eski state.json) → rootCauseTr fallback (undefined bug_intent OLMAZ)", () => {
     const m = buildRealAppVerifyMarker({ ...baseIn, bugReportTr: undefined });
     expect(m.pending_realapp_verify!.bug_intent_tr).toBe("buildCustomerSearchQuery aralığı fazla kısıtlıyor");
+  });
+
+  it("bugIntentEn verilirse marker'a bug_intent_en yazılır (tam-develop sentezi → çeviri atlanır)", () => {
+    const m = buildRealAppVerifyMarker({ ...baseIn, bugIntentEn: "the /wellcome page renders empty" });
+    expect(m.pending_realapp_verify!.bug_intent_en).toBe("the /wellcome page renders empty");
+  });
+  it("bugIntentEn yoksa bug_intent_en alanı HİÇ yazılmaz (Faz 0 marker → çeviri yolu korunur)", () => {
+    const m = buildRealAppVerifyMarker(baseIn);
+    expect("bug_intent_en" in m.pending_realapp_verify!).toBe(false);
+  });
+});
+
+describe("decideFullDevelopGate (tam-develop gerçek-app sentezi — MAHKEME BULGU 3 canlı fix)", () => {
+  const baseFd: FullDevelopGateSignals = {
+    hasPhase0Marker: false,
+    projectType: "web",
+    hasUiFiles: false,
+    phase6HumanReviewed: false,
+    hasIntent: true,
+    playwrightEnabled: true,
+  };
+
+  it("CANLI VAKA: tam-develop + web + Faz 6 insan-incelemesi YOK + niyet var → SENTEZLE (koş)", () => {
+    expect(decideFullDevelopGate(baseFd).run).toBe(true);
+  });
+  it("Faz 0 marker'ı zaten var → sentezleme (o kapı halleder)", () => {
+    expect(decideFullDevelopGate({ ...baseFd, hasPhase0Marker: true }).run).toBe(false);
+  });
+  it("Faz 6 insan tarafından incelendi (varsayılan mod / greenfield) → sentezleme (insan doğruladı)", () => {
+    expect(decideFullDevelopGate({ ...baseFd, phase6HumanReviewed: true }).run).toBe(false);
+  });
+  it("niyet yok → sentezleme (doğrulama hedefi yok)", () => {
+    expect(decideFullDevelopGate({ ...baseFd, hasIntent: false }).run).toBe(false);
+  });
+  it("Playwright kapalı → sentezleme", () => {
+    expect(decideFullDevelopGate({ ...baseFd, playwrightEnabled: false }).run).toBe(false);
+  });
+  it("api/cli/library (tarayıcıdan sürülemez) → sentezleme (UI-dosya olsa bile)", () => {
+    for (const pt of ["api", "cli", "library"] as const) {
+      expect(decideFullDevelopGate({ ...baseFd, projectType: pt, hasUiFiles: true }).run).toBe(false);
+    }
+  });
+  it("MAHKEME MEDIUM: unknown → GERÇEK UI-dosyası şart (spec-regex değil); cave (ejs views) → koş, backend (dosya yok) → koşma", () => {
+    // cave: project_type=unknown ama views/*.ejs var → hasUiFiles=true → sentezle
+    expect(decideFullDevelopGate({ ...baseFd, projectType: "unknown", hasUiFiles: true }).run).toBe(true);
+    // yanlış-sınıflı backend (unknown, UI dosyası yok, spec'te "html" geçse de) → sentezleme (yanlış blok önlenir)
+    expect(decideFullDevelopGate({ ...baseFd, projectType: "unknown", hasUiFiles: false }).run).toBe(false);
   });
 });

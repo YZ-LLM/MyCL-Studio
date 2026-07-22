@@ -230,7 +230,7 @@ import { runParallelModules } from "./module-parallel/dispatch.js";
 import { makeScopedCodegenWorker } from "./module-parallel/worker.js";
 import { candidatesToModules, judgeBatch, MAX_BATCH } from "./task-batch.js";
 import { isGitRepo, isWorkingTreeClean, getChangedFiles } from "./git.js";
-import { realAppGateDecision, buildRealAppVerifyMarker } from "./realapp-gate-signal.js";
+import { realAppGateDecision, buildRealAppVerifyMarker, decideFullDevelopGate } from "./realapp-gate-signal.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
@@ -258,7 +258,7 @@ import { isProcessAlive } from "./process-utils.js";
 import { stopActiveDevServer } from "./dev-server-launcher.js";
 import { loadI18n, t } from "./i18n.js";
 import { log } from "./logger.js";
-import { readFile as fsReadFile } from "node:fs/promises";
+import { readFile as fsReadFile, stat as fsStat, readdir as fsReaddir } from "node:fs/promises";
 import { join as pathJoin } from "node:path";
 import type { CostRecord, PhaseId, PhaseSpec, PhaseStatus, State } from "./types.js";
 import type { MyclConfig } from "./config.js";
@@ -4802,34 +4802,127 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
 }
 
 /**
+ * Bu iterasyonda Faz 6 (UI incelemesi) İNSAN tarafından incelendi mi? İnsan-incelemesi = varsayılan modda Faz 6
+ * PARKEDİP kullanıcı onayı (phase-6-complete, skip YOK). Foreign integrate (phase-6-skipped-integrate) VEYA never-ask
+ * (oto-geçiş) → insan İNCELEMEDİ → tam-develop gerçek-app sentezi devreye girer. Audit okunamazsa "incelendi" say
+ * (kuşkuda sentez KURMA — eski davranışı koru). SAF-değil (audit okur); karar realapp-gate-signal SAF'ında.
+ */
+async function isPhase6HumanReviewedThisIter(state: State): Promise<boolean> {
+  if (isNeverAsk()) return false; // never-ask → hiçbir insan UI'yi incelemedi
+  try {
+    // MAHKEME CRITICAL (2 müfettiş): readAuditLogTail(500) per-iterasyon check için YETERSİZ (audit.ts docstring
+    // bunu yasaklar; phase-8 aynı sebeple 1500 kullanır). Faz 6 iterasyonun ERKEN safhası; pipeline-sonuna (Faz 7-17)
+    // kadar 500'ü aşan event olursa erken phase-6-complete pencereden düşer → yanlış "incelenmedi" → greenfield-
+    // varsayılan-modda sentez YANLIŞ tetiklenir (KATI #14 ihlali). TAM audit + eventsSince (harness-verdict deseni).
+    const events = eventsSince(await readAuditLog(state.project_root), state.iteration_started_at ?? 0);
+    const p6 = events.filter((e) => e.phase === 6);
+    const skipped = p6.some((e) => e.event.startsWith("phase-6-skipped"));
+    const completed = p6.some((e) => e.event === "phase-6-complete");
+    return completed && !skipped;
+  } catch {
+    return true; // audit okunamadı → kuşkuda "incelendi" (sentez kurma; eski davranış)
+  }
+}
+
+/**
+ * İMPURE (mahkeme MEDIUM — sentez FP fix): proje GERÇEKTEN UI dosyaları içeriyor mu (view/component/framework).
+ * project_type="unknown" iken tam-develop sentezi YALNIZ spec-regex'e güvenirse yanlış-sınıflı backend/library
+ * (spec'te "html/dom" geçen HTML-parser) sentezlenip bloklanabilir. Bu SAF-değil FS sinyali regex belirsizliğini
+ * keser: gerçek UI dosyası varsa (cave: views/*.ejs) sentezle, yoksa (backend) sentezleme. Sınırlı tarama.
+ */
+async function projectHasUiFiles(root: string): Promise<boolean> {
+  const uiDirs = ["views", "components", "pages", "templates", "src/components", "src/pages", "src/app", "app/views", "src/views"];
+  for (const d of uiDirs) {
+    try {
+      if ((await fsStat(pathJoin(root, d))).isDirectory()) return true;
+    } catch {
+      /* yok */
+    }
+  }
+  const uiExts = new Set([".ejs", ".tsx", ".jsx", ".vue", ".svelte", ".hbs", ".pug", ".astro"]);
+  for (const base of ["", "src", "app", "public"]) {
+    try {
+      const entries = await fsReaddir(pathJoin(root, base), { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isFile()) continue;
+        const dot = e.name.lastIndexOf(".");
+        if (dot >= 0 && uiExts.has(e.name.slice(dot).toLowerCase())) return true;
+      }
+    } catch {
+      /* yok */
+    }
+  }
+  return false;
+}
+
+/**
  * GERÇEK-APP DOĞRULAMA KAPISI (YZLLM 2026-07-21) — pipeline sonunda, emitVerificationSummary/
  * onTaskMaybeComplete ÖNCESİNDE çağrılır. Canlı kök: cave /profile "boş sonuç" fix'i Faz 8'i
  * "complete score=100" damgaladı ama bug SÜRDÜ — çünkü yalnız BİRİM-suite yeşili doğrulandı, gerçek
- * çalışan uygulama hiç görülmedi. Bu kapı bir fix iterasyonunun (ui-only/backend-only) bıraktığı
- * pending_realapp_verify marker'ını tüketip bildirilen bug'ın gerçek app'te GERÇEKTEN çözüldüğünü
- * Playwright E2E ile doğrular (birim-yeşil ≠ app-yeşil).
+ * çalışan uygulama hiç görülmedi. İKİ KAYNAK: (1) Faz 0 debug fix-routing (ui-only/backend-only)
+ * pending_realapp_verify marker'ı bırakır; (2) TAM-DEVELOP SENTEZİ — canlı cave /wellcome kanıtı: bug'lar Faz 0
+ * debug'a DEĞİL tam-develop'a (Faz 1-17) yönleniyor → marker kurulmuyor; Faz 6 foreign/never-ask'ta atlanıyor,
+ * Faz 16 placeholder → UI hiç uçtan-uca doğrulanmadan "done" oluyor. Marker yoksa: UI + Faz 6 insan-incelemesi-yok
+ * + niyet-var ise intent_summary'yi hedef alıp marker SENTEZLE (decideFullDevelopGate). Her iki kaynak da AYNI
+ * kapıdan (Playwright E2E) geçip bildirilen bug'ın/niyetin gerçek app'te GERÇEKTEN karşılandığını doğrular.
  *   pass       → sessiz devam (onTaskMaybeComplete 'done' damgalar).
  *   fail       → done ENGELLENİR + returnTaskToPending (attempts+1 → farklı yaklaşımla oto-retry). audit -fail → PARTIAL.
  *   cannot_run → done ENGELLENİR + patchTask(pending, attempts:MAX) (oto-retry YOK; görünür bekler + "Tekrar Dene"). audit -skipped → PARTIAL.
- * KATI #14: marker yoksa / farklı iterasyon / config yok / karar "koşma" → SIFIR davranış değişikliği.
+ * KATI #14: marker yok + sentez tetiklenmiyor (Faz 6 insan-incelendi / non-UI / niyet-yok / Playwright kapalı) → SIFIR davranış değişikliği.
  *
- * KAPSAM SINIRI (mahkeme BULGU 3): kapı YALNIZ pipeline-sonuna (advanceToNextPhase next===null) ulaşan fix
- * iterasyonlarında koşar; marker da yalnız Faz 0 debug fix-routing'de (ui-only/backend-only) set edilir. Diğer
- * fix yolları YAPISAL olarak buraya ULAŞMAZ ve KASITLI olarak farklı doğrulama modeline sahiptir: (a) Faz 6
- * revise_ui → Faz 6'da kullanıcı incelemesine PARKEDER (insan gözüyle doğrular, KATI #9); (b) Faz 9 risk-fix
- * (seri + paralel worktree) → kendi Phase5/7/8 controller döngüsünde çalışır, pipeline-sonu next===null'a girmez
- * (tam pipeline'ın Faz 16 E2E'siyle kapsanır). Bu yolları buraya bağlamak ayrı bir iş (risk-fix'in "repro
- * senaryosu" yok, risk açıklaması var) — bilinçli kapsam-dışı, regresyon değil (bu yollar öncesinde de gerçek-app
- * doğrulanmıyordu).
+ * KAPSAM (mahkeme BULGU 3 canlı çıktı → genişletildi): Greenfield varsayılan mod → Faz 6 insan-incelemesi yapılır
+ * → sentez KOŞMAZ (regresyon yok). Faz 6 revise_ui → Faz 6'da parkeder (insan doğrular). Faz 9 risk-fix → kendi
+ * controller döngüsü, pipeline-sonu next===null'a girmez (hâlâ kapsam-dışı — risk-fix'in repro senaryosu yok).
  */
 async function runRealAppGateAtPipelineEnd(stateIn: State): Promise<void> {
-  const marker = stateIn.pending_realapp_verify;
-  if (!marker) return; // marker yok → greenfield/non-fix/kozmetik → no-op (eski davranış korunur)
+  const cfg = runtime.config;
+  if (!cfg) {
+    if (stateIn.pending_realapp_verify) log.warn("realapp-gate", "config yok → gerçek-app doğrulama atlandı (no-op)");
+    return;
+  }
+  const playwrightEnabled = cfg.features.playwright_enabled !== false;
 
-  // Marker'ı HER durumda TÜKET (tek-uçuş) — sonraki iterasyonda tekrar tetiklenmesin.
-  let state: State = { ...stateIn, pending_realapp_verify: undefined };
+  let marker = stateIn.pending_realapp_verify;
+  let synthesized = false;
+  if (!marker) {
+    // TAM-DEVELOP SENTEZİ (YZLLM 2026-07-21, canlı cave /wellcome): bug'lar Faz 0 debug'a DEĞİL tam-develop'a
+    // (Faz 1-17) yönleniyor → Faz 0 marker'ı kurulmuyor; Faz 6 foreign/never-ask'ta atlanıyor, Faz 16 placeholder
+    // → UI hiç uçtan-uca doğrulanmadan "done" oluyor. Marker yoksa: UI + Faz 6 insan-incelemesi-yok + niyet-var ise
+    // intent_summary'yi hedef alıp gerçek-app doğrulamasını SENTEZLE (aynı kapıdan geçir).
+    const phase6HumanReviewed = await isPhase6HumanReviewedThisIter(stateIn).catch(() => true);
+    const intentEn = (stateIn.intent_summary ?? "").trim();
+    const hasUiFiles = await projectHasUiFiles(stateIn.project_root).catch(() => false);
+    const dec = decideFullDevelopGate({
+      hasPhase0Marker: false,
+      projectType: stateIn.project_type,
+      hasUiFiles, // project_type=unknown iken GERÇEK UI-dosyası sinyali (regex FP'sini keser)
+      phase6HumanReviewed,
+      hasIntent: intentEn.length > 0,
+      playwrightEnabled,
+    });
+    if (!dec.run) {
+      log.info("realapp-gate", `tam-develop sentezi koşmuyor: ${dec.reason}`);
+      return; // marker yok + sentez de yok → no-op (eski davranış)
+    }
+    const built = buildRealAppVerifyMarker({
+      fromErrorAnalysis: false,
+      bugReportTr: intentEn, // fallback metin; asıl repro hedefi bug_intent_en'den okunur (çeviri atlanır)
+      bugIntentEn: intentEn,
+      rootCauseTr: intentEn,
+      fixLabel: `tam-develop iterasyon ${stateIn.iteration_count ?? 1}`,
+      checkpointRef: undefined, // checkpoint yok → changedFiles null → realAppGateDecision fail-open koşar
+      iteration: stateIn.iteration_count ?? 1,
+    });
+    marker = built.pending_realapp_verify;
+    synthesized = true;
+    if (!marker) return; // teorik; buildRealAppVerifyMarker fromErrorAnalysis=false → daima döner
+    emitChatMessage("system", "🔬 Bu iterasyonda UI insan tarafından incelenmedi (Faz 6 atlandı) — çalışan uygulamayı niyete karşı gerçek-app doğrulamasından geçiriyorum.");
+  }
+
+  // Marker'ı TÜKET (tek-uçuş) — sentezlenen marker state'te yoktu, yalnız Faz 0 marker'ını temizle+kaydet.
+  let state: State = synthesized ? stateIn : { ...stateIn, pending_realapp_verify: undefined };
   runtime.state = state;
-  await saveState(state);
+  if (!synthesized) await saveState(state);
 
   const curIter = state.iteration_count ?? 1;
   if (marker.created_iter !== curIter) {
@@ -4839,33 +4932,32 @@ async function runRealAppGateAtPipelineEnd(stateIn: State): Promise<void> {
     });
     return;
   }
-  const cfg = runtime.config;
-  if (!cfg) {
-    log.warn("realapp-gate", "config yok → gerçek-app doğrulama atlandı (no-op)");
-    return;
-  }
 
-  // Sinyalleri topla → SAF karar (realapp-gate-signal.ts).
-  const playwrightEnabled = cfg.features.playwright_enabled !== false;
-  const hasUiSpecSignal = await shouldRunMechanical(state.project_root, "has_ui").catch(() => true);
-  let changedFiles: string[] | null = null;
-  if (marker.checkpoint_ref) {
-    try {
-      changedFiles = await getChangedFiles(state.project_root, marker.checkpoint_ref);
-    } catch {
-      changedFiles = null; // tespit edilemedi → realAppGateDecision fail-open (koş)
+  // Faz 0 marker'ında realAppGateDecision (değişen-dosya + tip kararı); sentezlenen markerda decideFullDevelopGate
+  // ZATEN karar verdi (gerçek UI-dosyası + Faz 6 yok) → tekrar realAppGateDecision KOŞMA (unknown+regex-miss'te o
+  // 'run:false' derdi ve sentezi çelişkiyle iptal ederdi). Fail-open uyumlu.
+  if (!synthesized) {
+    let changedFiles: string[] | null = null;
+    if (marker.checkpoint_ref) {
+      try {
+        changedFiles = await getChangedFiles(state.project_root, marker.checkpoint_ref);
+      } catch {
+        changedFiles = null; // tespit edilemedi → realAppGateDecision fail-open (koş)
+      }
     }
-  }
-  const decision = realAppGateDecision({
-    isFixIteration: true, // marker YALNIZ fix dallarında (ui-only/backend-only) set edilir
-    projectType: state.project_type,
-    hasUiSpecSignal,
-    changedFiles,
-    playwrightEnabled,
-  });
-  if (!decision.run) {
-    log.info("realapp-gate", `gerçek-app doğrulama koşmuyor: ${decision.reason}`);
-    return; // done normal (eski davranış)
+    // has_ui spec-sinyali YALNIZ burada (Faz 0 marker'ı) gerekli → no-op/sentez yollarında hesaplama (LOW: mahkeme).
+    const hasUiSpecSignal = await shouldRunMechanical(state.project_root, "has_ui").catch(() => true);
+    const decision = realAppGateDecision({
+      isFixIteration: true, // Faz 0 fix dalı → bu iterasyonda doğrulanacak iş var
+      projectType: state.project_type,
+      hasUiSpecSignal,
+      changedFiles,
+      playwrightEnabled,
+    });
+    if (!decision.run) {
+      log.info("realapp-gate", `gerçek-app doğrulama koşmuyor: ${decision.reason}`);
+      return; // done normal (eski davranış)
+    }
   }
 
   // Doğrulamayı koş — verify-feature.ts altyapısı (dev-server + Playwright + codegen + mock-guard).
@@ -4878,6 +4970,7 @@ async function runRealAppGateAtPipelineEnd(stateIn: State): Promise<void> {
     const r = await runRealAppBugGate(
       {
         bug_intent_tr: marker.bug_intent_tr,
+        bug_intent_en: marker.bug_intent_en,
         root_cause_tr: marker.root_cause_tr,
         fix_label: marker.fix_label,
       },
@@ -4907,7 +5000,11 @@ async function runRealAppGateAtPipelineEnd(stateIn: State): Promise<void> {
     });
     emitChatMessage(
       "system",
-      "✅ Gerçek uygulama doğrulaması geçti — bildirilen sorun çalışan uygulamada gerçekten çözüldü.",
+      // MAHKEME MEDIUM (kapsam-aşımı): sentezde "bug" tüm niyettir → tek senaryo geçmesi niyetin TAMAMINI kanıtlamaz;
+      // Faz 0 marker'ında bildirilen tek bug'dır → güçlü iddia doğru. Mesaj kaynağa göre.
+      synthesized
+        ? "✅ Gerçek uygulama doğrulaması geçti — niyetin temel senaryosu çalışan uygulamada doğrulandı (birim değil, gerçek arayüz)."
+        : "✅ Gerçek uygulama doğrulaması geçti — bildirilen sorun çalışan uygulamada gerçekten çözüldü.",
     );
     return; // done normal (onTaskMaybeComplete 'done' damgalar)
   }

@@ -182,7 +182,12 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   Playwright yoksa / doğrulama koşulamazsa sessiz "tamamlandı" değil, görünür
   "yalnız birim doğrulandı, çalışan uygulamada kanıtlanmadı" (PARTIAL) işaretlenir
   ("Tekrar Dene" ile yeniden başlatılabilir). Tarayıcıdan sürülebilen (web/masaüstü)
-  düzeltmelerde, çalışma-zamanı ya da arayüz dosyası değiştiğinde çalışır.
+  düzeltmelerde, çalışma-zamanı ya da arayüz dosyası değiştiğinde çalışır. Ayrıca
+  tam geliştirme akışından geçen (Faz 1→17) UI iterasyonlarında da devreye girer:
+  arayüz **hiçbir insan tarafından incelenmemişse** (Faz 6 entegre/otonom modda
+  atlandıysa) ve E2E gerçek bir doğrulama yapmadıysa, iterasyonun niyeti çalışan
+  uygulamada gerçekten karşılandı mı diye kontrol eder — böylece "birim yeşil ama
+  arayüz bozuk" iş sessizce "tamamlandı" olmaz.
 - **Düşman-gözü inceleme** (Faz 9) — bulan ve çürüten ajanlar birlikte çalışır;
   yanlış-pozitif bulgular elenir, gerçek riskler otomatik düzeltmeye yönlenir.
 - **Mahkeme** (müfettiş ↔ orkestratör) — opsiyonel bağımsız denetim katmanı: bir

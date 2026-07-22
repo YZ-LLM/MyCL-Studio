@@ -519,6 +519,8 @@ export interface State {
   pending_realapp_verify?: {
     /** Orijinal bug raporu (verify testinin hedefi; kullanıcının şikayeti). */
     bug_intent_tr: string;
+    /** Zaten-İngilizce repro hedefi (tam-develop sentezinde intent_summary) — verilirse çeviri ATLANIR. */
+    bug_intent_en?: string;
     root_cause_tr?: string;
     fix_label?: string;
     /** Fix-öncesi git checkpoint (değişen-dosya tespiti; yoksa fail-open). */

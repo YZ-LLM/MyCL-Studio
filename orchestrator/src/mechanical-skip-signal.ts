@@ -12,9 +12,16 @@
 export type SkipUnless = "has_ui" | "has_web_target" | "has_nfr" | "has_database" | "always";
 
 /** has_ui: UI-spesifik terimler. 'web' BİLEREK yok (mahkeme: library/API spec'te "web browsers" → yanlış UI tetiği;
- *  'web' has_web_target'a ait). */
+ *  'web' has_web_target'a ait).
+ *  CANLI KÖK (YZLLM 2026-07-21, cave iter26 /wellcome): spec İngilizce ("the /wellcome page renders empty, the
+ *  ejs view has no visible dom content") ama regex İngilizce markup terimlerini İÇERMİYORDU → has_ui=false → Faz 16
+ *  (E2E) yanlış atlandı. Eklenen terimler UI-markup (ejs/html/css/dom/jsx/tsx/stylesheet/navbar/markup/viewport/
+ *  tailwind); /wellcome bunlardan ejs/dom/html ile eşleşir. MAHKEME MEDIUM: "render"/"modal" ÇIKARILDI — "render a
+ *  PDF report" / "modal value" gibi UI-DIŞI meşru anlamları var + has_ui Faz 5 (UI build) tüketicisinde FP pahalı.
+ *  page/view/route/form/table BİLEREK yok (route=backend, table=DB). Kaçan nadir UI vakaları tam-develop gerçek-app
+ *  kapısıyla (proje UI-dosyası var mı → sentez) yakalanır — o kapı regex FP'sinden bağımsız. */
 const RE_HAS_UI =
-  /\b(ui|frontend|görsel|ekran|sayfa|button|react|vue|svelte|angular|dashboard|panel|portal|widget|layout|component|screen|chart)\b/;
+  /\b(ui|frontend|görsel|ekran|sayfa|button|react|vue|svelte|angular|dashboard|panel|portal|widget|layout|component|screen|chart|ejs|html|css|dom|jsx|tsx|stylesheet|navbar|markup|viewport|tailwind)\b/;
 /** has_web_target: HTTP sunan her proje (web VEYA api). UI + api/sunucu terimleri; yalnız CLI/library/ml (HTTP yok) → false. */
 const RE_HAS_WEB_TARGET =
   /\b(ui|frontend|görsel|ekran|sayfa|button|web|react|vue|svelte|angular|next|api|rest|endpoint|http|server|sunucu|backend|express|fastapi|flask|django|rails|graphql|swagger|openapi)\b/;

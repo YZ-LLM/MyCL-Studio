@@ -17,12 +17,22 @@ describe("specSignalMatches — mekanik faz spec-sinyali (gerçek regex, gölge-
       "kullanıcı arayüzü: giriş sayfası ve panel",
       "add a vue component for the layout",
       "svelte frontend with a button",
+      // CANLI KÖK (cave iter26 /wellcome): İngilizce render/markup terimli UI-bug spec'i eskiden KAÇIYORDU.
+      "the /wellcome page renders almost empty; the ejs view shows no visible dom content",
+      "fix the html/css so the modal renders in the navbar",
+      "the tsx component styling is broken (tailwind stylesheet)",
     ])("UI spec → true: %s", (s) => expect(specSignalMatches(s.toLowerCase(), "has_ui")).toBe(true));
 
     it.each([
       "a command-line tool that parses csv files",
       "python library for matrix math",
       "background worker that processes a queue",
+      // Belirsiz backend/DB terimleri (route/table/endpoint) BİLEREK has_ui'yi tetiklemez (route=backend, table=DB).
+      "a rest api exposing routes that read a users table via endpoints",
+      // MAHKEME MEDIUM: "render"/"modal" ÇIKARILDI (UI-dışı meşru anlam) — İZOLE negatif test (başka UI terimi YOK)
+      // ki gelecekte biri sehven geri eklerse test kırılsın. FP: "render a PDF report" / "modal value of dataset".
+      "a service that will render a pdf report from database rows",
+      "compute the modal value and median of the numeric dataset",
     ])("UI-olmayan spec → false: %s", (s) => expect(specSignalMatches(s.toLowerCase(), "has_ui")).toBe(false));
 
     it("'web' KELİMESİ has_ui'yi TETİKLEMEZ (mahkeme: library'de 'web browsers' → yanlış UI): 'supports web browsers' → false", () => {

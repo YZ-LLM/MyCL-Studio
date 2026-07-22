@@ -94,6 +94,8 @@ export interface RealAppMarkerInputs {
   /** Kullanıcının orijinal şikayeti (repro hedefi); yoksa rootCauseTr'ye düşer (eski state.json). */
   bugReportTr?: string;
   rootCauseTr: string;
+  /** Zaten-İngilizce repro hedefi (tam-develop sentezinde intent_summary) — verilirse runRealAppBugGate çeviriyi ATLAR. */
+  bugIntentEn?: string;
   fixLabel: string;
   checkpointRef?: string;
   iteration: number;
@@ -101,11 +103,46 @@ export interface RealAppMarkerInputs {
 export interface RealAppMarkerFields {
   pending_realapp_verify?: {
     bug_intent_tr: string;
+    bug_intent_en?: string;
     root_cause_tr: string;
     fix_label: string;
     checkpoint_ref?: string;
     created_iter: number;
   };
+}
+
+/** SAF: tam-develop iterasyonu sonunda gerçek-app kapısı SENTEZLENMELİ mi (Faz 0 marker'ı yokken). Trigger:
+ *  UI-sürülebilir proje + Faz 6 insan-incelemesi YAPILMADI (skip) + doğrulanacak niyet var + Playwright açık.
+ *  Neden: bug'lar hep tam-develop'a (Faz 1-17) yönleniyor (Faz 0 debug değil — canlı kanıt), Faz 6 foreign/never-ask'ta
+ *  atlanıyor, Faz 16 placeholder → UI hiç uçtan-uca doğrulanmadan "done" oluyor (cave /wellcome sahte-yeşili). */
+export interface FullDevelopGateSignals {
+  hasPhase0Marker: boolean;
+  projectType: ProjectType | undefined;
+  /** Proje GERÇEKTEN UI dosyaları içeriyor mu (views/*.ejs, .tsx…). project_type=unknown iken sürülebilirlik
+   *  sinyali BU — spec-regex DEĞİL (MAHKEME MEDIUM: yanlış-sınıflı backend spec'te "html/dom" geçince regex
+   *  yanlış-pozitif verip sentezleyip bloklayabiliyordu; gerçek UI-dosyası kontrolü belirsizliği keser). */
+  hasUiFiles: boolean;
+  /** Faz 6 (UI incelemesi) bu iterasyonda İNSAN tarafından incelendi mi (yoksa foreign/never-ask ile atlandı mı). */
+  phase6HumanReviewed: boolean;
+  /** state.intent_summary var mı (doğrulama hedefi). */
+  hasIntent: boolean;
+  playwrightEnabled: boolean;
+}
+/** Sentez sürülebilirliği: web/desktop KESİN; unknown → GERÇEK UI-dosyası var mı (regex değil); diğer → hayır. */
+function isSynthDriveable(pt: ProjectType | undefined, hasUiFiles: boolean): boolean {
+  if (pt === "web" || pt === "desktop") return true;
+  if (pt === undefined || pt === "unknown") return hasUiFiles;
+  return false;
+}
+export function decideFullDevelopGate(s: FullDevelopGateSignals): RealAppGateDecision {
+  if (s.hasPhase0Marker) return { run: false, reason: "Faz 0 marker'ı zaten var — sentez gereksiz" };
+  if (!s.playwrightEnabled) return { run: false, reason: "Playwright kapalı" };
+  if (!isSynthDriveable(s.projectType, s.hasUiFiles)) {
+    return { run: false, reason: `sürülebilir UI değil (tip=${s.projectType ?? "unknown"}, ui-dosya=${s.hasUiFiles})` };
+  }
+  if (s.phase6HumanReviewed) return { run: false, reason: "Faz 6'da insan UI'yi inceledi — ayrıca gerçek-app kapısı gereksiz" };
+  if (!s.hasIntent) return { run: false, reason: "doğrulanacak niyet (intent_summary) yok" };
+  return { run: true, reason: "tam-develop + gerçek UI + Faz 6 insan-incelemesi yok → gerçek-app doğrulaması sentezle" };
 }
 
 /**
@@ -120,6 +157,7 @@ export function buildRealAppVerifyMarker(i: RealAppMarkerInputs): RealAppMarkerF
   return {
     pending_realapp_verify: {
       bug_intent_tr: i.bugReportTr ?? i.rootCauseTr,
+      ...(i.bugIntentEn ? { bug_intent_en: i.bugIntentEn } : {}),
       root_cause_tr: i.rootCauseTr,
       fix_label: i.fixLabel,
       checkpoint_ref: i.checkpointRef,
