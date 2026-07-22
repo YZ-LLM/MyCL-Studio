@@ -5,9 +5,10 @@
 // deseni birebir: buton → korumalı onay askq → pipeline'sız koşum → TR rapor → düşen bölümler
 // iş kuyruğuna fix işi olarak girer (source:"full-test").
 //
-// Bölümler: birim suite (profil `test`), entegrasyon (profil `integration`), E2E (Faz 16
-// altyapısı), rota taraması (MyCL'in kendi Playwright'ı: konsol hataları + ≥400 yanıtlar +
-// boş sayfa), a11y + görsel karşılaştırma (mevcut salt-rapor modülleri, bilgi amaçlı).
+// Bölümler (4 çekirdek — YZLLM 2026-07-22 "sadece bunları yapsın"): birim suite (profil `test`),
+// entegrasyon (profil `integration`), E2E (Faz 16 altyapısı), rota taraması (MyCL'in kendi Playwright'ı:
+// konsol hataları + ≥400 yanıtlar + boş sayfa). a11y + görsel karşılaştırma ÇIKARILDI (bu modüller Faz 6'da
+// yaşamaya devam eder; Full Test butonunda artık koşmaz).
 //
 // ASLA throw etmez; her bölüm ayrı try/catch. Koşulamayan bölüm GÖRÜNÜR "atlandı + neden"
 // (KATI #4 — sessiz yeşil yok). Bu bir GATE DEĞİL: hiçbir fazı bloklamaz; bulgular kuyruğa
@@ -20,10 +21,7 @@ import {
   isSpawnEnvFailure,
   resolveMechanicalCmd,
 } from "./base/mechanical-runner.js";
-import { runAccessibilityScan, formatA11yReport } from "./accessibility-scan.js";
 import {
-  captureAndCompare,
-  formatVisualReport,
   isNearlyBlank,
   routesFromHelpPages,
 } from "./visual-regression.js";
@@ -33,13 +31,13 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { State } from "./types.js";
 
-export type FullTestSectionId = "unit" | "integration" | "e2e" | "route-sweep" | "a11y" | "visual";
+export type FullTestSectionId = "unit" | "integration" | "e2e" | "route-sweep";
 
 export interface FullTestSection {
   id: FullTestSectionId;
   /** Rapor başlığı (TR). */
   label_tr: string;
-  /** pass/fail yalnız ÇEKİRDEK bölümlerde hüküm taşır; a11y/visual salt bilgidir. */
+  /** pass/fail hüküm taşır (4 bölümün hepsi çekirdek); koşulamayan bölüm "skipped" (görünür, sahte-yeşil değil). */
   status: "pass" | "fail" | "skipped";
   /** Satır gövdesi — pass'te kısa özet, fail'de düşenler, skipped'da NEDEN (zorunlu görünürlük). */
   detail_tr: string;
@@ -48,7 +46,7 @@ export interface FullTestSection {
 }
 
 export interface FullTestReport {
-  /** Çekirdek bölümlerin (birim/entegrasyon/E2E/rota) hiçbiri fail değil. a11y/görsel bilgidir, hükme girmez. */
+  /** 4 bölümün (birim/entegrasyon/E2E/rota) hiçbiri fail değil. */
   ok: boolean;
   sections: FullTestSection[];
   durationMs: number;
@@ -62,7 +60,7 @@ export interface FullTestDeps {
   ensureE2E: () => Promise<{ proceed: boolean; reason?: string }>;
 }
 
-/** Çekirdek (hüküm taşıyan) bölümler — a11y/görsel salt bilgi. */
+/** Çekirdek (hüküm taşıyan) bölümler — 4'ünün hepsi (a11y/görsel 2026-07-22'de ÇIKARILDI). */
 const CORE_SECTIONS: ReadonlySet<FullTestSectionId> = new Set<FullTestSectionId>([
   "unit",
   "integration",
@@ -233,7 +231,7 @@ async function sweepRoutes(baseUrl: string, projectRoot: string): Promise<FullTe
 
 /**
  * IMPURE: Full Test koşumu. ASLA throw etmez; her bölüm izole. Dev server kalkmazsa
- * canlı-uygulama bölümleri (E2E/rota/a11y/görsel) GÖRÜNÜR atlanır, birim/entegrasyon yine koşar.
+ * canlı-uygulama bölümleri (E2E/rota) GÖRÜNÜR atlanır, birim/entegrasyon yine koşar.
  */
 export async function runFullTest(state: State, deps: FullTestDeps): Promise<FullTestReport> {
   const t0 = Date.now();
@@ -322,36 +320,12 @@ export async function runFullTest(state: State, deps: FullTestDeps): Promise<Ful
     }
   }
 
-  // 4) Rota taraması + 5) a11y + 6) görsel — canlı uygulama ister.
+  // 4) Rota taraması — canlı uygulama ister (konsol hataları + ≥400 yanıtlar + boş sayfa).
   const baseUrl = `http://localhost:${port ?? 5173}`;
   if (!devOk) {
     sections.push(liveSkip("route-sweep", "Rota taraması"));
-    sections.push(liveSkip("a11y", "Erişilebilirlik (bilgi)"));
-    sections.push(liveSkip("visual", "Görsel karşılaştırma (bilgi)"));
   } else {
     sections.push(await sweepRoutes(baseUrl, state.project_root));
-    try {
-      const a11y = await runAccessibilityScan(baseUrl);
-      sections.push({
-        id: "a11y",
-        label_tr: "Erişilebilirlik (bilgi)",
-        status: a11y.ran ? "pass" : "skipped",
-        detail_tr: formatA11yReport(a11y),
-      });
-    } catch (err) {
-      sections.push({ id: "a11y", label_tr: "Erişilebilirlik (bilgi)", status: "skipped", detail_tr: `taranamadı (${String(err).slice(0, 80)})` });
-    }
-    try {
-      const vis = await captureAndCompare(baseUrl, state.project_root);
-      sections.push({
-        id: "visual",
-        label_tr: "Görsel karşılaştırma (bilgi)",
-        status: vis.ran ? "pass" : "skipped",
-        detail_tr: formatVisualReport(vis),
-      });
-    } catch (err) {
-      sections.push({ id: "visual", label_tr: "Görsel karşılaştırma (bilgi)", status: "skipped", detail_tr: `yapılamadı (${String(err).slice(0, 80)})` });
-    }
   }
 
   const ok = sections.every((s) => !(CORE_SECTIONS.has(s.id) && s.status === "fail"));
