@@ -555,6 +555,8 @@ export type OrchestratorCommand =
    *  (handleAskqAnswer pendingDast branch) çalışır. Buton doğrudan TARAMAZ. */
   | { kind: "run_dast" }
   | { kind: "run_full_test" }
+  /** ⏹ Full Test iptal (2026-07-22): koşan işlevsel doğrulamayı durdur — çalışan özellik bitince kalanlar atlanır. */
+  | { kind: "cancel_full_test" }
   | { kind: "run_maintenance" }
   | { kind: "summarize_chat" }
   | { kind: "set_plan_mode"; data: { enabled: boolean } }

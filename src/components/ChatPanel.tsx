@@ -249,6 +249,8 @@ interface Props {
   onDastClick?: () => void;
   onFullTestClick?: () => void;
   fullTestRunning?: boolean;
+  /** Full Test koşarken "İptal" — işlevsel doğrulama uzun sürebilir; çalışan özellik bitince kalanlar atlanır. */
+  onFullTestCancel?: () => void;
   onMaintenanceClick?: () => void;
   maintenanceRunning?: boolean;
   planMode?: boolean;
@@ -286,6 +288,7 @@ export function ChatPanel({
   dastRunning,
   onFullTestClick,
   fullTestRunning,
+  onFullTestCancel,
   onMaintenanceClick,
   maintenanceRunning,
   planMode,
@@ -770,23 +773,25 @@ export function ChatPanel({
           </button>
         )}
         {/* 🧪 Full Test (2026-07-16): tüm proje testi — buton backend onay askq'ı açar
-            (doğrudan koşmaz). Spinner sticky banner'dan (fullTestRunning) türetilir. */}
+            (doğrudan koşmaz). Spinner sticky banner'dan (fullTestRunning) türetilir.
+            Koşarken buton "İptal"e döner (2026-07-22): işlevsel doğrulama uzun sürebilir → çalışan
+            özellik bitince kalanlar atlanır. onFullTestCancel yoksa eski davranış (koşarken disabled). */}
         {onFullTestClick && (
           <button
             type="button"
             className="intent-pill"
             data-testid="intent-full-test"
-            onClick={onFullTestClick}
-            disabled={fullTestRunning}
+            onClick={fullTestRunning ? onFullTestCancel : onFullTestClick}
+            disabled={fullTestRunning && !onFullTestCancel}
             title={
               fullTestRunning
-                ? "Full Test sürüyor…"
-                : "Tüm projeyi test et: birim + entegrasyon + E2E (Playwright) + rota taraması + erişilebilirlik + görsel — önce açıklar + onay sorar"
+                ? "Full Test sürüyor — iptal etmek için tıkla (çalışan özellik bitince kalanlar atlanır)"
+                : "Tüm projeyi test et: birim + entegrasyon + E2E (Playwright) + rota taraması + işlevsel doğrulama (her özellik gerçekten çalışıyor mu) — önce açıklar + onay sorar"
             }
           >
             <span className="intent-pill-emoji" aria-hidden>🧪</span>
             <span className="intent-pill-label">
-              Full Test
+              {fullTestRunning ? "İptal" : "Full Test"}
               {fullTestRunning && (
                 <span
                   className="agent-busy-spinner"

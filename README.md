@@ -234,11 +234,15 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı
   onaylı; pipeline'da otomatik koşmaz — pentest ağır olduğundan yükü kullanıcı kontrol
   eder). Bulgular önceliklenip otomatik düzeltme iterasyonlarına (Faz 3'ten) dönüşür.
-- **🧪 Full Test butonu** — istediğin an TÜM projeyi test eder (4 bölüm): birim
-  testleri, entegrasyon, Playwright ile uçtan uca (E2E) ve tüm sayfaların taranması
-  (konsol hataları, kırık istekler, boş sayfa). Kullanıcı onaylı; koşulamayan bölüm
-  görünür "atlandı" olur (sessiz yeşil yok). Bulunan sorunlar iş kuyruğuna düzeltme
-  işi olarak eklenir.
+- **🧪 Full Test butonu** — istediğin an TÜM projeyi test eder (5 bölüm): birim
+  testleri, entegrasyon, Playwright ile uçtan uca (E2E), tüm sayfaların taranması
+  (konsol hataları, kırık istekler, boş sayfa) ve **işlevsel doğrulama** — her
+  belgelenmiş özelliğin çalışan uygulamada GERÇEKTEN doğru çalıştığını (yalnız
+  sayfanın açıldığını değil) gerçek, mock'suz Playwright testiyle tek tek kanıtlar.
+  Uzun sürebildiği için buton koşarken **"İptal"e** döner (çalışan özellik bitince
+  kalanlar atlanır). Kullanıcı onaylı; koşulamayan bölüm görünür "atlandı" olur
+  (sessiz yeşil yok; işlevsel doğrulama yalnız CLI/abonelik + UI'lı projede çalışır).
+  Bulunan sorunlar iş kuyruğuna düzeltme işi olarak eklenir.
 - **🔧 Bakım Turu butonu** — güncel olmayan bağımlılıklar raporlanır; güvenliyse
   (kaydedilmemiş değişiklik yoksa) bağımlılıklar mevcut sürüm aralığında
   **muhafazakârca** güncellenir (büyük sürüm atlaması yok; komutlar stack

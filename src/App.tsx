@@ -1083,6 +1083,11 @@ function App() {
     void orch.send({ kind: "run_full_test" });
   };
 
+  // ⏹ Full Test iptal (2026-07-22): işlevsel doğrulama uzun sürebilir → çalışan özellik bitince kalanlar atlanır.
+  const sendCancelFullTest = () => {
+    void orch.send({ kind: "cancel_full_test" });
+  };
+
   // 🔧 Bakım Turu (2026-07-16): buton → backend açıklama+onay askq'ı açar (doğrudan koşmaz).
   const sendRunMaintenance = () => {
     void orch.send({ kind: "run_maintenance" });
@@ -1661,6 +1666,7 @@ function App() {
           dastRunning={mainState.runningBanner?.label === "🛡️ Güvenlik Taraması (DAST)"}
           onFullTestClick={sendRunFullTest}
           fullTestRunning={mainState.runningBanner?.label === "🧪 Full Test"}
+          onFullTestCancel={sendCancelFullTest}
           onMaintenanceClick={sendRunMaintenance}
           maintenanceRunning={mainState.runningBanner?.label === "🔧 Bakım Turu"}
           planMode={planMode}

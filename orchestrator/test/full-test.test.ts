@@ -1,15 +1,22 @@
 // full-test — saf sınıflandırma/rapor/fix-işi testleri + deps-enjekteli koşum (tarayıcı/LLM YOK).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   classifySuiteResult,
   formatFullTestReport,
   fixTasksFromReport,
   runFullTest,
   sweepOneRoute,
+  collectFeatureIntents,
+  verifyDocumentedFeatures,
   type FullTestReport,
 } from "../src/full-test.js";
 import type { State } from "../src/types.js";
+import type { RealAppGateOutcome } from "../src/verify-feature.js";
 import { PNG } from "pngjs";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
 
 describe("classifySuiteResult", () => {
   it("exit 0 → pass", () => {
@@ -62,9 +69,12 @@ describe("runFullTest — deps enjekte, bölüm izolasyonu", () => {
       expect(byId.get(id)?.status).toBe("skipped");
       expect(byId.get(id)?.detail_tr).toContain("dev server");
     }
+    // functional: verifyIntent enjekte edilmedi → görünür atlandı (API-modu davranışı; verdict düşmez)
+    expect(byId.get("functional")?.status).toBe("skipped");
+    expect(byId.get("functional")?.detail_tr).toContain("kapalı");
     // hiçbir çekirdek fail yok → ok (atlanmışlar rapor içinde görünür)
     expect(r.ok).toBe(true);
-    expect(r.sections).toHaveLength(4); // birim/entegrasyon/E2E/rota (a11y+görsel çıkarıldı 2026-07-22)
+    expect(r.sections).toHaveLength(5); // birim/entegrasyon/E2E/rota/işlevsel (a11y+görsel çıkarıldı 2026-07-22)
   });
 
   it("ensureDevServer throw etse bile rapor döner (bölüm izolasyonu)", async () => {
@@ -74,7 +84,7 @@ describe("runFullTest — deps enjekte, bölüm izolasyonu", () => {
       },
       ensureE2E: async () => ({ proceed: true }),
     });
-    expect(r.sections).toHaveLength(4);
+    expect(r.sections).toHaveLength(5);
   });
 });
 
@@ -204,5 +214,262 @@ describe("sweepOneRoute — rota-yerel dinleyiciler (mahkeme bulgusu: geç olay 
     const page = makeFakePage({ shot: pngBuffer(false) });
     const r = await sweepOneRoute(page, BASE, "/bos");
     expect(r.issues.map((i) => i.problem).join()).toContain("neredeyse boş");
+  });
+});
+
+describe("collectFeatureIntents — SAF davranış-kaynağı çıkarımı (help-pages birincil, features fallback)", () => {
+  it("help-pages.json birincil: her sayfa → route + beklenen davranış içeren niyet", () => {
+    const raw = [
+      { route: "/kullanicilar", title_tr: "Kullanıcılar", title_en: "Users", body_tr: "liste", body_en: "shows a searchable user list" },
+      { route: "/profil", title_tr: "Profil", title_en: "Profile", body_tr: "düzenle", body_en: "edit and save profile fields" },
+    ];
+    const r = collectFeatureIntents(raw, "");
+    expect(r.source).toBe("help-pages");
+    expect(r.intents).toHaveLength(2);
+    expect(r.intents[0].label_tr).toBe("Kullanıcılar");
+    expect(r.intents[0].intentEn).toContain("/kullanicilar");
+    expect(r.intents[0].intentEn).toContain("searchable user list");
+    // "yalnız açıldığını değil, GERÇEKTEN çalıştığını" niyeti gömülü (sahte-yeşil önleme)
+    expect(r.intents[0].intentEn.toLowerCase()).toContain("actually works");
+  });
+
+  it("route veya davranış eksik sayfa atlanır (yalnız açılış rota-taramasının işi)", () => {
+    const raw = [
+      { route: "/ok", title_en: "OK", body_en: "does a thing" },
+      { route: "", title_en: "no route", body_en: "x" }, // route yok
+      { route: "/y", title_en: "no body" }, // body yok
+      { title_en: "hiç route yok", body_en: "y" }, // route alanı yok
+    ];
+    const r = collectFeatureIntents(raw, "");
+    expect(r.source).toBe("help-pages");
+    expect(r.intents).toHaveLength(1);
+    expect(r.intents[0].intentEn).toContain("/ok");
+  });
+
+  it("aynı route iki kez → tekilleştirilir", () => {
+    const raw = [
+      { route: "/a", title_en: "A", body_en: "first" },
+      { route: "/a", title_en: "A yine", body_en: "second" },
+    ];
+    expect(collectFeatureIntents(raw, "").intents).toHaveLength(1);
+  });
+
+  it("eski şema toleransı: yalnız _tr alanları varsa TR kullanılır", () => {
+    const raw = [{ route: "/eski", title_tr: "Eski", body_tr: "eski davranış açıklaması" }];
+    const r = collectFeatureIntents(raw, "");
+    expect(r.intents).toHaveLength(1);
+    expect(r.intents[0].label_tr).toBe("Eski");
+    expect(r.intents[0].intentEn).toContain("eski davranış açıklaması");
+  });
+
+  it("help-pages boş → features.md'ye düşer (## başlıklar; # önsöz atlanır)", () => {
+    const md = [
+      "# Uygulama Adı",
+      "Giriş metni — özellik değil.",
+      "",
+      "## Arama",
+      "Kullanıcı arar, sonuç anında filtrelenir.",
+      "",
+      "## Dışa aktarma",
+      "CSV indirir.",
+    ].join("\n");
+    const r = collectFeatureIntents([], md);
+    expect(r.source).toBe("features");
+    expect(r.intents).toHaveLength(2); // önsöz (# ...) atlandı
+    expect(r.intents[0].label_tr).toBe("Arama");
+    expect(r.intents[0].intentEn).toContain("anında filtrelenir");
+    expect(r.intents[1].label_tr).toBe("Dışa aktarma");
+  });
+
+  it("features.md önsözü '#' ile BAŞLAMASA bile özellik sayılmaz (ilk ## öncesi koşulsuz atlanır)", () => {
+    // Müfettiş hipotezi: önsöz '#' başlıksız çok satırlı metinse eski sezgisel onu 'özellik' sanabilirdi.
+    const md = ["Bu uygulama şunu yapar (başlıksız giriş).", "İkinci satır.", "", "## Giriş yap", "Kullanıcı e-posta+parola ile giriş yapar."].join("\n");
+    const r = collectFeatureIntents([], md);
+    expect(r.source).toBe("features");
+    expect(r.intents).toHaveLength(1); // önsöz atlandı, yalnız gerçek ## özellik kaldı
+    expect(r.intents[0].label_tr).toBe("Giriş yap");
+  });
+
+  it("features.md doğrudan ## ile başlarsa (önsöz yok) ilk özellik kaybolmaz", () => {
+    const md = ["## Arama", "Anında filtreler.", "", "## Silme", "Kaydı siler."].join("\n");
+    const r = collectFeatureIntents([], md);
+    expect(r.intents.map((i) => i.label_tr)).toEqual(["Arama", "Silme"]);
+  });
+
+  it("ikisi de boş → source 'none' (çağıran görünür atlar — KATI #4)", () => {
+    expect(collectFeatureIntents(null, "").source).toBe("none");
+    expect(collectFeatureIntents([], "   ").source).toBe("none");
+    expect(collectFeatureIntents("bozuk" as unknown, "").source).toBe("none");
+    expect(collectFeatureIntents([], "").intents).toHaveLength(0);
+  });
+});
+
+describe("verifyDocumentedFeatures — aggregate + iptal + no-source (sahte verifyIntent; Playwright/LLM YOK)", () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "mycl-functional-"));
+    await fs.mkdir(join(root, ".mycl"), { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const st = (r: string) => ({ project_root: r, stack: "node-npm", project_type: "web" }) as unknown as State;
+
+  async function writePages(pages: Array<{ route: string; title_en: string; body_en: string }>): Promise<void> {
+    await fs.writeFile(join(root, ".mycl", "help-pages.json"), JSON.stringify(pages), "utf-8");
+  }
+  // route → sahte outcome eşlemesi ile deterministik verifyIntent
+  function fakeVerify(byRoute: Record<string, RealAppGateOutcome>, calls?: string[]): (i: string) => Promise<RealAppGateOutcome> {
+    return async (intentEn: string) => {
+      const route = intentEn.match(/route (\/[^\s.]+)/)?.[1] ?? "";
+      calls?.push(route);
+      return byRoute[route] ?? { outcome: "cannot_run", reason: "not_found" };
+    };
+  }
+
+  it("verifyIntent enjekte edilmedi → görünür atlanır (API-modu)", async () => {
+    await writePages([{ route: "/a", title_en: "A", body_en: "x" }]);
+    const s = await verifyDocumentedFeatures(st(root), { ensureDevServer: async () => ({ ok: true }), ensureE2E: async () => ({ proceed: true }) });
+    expect(s.status).toBe("skipped");
+    expect(s.detail_tr).toContain("kapalı");
+  });
+
+  it("davranış kaynağı yok → görünür atlanır (KATI #4)", async () => {
+    // .mycl var ama help-pages.json/features.md yok
+    const s = await verifyDocumentedFeatures(st(root), {
+      ensureDevServer: async () => ({ ok: true }),
+      ensureE2E: async () => ({ proceed: true }),
+      verifyIntent: fakeVerify({}),
+    });
+    expect(s.status).toBe("skipped");
+    expect(s.detail_tr).toContain("davranış kaynağı yok");
+  });
+
+  it("hepsi pass → pass (N doğrulandı)", async () => {
+    await writePages([
+      { route: "/a", title_en: "A", body_en: "x" },
+      { route: "/b", title_en: "B", body_en: "y" },
+    ]);
+    const s = await verifyDocumentedFeatures(st(root), {
+      ensureDevServer: async () => ({ ok: true }),
+      ensureE2E: async () => ({ proceed: true }),
+      verifyIntent: fakeVerify({ "/a": { outcome: "pass" }, "/b": { outcome: "pass" } }),
+    });
+    expect(s.status).toBe("pass");
+    expect(s.detail_tr).toContain("2/2");
+  });
+
+  it("karışık: bir fail → fail + YALNIZ düşen özellik failures'ta; cannot_run verdict'i DÜŞÜRMEZ", async () => {
+    await writePages([
+      { route: "/ok", title_en: "OK", body_en: "works" },
+      { route: "/kirik", title_en: "Kirik", body_en: "broken search" },
+      { route: "/belirsiz", title_en: "Belirsiz", body_en: "cant verify" },
+    ]);
+    const s = await verifyDocumentedFeatures(st(root), {
+      ensureDevServer: async () => ({ ok: true }),
+      ensureE2E: async () => ({ proceed: true }),
+      verifyIntent: fakeVerify({
+        "/ok": { outcome: "pass" },
+        "/kirik": { outcome: "fail", failSnippet: "Expected 3 results, got 0\nat search.spec.ts:12" },
+        "/belirsiz": { outcome: "cannot_run", reason: "codegen_failed" },
+      }),
+    });
+    expect(s.status).toBe("fail");
+    expect(s.failures).toHaveLength(1); // yalnız gerçek fail
+    expect(s.failures?.[0]).toContain("Kirik");
+    expect(s.failures?.[0]).toContain("Expected 3 results");
+    expect(s.detail_tr).toContain("1 kanıtlanamadı"); // cannot_run görünür ama fail değil
+  });
+
+  it("hepsi cannot_run → skipped (görünür; sahte-kırmızı DEĞİL — API-modu koruması)", async () => {
+    await writePages([
+      { route: "/a", title_en: "A", body_en: "x" },
+      { route: "/b", title_en: "B", body_en: "y" },
+    ]);
+    const s = await verifyDocumentedFeatures(st(root), {
+      ensureDevServer: async () => ({ ok: true }),
+      ensureE2E: async () => ({ proceed: true }),
+      verifyIntent: fakeVerify({ "/a": { outcome: "cannot_run", reason: "not_found" }, "/b": { outcome: "cannot_run", reason: "codegen_failed" } }),
+    });
+    expect(s.status).toBe("skipped");
+    expect(s.detail_tr).toContain("hiçbir özellik doğrulanamadı");
+  });
+
+  it("iptal: signal k'dan sonra abort → kalanlar atlanır, verifyIntent yalnız k kez çağrılır", async () => {
+    await writePages([
+      { route: "/a", title_en: "A", body_en: "x" },
+      { route: "/b", title_en: "B", body_en: "y" },
+      { route: "/c", title_en: "C", body_en: "z" },
+      { route: "/d", title_en: "D", body_en: "w" },
+    ]);
+    const ac = new AbortController();
+    const calls: string[] = [];
+    const base = fakeVerify({ "/a": { outcome: "pass" }, "/b": { outcome: "pass" }, "/c": { outcome: "pass" }, "/d": { outcome: "pass" } }, calls);
+    const s = await verifyDocumentedFeatures(st(root), {
+      ensureDevServer: async () => ({ ok: true }),
+      ensureE2E: async () => ({ proceed: true }),
+      signal: ac.signal,
+      verifyIntent: async (i) => {
+        const out = await base(i);
+        if (calls.length >= 2) ac.abort(); // 2. özellikten sonra iptal
+        return out;
+      },
+    });
+    expect(calls).toHaveLength(2); // 3. tur öncesi signal.aborted → döngü kırılır
+    expect(s.detail_tr).toContain("iptalle atlandı");
+    // 2 pass var → verdict pass (iptal sahte-kırmızı yapmaz)
+    expect(s.status).toBe("pass");
+  });
+
+  it("onProgress her özellikte i/N ile çağrılır", async () => {
+    await writePages([
+      { route: "/a", title_en: "A", body_en: "x" },
+      { route: "/b", title_en: "B", body_en: "y" },
+    ]);
+    const progress: string[] = [];
+    await verifyDocumentedFeatures(st(root), {
+      ensureDevServer: async () => ({ ok: true }),
+      ensureE2E: async () => ({ proceed: true }),
+      onProgress: (m) => progress.push(m),
+      verifyIntent: fakeVerify({ "/a": { outcome: "pass" }, "/b": { outcome: "pass" } }),
+    });
+    expect(progress).toHaveLength(2);
+    expect(progress[0]).toContain("1/2");
+    expect(progress[1]).toContain("2/2");
+  });
+
+  it("seam istisna verirse: kanıtlanamadı sayılır (bölüm izolasyonu — throw etmez)", async () => {
+    await writePages([{ route: "/patlar", title_en: "P", body_en: "x" }]);
+    const s = await verifyDocumentedFeatures(st(root), {
+      ensureDevServer: async () => ({ ok: true }),
+      ensureE2E: async () => ({ proceed: true }),
+      verifyIntent: async () => {
+        throw new Error("seam patladı");
+      },
+    });
+    expect(s.status).toBe("skipped"); // hiç pass/fail yok → görünür atlama
+    expect(s.detail_tr).toContain("hiçbir özellik doğrulanamadı");
+  });
+});
+
+describe("fixTasksFromReport — işlevsel bölüm çekirdek (düşünce → fix işi)", () => {
+  it("functional fail → 1 fix işi (kanıt: düşen özellikler)", () => {
+    const r: FullTestReport = {
+      ok: false,
+      durationMs: 1000,
+      sections: [
+        {
+          id: "functional",
+          label_tr: "İşlevsel doğrulama",
+          status: "fail",
+          detail_tr: "1 özellik çalışmıyor",
+          failures: ["Arama — Expected 3 results, got 0"],
+        },
+      ],
+    };
+    const tasks = fixTasksFromReport(r);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toContain("İşlevsel doğrulama");
+    expect(tasks[0]).toContain("Arama");
   });
 });

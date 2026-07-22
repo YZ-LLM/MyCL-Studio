@@ -607,76 +607,123 @@ export async function runRealAppBugGate(
   const pre = await assessPhase16Verification(state.project_root);
   const authConfigured = pre.authStatus === "configured";
 
-  const snapshot = await buildCodebaseSnapshot(state.project_root);
-  const slug = slugifyFeature(`bug ${bugEn}`);
+  // ÇEKİRDEK: kurulum-sonrası codegen + guard + koşum ORTAK — verifyIntentAgainstApp'e taşındı (Full Test işlevsel
+  // doğrulama da AYNI çekirdeği kullanır). authConfigured yukarıda hesaplandı → tekrar hesaplanmasın diye geç.
+  const core = await verifyIntentAgainstApp(bugEn, {
+    state,
+    config,
+    authConfigured,
+    context: { rootCause: marker.root_cause_tr, fixLabel: marker.fix_label },
+    slugPrefix: "bug",
+  });
+  return { result: core.result, statePatch: dev.statePatch };
+}
+
+/**
+ * IMPURE ÇEKİRDEK (YZLLM 2026-07-22): bir NİYETİ (bug repro VEYA özellik davranışı) çalışan uygulamada gerçek
+ * (mock'suz) Playwright E2E ile doğrular — dev-server + Playwright'ın ZATEN kurulu olduğunu varsayar (caller
+ * kurar). runRealAppBugGate (bug) ve Full Test işlevsel doğrulama (her özellik) AYNI çekirdeği kullanır → tek
+ * kaynak. `emitChatMessage` ÇAĞIRMAZ (Full Test emitter-bağımsız; ilerleme onProgress'ten gider). snapshot/
+ * authConfigured verilmezse hesaplar (Full Test bir kez üretip N kez paylaşır → maliyet). signal ile özellikler-
+ * arası iptal (codegen/test öncesi kontrol). Dönüş cannot_run nedenleri: codegen_failed | not_found | error(abort).
+ */
+export async function verifyIntentAgainstApp(
+  intentEn: string,
+  deps: {
+    state: State;
+    config: MyclConfig;
+    snapshot?: string;
+    authConfigured?: boolean;
+    context?: { rootCause?: string; fixLabel?: string };
+    slugPrefix?: string;
+    signal?: AbortSignal;
+  },
+): Promise<{ result: RealAppGateOutcome }> {
+  const { state, config, signal } = deps;
+  const aborted = (): boolean => signal?.aborted === true;
+  if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
+
+  const snapshot = deps.snapshot ?? (await buildCodebaseSnapshot(state.project_root));
+  const authConfigured =
+    deps.authConfigured ??
+    (await assessPhase16Verification(state.project_root)).authStatus === "configured";
+  const slug = slugifyFeature(`${deps.slugPrefix ?? "verify"} ${intentEn}`);
   const specRel = join("tests", `${slug}.spec.ts`);
   const specAbs = join(state.project_root, specRel);
   const toolCtx: ToolContext = { project_root: state.project_root };
   const modelId = config.selected_models.main;
   const apiKey = config.api_keys.main;
-  const sysPrompt = buildBugGateSystemPrompt(bugEn, slug, snapshot, authConfigured, {
-    rootCause: marker.root_cause_tr,
-    fixLabel: marker.fix_label,
-  });
+  const sysPrompt = buildBugGateSystemPrompt(intentEn, slug, snapshot, authConfigured, deps.context ?? {});
 
   // Test üretimi
   await clearHistory(state.project_root, VERIFY_PHASE_ID);
   const codegenOutcome = await runCodegen(
     sysPrompt,
-    `Write the Playwright E2E test that reproduces this bug scenario and proves it is fixed: ${bugEn}. Target file: ${specRel}.`,
+    `Write the Playwright E2E test that reproduces this scenario and proves the behavior is correct: ${intentEn}. Target file: ${specRel}.`,
     { state, config, modelId, apiKey, toolCtx },
   );
   if (codegenOutcome.kind === "failed" || codegenOutcome.kind === "aborted") {
-    return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+    return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
   }
   if (!(await fileExists(specAbs))) {
     // Ajan senaryoyu bulamadı/üretemedi → dürüst "kanıtlayamadım" (sahte-yeşil DEĞİL).
-    return { result: { outcome: "cannot_run", reason: "not_found" }, statePatch: dev.statePatch };
+    return { result: { outcome: "cannot_run", reason: "not_found" } };
   }
 
   // Mock-guard (2 deneme) — mock'lu test gerçek doğrulama değil.
   let specContent = await safeRead(specAbs);
   if (containsMocking(specContent)) {
+    if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
     await clearHistory(state.project_root, VERIFY_PHASE_ID);
     await runCodegen(
       sysPrompt +
-        `\n\nYOUR PREVIOUS ATTEMPT USED MOCKING — FORBIDDEN. Rewrite ${specRel} with NO mocking: reproduce the scenario against the real backend and assert the corrected behavior.`,
-      `Rewrite ${specRel} — NO mocking, real backend reproduction of: ${bugEn}.`,
+        `\n\nYOUR PREVIOUS ATTEMPT USED MOCKING — FORBIDDEN. Rewrite ${specRel} with NO mocking: reproduce the scenario against the real backend and assert the correct behavior.`,
+      `Rewrite ${specRel} — NO mocking, real backend reproduction of: ${intentEn}.`,
       { state, config, modelId, apiKey, toolCtx },
     );
     specContent = await safeRead(specAbs);
     if (containsMocking(specContent)) {
-      return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+      return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
     }
   }
 
   // Substance-guard (MAHKEME BULGU 2, tek deneme): boş/atlanmış test yeşil geçse de HİÇBİR ŞEY doğrulamaz →
-  // sahte-pass. Assertion içeren gerçek bir test iste; hâlâ vacuous ise → cannot_run (doğrulayamadım, done değil).
+  // sahte-pass. Assertion içeren gerçek bir test iste; hâlâ vacuous ise → cannot_run (doğrulayamadım).
   if (!containsMocking(specContent) && !hasSubstantiveTest(specContent)) {
+    if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
     await clearHistory(state.project_root, VERIFY_PHASE_ID);
     await runCodegen(
       sysPrompt +
-        `\n\nYOUR PREVIOUS ATTEMPT WAS VACUOUS — it had no real assertion (missing expect(...) or used test.skip/test.fixme). A test that asserts nothing proves nothing. Rewrite ${specRel} so it reproduces the reported scenario and asserts the CORRECT behavior with at least one concrete expect(...). No skipped tests.`,
-      `Rewrite ${specRel} with a real assertion (expect) reproducing: ${bugEn}.`,
+        `\n\nYOUR PREVIOUS ATTEMPT WAS VACUOUS — it had no real assertion (missing expect(...) or used test.skip/test.fixme). A test that asserts nothing proves nothing. Rewrite ${specRel} so it reproduces the scenario and asserts the CORRECT behavior with at least one concrete expect(...). No skipped tests.`,
+      `Rewrite ${specRel} with a real assertion (expect) reproducing: ${intentEn}.`,
       { state, config, modelId, apiKey, toolCtx },
     );
     specContent = await safeRead(specAbs);
     if (containsMocking(specContent) || !hasSubstantiveTest(specContent)) {
-      return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+      return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
     }
   }
 
   // Çalıştır (+ tek tamir denemesi: selector/assertion gerçek uygulamaya göre)
+  if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
   let run = await runGeneratedTest(state.project_root, specRel);
-  if (!run.ok) {
+  if (!run.ok && !aborted()) {
     await clearHistory(state.project_root, VERIFY_PHASE_ID);
     await runCodegen(
       sysPrompt +
-        `\n\nPREVIOUS RUN OUTPUT:\n<<<\n${run.output.slice(-1500)}\n>>>\nFix ONLY selectors/assertions/navigation that are wrong about the app — do NOT weaken the correctness assertion. If the BUG itself is still present (not a test error), keep the test correct so it reports the real failure.`,
-      `Fix the test at ${specRel} (selectors only, keep bug-assertion intact) for: ${bugEn}.`,
+        `\n\nPREVIOUS RUN OUTPUT:\n<<<\n${run.output.slice(-1500)}\n>>>\nFix ONLY selectors/assertions/navigation that are wrong about the app — do NOT weaken the correctness assertion. If the behavior itself is still wrong (not a test error), keep the test correct so it reports the real failure.`,
+      `Fix the test at ${specRel} (selectors only, keep the correctness assertion intact) for: ${intentEn}.`,
       { state, config, modelId, apiKey, toolCtx },
     );
     run = await runGeneratedTest(state.project_root, specRel);
+  }
+
+  // MAHKEME (2026-07-22, sahte-yeşil merceği): iptal ORTADA geldiyse (kullanıcı Full Test'i durdurdu) ve koşum
+  // başarısız bittiyse, yukarıdaki tek tamir denemesi `!aborted()` yüzünden ATLANDI → bu bir GERÇEK bug değil.
+  // `fail` dönersek kullanıcının KENDİ iptali özelliği "bozuk" damgalar + sahte fix işi üretir (sahte-kırmızı,
+  // Ümit'in nefret ettiği yanlış-pozitif). Dürüst "kanıtlayamadım" → cannot_run (verdict'i düşürmez).
+  if (!run.ok && aborted()) {
+    return { result: { outcome: "cannot_run", reason: "error" } };
   }
 
   if (run.ok) {
@@ -684,14 +731,11 @@ export async function runRealAppBugGate(
     // Final spec'i tazeleyip mock/substance'ı SON KEZ doğrula; kırıksa pass DEĞİL cannot_run (dürüst kanıtlayamadım).
     const finalSpec = await safeRead(specAbs);
     if (containsMocking(finalSpec) || !hasSubstantiveTest(finalSpec)) {
-      return { result: { outcome: "cannot_run", reason: "codegen_failed" }, statePatch: dev.statePatch };
+      return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
     }
-    return { result: { outcome: "pass" }, statePatch: dev.statePatch };
+    return { result: { outcome: "pass" } };
   }
-  return {
-    result: { outcome: "fail", failSnippet: extractFailSnippet(run.output) },
-    statePatch: dev.statePatch,
-  };
+  return { result: { outcome: "fail", failSnippet: extractFailSnippet(run.output) } };
 }
 
 interface CodegenDeps {

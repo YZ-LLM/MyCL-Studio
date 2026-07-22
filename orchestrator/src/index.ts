@@ -54,7 +54,7 @@ import {
   wasPipelineCompleted,
 } from "./audit.js";
 import { computeVerdict, eventsSince, type HarnessVerdict } from "./harness-verdict.js";
-import { classifyOpenedFolder, hasDeliverable } from "./phase-1-codebase-probe.js";
+import { classifyOpenedFolder, hasDeliverable, buildCodebaseSnapshot } from "./phase-1-codebase-probe.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import {
   detectInterruptedPhase2To9Pure,
@@ -177,7 +177,7 @@ import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller } from "./phase-5.js";
 import { Phase6Controller } from "./phase-6.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
-import { runFullTest, formatFullTestReport, fixTasksFromReport } from "./full-test.js";
+import { runFullTest, formatFullTestReport, fixTasksFromReport, type FullTestDeps } from "./full-test.js";
 import { runMaintenance, formatMaintenanceReport } from "./maintenance.js";
 import {
   formatPlanTR,
@@ -246,7 +246,7 @@ import {
   ensurePlaywrightInstalled,
   ensurePlaywrightScaffold,
 } from "./playwright-setup.js";
-import { verifyFeatureHandler, runRealAppBugGate, type RealAppGateOutcome } from "./verify-feature.js";
+import { verifyFeatureHandler, runRealAppBugGate, verifyIntentAgainstApp, type RealAppGateOutcome } from "./verify-feature.js";
 import {
   blindspotLensDecision,
   decisionIsConsequential,
@@ -331,6 +331,9 @@ interface OrchestratorRuntime {
   pendingDast: { askqId: string } | null;
   /** 🧪 Full Test onayı bekliyor (2026-07-16) — DAST deseni: askq onaysız koşum imkânsız. */
   pendingFullTest: { askqId: string } | null;
+  /** 🧪 Full Test KOŞARKEN iptal denetleyicisi (2026-07-22) — faz controller'ından AYRI (Full Test lock
+   *  tutmaz; cancel_full_test IPC concurrent çalışıp bunu abort eder). Koşum-dışı null. */
+  fullTestAbort: AbortController | null;
   /** 🔧 Bakım Turu onayı bekliyor (2026-07-16) — aynı desen (bağımlılık YAZAR → onay şart). */
   pendingMaintenance: { askqId: string } | null;
   /** 🗺️ Plan onayı bekliyor (2026-07-16) — plan_approve_* korumalı askq + plan gövdesi. */
@@ -372,6 +375,7 @@ const runtime: OrchestratorRuntime = {
   findingQueue: null,
   pendingDast: null,
   pendingFullTest: null,
+  fullTestAbort: null,
   pendingMaintenance: null,
   pendingPlan: null,
   pendingPlanEdit: null,
@@ -388,6 +392,48 @@ const DAST_RUNNING_LABEL = "🛡️ Güvenlik Taraması (DAST)";
 const FULL_TEST_START_LABEL = "🧪 Başlat";
 const FULL_TEST_RUNNING_LABEL = "🧪 Full Test";
 const MAINTENANCE_START_LABEL = "🔧 Başlat";
+
+/**
+ * Full Test İŞLEVSEL DOĞRULAMA deps'i (2026-07-22) — her belgelenmiş özelliği çalışan app'te gerçek E2E ile
+ * doğrulayan seam. snapshot + authConfigured BİR KEZ (lazy, promise-cache) hesaplanıp N özellik arası paylaşılır
+ * (maliyet). Dev-server + Playwright scaffold'unu runFullTest'in ensureE2E'si kurar (verifyIntentAgainstApp hazır
+ * varsayar). Full Test askq VE bakım turu AYNI helper'ı kullanır → tek kaynak. Seam beklenmedik istisna verirse
+ * cannot_run("error") → verdict'i düşürMEZ (verifyDocumentedFeatures "kanıtlanamadı" sayar).
+ */
+function makeFunctionalVerifyDeps(
+  st: State,
+  ac: AbortController,
+  runningLabel: string,
+): Pick<FullTestDeps, "signal" | "onProgress" | "verifyIntent"> {
+  let snapshotP: Promise<string> | null = null;
+  let authP: Promise<boolean> | null = null;
+  return {
+    signal: ac.signal,
+    // Banner LABEL'ı sabit tutulur (akışa göre: Full Test veya Bakım) — yalnız detay "i/N: özellik" değişir.
+    // Yoksa bakım turunda banner Full Test'e kayıp maintenanceRunning'i düşürür (buton koşarken re-enable → regresyon).
+    onProgress: (m: string) => emitPhaseRunning(runningLabel, m),
+    verifyIntent: async (intentEn, opts): Promise<RealAppGateOutcome> => {
+      if (!runtime.config) return { outcome: "cannot_run", reason: "error" };
+      try {
+        snapshotP ??= buildCodebaseSnapshot(st.project_root);
+        authP ??= assessPhase16Verification(st.project_root).then((v) => v.authStatus === "configured");
+        const [snapshot, authConfigured] = await Promise.all([snapshotP, authP]);
+        const r = await verifyIntentAgainstApp(intentEn, {
+          state: st,
+          config: runtime.config,
+          snapshot,
+          authConfigured,
+          slugPrefix: "verify",
+          signal: opts?.signal ?? ac.signal,
+        });
+        return r.result;
+      } catch (err) {
+        log.warn("full-test", "işlevsel doğrulama seam istisna verdi — cannot_run(error)", { error: String(err) });
+        return { outcome: "cannot_run", reason: "error" };
+      }
+    },
+  };
+}
 const MAINTENANCE_RUNNING_LABEL = "🔧 Bakım Turu";
 
 /**
@@ -7094,14 +7140,26 @@ async function handleRunFullTestRequest(): Promise<void> {
     emitChatMessage("system", "Zaten bir Full Test onayı bekleniyor.");
     return;
   }
+  // MAHKEME (2026-07-22, iptal eşzamanlılığı merceği): Full Test ve Bakım Turu AYNI `runtime.fullTestAbort` +
+  // tek global banner slotunu paylaşır → ikisi aynı anda koşarsa iptal düğmesi sessizce işlevsiz kalır ve banner
+  // "boşta" derken arka planda iş sürer. Karşılıklı dışlama kaynağında kurulur (korumadan önce engelle — KATI #6).
+  if (runtime.fullTestAbort) {
+    emitChatMessage("system", "Şu an bir Full Test / Bakım Turu çalışıyor — bitmesini bekle ya da 'İptal'e bas, sonra yenisini başlat.");
+    return;
+  }
+  if (runtime.pendingMaintenance) {
+    emitChatMessage("system", "Bir bakım turu onayı bekleniyor — önce onu yanıtla, sonra Full Test'i başlat.");
+    return;
+  }
   const askqId = `full_test_confirm_${randomUUID()}`;
   runtime.pendingFullTest = { askqId };
   emitChatMessage(
     "assistant",
     "🧪 **Full Test**: tüm proje baştan sona test edilir — birim testleri, entegrasyon, " +
       "Playwright ile uçtan uca (E2E), tüm sayfaların taranması (konsol hataları, kırık istekler, " +
-      "boş sayfa), erişilebilirlik ve görsel karşılaştırma. Uygulama gerekirse başlatılır. " +
-      "Birkaç dakika sürebilir; bulunan sorunlar iş kuyruğuna düzeltme işi olarak eklenir. Başlatayım mı?",
+      "boş sayfa) ve **işlevsel doğrulama** (her belgelenmiş özelliğin gerçekten çalıştığı, mock'suz E2E ile). " +
+      "Uygulama gerekirse başlatılır. Uzun sürebilir; koşarken buton **'İptal'e** döner. Bulunan sorunlar iş " +
+      "kuyruğuna düzeltme işi olarak eklenir. Başlatayım mı?",
   );
   emitAskq({
     id: askqId,
@@ -7133,6 +7191,16 @@ async function handleRunMaintenanceRequest(): Promise<void> {
   }
   if (runtime.pendingMaintenance) {
     emitChatMessage("system", "Zaten bir bakım turu onayı bekleniyor.");
+    return;
+  }
+  // MAHKEME (2026-07-22, iptal eşzamanlılığı): Bakım Turu da Full Test ile aynı `fullTestAbort`/banner slotunu
+  // paylaşır (bakım içinde Full Test koşar) → karşılıklı dışlama (Full Test handler ile simetrik).
+  if (runtime.fullTestAbort) {
+    emitChatMessage("system", "Şu an bir Full Test / Bakım Turu çalışıyor — bitmesini bekle ya da 'İptal'e bas, sonra yenisini başlat.");
+    return;
+  }
+  if (runtime.pendingFullTest) {
+    emitChatMessage("system", "Bir Full Test onayı bekleniyor — önce onu yanıtla, sonra bakım turunu başlat.");
     return;
   }
   const askqId = `maintenance_confirm_${randomUUID()}`;
@@ -7406,7 +7474,11 @@ export async function handleAskqAnswer(
       return;
     }
     const st = runtime.state;
-    emitPhaseRunning(FULL_TEST_RUNNING_LABEL, "birim + entegrasyon + E2E + rota taraması");
+    emitPhaseRunning(FULL_TEST_RUNNING_LABEL, "birim + entegrasyon + E2E + rota + işlevsel doğrulama");
+    // İptal denetleyicisi — Full Test lock TUTMAZ (handleAskqAnswer yolu); cancel_full_test IPC concurrent
+    // çalışıp bunu abort eder. Faz controller'ından AYRI (o Full Test'e erişmez).
+    const ac = new AbortController();
+    runtime.fullTestAbort = ac;
     try {
       await appendAuditModule(st.project_root, {
         ts: Date.now(),
@@ -7421,6 +7493,7 @@ export async function handleAskqAnswer(
           return { ok: dev.ok, port: dev.port };
         },
         ensureE2E: () => ensurePlaywrightForPhase16(st),
+        ...makeFunctionalVerifyDeps(st, ac, FULL_TEST_RUNNING_LABEL),
       });
       emitChatMessage(report.ok ? "system" : "error", formatFullTestReport(report));
       await appendAuditModule(st.project_root, {
@@ -7437,6 +7510,7 @@ export async function handleAskqAnswer(
     } catch (err) {
       emitChatMessage("error", `Full Test başarısız: ${String(err).slice(0, 200)}`);
     } finally {
+      runtime.fullTestAbort = null;
       emitPhaseIdle();
     }
     return;
@@ -7515,6 +7589,9 @@ export async function handleAskqAnswer(
     }
     const st = runtime.state;
     emitPhaseRunning(MAINTENANCE_RUNNING_LABEL, "güncelle + tara + Full Test");
+    // İptal denetleyicisi — bakımın Full Test alt-adımı (işlevsel doğrulama) da iptal edilebilir (Full Test ile aynı seam).
+    const ac = new AbortController();
+    runtime.fullTestAbort = ac;
     try {
       await appendAuditModule(st.project_root, {
         ts: Date.now(),
@@ -7529,6 +7606,7 @@ export async function handleAskqAnswer(
           return { ok: dev.ok, port: dev.port };
         },
         ensureE2E: () => ensurePlaywrightForPhase16(st),
+        ...makeFunctionalVerifyDeps(st, ac, MAINTENANCE_RUNNING_LABEL),
       });
       const ok = report.fullTest.ok && !report.auditRed && report.sastFindings.length === 0;
       emitChatMessage(
@@ -7563,6 +7641,7 @@ export async function handleAskqAnswer(
     } catch (err) {
       emitChatMessage("error", `Bakım turu başarısız: ${String(err).slice(0, 200)}`);
     } finally {
+      runtime.fullTestAbort = null;
       emitPhaseIdle();
     }
     return;
@@ -9082,6 +9161,15 @@ ipcRouter.register("askq_answer", async (data: unknown) => {
 // pendingFullTest dalında (DAST deseni — onay baypası imkânsız).
 ipcRouter.register("run_full_test", async () => {
   await handleRunFullTestRequest();
+});
+// ⏹ Full Test iptal (2026-07-22): işlevsel doğrulama uzun sürebilir → kullanıcı "İptal"e basınca
+// çalışan özellik bitince kalan özellikler atlanır. Full Test lock TUTMAZ + IPC dispatch await'siz
+// (app.ts) → bu handler Full Test askıdayken concurrent çalışıp AbortController'ı tetikler.
+ipcRouter.register("cancel_full_test", async () => {
+  if (runtime.fullTestAbort && !runtime.fullTestAbort.signal.aborted) {
+    runtime.fullTestAbort.abort();
+    emitChatMessage("system", "⏹ Full Test iptal ediliyor — çalışan özellik bitince kalanlar atlanacak.");
+  }
 });
 // 🔧 Bakım Turu (2026-07-16): aynı desen — buton onay askq'ı açar.
 ipcRouter.register("run_maintenance", async () => {

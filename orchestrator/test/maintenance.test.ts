@@ -23,8 +23,8 @@ describe("runMaintenance — bölüm izolasyonu + görünür atlama", () => {
     expect(byId.get("outdated")?.detail_tr).toContain("desteklenmiyor");
     expect(byId.get("update")?.status).toBe("skipped");
     // Full Test HER ZAMAN koşar (kullanıcının açık şartı) — burada bölümleri atlanmış da olsa rapor var.
-    // 4 bölüm: birim/entegrasyon/E2E/rota (a11y+görsel 2026-07-22'de çıkarıldı).
-    expect(r.fullTest.sections).toHaveLength(4);
+    // 5 bölüm: birim/entegrasyon/E2E/rota/işlevsel (a11y+görsel 2026-07-22'de çıkarıldı; işlevsel eklendi).
+    expect(r.fullTest.sections).toHaveLength(5);
     expect(r.checkpointRef).toBeNull();
   });
 });

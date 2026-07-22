@@ -30,8 +30,11 @@ import { log } from "./logger.js";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { State } from "./types.js";
+// Yalnız TİP importu (runtime döngü yok — verify-feature full-test'i import etmez; tип erasure).
+// İşlevsel bölümün gerçek koşumu deps.verifyIntent seam'inden gelir (index.ts enjekte eder).
+import type { RealAppGateOutcome } from "./verify-feature.js";
 
-export type FullTestSectionId = "unit" | "integration" | "e2e" | "route-sweep";
+export type FullTestSectionId = "unit" | "integration" | "e2e" | "route-sweep" | "functional";
 
 export interface FullTestSection {
   id: FullTestSectionId;
@@ -46,7 +49,7 @@ export interface FullTestSection {
 }
 
 export interface FullTestReport {
-  /** 4 bölümün (birim/entegrasyon/E2E/rota) hiçbiri fail değil. */
+  /** Çekirdek bölümlerin (birim/entegrasyon/E2E/rota/işlevsel) hiçbiri fail değil. */
   ok: boolean;
   sections: FullTestSection[];
   durationMs: number;
@@ -58,15 +61,125 @@ export interface FullTestDeps {
   ensureDevServer: () => Promise<{ ok: boolean; port?: number }>;
   /** Playwright kurulum + scaffold ön adımı (ensurePlaywrightForPhase16 sarmalayıcısı). */
   ensureE2E: () => Promise<{ proceed: boolean; reason?: string }>;
+  /** İlerleme geri-bildirimi (banner "i/N: <özellik>" + sohbet ekmek-kırıntısı). Yoksa sessiz. */
+  onProgress?: (msg: string) => void;
+  /** İptal sinyali — kullanıcı "İptal"e basınca özellikler arası döngü durur (kalanlar görünür atlanır). */
+  signal?: AbortSignal;
+  /** İŞLEVSEL DOĞRULAMA seam'i — bir niyeti çalışan app'te gerçek (mock'suz) E2E ile doğrular.
+   *  index.ts verifyIntentAgainstApp'i enjekte eder; YOKSA işlevsel bölüm görünür atlanır (geriye uyumlu). */
+  verifyIntent?: (intentEn: string, opts?: { signal?: AbortSignal }) => Promise<RealAppGateOutcome>;
 }
 
-/** Çekirdek (hüküm taşıyan) bölümler — 4'ünün hepsi (a11y/görsel 2026-07-22'de ÇIKARILDI). */
+/** Çekirdek (hüküm taşıyan) bölümler — birim/entegrasyon/E2E/rota + işlevsel (a11y/görsel 2026-07-22'de ÇIKARILDI). */
 const CORE_SECTIONS: ReadonlySet<FullTestSectionId> = new Set<FullTestSectionId>([
   "unit",
   "integration",
   "e2e",
   "route-sweep",
+  "functional",
 ]);
+
+/** İşlevsel doğrulama için bir belgelenmiş özellik → codegen niyeti. */
+export interface FeatureIntent {
+  /** Rapor/ilerleme başlığı (TR). */
+  label_tr: string;
+  /** Codegen'e giden İngilizce niyet (route + beklenen davranış). */
+  intentEn: string;
+}
+
+/** collectFeatureIntents çıktısı — niyetler + hangi kaynaktan geldiği (görünür atlama için). */
+export interface FeatureIntentSource {
+  intents: FeatureIntent[];
+  source: "help-pages" | "features" | "none";
+}
+
+/** SAF: davranış kaynaklarından işlevsel-doğrulama niyetleri çıkar (test edilebilir; IO yok).
+ *  Birincil kaynak `.mycl/help-pages.json` (route + beklenen davranış); yoksa `.mycl/features.md`
+ *  (## başlık bloklarına bölünür). İkisi de boşsa source="none" → çağıran görünür atlar (KATI #4). */
+export function collectFeatureIntents(helpPagesRaw: unknown, featuresMd: string): FeatureIntentSource {
+  // Birincil: help-pages.json — her sayfanın body'si = beklenen davranış (Full Test bugüne dek ATIYORDU).
+  if (Array.isArray(helpPagesRaw)) {
+    const intents: FeatureIntent[] = [];
+    const seen = new Set<string>();
+    for (const p of helpPagesRaw) {
+      const o = p as {
+        route?: unknown;
+        title_tr?: unknown;
+        title_en?: unknown;
+        body_tr?: unknown;
+        body_en?: unknown;
+      };
+      const route = typeof o?.route === "string" && o.route.startsWith("/") ? o.route : "";
+      const titleEn =
+        typeof o?.title_en === "string" && o.title_en.trim()
+          ? o.title_en.trim()
+          : typeof o?.title_tr === "string"
+            ? o.title_tr.trim()
+            : "";
+      const bodyEn =
+        typeof o?.body_en === "string" && o.body_en.trim()
+          ? o.body_en.trim()
+          : typeof o?.body_tr === "string"
+            ? o.body_tr.trim()
+            : "";
+      if (!route || !bodyEn) continue; // route + davranış İKİSİ de şart (yalnız açılış rota-taramasının işi)
+      if (seen.has(route)) continue;
+      seen.add(route);
+      const label_tr =
+        typeof o?.title_tr === "string" && o.title_tr.trim() ? o.title_tr.trim() : titleEn || route;
+      const intentEn = `Page "${titleEn || route}" at route ${route}. Expected behavior (verify this actually WORKS, not just that the page loads): ${bodyEn}`;
+      intents.push({ label_tr, intentEn });
+    }
+    if (intents.length > 0) return { intents, source: "help-pages" };
+  }
+
+  // Fallback: features.md — ## başlıklarına böl (What/Where/Behavior gövdesi = niyet).
+  const md = (featuresMd ?? "").trim();
+  if (md) {
+    const intents: FeatureIntent[] = [];
+    // split[0] = ilk `##` ÖNCESİ gelen her şey (başlık/giriş önsözü) → TANIM GEREĞİ özellik değil, koşulsuz atla.
+    // (MAHKEME 2026-07-22: eski `startsWith("#")` sezgisi, önsöz `#` ile başlamazsa onu yanlışlıkla özellik sayardı.)
+    const parts = md.split(/^##\s+/m).slice(1);
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const nl = trimmed.indexOf("\n");
+      const heading = (nl >= 0 ? trimmed.slice(0, nl) : trimmed).trim();
+      const body = (nl >= 0 ? trimmed.slice(nl + 1) : "").trim();
+      if (!heading || !body) continue;
+      intents.push({
+        label_tr: heading,
+        intentEn: `Feature "${heading}". Expected behavior (verify this actually WORKS, not just that the page loads): ${body}`,
+      });
+    }
+    if (intents.length > 0) return { intents, source: "features" };
+  }
+
+  return { intents: [], source: "none" };
+}
+
+/** IO: davranış kaynaklarını oku (.mycl/help-pages.json + features.md; ENOENT tolere) → collectFeatureIntents. */
+async function readFeatureIntents(projectRoot: string): Promise<FeatureIntentSource> {
+  let helpRaw: unknown = null;
+  try {
+    helpRaw = JSON.parse(await fs.readFile(join(projectRoot, ".mycl", "help-pages.json"), "utf-8"));
+  } catch (e) {
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.warn("full-test", "help-pages.json okunamadı (işlevsel doğrulama) — features.md'ye düşülüyor", {
+        error: String(e),
+      });
+    }
+  }
+  let featuresMd = "";
+  try {
+    featuresMd = await fs.readFile(join(projectRoot, ".mycl", "features.md"), "utf-8");
+  } catch (e) {
+    if ((e as { code?: string }).code !== "ENOENT") {
+      log.warn("full-test", "features.md okunamadı (işlevsel doğrulama)", { error: String(e) });
+    }
+  }
+  return collectFeatureIntents(helpRaw, featuresMd);
+}
 
 const ROUTE_TIMEOUT_MS = 8_000;
 const ROUTE_BUDGET_MS = 45_000;
@@ -230,8 +343,125 @@ async function sweepRoutes(baseUrl: string, projectRoot: string): Promise<FullTe
 }
 
 /**
+ * IMPURE: İŞLEVSEL DOĞRULAMA — her belgelenmiş özelliğin çalışan uygulamada GERÇEKTEN doğru çalıştığını
+ * (yalnız sayfanın açıldığını DEĞİL) gerçek (mock'suz) E2E ile doğrular. deps.verifyIntent yoksa görünür
+ * atlanır (API-modu/no-UI). SIRALI koşar (paylaşılan history slotu 16 → paralelleşemez); özellikler arası
+ * iptal edilebilir (signal). Aggregate → TEK bölüm: herhangi fail → fail; fail yok + pass var → pass; hiç
+ * pass/fail yok (hepsi cannot_run/iptal) → skipped (görünür). `cannot_run` verdict'i DÜŞÜRMEZ (yalnız gerçek
+ * fail) — yoksa kaynak-yok/API-modu yanlış ❌ üretir. Test'te sahte verifyIntent ile doğrudan çağrılır. */
+export async function verifyDocumentedFeatures(state: State, deps: FullTestDeps): Promise<FullTestSection> {
+  const id: FullTestSectionId = "functional";
+  const label_tr = "İşlevsel doğrulama";
+  const verifyIntent = deps.verifyIntent;
+  if (!verifyIntent) {
+    return {
+      id,
+      label_tr,
+      status: "skipped",
+      detail_tr:
+        "işlevsel doğrulama bu modda kapalı (yalnız CLI/abonelik + UI projesinde çalışır) — açılış/rota taraması yapıldı",
+    };
+  }
+
+  let src: FeatureIntentSource;
+  try {
+    src = await readFeatureIntents(state.project_root);
+  } catch (err) {
+    return {
+      id,
+      label_tr,
+      status: "skipped",
+      detail_tr: `davranış kaynağı okunamadı (${String(err).slice(0, 80)}) — açılış/rota taraması yapıldı`,
+    };
+  }
+  if (src.source === "none" || src.intents.length === 0) {
+    return {
+      id,
+      label_tr,
+      status: "skipped",
+      detail_tr:
+        "davranış kaynağı yok (.mycl/help-pages.json veya features.md — yalnız CLI/abonelik + UI modunda üretilir); yalnız açılış/rota taraması yapıldı",
+    };
+  }
+
+  const total = src.intents.length;
+  const passed: string[] = [];
+  const failures: string[] = [];
+  const couldNotRun: string[] = [];
+  let cancelled = 0;
+
+  for (let i = 0; i < total; i++) {
+    const intent = src.intents[i];
+    if (deps.signal?.aborted) {
+      cancelled = total - i; // kalan tüm özellikler iptalle atlandı (görünür)
+      break;
+    }
+    deps.onProgress?.(`İşlevsel doğrulama ${i + 1}/${total}: ${intent.label_tr}`);
+    let outcome: RealAppGateOutcome;
+    try {
+      outcome = await verifyIntent(intent.intentEn, { signal: deps.signal });
+    } catch (err) {
+      // Seam beklenmedik istisna → "kanıtlayamadım" say (verdict'i DÜŞÜRMEZ; bölüm izolasyonu — runFullTest throw etmez).
+      log.warn("full-test", "işlevsel doğrulama özelliği patladı — kanıtlanamadı sayıldı", {
+        feature: intent.label_tr,
+        error: String(err),
+      });
+      couldNotRun.push(intent.label_tr);
+      continue;
+    }
+    if (outcome.outcome === "fail") {
+      const firstLine =
+        outcome.failSnippet
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean)[0] ?? "";
+      failures.push(`${intent.label_tr}${firstLine ? ` — ${firstLine.slice(0, 160)}` : ""}`);
+    } else if (outcome.outcome === "pass") {
+      passed.push(intent.label_tr);
+    } else {
+      // cannot_run (no_dev_server/no_playwright/codegen_failed/not_found/error) → kanıtlanamadı (DÜŞÜRMEZ).
+      couldNotRun.push(intent.label_tr);
+    }
+  }
+
+  const parts: string[] = [`${passed.length}/${total} özellik doğrulandı`];
+  if (couldNotRun.length > 0) parts.push(`${couldNotRun.length} kanıtlanamadı`);
+  if (cancelled > 0) parts.push(`${cancelled} iptalle atlandı`);
+  const summary = parts.join(", ");
+
+  if (failures.length > 0) {
+    return {
+      id,
+      label_tr,
+      status: "fail",
+      detail_tr:
+        `${failures.length} özellik beklendiği gibi çalışmıyor (${summary}): ` +
+        failures
+          .slice(0, 6)
+          .map((f) => `\`${f}\``)
+          .join("; ") +
+        (failures.length > 6 ? ` (+${failures.length - 6})` : ""),
+      failures,
+    };
+  }
+  if (passed.length > 0) {
+    return { id, label_tr, status: "pass", detail_tr: summary };
+  }
+  // Hiç pass, hiç fail → hepsi cannot_run/iptal → GÖRÜNÜR atlama (sahte-yeşil DEĞİL, sahte-kırmızı da değil).
+  return {
+    id,
+    label_tr,
+    status: "skipped",
+    detail_tr:
+      cancelled >= total
+        ? "iptal edildi — hiçbir özellik doğrulanmadan durduruldu"
+        : `hiçbir özellik doğrulanamadı (${summary}) — kaynak/ortam elvermedi (görünür atlama)`,
+  };
+}
+
+/**
  * IMPURE: Full Test koşumu. ASLA throw etmez; her bölüm izole. Dev server kalkmazsa
- * canlı-uygulama bölümleri (E2E/rota) GÖRÜNÜR atlanır, birim/entegrasyon yine koşar.
+ * canlı-uygulama bölümleri (E2E/rota/işlevsel) GÖRÜNÜR atlanır, birim/entegrasyon yine koşar.
  */
 export async function runFullTest(state: State, deps: FullTestDeps): Promise<FullTestReport> {
   const t0 = Date.now();
@@ -274,41 +504,49 @@ export async function runFullTest(state: State, deps: FullTestDeps): Promise<Ful
     detail_tr: "dev server başlatılamadı — canlı uygulama testi atlandı (sahte yeşil değil)",
   });
 
-  // 3) E2E — Faz 16 altyapısı (kurulum + scaffold) + profil e2e komutu.
+  // Playwright ön adımı (kurulum + scaffold) — E2E VE işlevsel doğrulama AYNI scaffold'u paylaşır → BİR KEZ.
+  // (verifyIntentAgainstApp Playwright'ın hazır olduğunu varsayar; scaffold'ı burada garantiliyoruz.)
+  let e2ePre: { proceed: boolean; reason?: string } = { proceed: false, reason: "dev server yok" };
+  if (devOk) {
+    try {
+      e2ePre = await deps.ensureE2E();
+    } catch (err) {
+      e2ePre = { proceed: false, reason: `ön adım hata: ${String(err).slice(0, 80)}` };
+    }
+  }
+
+  // 3) E2E — Faz 16 altyapısı (kurulum + scaffold yukarıda) + profil e2e komutu.
   if (!devOk) {
     sections.push(liveSkip("e2e", "E2E (Playwright)"));
+  } else if (!e2ePre.proceed) {
+    sections.push({
+      id: "e2e",
+      label_tr: "E2E (Playwright)",
+      status: "skipped",
+      detail_tr: `E2E ön adımı geçilemedi (${e2ePre.reason ?? "bilinmeyen"}) — görünür atlama`,
+    });
   } else {
     try {
-      const pre = await deps.ensureE2E();
-      if (!pre.proceed) {
+      const cmd = await resolveMechanicalCmd({ type: "project_type", which: "e2e" }, state);
+      if (!cmd) {
         sections.push({
           id: "e2e",
           label_tr: "E2E (Playwright)",
           status: "skipped",
-          detail_tr: `E2E ön adımı geçilemedi (${pre.reason ?? "bilinmeyen"}) — görünür atlama`,
+          detail_tr: "bu proje tipi için E2E runner tanımlı değil (profil)",
         });
       } else {
-        const cmd = await resolveMechanicalCmd({ type: "project_type", which: "e2e" }, state);
-        if (!cmd) {
-          sections.push({
-            id: "e2e",
-            label_tr: "E2E (Playwright)",
-            status: "skipped",
-            detail_tr: "bu proje tipi için E2E runner tanımlı değil (profil)",
-          });
-        } else {
-          const section = classifySuiteResult("e2e", "E2E (Playwright)", await runSuiteProcess(cmd, state.project_root));
-          // Dürüstlük notu: koşan smoke MyCL yer tutucusu mu, gerçek test mi?
-          try {
-            const honesty = await assessPhase16Verification(state.project_root);
-            if (honesty.smokeKind === "placeholder" && section.status === "pass") {
-              section.detail_tr += " — DİKKAT: koşan test MyCL yer tutucu duman testi (gerçek kapsam değil)";
-            }
-          } catch {
-            /* dürüstlük notu opsiyonel zenginleştirme */
+        const section = classifySuiteResult("e2e", "E2E (Playwright)", await runSuiteProcess(cmd, state.project_root));
+        // Dürüstlük notu: koşan smoke MyCL yer tutucusu mu, gerçek test mi?
+        try {
+          const honesty = await assessPhase16Verification(state.project_root);
+          if (honesty.smokeKind === "placeholder" && section.status === "pass") {
+            section.detail_tr += " — DİKKAT: koşan test MyCL yer tutucu duman testi (gerçek kapsam değil)";
           }
-          sections.push(section);
+        } catch {
+          /* dürüstlük notu opsiyonel zenginleştirme */
         }
+        sections.push(section);
       }
     } catch (err) {
       sections.push({
@@ -326,6 +564,34 @@ export async function runFullTest(state: State, deps: FullTestDeps): Promise<Ful
     sections.push(liveSkip("route-sweep", "Rota taraması"));
   } else {
     sections.push(await sweepRoutes(baseUrl, state.project_root));
+  }
+
+  // 5) İşlevsel doğrulama — her belgelenmiş özellik çalışan app'te GERÇEKTEN doğru çalışıyor mu (mock'suz E2E).
+  //    Canlı app + Playwright scaffold'u ZATEN hazır olmalı (devOk + e2ePre.proceed); verifyIntent enjekte edilmeli.
+  if (!deps.verifyIntent) {
+    sections.push({
+      id: "functional",
+      label_tr: "İşlevsel doğrulama",
+      status: "skipped",
+      detail_tr:
+        "işlevsel doğrulama bu modda kapalı (yalnız CLI/abonelik + UI projesinde çalışır) — açılış/rota taraması yapıldı",
+    });
+  } else if (!devOk) {
+    sections.push({
+      id: "functional",
+      label_tr: "İşlevsel doğrulama",
+      status: "skipped",
+      detail_tr: "dev server başlatılamadı — işlevsel doğrulama atlandı (sahte yeşil değil)",
+    });
+  } else if (!e2ePre.proceed) {
+    sections.push({
+      id: "functional",
+      label_tr: "İşlevsel doğrulama",
+      status: "skipped",
+      detail_tr: `Playwright ön adımı geçilemedi (${e2ePre.reason ?? "bilinmeyen"}) — işlevsel doğrulama atlandı`,
+    });
+  } else {
+    sections.push(await verifyDocumentedFeatures(state, deps));
   }
 
   const ok = sections.every((s) => !(CORE_SECTIONS.has(s.id) && s.status === "fail"));
