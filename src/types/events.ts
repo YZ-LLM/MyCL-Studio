@@ -39,7 +39,8 @@ export interface NeededPhasesEvent {
   data: { phases: number[] | null };
 }
 
-export type PhaseStatus = "running" | "waiting" | "complete" | "error";
+// "idle" = faz tamamlanmadı ama iş de beklemiyor (açılışta boşta) → nötr render. Backend types.ts ile birebir ayna.
+export type PhaseStatus = "running" | "waiting" | "complete" | "error" | "idle";
 
 /** Orchestrator → UI event'leri.
  *  UnknownEvent union'a dahil DEĞİL — discriminated narrowing'i bozar.

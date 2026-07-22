@@ -69,7 +69,36 @@ describe("composeOpenStatus — öncelik sırası", () => {
   });
 
   it("formatOpenStatus: 📍 Durum + Yapman gereken iki satır", () => {
-    const t = formatOpenStatus({ durum: "D", action: "A" });
+    const t = formatOpenStatus({ durum: "D", action: "A", phaseStatus: "idle" });
     expect(t).toBe("📍 **Durum:** D\n**Yapman gereken:** A");
+  });
+});
+
+// AÇILIŞ TUTARSIZLIĞI FIX'i (YZLLM 2026-07-22): faz-durumu emit'i mesajla AYNI karardan üretilir → drift imkansız.
+// Boot'ta composeOpenStatus(input).phaseStatus, phase_changed'e yayılır. Bu testler o eşlemeyi kilitler.
+describe("composeOpenStatus — phaseStatus (boot faz-durumu, mesajla tek kaynak)", () => {
+  it("pendingDiagnostic / pendingUiReview → waiting", () => {
+    expect(composeOpenStatus({ ...base, pendingDiagnostic: true }).phaseStatus).toBe("waiting");
+    expect(composeOpenStatus({ ...base, pendingUiReview: true }).phaseStatus).toBe("waiting");
+  });
+  it("mid-pipeline (2-16) / koşan iş / bekleyen kuyruk / EDD → running", () => {
+    expect(composeOpenStatus({ ...base, currentPhase: 8, intentEmpty: false }).phaseStatus).toBe("running");
+    expect(composeOpenStatus({ ...base, runningTaskText: "x" }).phaseStatus).toBe("running");
+    expect(composeOpenStatus({ ...base, pendingTaskCount: 2 }).phaseStatus).toBe("running");
+    expect(composeOpenStatus({ ...base, isForeign: true, eddPending: 3 }).phaseStatus).toBe("running");
+  });
+  it("Faz 1 + intent boş (taze) → idle (nötr; 'yeni iş bekliyorum'la tutarlı, Faz 1'i yanlış ✅ göstermez)", () => {
+    expect(composeOpenStatus(base).phaseStatus).toBe("idle");
+  });
+  it("CANLI VAKA: Faz 17 tamamlanmış + kuyruk boş + pending yok → complete (Faz 17 ✅ + 'Hazırım boşta')", () => {
+    const s = composeOpenStatus({ ...base, currentPhase: 17, intentEmpty: false });
+    expect(s.durum).toContain("Hazırım");
+    expect(s.phaseStatus).toBe("complete");
+  });
+  it("DEJENERE: Faz 1 intent-DOLU idle (fallback) → complete DEĞİL idle (Faz 1 yanlış-yeşil önlenir)", () => {
+    expect(composeOpenStatus({ ...base, currentPhase: 1, intentEmpty: false }).phaseStatus).toBe("idle");
+  });
+  it("DEJENERE: Faz 0 (debug) idle (fallback) → idle (nötr, tamamlandı değil)", () => {
+    expect(composeOpenStatus({ ...base, currentPhase: 0, intentEmpty: false }).phaseStatus).toBe("idle");
   });
 });

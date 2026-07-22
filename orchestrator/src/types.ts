@@ -684,7 +684,9 @@ export type MechanicalRunner = (state: State) => Promise<MechResult>;
 export type TranslationDir = "tr-to-en" | "en-to-tr";
 
 // Faz durumu — UI faz indicator için.
-export type PhaseStatus = "running" | "waiting" | "complete" | "error";
+// "idle" (YZLLM 2026-07-22): faz tamamlanmadı AMA iş de beklemiyor (açılışta boşta) → nötr render (mavi/yeşil değil).
+// Açılış tutarsızlığı fix'i: boot'ta koşulsuz "running" yerine open-status'un idle/aktif kararıyla aynı statü yayılır.
+export type PhaseStatus = "running" | "waiting" | "complete" | "error" | "idle";
 
 // Orchestrator IPC mesajları (Tauri ↔ Node).
 export interface IncomingMessage {

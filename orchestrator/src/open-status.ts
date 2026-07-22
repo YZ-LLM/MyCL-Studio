@@ -47,9 +47,14 @@ export interface OpenStatusInput {
   eddPending: number;
 }
 
+import type { PhaseStatus } from "./types.js";
+
 export interface OpenStatus {
   durum: string;
   action: string;
+  /** Açılışta faz-göstergesine (header/sidebar/şerit) yayılacak faz durumu — MESAJLA AYNI KARARDAN üretilir
+   *  (drift imkansız). running=aktif/sürüyor, waiting=kullanıcı cevabı, idle=taze/iş-bekliyor, complete=tamamlandı. */
+  phaseStatus: PhaseStatus;
 }
 
 function phaseName(p: number): string {
@@ -62,12 +67,14 @@ export function composeOpenStatus(i: OpenStatusInput): OpenStatus {
     return {
       durum: "Bir hata için çözüm seçimi bekliyor.",
       action: "Chat'te açılan soruyu yanıtla; ardından düzeltmeye geçerim.",
+      phaseStatus: "waiting",
     };
   }
   if (i.pendingUiReview) {
     return {
       durum: `UI incelemesi bekliyor (Faz 6, ${phaseName(6)}).`,
       action: "Açılan uygulamayı incele; beğendiysen onayla, beğenmediysen değişikliği yaz.",
+      phaseStatus: "waiting",
     };
   }
   // Mid-pipeline (2..16): faz otomatik kaldığı yerden sürer — kullanıcının bir şey yapmasına gerek yok.
@@ -75,6 +82,7 @@ export function composeOpenStatus(i: OpenStatusInput): OpenStatus {
     return {
       durum: `Faz ${i.currentPhase} (${phaseName(i.currentPhase)}) kaldığı yerden otomatik sürüyor.`,
       action: "Bir şey yapmana gerek yok — otomatik ilerliyor. Yeni bir hedef için yazman yeterli.",
+      phaseStatus: "running",
     };
   }
   if (i.runningTaskText) {
@@ -82,18 +90,21 @@ export function composeOpenStatus(i: OpenStatusInput): OpenStatus {
     return {
       durum: `Önceki iş kaldığı yerden sürüyor: "${t}".`,
       action: "Bitmesini bekleyebilirsin; yeni bir hedef için yazman yeterli.",
+      phaseStatus: "running",
     };
   }
   if (i.pendingTaskCount > 0) {
     return {
       durum: `İş kuyruğunda ${i.pendingTaskCount} iş bekliyor.`,
       action: "Sıradaki iş birazdan otomatik başlar; yeni hedef eklemek için yazabilirsin.",
+      phaseStatus: "running",
     };
   }
   if (i.isForeign && i.eddPending > 0) {
     return {
       durum: `Proje analizi (EDD) arka planda sürüyor: ${i.eddDone}/${i.eddTotal} birim.`,
       action: "Analiz bitince projeyi tam kavrarım; şimdiden yeni bir hedef yazabilirsin.",
+      phaseStatus: "running",
     };
   }
   if (i.currentPhase === 1 && i.intentEmpty) {
@@ -102,11 +113,15 @@ export function composeOpenStatus(i: OpenStatusInput): OpenStatus {
         ? "Proje analizi tamam; yeni bir iş bekliyorum."
         : "Yeni bir iş bekliyorum.",
       action: "Ne yapmak istediğini yaz — hedefi verince başlarım.",
+      phaseStatus: "idle", // taze/iş-bekliyor — nötr (Faz 1'i "tamamlandı ✅" göstermez)
     };
   }
   return {
     durum: "Hazırım, bekleyen bir işim yok.",
     action: "Ne yapmak istediğini yaz.",
+    // TERMINAL-FARKINDA: pipeline daima Faz 17'de biter → 17 idle = tamamlandı (✅); Faz 0/1-intent-dolu idle = nötr
+    // (blanket "complete" olsa Faz 1'i yanlış ✅ gösterirdi). Mesaj her durumda "Hazırım boşta" → statüyle drift yok.
+    phaseStatus: i.currentPhase === 17 ? "complete" : "idle",
   };
 }
 

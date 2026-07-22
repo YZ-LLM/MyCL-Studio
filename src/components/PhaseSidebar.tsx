@@ -53,8 +53,10 @@ export function phaseBadge(
   if (id === currentPhase) {
     // CURRENT faz: TAMAMLANDIYSA ✅ (özellikle SON faz — pipeline bitince currentPhase ilerlemez → aksi halde
     // Faz 17 sonsuza dek ▶️ mavi kalırdı; YZLLM 2026-07-14 "iterasyon bitti ama faz 17 yeşil olmamış" bug'ı).
-    // running/waiting → ▶️ (hâlâ çalışıyor/park).
-    return currentPhaseStatus === "complete" ? "✅" : "▶️";
+    // idle (açılışta taze/iş-bekliyor, YZLLM 2026-07-22) → nötr ⏹️ (çalışmıyor da tamamlanmadı da). running/waiting → ▶️.
+    if (currentPhaseStatus === "complete") return "✅";
+    if (currentPhaseStatus === "idle") return "⏹️";
+    return "▶️";
   }
   const reached = currentPhase === (0 as PhaseId) ? maxPhase : currentPhase;
   if (id < reached) return "✅"; // tamamlandı (yeşil kalır)
@@ -123,7 +125,16 @@ export function PhaseSidebar({
               title="Faz 0 — Hata Ayıklama (Debug Triage). Pipeline dışı, standalone. Yaşadığın hatayı chat'e yaz; debug akışı otomatik başlar."
             >
               <span className="phase-badge" aria-hidden>
-                {isCurrent0 ? "▶️" : "🐛"}
+                {/* MAHKEME MEDIUM (2026-07-22): Faz 0 current iken de phaseStatus'e bak — açılışta idle olan bir debug
+                    projesinde header "boşta" derken bu rozet sabit "▶️" (aktif) gösterip YENİ çelişki üretiyordu.
+                    idle → ⏹️ (nötr), complete → ✅ (Faz 0'da olmaz ama tutarlı), aksi (running/waiting) → ▶️. */}
+                {isCurrent0
+                  ? phaseStatus === "complete"
+                    ? "✅"
+                    : phaseStatus === "idle"
+                      ? "⏹️"
+                      : "▶️"
+                  : "🐛"}
               </span>
               <div className="phase-text">
                 <div className="phase-label">Faz 0</div>

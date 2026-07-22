@@ -355,6 +355,12 @@ select:focus {
   background: rgba(248, 81, 73, 0.12);
 }
 
+/* idle (YZLLM 2026-07-22): açılışta taze/iş-bekleyen faz — nötr (mavi/yeşil DEĞİL), base ile aynı; açıklık için explicit. */
+.app-phase-indicator.idle {
+  color: var(--fg-dim);
+  background: var(--bg-elev);
+}
+
 /* v15.7 (2026-05-27): Faz badge'i ErrorDrawer toggle olarak tıklanabilir. */
 .app-phase-indicator.clickable {
   border: none;

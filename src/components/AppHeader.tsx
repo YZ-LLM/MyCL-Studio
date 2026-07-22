@@ -31,6 +31,7 @@ const STATUS_LABEL: Record<PhaseStatus, string> = {
   waiting: "yanıt bekleniyor",
   complete: "tamamlandı",
   error: "hata",
+  idle: "boşta", // taze/iş-bekliyor — açılışta tamamlanmamış ama iş de beklemeyen faz (nötr)
 };
 
 export function AppHeader({

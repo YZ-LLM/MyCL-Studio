@@ -222,7 +222,7 @@ import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
 import { maybeRunEdd } from "./edd/engine.js";
 import { readEddProgress, summarizeProgress } from "./edd/progress.js";
-import { composeOpenStatus, formatOpenStatus } from "./open-status.js";
+import { composeOpenStatus, formatOpenStatus, type OpenStatusInput } from "./open-status.js";
 import { attachEddCodegenNote } from "./edd/codegen-note.js";
 import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
@@ -1928,9 +1928,14 @@ async function handleOpenProject(path: string, integrate = false): Promise<void>
  * mesajı basar. Eski LLM boot-narrator'ın (runBootStatusCheck) yerini alır: o kuyrukta iş varken susuyordu
  * (her-zaman garantisi yoktu) + token yakıyordu + prompt-kırılgandı. ASLA throw etmez (caller yutar).
  */
-async function emitOpenStatusSummary(): Promise<void> {
+/**
+ * SAF-değil: açılış durum SNAPSHOT'unu (state + kuyruk + EDD) topla → composeOpenStatus girdisi. Boot'ta İKİ
+ * yerde kullanılır: (1) faz-durumu emit'i (index.ts:2076 idle/aktif statü) ve (2) durum-özeti mesajı — İKİSİ AYNI
+ * girdiden composeOpenStatus çağırır → mesaj ile faz-göstergesi ARASINDA drift imkansız. state yoksa null.
+ */
+async function gatherOpenStatusInput(): Promise<OpenStatusInput | null> {
   const st = runtime.state;
-  if (!st) return;
+  if (!st) return null;
   const root = st.project_root;
   const tasks = await readTasks(root).catch(() => []);
   const running =
@@ -1944,7 +1949,7 @@ async function emitOpenStatusSummary(): Promise<void> {
       eddDone = e.done; eddTotal = e.total; eddPending = e.pending;
     } catch { /* edd yoksa 0 kalır */ }
   }
-  const status = composeOpenStatus({
+  return {
     currentPhase: st.current_phase,
     intentEmpty: !st.intent_summary || st.intent_summary.trim() === "",
     isForeign,
@@ -1953,8 +1958,13 @@ async function emitOpenStatusSummary(): Promise<void> {
     runningTaskText: running?.text ?? null,
     pendingTaskCount: pendingCount,
     eddDone, eddTotal, eddPending,
-  });
-  emitChatMessage("assistant", formatOpenStatus(status));
+  };
+}
+
+async function emitOpenStatusSummary(): Promise<void> {
+  const input = await gatherOpenStatusInput();
+  if (!input) return;
+  emitChatMessage("assistant", formatOpenStatus(composeOpenStatus(input)));
 }
 
 async function handleOpenProjectInner(path: string, integrate = false): Promise<void> {
@@ -2073,7 +2083,20 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
       session_id: runtime.state.session_id,
       current_phase: runtime.state.current_phase,
     });
-    emitPhaseChanged(runtime.state.current_phase, runtime.state.current_phase, "running");
+    // AÇILIŞ DURUM TUTARSIZLIĞI FIX'i (YZLLM 2026-07-22): eskiden KOŞULSUZ "running" yayılıyordu → tamamlanmış Faz 17
+    // idle projesi açılınca header/sidebar/şerit "çalışıyor" gösterip durum-mesajının "boşta"sıyla çelişiyordu (faz
+    // durumu persist edilmez). Artık faz-durumu, mesajla AYNI kaynaktan (composeOpenStatus) üretilir → drift imkansız.
+    // KONUM KRİTİK: bu emit, aşağıdaki D2_WAITING debug askq re-emit'inden ÖNCE kalmalı — phase_changed reducer'ı
+    // pendingAskq'yı temizler (App.tsx), sonraya taşınırsa yeni askq silinir. Resume dalları SONRA kendi phase_changed'ini
+    // yayıp override eder → yalnız idle yollar bu hesaplanmış statüyü nihai taşır. state okunamazsa "running" (defansif).
+    {
+      const _oi = await gatherOpenStatusInput();
+      emitPhaseChanged(
+        runtime.state.current_phase,
+        runtime.state.current_phase,
+        _oi ? composeOpenStatus(_oi).phaseStatus : "running",
+      );
+    }
     // Mahkeme H1 (boot yarışı): kapsam emit'ini buraya koy — runtime.state loadOrInit ile POPULATE edildikten SONRA
     // deterministik koşar. Eski tek emit (handleListPhases) ayrı IPC mesajı + open_project'in await penceresinde
     // yarışıp null/bayat okuyabiliyordu → yeniden açılan onaylı-kapsamlı projede PhaseSidebar dimming'i bayat kalırdı.
