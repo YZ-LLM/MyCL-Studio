@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectCliRateLimit } from "../src/cli-rate-limit.js";
+import { detectCliRateLimit, isCliUsageLimitError } from "../src/cli-rate-limit.js";
 
 describe("detectCliRateLimit (rate-limit-as-error tespiti — dar)", () => {
   it("usage limit imzası → usage-limit", () => {
@@ -28,5 +28,29 @@ describe("detectCliRateLimit — session limit (YZLLM 2026-07-17 canlı cave don
   });
   it("'session limit' geçmeyen sıradan hata → null (yanlış pozitif yok)", () => {
     expect(detectCliRateLimit("session expired, please login again")).toBeNull();
+  });
+});
+
+describe("isCliUsageLimitError — CLAUDE'A ÇAPALI imza (MAHKEME 2026-07-23: failPhase proje çıktısı taşır)", () => {
+  it("canlı log metni (Faz 1 çeviri hatası) → true", () => {
+    expect(
+      isCliUsageLimitError(
+        "Faz 1: niyet çevirisi başarısız — Error: claude exit=1 :: You've hit your session limit · resets 6:20am (Europe/Istanbul)",
+      ),
+    ).toBe(true);
+  });
+  it("çıplak CLI cümlesi (sarmalayıcısız) → true; eski CLI metni → true", () => {
+    expect(isCliUsageLimitError("You've hit your usage limit.")).toBe(true);
+    expect(isCliUsageLimitError("Claude AI usage limit reached|1780504200")).toBe(true);
+  });
+  it("exit-sarmalı genel imza → true", () => {
+    expect(isCliUsageLimitError("claude exit=1 :: usage_limit exceeded, try later")).toBe(true);
+  });
+  it("PROJENİN kendi çıktısındaki limit metni (Claude çapası yok) → false (yanlış pozitif yok)", () => {
+    // Faz 5 lastFailReason'a projenin dev-server stderr'i girer — bunlar Claude limiti DEĞİL:
+    expect(isCliUsageLimitError("MyApp API error: usage limit exceeded for tenant acme")).toBe(false);
+    expect(isCliUsageLimitError("warning: session limit reached, oldest session evicted")).toBe(false);
+    expect(isCliUsageLimitError("rate limit exceeded")).toBe(false);
+    expect(isCliUsageLimitError("")).toBe(false);
   });
 });

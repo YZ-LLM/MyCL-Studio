@@ -208,7 +208,7 @@ import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting } from "./llm
 import { translate } from "./translator.js";
 import { runChatSummary } from "./chat-summary.js";
 import { shouldKickQueue, startLivenessWatchdog } from "./liveness-watchdog.js";
-import { detectCliRateLimit } from "./cli-rate-limit.js";
+import { detectCliRateLimit, isCliUsageLimitError } from "./cli-rate-limit.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
 import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk, isAutonomouslyAnswerableAskq, isCourtFirstAskqId, matchAnswerToOption, stripDestructiveOptions, pickConservativeDefault, shouldStopAutoAnswer } from "./auto-answer.js";
@@ -1373,7 +1373,13 @@ let _pendingStopReason: string | null = null;
 function makePhaseOutageResume(n: PhaseId): () => Promise<void> {
   return async () => {
     if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
-      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor).");
+      // MAHKEME (2026-07-23, dürüst mesaj — KATI #4): bu dal beklemeyi SONLANDIRIR (fire yeniden kurmaz);
+      // "atlandı" tek başına ileride denenecek izlenimi veriyordu. Gerçek devam yolları: askq cevabı /
+      // yeni iş tetiği → kuyruk sürer → erişim hâlâ kapalıysa failPhase dalları beklemeyi yeniden kurar.
+      emitChatMessage(
+        "system",
+        "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor). Bekleyen soru cevaplanınca ya da yeni bir iş tetiklenince kuyruk kendiliğinden sürer.",
+      );
       return;
     }
     if (!runtime.state) {
@@ -1466,6 +1472,24 @@ async function failPhase(
     _drainActive = false; // MAHKEME CRITICAL: sıradaki işler aynı ölü sağlayıcıyla denemelerini yakmasın
     armLlmOutageWait("abonelik limitli + API kredisi yetersiz", makePhaseOutageResume(n));
     return; // STOP — escalation YOK, analiz YOK, fix YOK; devam zamanlayıcısı kuruldu.
+  }
+  // CLI ABONELİK LİMİTİ (YZLLM 2026-07-23 canlı log — "aboneliğin tekrar açılacağını unuttu"): faz hatası
+  // "You've hit your session limit · resets 6:20am" imzasıyla gelince yukarıdaki isApiAccountError dalı
+  // TETİKLENMİYORDU (o regex yalnız API kredi/yetki kalıpları) → akış mahkeme + hata-analizi + oto-cevap
+  // döngüsüne sapıyordu (hepsi LLM ister → hepsi çöker → asılı askq) ve bekle-ve-devam YENİDEN KURULMUYORDU
+  // → reset saati unutuluyordu. Emsal desen: handleUserMessage catch'i (yukarıda ~3489) aynı birleşimi kullanır.
+  // MAHKEME (2026-07-23): detectCliRateLimit DEĞİL isCliUsageLimitError — lastFailReason'a Faz 5 projenin kendi
+  // stderr'ini de taşır; çıplak "usage limit" imzası proje çıktısıyla karışırdı. Claude'a çapalı imza şart.
+  if (isCliUsageLimitError(`${ctrl?.lastFailReason ?? ""}\n${message}`)) {
+    emitChatMessage(
+      "system",
+      "⛔ **Claude aboneliği kullanım limitine takıldı** — bu bir ortam sorunu, proje hatası DEĞİL. Otomatik " +
+        "tırmanma/analiz YAPMADIM — hepsi bir sağlayıcı gerektirir, aynı hatayı verirdi. Limit açılınca " +
+        "kaldığım yerden OTOMATİK devam edeceğim.",
+    );
+    _drainActive = false; // sıradaki işler aynı limitli sağlayıcıyla denemelerini yakmasın
+    armLlmOutageWait("abonelik kullanım limiti", makePhaseOutageResume(n));
+    return; // STOP — escalation YOK, analiz YOK; devam zamanlayıcısı kuruldu (reset biliniyorsa o saate).
   }
   // GEÇİCİ API YÜKÜ (YZLLM 2026-06-17 canlı bulgu): "529 Overloaded" = Anthropic API aşırı-yük, GEÇİCİ. 5-deneme +
   // ~67s backoff sonrası bile sürüyorsa PROJE/KOD hatası DEĞİL → oto-çözüm/debug/tweak ANLAMSIZ. (Canlı kanıt:
@@ -4742,6 +4766,21 @@ async function tryStartTaskBatch(): Promise<boolean> {
  */
 async function returnTaskToPending(projectRoot: string, taskId: string, failNote: string): Promise<number> {
   const current = (await readTasks(projectRoot).catch(() => [])).find((t) => t.id === taskId);
+  // LLM KESİNTİSİ BEKLENİYORKEN deneme SAYILMAZ (YZLLM 2026-07-23 canlı log): iki kanal da kapalıyken
+  // başarısız olan koşum İŞİN suçu değil — uzun pencerede (7 güne dek) saatlik yoklamalar 3 denemeyi eritip
+  // reset açıldığında devam edecek iş bırakmazdı. Erişim dönünce gerçek başarısızlıklar yine normal sayılır.
+  if (isLlmOutageWaiting()) {
+    const kept = current?.attempts ?? 0;
+    await patchTask(projectRoot, taskId, {
+      status: "pending",
+      last_fail: failNote.slice(0, 200),
+    });
+    emitChatMessage(
+      "system",
+      `↩️ İş kuyruğa GERİ kondu — LLM erişimi kapalı olduğundan bu koşum DENEME SAYILMADI (deneme ${kept}/${MAX_TASK_AUTO_RETRIES} korundu); erişim açılınca kaldığı yerden denenecek.`,
+    );
+    return kept;
+  }
   const attempts = (current?.attempts ?? 0) + 1;
   await patchTask(projectRoot, taskId, {
     status: "pending",
@@ -5242,6 +5281,11 @@ async function kickWorkQueue(): Promise<void> {
   if (!runtime.state) return;
   const items = await readTasks(runtime.state.project_root);
   if (!nextPendingTask(items)) return; // bekleyen iş yok → tetikleme
+  // MAHKEME (2026-07-23): yeni iş tetiği = "şimdi dene" iradesi (handleRunPhase emsali) → bekle-ve-devam
+  // iptal. Yoksa bayat bekleme bayrağı (kesinti düzeldi ama zamanlayıcı ateşlenmedi penceresi)
+  // returnTaskToPending'in deneme-muafiyetini yanlış açık tutar (gerçek hata da sayılmazdı). Kesinti
+  // hâlâ sürüyorsa ilk faz hatası (failPhase usage-limit/kredi dalları) beklemeyi YENİDEN kurar.
+  cancelLlmOutageWait();
   _drainActive = true;
   setImmediate(() => {
     void reconcileAndDrainTasks().catch((e: unknown) =>

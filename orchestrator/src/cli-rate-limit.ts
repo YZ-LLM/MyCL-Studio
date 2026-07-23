@@ -163,6 +163,26 @@ export function detectCliRateLimit(text: string): string | null {
 }
 
 /**
+ * SAF + CLAUDE'A ÇAPALI: metin CLAUDE'UN KENDİ abonelik/usage limit hatası mı? failPhase gibi
+ * PROJE ÇIKTISI da taşıyabilen bağlamlar için (MAHKEME 2026-07-23): `detectCliRateLimit` çıplak
+ * "usage limit" arar — Faz 5 lastFailReason'a projenin dev-server stderr'i girer; proje kendi
+ * kotasını loglarsa ("usage limit exceeded") yanlış "Claude limitli" tespiti akışı gereksiz
+ * bekletir. Burada imza Claude'a özgü kalıplara çapalı: CLI'nin kendi cümlesi ("You've hit your
+ * session/usage limit", "Claude AI usage limit reached") ya da bizim sarmalayıcımızın "claude
+ * exit=N" öneki yakınında limit imzası. detectCliRateLimit'in yerine GEÇMEZ (o, CLI result-error
+ * yolunda kalır — metin orada tanım gereği Claude'dan gelir); yalnız karışık-kaynaklı bağlamlarda kullan.
+ */
+export function isCliUsageLimitError(text: string): boolean {
+  const t = (text ?? "").toLowerCase();
+  if (!t) return false;
+  if (/you'?ve hit your (session|usage)[ _-]?limit/.test(t)) return true; // claude 2.1.x canlı metni
+  if (/claude( ai)? usage limit (reached|exceeded)/.test(t)) return true; // eski claude metni
+  // cli-run/cli-session hata sarmalayıcısı: "claude exit=N :: <CLI hata metni>" — limit imzası bu çapanın yakınında.
+  if (/claude exit=\d+[\s\S]{0,300}?(session|usage)[ _-]?limit/.test(t)) return true;
+  return false;
+}
+
+/**
  * Şu an CLI limitli mi (impure — Date.now). Limit geçtiyse temizler + bir kez
  * "CLI'ye dönüldü" mesajı verir (görünür reset). backendForRole "auto" bunu çağırır.
  */
