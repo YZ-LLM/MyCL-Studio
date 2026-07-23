@@ -383,8 +383,10 @@ için kalıcı tutulur; yeniden açıldığında zaten yanıtladıklarını **te
 **Şu an ne yapıyor? — kalıcı durum şeridi.** Header'ın hemen altında, hiç
 kaybolmayan bir "📍 Şu an: …" şeridi MyCL'in o anki canlı aktivitesini gösterir:
 hangi faz + ne yaptığı (ör. "Faz 13 · Güvenlik — semgrep taraması"), senden cevap
-mı beklediği, yoksa boşta mı olduğu. Sol kenar rengi tonu belli eder (çalışıyor /
-bekliyor / boşta). Kayan sohbete karışmaz, her an görünür.
+mı beklediği, yoksa boşta mı olduğu. Claude erişimi kapalıyken (abonelik limiti /
+API kredisi) şerit "boşta" demez — "LLM erişimi bekleniyor · ~14:20 civarı otomatik
+devam" gibi gerçek durumu ve otomatik devam saatini gösterir. Sol kenar rengi tonu
+belli eder (çalışıyor / bekliyor / boşta). Kayan sohbete karışmaz, her an görünür.
 
 **Açılışta durum + yapman gereken özeti.** Bir proje açtığında (özellikle mevcut
 projeyi entegre ettiğinde) MyCL son mesajında **her zaman** kısa bir "📍 Durum /

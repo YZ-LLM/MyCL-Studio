@@ -113,4 +113,28 @@ describe("armLlmOutageWait / fire / cancel (sahte zamanlayıcı)", () => {
     await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS * 3);
     expect(resume).not.toHaveBeenCalled();
   });
+
+  // MAHKEME CRITICAL (2026-07-23): "skipped" (meşgul/askq — gerçek deneme yok) beklemeyi SONLANDIRMAZ —
+  // eski davranış sessizce sonlanıp kuyruksuz faz-vuruş köşesinde kalıcı durmaya yol açıyordu.
+  it("resume 'skipped' dönerse bekleme SÜRER → 5 dk sonra yine denenir; 'resumed' olunca biter", async () => {
+    const results: Array<"skipped" | "resumed"> = ["skipped", "skipped", "resumed"];
+    const resume = vi.fn(async () => results.shift() ?? ("resumed" as const));
+    armLlmOutageWait("test (askq asılı)", resume);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(isLlmOutageWaiting()).toBe(true); // skipped → sessiz yeniden kuruldu
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(resume).toHaveBeenCalledTimes(2);
+    expect(isLlmOutageWaiting()).toBe(true);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(resume).toHaveBeenCalledTimes(3); // resumed → bekleme bitti
+    expect(isLlmOutageWaiting()).toBe(false);
+  });
+
+  it("void dönüş (eski imza) 'resumed' sayılır — geriye uyum", async () => {
+    const resume = vi.fn(async () => {});
+    armLlmOutageWait("test", resume);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(isLlmOutageWaiting()).toBe(false); // sonlandı (yeniden kurulmadı)
+  });
 });

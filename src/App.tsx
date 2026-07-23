@@ -202,6 +202,9 @@ interface MainState {
   iterationIntent: string | null;
   /** Sticky loading banner — emitPhaseRunning / emitPhaseIdle ile yönetilir. */
   runningBanner: { label: string; detail?: string; ts: number } | null;
+  /** ⏸️ LLM bekle-ve-devam aktif mi (2026-07-23) — outage_wait olayıyla yönetilir; ActivityBar
+   *  "boşta" yerine "LLM erişimi bekleniyor" gösterir. resetMs null = 5 dk'da bir yoklama modu. */
+  outageWait: { resetMs: number | null } | null;
   /** Feature 3 history state. */
   historyLoaded: boolean;
   oldestLoadedTs: number;
@@ -264,6 +267,7 @@ const INITIAL_STATE: MainState = {
   ccEvents: [],
   ccBanner: null,
   runningBanner: null,
+  outageWait: null,
   phase: 1,
   maxPhase: 1 as PhaseId,
   phaseStatus: "running",
@@ -454,6 +458,12 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
   }
   if (ev.kind === "phase_idle") {
     return { ...state, runningBanner: null };
+  }
+  if (ev.kind === "outage_wait") {
+    return {
+      ...state,
+      outageWait: ev.data.active ? { resetMs: ev.data.reset_ms ?? null } : null,
+    };
   }
   if (ev.kind === "phase_changed") {
     // Banner phase_changed status=running ile AÇILMAZ (yanıltıcı: Phase 7
@@ -1606,7 +1616,17 @@ function App() {
         // bayat "yanıt bekleniyor" (askq cevaplandıktan sonra kalan) yanıltmasın. runningBanner canlı gerçek.
         // MAHKEME MEDIUM (2026-07-21): açık askq VARKEN "cevap bekliyorum" ÖNCELİKLİ olmalı — yoksa header
         // "çalışıyor" derken ActivityBar "senden cevap bekliyorum" der (çelişki). İki gösterge aynı hükmü versin.
-        status={mainState.pendingAskq ? "waiting" : mainState.runningBanner ? "running" : mainState.phaseStatus}
+        // outageWait aynı hizada (MAHKEME 2026-07-23): LLM beklenirken header "hata" derken şerit "bekleniyor"
+        // demesin — bekleme aktifken ikisi de bekleme gösterir (hata detayı errorCount rozetinde zaten duruyor).
+        status={
+          mainState.pendingAskq
+            ? "waiting"
+            : mainState.runningBanner
+              ? "running"
+              : mainState.outageWait
+                ? "waiting"
+                : mainState.phaseStatus
+        }
         onPhaseIndicatorClick={() => setErrorDrawerOpen((o) => !o)}
         errorCount={errorEntries.length}
         pipelineVerdict={mainState.pipelineVerdict?.verdict ?? null}
@@ -1618,6 +1638,12 @@ function App() {
         runningLabel={mainState.runningBanner?.label ?? null}
         runningDetail={mainState.runningBanner?.detail ?? null}
         hasAskq={mainState.pendingAskq !== null}
+        outageWaiting={mainState.outageWait !== null}
+        outageUntil={
+          mainState.outageWait?.resetMs
+            ? new Date(mainState.outageWait.resetMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+            : null
+        }
       />
       <div
         className={

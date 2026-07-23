@@ -13,8 +13,14 @@
 // yeniden arm eder ya da buradaki catch 5 dk sonra tekrar kurar.
 
 import { getKnownResetMs } from "./cli-rate-limit.js";
-import { emitChatMessage } from "./ipc.js";
+import { emit, emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
+
+/** ⏸️ Şerit görünürlüğü (YZLLM 2026-07-23 ekran: şerit "boşta" derken bekleme sürüyordu — banner-yok ≠ boşta):
+ *  bekleme kuruldu/çözüldü → UI'ya olay; ActivityBar "LLM erişimi bekleniyor — ~HH:MM'de otomatik devam" gösterir. */
+function emitOutageWait(active: boolean, resetMs?: number): void {
+  emit("outage_wait", { active, reset_ms: resetMs, ts: Date.now() });
+}
 
 export const OUTAGE_RETRY_INTERVAL_MS = 5 * 60_000;
 /** Uzun beklemede ara yoklama (YZLLM 2026-07-17 "evet ekle"): reset 1 saatten uzaksa (örn. 7 günlük
@@ -34,9 +40,12 @@ export function computeRetryAtMs(knownResetMs: number | undefined, nowMs: number
   return nowMs + OUTAGE_RETRY_INTERVAL_MS;
 }
 
+/** Resume sonucu (MAHKEME CRITICAL 2026-07-23): "skipped" = sistem meşgul/askq asılı olduğu için GERÇEK
+ *  deneme YAPILMADI → bekleme SONA ERMEZ (sessizce yeniden kurulur). Void dönüş = "resumed" (geriye uyum). */
+export type OutageResumeResult = "resumed" | "skipped";
+
 let _timer: NodeJS.Timeout | null = null;
-let _resume: (() => Promise<void>) | null = null;
-let _attempt = 0;
+let _resume: (() => Promise<OutageResumeResult | void>) | null = null;
 
 export function isLlmOutageWaiting(): boolean {
   return _timer !== null;
@@ -59,13 +68,24 @@ async function fire(): Promise<void> {
   const resume = _resume;
   _resume = null;
   if (!resume) return;
-  _attempt++;
-  emitChatMessage("system", `🔄 LLM erişimini yeniden deniyorum (deneme ${_attempt}) — açıldıysa kaldığım yerden devam edeceğim.`);
+  // "🔄 deneniyor" mesajı BURADA BASILMAZ (MAHKEME 2026-07-23): resume "skipped" dönebilir (meşgul/askq —
+  // gerçek deneme yok) ve bekleme sessizce yeniden kurulur; her 5 dk mesaj basmak spam olurdu. Gerçek
+  // deneme yapan resume yolları mesajı KENDİ basar (görünürlük orada).
   try {
-    await resume();
+    const r = await resume();
+    if (r === "skipped") {
+      // Gerçek deneme YAPILMADI (sistem meşgul / askq asılı) → bekleme SONA ERMEZ. Eski davranış burada
+      // sessizce sonlanıyordu → kuyruksuz faz-vuruş köşesinde (watchdog hasPending şartına takılır) kalıcı
+      // durma + şeride yanlış "boşta" (MAHKEME CRITICAL). Sessiz yeniden kur (ilk atlama resume'da görünür).
+      _resume = resume;
+      schedule(OUTAGE_RETRY_INTERVAL_MS);
+      return;
+    }
     // resume içinde yeniden kesinti olduysa çağrı zinciri armLlmOutageWait'i tekrar kurmuştur
-    // (_timer dolu olur) — sayaç korunur. Gerçek başarıda sayaç sıfırlanır.
-    if (_timer === null) _attempt = 0;
+    // (_timer dolu olur). Gerçek sonlanmada şerit bekleme durumu kapanır.
+    if (_timer === null) {
+      emitOutageWait(false);
+    }
   } catch (e) {
     log.warn("llm-outage", "devam denemesi hata verdi", { error: String(e) });
     if (_timer === null) {
@@ -81,7 +101,7 @@ async function fire(): Promise<void> {
  * Bekle-ve-devam kur. Tek uçuş: zaten bekleniyorsa zamanlayıcı korunur, yalnız resume güncellenir
  * (en son kesilen iş devam ettirilir; mesaj tekrarı yok). reason kullanıcıya kısaca gösterilir.
  */
-export function armLlmOutageWait(reason: string, resume: () => Promise<void>): void {
+export function armLlmOutageWait(reason: string, resume: () => Promise<OutageResumeResult | void>): void {
   _resume = resume;
   if (_timer !== null) return;
   const now = Date.now();
@@ -97,6 +117,7 @@ export function armLlmOutageWait(reason: string, resume: () => Promise<void>): v
       : `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). 5 dakikada bir yeniden deneyeceğim — açılınca kaldığım yerden OTOMATİK devam ederim.`,
   );
   log.info("llm-outage", "bekle-ve-devam kuruldu", { at, resetKnown: resetMs !== undefined });
+  emitOutageWait(true, resetMs);
   schedule(at - now);
 }
 
@@ -106,7 +127,7 @@ export function cancelLlmOutageWait(): void {
     clearTimeout(_timer);
     _timer = null;
     log.info("llm-outage", "bekle-ve-devam iptal edildi");
+    emitOutageWait(false); // yalnız gerçekten aktifken (kickWorkQueue her tetikte çağırır — boşta event spam'i olmasın)
   }
   _resume = null;
-  _attempt = 0;
 }

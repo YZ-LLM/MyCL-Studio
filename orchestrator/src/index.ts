@@ -204,7 +204,7 @@ import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
-import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting } from "./llm-outage.js";
+import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting, type OutageResumeResult } from "./llm-outage.js";
 import { translate } from "./translator.js";
 import { runChatSummary } from "./chat-summary.js";
 import { shouldKickQueue, startLivenessWatchdog } from "./liveness-watchdog.js";
@@ -1370,39 +1370,47 @@ let _pendingStopReason: string | null = null;
  * kesilen fazı, erişim dönünce OTOMATİK yeniden koşar. Emniyetler: pipeline zaten koşuyorsa (kullanıcı
  * 'Çalıştır'a bastı) ya da faz manuel ilerletildiyse ÇİFT koşum yok — görünür not + atla.
  */
-function makePhaseOutageResume(n: PhaseId): () => Promise<void> {
+function makePhaseOutageResume(n: PhaseId): () => Promise<OutageResumeResult> {
+  // MAHKEME CRITICAL (2026-07-23): meşgul/askq atlaması eskiden beklemeyi SESSİZCE sonlandırıyordu →
+  // kuyruksuz faz-vuruş köşesinde (watchdog hasPending şartına takılır, kuyrukta iş yok) kalıcı durma.
+  // Artık "skipped" dönülür → fire beklemeyi SESSİZCE yeniden kurar; mesaj yalnız İLK atlamada (spam yok,
+  // şerit zaten "LLM erişimi bekleniyor" göstermeye devam eder — görünürlük orada).
+  let skipNoticeShown = false;
   return async () => {
     if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
-      // MAHKEME (2026-07-23, dürüst mesaj — KATI #4): bu dal beklemeyi SONLANDIRIR (fire yeniden kurmaz);
-      // "atlandı" tek başına ileride denenecek izlenimi veriyordu. Gerçek devam yolları: askq cevabı /
-      // yeni iş tetiği → kuyruk sürer → erişim hâlâ kapalıysa failPhase dalları beklemeyi yeniden kurar.
-      emitChatMessage(
-        "system",
-        "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor). Bekleyen soru cevaplanınca ya da yeni bir iş tetiklenince kuyruk kendiliğinden sürer.",
-      );
-      return;
+      if (!skipNoticeShown) {
+        skipNoticeShown = true;
+        emitChatMessage(
+          "system",
+          "ℹ️ Otomatik devam şimdilik atlandı — sistem meşgul (yeni mesaj/askq/faz sürüyor). Beklemeye devam ediyorum; meşguliyet çözülünce yeniden deneyeceğim.",
+        );
+      }
+      return "skipped";
     }
     if (!runtime.state) {
-      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — proje bu arada değişmiş.");
-      return;
+      emitChatMessage("system", "ℹ️ Otomatik devam sonlandı — proje bu arada değişmiş.");
+      return "resumed";
     }
     // KUYRUK YOLU (mahkeme CRITICAL 2026-07-18): kesinti bir kuyruk işini vurduysa reconcile işi çoktan
     // pending'e döndürmüştür (currentTaskId=null, drain kapalı) → fazı değil KUYRUĞU sürdür (iş, deneme
     // bağlamıyla baştan ele alınır; aynı ölü sağlayıcıya art arda faz koşup deneme yakılmaz).
     if (!runtime.currentTaskId && nextPendingTask(await readTasks(runtime.state.project_root).catch(() => []))) {
+      emitChatMessage("system", "🔄 LLM erişimini yeniden deniyorum — açıldıysa kaldığım yerden devam edeceğim.");
       _drainActive = true;
       await reconcileAndDrainTasks();
-      return;
+      return "resumed";
     }
     if (runtime.state.current_phase !== n) {
-      emitChatMessage("system", "ℹ️ Otomatik devam atlandı — durum bu arada değişmiş (faz elle ilerletilmiş ya da proje değişmiş).");
-      return;
+      emitChatMessage("system", "ℹ️ Otomatik devam sonlandı — durum bu arada değişmiş (faz elle ilerletilmiş ya da proje değişmiş).");
+      return "resumed";
     }
     if (n >= 1) {
+      emitChatMessage("system", "🔄 LLM erişimini yeniden deniyorum — açıldıysa kaldığım yerden devam edeceğim.");
       await advanceToNextPhase((n - 1) as PhaseId); // kesilen fazı yeniden koş
     } else {
       emitChatMessage("system", "ℹ️ Faz 0 kesilmişti — devam için işi yeniden başlat ('Çalıştır' ya da mesaj).");
     }
+    return "resumed";
   };
 }
 
@@ -3515,12 +3523,20 @@ async function handleUserMessageInner(text: string): Promise<void> {
       // aynı mesajı erişim dönünce yeniden dener (YZLLM 2026-07-17, canlı cave 2 saat donması).
       // MAHKEME CRITICAL: gecikmeli koşum handleUserMessage'ın re-entrancy kilidinden GEÇMEZ →
       // meşguliyet/askq korumasını burada kur (makePhaseOutageResume'un ikizi); atlama GÖRÜNÜR.
-      armLlmOutageWait(msg, async () => {
+      // MAHKEME CRITICAL (2026-07-23): meşgul atlaması "skipped" döner → bekleme sonlanmaz (sessiz yeniden
+      // kurulur; mesaj yalnız ilk atlamada — makePhaseOutageResume ile aynı sözleşme).
+      let skipNoticeShown = false;
+      armLlmOutageWait(msg, async (): Promise<OutageResumeResult> => {
         if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
-          emitChatMessage("system", "ℹ️ Otomatik devam atlandı — sistem bu arada meşgul (yeni mesaj/askq/faz sürüyor). Mesajını istersen yeniden yaz.");
-          return;
+          if (!skipNoticeShown) {
+            skipNoticeShown = true;
+            emitChatMessage("system", "ℹ️ Otomatik devam şimdilik atlandı — sistem meşgul. Beklemeye devam ediyorum; istersen mesajını yeniden yaz.");
+          }
+          return "skipped";
         }
+        emitChatMessage("system", "🔄 LLM erişimini yeniden deniyorum — açıldıysa mesajını kaldığım yerden yanıtlayacağım.");
         await respondAndExecute();
+        return "resumed";
       });
     } else {
       emitChatMessage(

@@ -17,6 +17,11 @@ export interface ActivityInput {
   runningDetail: string | null;
   /** Kullanıcıdan cevap bekleyen açık soru var mı. */
   hasAskq: boolean;
+  /** ⏸️ LLM bekle-ve-devam aktif mi (2026-07-23: iki Claude kanalı da kapalı — outage_wait olayı).
+   *  Saatlerce sürebilir; şerit "boşta" DEMEMELİ (YZLLM ekranı: alttaki mesaj doğru, şerit bayattı). */
+  outageWaiting: boolean;
+  /** Bilinen otomatik devam saati ("14:20" — App formatlar); null = 5 dk'da bir yoklama modu. */
+  outageUntil: string | null;
 }
 
 export interface Activity {
@@ -41,6 +46,13 @@ export function composeActivity(i: ActivityInput): Activity {
     const labelHasPhase = /^\s*Faz\s/i.test(i.runningLabel);
     const text = labelHasPhase ? `${i.runningLabel}${d}` : `${p} — ${i.runningLabel}${d}`;
     return { icon: "⚙️", tone: "running", text };
+  }
+  // ⏸️ LLM bekle-ve-devam (2026-07-23): iki Claude kanalı da kapalı, otomatik devam bekleniyor — saatlerce
+  // sürebilir; "boşta, yeni iş bekliyorum" YANLIŞ olurdu (iş var, erişim yok). runningLabel'dan SONRA:
+  // yoklama gerçek bir koşum başlatırsa banner gerçeği gösterir, koşum durunca yine beklemeye döner.
+  if (i.outageWaiting) {
+    const when = i.outageUntil ? `~${i.outageUntil} civarı otomatik devam` : "5 dakikada bir yeniden denenecek";
+    return { icon: "⏸️", tone: "waiting", text: `${p} — LLM erişimi bekleniyor · ${when}` };
   }
   // MAHKEME MEDIUM (2026-07-21): mid-pipeline faz (Faz 0 + 2..16) phaseStatus="running" ama banner henüz
   // gelmemişse (askq cevabı işleniyor / banner'lar arası kısa pencere) YANLIŞ "boşta" DEME → nötr "çalışıyor".

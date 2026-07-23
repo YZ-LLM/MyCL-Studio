@@ -61,6 +61,7 @@ export type OrchestratorEvent =
   | RuntimeErrorEvent
   | PhaseRunningEvent
   | PhaseIdleEvent
+  | OutageWaitEvent
   | PhaseChangedEvent
   | PipelineEndEvent
   | ClaudeStreamEvent
@@ -317,6 +318,19 @@ export interface PhaseRunningEvent {
 export interface PhaseIdleEvent {
   kind: "phase_idle";
   data: { ts: number };
+}
+
+/** ⏸️ LLM bekle-ve-devam durumu (2026-07-23): iki Claude kanalı da kapalıyken kuruldu/çözüldü.
+ *  ActivityBar bunu "boşta" yerine "LLM erişimi bekleniyor — ~HH:MM'de otomatik devam" göstermek
+ *  için okur (banner-yok ≠ boşta dersi; bekleme saatlerce sürebilir, şerit gerçeği söylemeli). */
+export interface OutageWaitEvent {
+  kind: "outage_wait";
+  data: {
+    active: boolean;
+    /** Bilinen abonelik reset zamanı (ms) — yoksa 5 dk'da bir yoklama modu. */
+    reset_ms?: number;
+    ts: number;
+  };
 }
 
 export interface RuntimeErrorEvent {
