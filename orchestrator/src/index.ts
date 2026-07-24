@@ -234,7 +234,7 @@ import { realAppGateDecision, buildRealAppVerifyMarker, decideFullDevelopGate } 
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
-import { MechanicalRunnerBase, isNotApplicableSkip } from "./base/mechanical-runner.js";
+import { MechanicalRunnerBase, isNotApplicableSkip, isToolInstallableSkip } from "./base/mechanical-runner.js";
 import {
   computeChangedScope,
   shouldComputeScope,
@@ -790,6 +790,10 @@ async function emitVerificationSummary(state: State): Promise<void> {
   const passed: string[] = [];
   const skipped: string[] = []; // araç yok/stub/bozuk → GERÇEK boşluk, sarı uyar
   const notApplicable: string[] = []; // stack bu boyuta genuinely sahip değil → nötr (YZLLM 2026-07-01)
+  // Araç kurulumuyla OTO-ÇÖZÜLEBİLİR atlamalar (YZLLM 2026-07-24: "aracı eklemeye karar vermesi
+  // gerekiyordu ve ekleyip çalıştırması gerekiyordu") — kullanıcıya "bilerek kabul et veya aracı ekle"
+  // deyip DURMAK yerine karar verilir: kuyruğa "aracı kur + gate'i gerçekten koştur" işi açılır.
+  const installable: Array<{ n: number; dim: string; detail: string }> = [];
   for (const [nStr, dim] of Object.entries(GATE_DIMS)) {
     const n = Number(nStr);
     const skip = thisIter.find((e) => e.event === `phase-${n}-skipped`);
@@ -799,7 +803,10 @@ async function emitVerificationSummary(state: State): Promise<void> {
       const label = `${dim}${reason ? ` (${reason})` : ""}`;
       // KESİN-N/A (ts-prune JS'te / profil null) → nötr; şüpheli/araç-eksik → sarı (false-green önleme).
       if (isNotApplicableSkip(skip.detail)) notApplicable.push(label);
-      else skipped.push(label);
+      else {
+        skipped.push(label);
+        if (isToolInstallableSkip(skip.detail)) installable.push({ n, dim, detail: String(skip.detail ?? "") });
+      }
     } else if (done) passed.push(dim);
   }
   // GERÇEK-APP DOĞRULAMA (mekanik faz değil → ayrı event'ler; YZLLM 2026-07-21): fix'in bildirilen bug'ı
@@ -823,8 +830,43 @@ async function emitVerificationSummary(state: State): Promise<void> {
   if (skipped.length) {
     lines.push(
       `⚠️ **DOĞRULANMADI (atlandı)**: ${skipped.join(", ")}`,
-      `Bu boyutlar bu koşuda kontrol EDİLMEDİ (araç kurulu değil / stub / bozuk). "Geçti" anlamına gelmez — bilerek kabul et veya aracı ekle.`,
+      `Bu boyutlar bu koşuda kontrol EDİLMEDİ (araç kurulu değil / stub / bozuk). "Geçti" anlamına gelmez.`,
     );
+    // Araç-kurulabilir atlamalar → kuyruğa TEK-ATIŞ iş (YZLLM 2026-07-24: kararı kullanıcıya bırakma —
+    // aracı ekle ve çalıştır). Dedup: aynı boyut için daha önce AÇILMIŞ (statüden bağımsız) verify-gap
+    // işi varsa yeniden açılmaz — iş başarısız olsa da sonsuz açma döngüsü yok (özet dürüst kalır).
+    const queuedDims: string[] = [];
+    if (installable.length > 0) {
+      try {
+        const existing = await readTasks(state.project_root);
+        for (const gap of installable) {
+          // Dedup anahtarı aşağıdaki sabit cümle başlangıcı — şablonu değiştirirsen anahtarı da güncelle.
+          const dedupKey = `Faz ${gap.n} (${gap.dim}) doğrulaması atlandı`;
+          if (existing.some((t) => t.source === "verify-gap" && t.text.includes(dedupKey))) continue;
+          const cmd = /cmd="([^"]+)"/.exec(gap.detail)?.[1];
+          await enqueueSystemFixTask(
+            state.project_root,
+            `${dedupKey} — neden: ${gap.detail || "araç yok"}. ` +
+              `${cmd ? `Beklenen komut: ${cmd}. ` : ""}` +
+              `Bu doğrulamanın gerçekten koşabilmesi için gerekli aracı/scripti projeye kur (bağımlılık + ` +
+              `gerekli config + GERÇEK kontrol komutu; echo/stub YASAK) ve komutun gerçekten koşup anlamlı ` +
+              `sonuç ürettiğini kanıtla.`,
+            "verify-gap",
+          );
+          queuedDims.push(gap.dim);
+        }
+      } catch (e) {
+        // İş açma başarısız → görünür (sessiz fallback yok); özetin kendisi yine basılır.
+        log.warn("orchestrator", "verify-gap işi kuyruğa eklenemedi", { error: String(e) });
+        lines.push(`⚠️ Araç kurulum işi kuyruğa eklenemedi (${String(e).slice(0, 80)}) — aracı elle ekleyebilirsin.`);
+      }
+    }
+    if (queuedDims.length > 0) {
+      lines.push(`🔧 ${queuedDims.join(", ")} için "aracı kur + doğrulamayı koştur" işi kuyruğa eklendi — otomatik denenecek.`);
+      if (skipped.length > queuedDims.length) lines.push(`Kalanlar için: bilerek kabul et veya aracı elle ekle.`);
+    } else {
+      lines.push(`Bilerek kabul et veya aracı ekle.`);
+    }
   }
   emitChatMessage("system", lines.join("\n"));
 }
@@ -7095,7 +7137,7 @@ async function enqueueSecurityFixTask(projectRoot: string, text: string): Promis
 async function enqueueSystemFixTask(
   projectRoot: string,
   text: string,
-  source: "security" | "full-test" | "maintenance",
+  source: "security" | "full-test" | "maintenance" | "verify-gap",
 ): Promise<void> {
   const task: TaskQueueItem = {
     id: randomUUID(),

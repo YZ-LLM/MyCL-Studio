@@ -21,8 +21,10 @@
 export type TaskStatus = "pending" | "running" | "done" | "dropped";
 
 /** İş kaynağı — kim/ne ekledi. Yeni kaynak eklerken TASK_SOURCES setine de ekle
- *  (store.ts okuma doğrulaması oradan yürür; unutulursa kaynak sessizce düşerdi). */
-export type TaskSource = "manual" | "auto" | "security" | "full-test" | "maintenance" | "plan";
+ *  (store.ts okuma doğrulaması oradan yürür; unutulursa kaynak sessizce düşerdi).
+ *  verify-gap (2026-07-24): doğrulama özetinde "araç yok/stub" nedeniyle atlanan gate boyutu →
+ *  aracı kurup gate'i gerçekten koşturma işi (YZLLM: "aracı eklemeye karar vermesi ve çalıştırması gerekiyordu"). */
+export type TaskSource = "manual" | "auto" | "security" | "full-test" | "maintenance" | "plan" | "verify-gap";
 
 export interface TaskQueueItem {
   /** UUID v4 — silme tombstone bağlamak için. */
@@ -98,6 +100,7 @@ export const TASK_SOURCES: ReadonlySet<TaskSource> = new Set<TaskSource>([
   "full-test",
   "maintenance",
   "plan",
+  "verify-gap",
 ]);
 
 export class TaskQueueError extends Error {

@@ -83,6 +83,17 @@ export function isNotApplicableSkip(reason: string | undefined | null): boolean 
   return GATE_SKIP_NOT_APPLICABLE.has(String(reason).trim().split(/\s+/)[0]);
 }
 
+/** SAF (YZLLM 2026-07-24 "aracı eklemeye karar vermesi ve çalıştırması gerekiyordu"): bir gate-skip'i
+ *  ARAÇ KURULUMUYLA oto-çözülebilir mi? missing_command (araç/komut sistemde yok) + stub_script (echo-stub,
+ *  gerçek kontrol yok) → EVET (kuyruğa "aracı kur + gate'i koştur" işi açılır). mycl_tool_broken (MyCL'in
+ *  KENDİ paketleme bug'ı — proje işi değil), aborted (kullanıcı iptali), profile_resolve_null (stack bu
+ *  boyutu tanımlamıyor — profil işi) ve N/A sınıfı → HAYIR (yalnız görünür kalır). */
+export function isToolInstallableSkip(reason: string | undefined | null): boolean {
+  if (!reason) return false;
+  const first = String(reason).trim().split(/\s+/)[0];
+  return first === "missing_command" || first === "stub_script";
+}
+
 const DEFAULT_TIMEOUT = 120_000;
 
 /**

@@ -10,6 +10,7 @@ import {
   resolveMechanicalCmd,
   shellQuote,
   isNotApplicableSkip,
+  isToolInstallableSkip,
 } from "../src/base/mechanical-runner.js";
 import { _clearProfileCache } from "../src/profile-loader.js";
 import type { State } from "../src/types.js";
@@ -620,5 +621,23 @@ describe("isNotApplicableSkip (skip sınıflandırma)", () => {
     expect(isNotApplicableSkip("missing_file")).toBe(false);
     expect(isNotApplicableSkip(undefined)).toBe(false);
     expect(isNotApplicableSkip("")).toBe(false);
+  });
+});
+
+// YZLLM 2026-07-24 ("aracı eklemeye karar vermesi gerekiyordu ve ekleyip çalıştırması gerekiyordu"):
+// hangi skip'ler kuyruğa "aracı kur + gate'i koştur" işi açar.
+describe("isToolInstallableSkip (araç kurulumuyla oto-çözülebilir skip)", () => {
+  it("missing_command + stub_script → true (detail 'reason cmd=...' formatıyla da)", () => {
+    expect(isToolInstallableSkip("missing_command")).toBe(true);
+    expect(isToolInstallableSkip('missing_command cmd="npx lighthouse"')).toBe(true);
+    expect(isToolInstallableSkip('stub_script cmd="echo ok"')).toBe(true);
+  });
+  it("MyCL'in kendi bug'ı / iptal / profil-null / N/A / boş → false (iş AÇILMAZ)", () => {
+    expect(isToolInstallableSkip("mycl_tool_broken")).toBe(false); // MyCL paketleme bug'ı — proje işi değil
+    expect(isToolInstallableSkip("aborted")).toBe(false); // kullanıcı iptali
+    expect(isToolInstallableSkip("profile_resolve_null")).toBe(false); // stack boyutu tanımlamıyor — profil işi
+    expect(isToolInstallableSkip("ts_tool_js_project")).toBe(false); // N/A sınıfı
+    expect(isToolInstallableSkip(undefined)).toBe(false);
+    expect(isToolInstallableSkip("")).toBe(false);
   });
 });

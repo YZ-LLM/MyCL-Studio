@@ -172,7 +172,11 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
 - **Dürüst hüküm** — akış sonunda mekanik kapılar ve risk incelemesi tek bir
   sonuca toplanır: PASS / PARTIAL / FAIL. Araç yokluğundan atlanan boyutlar
   "doğrulanmadı" diye işaretlenir; patlayan bir kapı sessizce "tamamlandı"
-  sayılmaz (yan menüde ⚠️, başlıkta kısmî/başarısız çip).
+  sayılmaz (yan menüde ⚠️, başlıkta kısmî/başarısız çip). Araç kurulumuyla
+  çözülebilecek atlamalar (komut/araç yok, echo-stub script) kullanıcıya
+  bırakılmaz: MyCL "aracı kur + doğrulamayı gerçekten koştur" işini kuyruğa
+  kendisi ekler ve otomatik dener (boyut başına bir kez; MyCL'in kendi araç
+  hatası proje işine dönüşmez).
 - **Gerçek uygulama doğrulaması (bug fix'leri için)** — bir hata düzeltmesi
   "çözüldü" sayılmadan önce, gerçek çalışan uygulamada bildirilen sorunun
   GERÇEKTEN gittiği Playwright E2E ile doğrulanır (birim testi yeşili ≠ çalışan
