@@ -34,6 +34,7 @@ import type {
   TaskQueueItem,
   ChatSummaryState,
 } from "./types/events";
+import { MAX_TASK_AUTO_RETRIES } from "./types/events";
 import { TaskQueuePanel } from "./components/TaskQueuePanel";
 import { TokenTimelinePanel } from "./components/TokenTimelinePanel";
 import { ActivityBar } from "./components/ActivityBar";
@@ -1643,6 +1644,11 @@ function App() {
           mainState.outageWait?.resetMs
             ? new Date(mainState.outageWait.resetMs).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
             : null
+        }
+        stalledTasks={
+          mainState.taskQueue.filter(
+            (t) => (t.status ?? "pending") === "pending" && (t.attempts ?? 0) >= MAX_TASK_AUTO_RETRIES,
+          ).length
         }
       />
       <div

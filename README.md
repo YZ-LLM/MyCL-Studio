@@ -395,8 +395,10 @@ belli eder (çalışıyor / bekliyor / boşta). Kayan sohbete karışmaz, her an
 **Açılışta durum + yapman gereken özeti.** Bir proje açtığında (özellikle mevcut
 projeyi entegre ettiğinde) MyCL son mesajında **her zaman** kısa bir "📍 Durum /
 Yapman gereken" özeti yazar: ne durumda olduğunu (analiz sürüyor, önceki iş
-kaldığı yerden sürüyor, yeni iş bekliyor, faz otomatik ilerliyor…) ve senin ne
-yapman gerektiğini (bekle / hedef yaz / soruyu yanıtla) tek bakışta gösterir.
+kaldığı yerden sürüyor, yeni iş bekliyor, faz otomatik ilerliyor, kuyrukta deneme
+hakkı dolmuş işler "Tekrar Dene" bekliyor…) ve senin ne yapman gerektiğini
+(bekle / hedef yaz / soruyu yanıtla) tek bakışta gösterir. Kuyrukta iş varken
+asla "bekleyen işim yok" demez.
 Bu özet deterministiktir — LLM'e sorulmaz, token yakmaz.
 
 **İş kuyruğundan iş alınca tekrar niyet sormaz.** İş kuyruğundan bir iş işlenmeye

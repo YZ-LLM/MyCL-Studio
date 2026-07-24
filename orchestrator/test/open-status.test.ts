@@ -11,6 +11,7 @@ const base: OpenStatusInput = {
   pendingUiReview: false,
   runningTaskText: null,
   pendingTaskCount: 0,
+  stalledTaskCount: 0,
   eddDone: 0,
   eddTotal: 0,
   eddPending: 0,
@@ -45,6 +46,35 @@ describe("composeOpenStatus — öncelik sırası", () => {
   it("bekleyen kuyruk işi → N iş bekliyor", () => {
     const s = composeOpenStatus({ ...base, pendingTaskCount: 3 });
     expect(s.durum).toContain("3 iş bekliyor");
+  });
+
+  // YZLLM 2026-07-24 ekranı: 7 "otomatik denenmez" iş kuyruktayken özet "bekleyen bir işim yok" diyordu.
+  it("yalnız otomatik denenmez (deneme hakkı dolmuş) işler → 'işim yok' DEMEZ; Tekrar Dene yönlendirir", () => {
+    const s = composeOpenStatus({ ...base, stalledTaskCount: 7 });
+    expect(s.durum).toContain("7 iş bekliyor");
+    expect(s.durum).toContain("otomatik deneme hakları doldu");
+    expect(s.durum).not.toContain("işim yok");
+    expect(s.action).toContain("Tekrar Dene");
+    expect(s.phaseStatus).toBe("idle"); // koşan yok — nötr
+  });
+
+  it("oto-denenebilir + denenmez karışık → oto işler sürer, denenmezler notta görünür", () => {
+    const s = composeOpenStatus({ ...base, pendingTaskCount: 2, stalledTaskCount: 5 });
+    expect(s.durum).toContain("2 iş bekliyor");
+    expect(s.durum).toContain("5 iş daha deneme hakkı dolduğundan elle bekliyor");
+    expect(s.phaseStatus).toBe("running");
+  });
+
+  it("MAHKEME: Faz 17 + stalled işler → mesaj kuyruk gerçeğini söyler AMA faz ✅ tamamlandı KALIR (terminal farkındalık)", () => {
+    const s = composeOpenStatus({ ...base, currentPhase: 17, intentEmpty: false, stalledTaskCount: 7 });
+    expect(s.durum).toContain("7 iş bekliyor");
+    expect(s.phaseStatus).toBe("complete"); // pipeline gerçekten bitti — stalled işler ✅ sinyalini silmez
+  });
+
+  it("EDD sürerken stalled işler mesajı EZMEZ (analiz daha canlı sinyal — running)", () => {
+    const s = composeOpenStatus({ ...base, isForeign: true, eddPending: 3, eddDone: 1, eddTotal: 4, stalledTaskCount: 7 });
+    expect(s.durum).toContain("EDD");
+    expect(s.phaseStatus).toBe("running");
   });
 
   it("foreign + EDD sürüyor → analiz done/total", () => {

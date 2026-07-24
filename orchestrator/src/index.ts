@@ -2061,6 +2061,9 @@ async function gatherOpenStatusInput(): Promise<OpenStatusInput | null> {
   const running =
     tasks.find((t) => t.id === runtime.currentTaskId) ?? tasks.find((t) => t.status === "running") ?? null;
   const pendingCount = tasks.filter((t) => (t.status ?? "pending") === "pending" && (t.attempts ?? 0) < MAX_TASK_AUTO_RETRIES).length;
+  // Otomatik denenmez (deneme hakkı dolmuş) ama kuyrukta GÖRÜNÜR bekleyen işler — özet "işim yok" DEMESİN
+  // (YZLLM 2026-07-24 ekranı: 7 böyle iş varken "bekleyen bir işim yok" çelişkisi).
+  const stalledCount = tasks.filter((t) => (t.status ?? "pending") === "pending" && (t.attempts ?? 0) >= MAX_TASK_AUTO_RETRIES).length;
   const isForeign = st.origin === "foreign";
   let eddDone = 0, eddTotal = 0, eddPending = 0;
   if (isForeign) {
@@ -2077,6 +2080,7 @@ async function gatherOpenStatusInput(): Promise<OpenStatusInput | null> {
     pendingUiReview: st.pending_ui_review === true,
     runningTaskText: running?.text ?? null,
     pendingTaskCount: pendingCount,
+    stalledTaskCount: stalledCount,
     eddDone, eddTotal, eddPending,
   };
 }

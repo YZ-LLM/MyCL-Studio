@@ -22,6 +22,9 @@ export interface ActivityInput {
   outageWaiting: boolean;
   /** Bilinen otomatik devam saati ("14:20" — App formatlar); null = 5 dk'da bir yoklama modu. */
   outageUntil: string | null;
+  /** Kuyrukta bekleyen ama OTOMATİK DENENMEZ (deneme hakkı dolmuş, "Tekrar Dene" bekleyen) iş sayısı —
+   *  MAHKEME 2026-07-24: sohbet "7 iş bekliyor (Tekrar Dene)" derken şerit "boşta" diyordu (çelişki). */
+  stalledTasks: number;
 }
 
 export interface Activity {
@@ -59,6 +62,15 @@ export function composeActivity(i: ActivityInput): Activity {
   // Faz 1 istisna: orası niyet bekleme fazı; banner yoksa gerçekten kullanıcıyı bekliyordur → "boşta" doğru.
   if (i.phaseStatus === "running" && i.phase !== 1) {
     return { icon: "⚙️", tone: "running", text: `${p} — çalışıyor…` };
+  }
+  // Kuyruğa takılı işler (MAHKEME 2026-07-24): hiçbir şey koşmuyor AMA kuyrukta deneme hakkı dolmuş,
+  // "Tekrar Dene" bekleyen işler var → "boşta, yeni iş bekliyorum" YANLIŞ (iş var, karar kullanıcıda).
+  if (i.stalledTasks > 0) {
+    return {
+      icon: "⏸️",
+      tone: "waiting",
+      text: `${p} — ${i.stalledTasks} iş deneme hakkı dolduğundan bekliyor (kuyruktan "Tekrar Dene")`,
+    };
   }
   return { icon: "💤", tone: "idle", text: `${p} — boşta, yeni iş bekliyorum` };
 }

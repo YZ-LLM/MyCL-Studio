@@ -39,8 +39,11 @@ export interface OpenStatusInput {
   pendingUiReview: boolean;
   /** Şu an koşan/başlamak üzere olan kuyruk işinin metni (yoksa null). */
   runningTaskText: string | null;
-  /** Kuyrukta bekleyen (koşmayan) iş sayısı. */
+  /** Kuyrukta bekleyen ve OTOMATİK denenebilir (attempts < tavan) iş sayısı. */
   pendingTaskCount: number;
+  /** Kuyrukta bekleyen ama OTOMATİK DENENMEZ (deneme hakkı dolmuş, "Tekrar Dene" bekleyen) iş sayısı —
+   *  YZLLM 2026-07-24 ekranı: 7 böyle iş varken özet "bekleyen bir işim yok" diyordu (yanlış). */
+  stalledTaskCount: number;
   /** EDD (yabancı proje analizi) — analiz edilen / toplam birim; pending>0 ise analiz sürüyor. */
   eddDone: number;
   eddTotal: number;
@@ -94,8 +97,10 @@ export function composeOpenStatus(i: OpenStatusInput): OpenStatus {
     };
   }
   if (i.pendingTaskCount > 0) {
+    const stalledNote =
+      i.stalledTaskCount > 0 ? ` (${i.stalledTaskCount} iş daha deneme hakkı dolduğundan elle bekliyor)` : "";
     return {
-      durum: `İş kuyruğunda ${i.pendingTaskCount} iş bekliyor.`,
+      durum: `İş kuyruğunda ${i.pendingTaskCount} iş bekliyor${stalledNote}.`,
       action: "Sıradaki iş birazdan otomatik başlar; yeni hedef eklemek için yazabilirsin.",
       phaseStatus: "running",
     };
@@ -105,6 +110,18 @@ export function composeOpenStatus(i: OpenStatusInput): OpenStatus {
       durum: `Proje analizi (EDD) arka planda sürüyor: ${i.eddDone}/${i.eddTotal} birim.`,
       action: "Analiz bitince projeyi tam kavrarım; şimdiden yeni bir hedef yazabilirsin.",
       phaseStatus: "running",
+    };
+  }
+  // Yalnız otomatik-denenmez işler var (YZLLM 2026-07-24: "iş kuyruğunda bi sürü iş var ama işim yok
+  // diyor") — "işim yok" YANLIŞ olur; işler kuyrukta GÖRÜNÜR bekliyor, karar kullanıcıda. EDD'den SONRA:
+  // analiz sürüyorsa o daha canlı sinyal (running) — stalled o bitince görünür.
+  if (i.stalledTaskCount > 0) {
+    return {
+      durum: `İş kuyruğunda ${i.stalledTaskCount} iş bekliyor ama otomatik deneme hakları doldu (tekrar tekrar başarısız oldular).`,
+      action: `Kuyruktan "Tekrar Dene" ile sürdür, işi silebilir ya da ne istediğini yeni bir talimatla yazabilirsin.`,
+      // MAHKEME HIGH (2026-07-24): TERMINAL-FARKINDALIK KORUNUR — Faz 17'de pipeline GERÇEKTEN bitti;
+      // stalled işler faz-tamamlanma sinyalini SİLMEZ (✅ kalır), yalnız mesaj kuyruk gerçeğini taşır.
+      phaseStatus: i.currentPhase === 17 ? "complete" : "idle",
     };
   }
   if (i.currentPhase === 1 && i.intentEmpty) {
