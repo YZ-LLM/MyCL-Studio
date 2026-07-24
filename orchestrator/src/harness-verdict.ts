@@ -59,9 +59,11 @@ function isSecuritySkip(e: AuditEvent): boolean {
 /**
  * SAF (YZLLM 2026-07-21): gerçek-app doğrulama kapısı KOŞAMADI mı (ortamsal engel). Yalnız
  * `realapp-verify-skipped` — `realapp-verify-fail` zaten `-fail`→PARTIAL yolundan geçer, burada değil.
+ * `not_applicable_*` detayı HARİÇ (YZLLM onayı 2026-07-24): sentezlenmiş kapı UI senaryosuna çevrilemeyen
+ * işe (güvenlik/test-altyapı) uygulanamadı → NÖTR; PARTIAL damgalamak yanlış sarı üretirdi.
  */
 function isRealAppSkip(e: AuditEvent): boolean {
-  return e.event === "realapp-verify-skipped";
+  return e.event === "realapp-verify-skipped" && !String(e.detail ?? "").startsWith("not_applicable");
 }
 
 /**

@@ -499,7 +499,14 @@ export type RealAppGateOutcome =
   | {
       outcome: "cannot_run";
       // "error" = doğrulama işi beklenmedik istisna verdi (caller try/catch'i sentezler) → done ENGELLENİR, sessiz done değil.
-      reason: "no_dev_server" | "no_playwright" | "codegen_failed" | "not_found" | "error";
+      // MAHKEME (2026-07-24) neden inceltmesi — "uygulanamaz" köşesi yalnız not_found'a daraltılabilsin diye:
+      //   codegen_failed = LLM üretim hattı başarısız (ortamsal/kesinti sınıfına yakın) → SERT.
+      //   guard_tripped  = ajan mock/vacuous üretmekte ısrar etti YA DA yeşil koşumdan sonra final guard hileyi
+      //                    yakaladı — sahte-yeşil SİNYALİ, ASLA nötr sayılmaz → SERT.
+      //   aborted        = kullanıcı/kesinti iptali → SERT (llm-outage/deneme-sayılmaz zaten devrede).
+      //   not_found      = ajan senaryo DOSYASI hiç üretemedi ("bu niyetten çalışan arayüz senaryosu çıkaramadım"
+      //                    deklarasyonu) → sentezlenmiş kapıda uygulanamaz adayı.
+      reason: "no_dev_server" | "no_playwright" | "codegen_failed" | "guard_tripped" | "aborted" | "not_found" | "error";
     };
 
 /** SAF: bug-repro doğrulama sistem prompt'u — buildSystemPrompt'un MOCK-YASAK + kalıcı-durum ilkelerini
@@ -641,7 +648,7 @@ export async function verifyIntentAgainstApp(
 ): Promise<{ result: RealAppGateOutcome }> {
   const { state, config, signal } = deps;
   const aborted = (): boolean => signal?.aborted === true;
-  if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
+  if (aborted()) return { result: { outcome: "cannot_run", reason: "aborted" } };
 
   const snapshot = deps.snapshot ?? (await buildCodebaseSnapshot(state.project_root));
   const authConfigured =
@@ -663,7 +670,8 @@ export async function verifyIntentAgainstApp(
     { state, config, modelId, apiKey, toolCtx },
   );
   if (codegenOutcome.kind === "failed" || codegenOutcome.kind === "aborted") {
-    return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
+    // aborted ≠ üretim hatası (MAHKEME 2026-07-24): iptal/kesinti "uygulanamaz" ile ASLA karışmasın.
+    return { result: { outcome: "cannot_run", reason: codegenOutcome.kind === "aborted" ? "aborted" : "codegen_failed" } };
   }
   if (!(await fileExists(specAbs))) {
     // Ajan senaryoyu bulamadı/üretemedi → dürüst "kanıtlayamadım" (sahte-yeşil DEĞİL).
@@ -673,7 +681,7 @@ export async function verifyIntentAgainstApp(
   // Mock-guard (2 deneme) — mock'lu test gerçek doğrulama değil.
   let specContent = await safeRead(specAbs);
   if (containsMocking(specContent)) {
-    if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
+    if (aborted()) return { result: { outcome: "cannot_run", reason: "aborted" } };
     await clearHistory(state.project_root, VERIFY_PHASE_ID);
     await runCodegen(
       sysPrompt +
@@ -683,14 +691,15 @@ export async function verifyIntentAgainstApp(
     );
     specContent = await safeRead(specAbs);
     if (containsMocking(specContent)) {
-      return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
+      // Ajan mock'ta ISRAR etti — sahte-yeşil sinyali (MAHKEME 2026-07-24): "uygulanamaz" sayılamaz.
+      return { result: { outcome: "cannot_run", reason: "guard_tripped" } };
     }
   }
 
   // Substance-guard (MAHKEME BULGU 2, tek deneme): boş/atlanmış test yeşil geçse de HİÇBİR ŞEY doğrulamaz →
   // sahte-pass. Assertion içeren gerçek bir test iste; hâlâ vacuous ise → cannot_run (doğrulayamadım).
   if (!containsMocking(specContent) && !hasSubstantiveTest(specContent)) {
-    if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
+    if (aborted()) return { result: { outcome: "cannot_run", reason: "aborted" } };
     await clearHistory(state.project_root, VERIFY_PHASE_ID);
     await runCodegen(
       sysPrompt +
@@ -700,12 +709,13 @@ export async function verifyIntentAgainstApp(
     );
     specContent = await safeRead(specAbs);
     if (containsMocking(specContent) || !hasSubstantiveTest(specContent)) {
-      return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
+      // Vacuous/mock ısrarı — sahte-yeşil sinyali (MAHKEME 2026-07-24) → guard_tripped (SERT).
+      return { result: { outcome: "cannot_run", reason: "guard_tripped" } };
     }
   }
 
   // Çalıştır (+ tek tamir denemesi: selector/assertion gerçek uygulamaya göre)
-  if (aborted()) return { result: { outcome: "cannot_run", reason: "error" } };
+  if (aborted()) return { result: { outcome: "cannot_run", reason: "aborted" } };
   let run = await runGeneratedTest(state.project_root, specRel);
   if (!run.ok && !aborted()) {
     await clearHistory(state.project_root, VERIFY_PHASE_ID);
@@ -723,7 +733,7 @@ export async function verifyIntentAgainstApp(
   // `fail` dönersek kullanıcının KENDİ iptali özelliği "bozuk" damgalar + sahte fix işi üretir (sahte-kırmızı,
   // Ümit'in nefret ettiği yanlış-pozitif). Dürüst "kanıtlayamadım" → cannot_run (verdict'i düşürmez).
   if (!run.ok && aborted()) {
-    return { result: { outcome: "cannot_run", reason: "error" } };
+    return { result: { outcome: "cannot_run", reason: "aborted" } };
   }
 
   if (run.ok) {
@@ -731,7 +741,8 @@ export async function verifyIntentAgainstApp(
     // Final spec'i tazeleyip mock/substance'ı SON KEZ doğrula; kırıksa pass DEĞİL cannot_run (dürüst kanıtlayamadım).
     const finalSpec = await safeRead(specAbs);
     if (containsMocking(finalSpec) || !hasSubstantiveTest(finalSpec)) {
-      return { result: { outcome: "cannot_run", reason: "codegen_failed" } };
+      // YEŞİL koşumdan SONRA hile yakalandı (MAHKEME BULGU 2) — en kritik sahte-yeşil sinyali → guard_tripped.
+      return { result: { outcome: "cannot_run", reason: "guard_tripped" } };
     }
     return { result: { outcome: "pass" } };
   }

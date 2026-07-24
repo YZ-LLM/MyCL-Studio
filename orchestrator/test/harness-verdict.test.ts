@@ -151,6 +151,14 @@ describe("harness-verdict · computeVerdict", () => {
     expect(r.summary).toMatch(/gerçek uygulama doğrulaması koşamadı/);
   });
 
+  it("YZLLM onayı 2026-07-24: not_applicable_* detaylı realapp-skip NÖTR → PASS (PARTIAL değil)", () => {
+    // Sentezlenmiş kapı UI senaryosuna çevrilemeyen işe (güvenlik/test-altyapı) uygulanamadı — sarı yanlış.
+    const events = [...cleanRun(), ev(16, "realapp-verify-skipped", "not_applicable_codegen_failed")];
+    const r = computeVerdict(events);
+    expect(r.verdict).toBe("PASS");
+    expect(r.realAppSkipped).toEqual([]);
+  });
+
   it("gerçek-app doğrulama BAŞARISIZ (realapp-verify-fail) → gate-fail yolundan PARTIAL (realAppSkipped değil)", () => {
     // -fail zaten -fail→PARTIAL yolundan geçer; realAppSkipped'a DÜŞMEZ (o yalnız -skipped).
     const events = [...cleanRun(), ev(16, "realapp-verify-fail", "bug sürüyor")];

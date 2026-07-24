@@ -815,7 +815,13 @@ async function emitVerificationSummary(state: State): Promise<void> {
   const realappSkip = thisIter.find((e) => e.event === "realapp-verify-skipped");
   const realappFail = thisIter.some((e) => e.event === "realapp-verify-fail");
   if (realappPass) passed.push("Gerçek uygulama (bildirilen sorun)");
-  else if (realappSkip) skipped.push(`Gerçek uygulama (${realappSkip.detail ? String(realappSkip.detail) : "koşulamadı"})`);
+  else if (realappSkip) {
+    // not_applicable_* (YZLLM onayı 2026-07-24): sentezlenmiş kapı bu işe uygulanamadı (UI senaryosuna
+    // çevrilemeyen iş — güvenlik/test-altyapı) → NÖTR ➖ (sarı "DOĞRULANMADI" korkutması yanlış olur).
+    const d = realappSkip.detail ? String(realappSkip.detail) : "koşulamadı";
+    if (d.startsWith("not_applicable")) notApplicable.push("Gerçek uygulama (arayüz senaryosuna çevrilemedi)");
+    else skipped.push(`Gerçek uygulama (${d})`);
+  }
   const lines = [`🔎 **Doğrulama özeti**`];
   if (passed.length) lines.push(`✅ Doğrulandı: ${passed.join(", ")}`);
   if (realappFail) {
@@ -5179,6 +5185,29 @@ async function runRealAppGateAtPipelineEnd(stateIn: State): Promise<void> {
     return; // done normal (onTaskMaybeComplete 'done' damgalar)
   }
 
+  // UYGULANAMAZ (YZLLM onayı 2026-07-24, "UI değişmeyen işlerde kapıyı uygulanamaz say"): SENTEZLENMİŞ
+  // kapıda (Faz 6 atlanınca niyetten türetilen — kullanıcının bildirdiği somut bug DEĞİL) ajan senaryo
+  // DOSYASINI hiç üretemediyse (not_found = "bu niyetten çalışan arayüz senaryosu çıkaramadım" deklarasyonu),
+  // bu iş arayüz senaryosuna çevrilemiyor demektir (örn. güvenlik bulgusu giderme, test altyapısı tamiri).
+  // Canlı kanıt (cave): işler suite yeşili + Faz 8 100 iken bu köşede attempts=MAX'a damgalanıp tavana
+  // oturuyordu. Bu köşe NÖTR uygulanamaz → done NORMAL; özet ➖ basar. MAHKEME HIGH daraltması: YALNIZ
+  // not_found — codegen_failed (LLM üretim hattı), guard_tripped (mock/vacuous hile sinyali!), aborted
+  // (kesinti/iptal) ve ortamsal engeller SERT kalır; Faz 0 GERÇEK bug marker'ı (synthesized=false) aynen.
+  if (synthesized && result.outcome === "cannot_run" && result.reason === "not_found") {
+    await appendAuditModule(state.project_root, {
+      ts: nowTs,
+      phase: 16 as PhaseId,
+      event: "realapp-verify-skipped",
+      caller: "mycl-orchestrator",
+      detail: `not_applicable_${result.reason}`, // emitVerificationSummary bunu ➖ nötr sınıflar
+    });
+    emitChatMessage(
+      "system",
+      "➖ Gerçek uygulama doğrulaması bu işe uygulanamadı — iş, çalışan arayüzde tek bir kullanıcı senaryosuna çevrilemedi (örn. güvenlik/test altyapısı işi). İş test yeşiliyle tamamlandı; arayüzü değiştiren işlerde bu doğrulama aynen koşmaya devam ediyor.",
+    );
+    return; // done NORMAL işler (onTaskMaybeComplete 'done' damgalar) — tavana damgalama YOK.
+  }
+
   // fail / cannot_run → done'ı ENGELLE: currentTaskId + _drainTaskId null → onTaskMaybeComplete no-op.
   const taskId = runtime.currentTaskId ?? _drainTaskId;
   runtime.currentTaskId = null;
@@ -5212,6 +5241,8 @@ async function runRealAppGateAtPipelineEnd(stateIn: State): Promise<void> {
     no_dev_server: "dev server ayağa kalkmadı",
     no_playwright: "Playwright kurulamadı",
     codegen_failed: "doğrulama testi üretilemedi",
+    guard_tripped: "üretilen test hileliydi (mock/boş) — doğrulama sayılmadı",
+    aborted: "doğrulama kesinti/iptalle yarıda kaldı",
     not_found: "senaryo/sayfa bulunamadı",
     error: "doğrulama beklenmedik hata verdi",
   };

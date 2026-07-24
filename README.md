@@ -184,7 +184,11 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   arayüzde sorun sürebiliyordu). Sorun hâlâ görülüyorsa iş "Tamamlandı"
   damgalanmaz, kuyruğa geri döner (bir sonraki denemede farklı yaklaşım);
   Playwright yoksa / doğrulama koşulamazsa sessiz "tamamlandı" değil, görünür
-  "yalnız birim doğrulandı, çalışan uygulamada kanıtlanmadı" (PARTIAL) işaretlenir
+  "yalnız birim doğrulandı, çalışan uygulamada kanıtlanmadı" (PARTIAL) işaretlenir.
+  Arayüz senaryosuna çevrilemeyen işlerde (örn. güvenlik bulgusu giderme, test
+  altyapısı tamiri) bu doğrulama nötr "uygulanamaz" sayılır — iş test yeşiliyle
+  tamamlanır, boşuna tavana oturmaz; hileli test (mock/boş) sinyali ise asla
+  nötr sayılmaz
   ("Tekrar Dene" ile yeniden başlatılabilir). Tarayıcıdan sürülebilen (web/masaüstü)
   düzeltmelerde, çalışma-zamanı ya da arayüz dosyası değiştiğinde çalışır. Ayrıca
   tam geliştirme akışından geçen (Faz 1→17) UI iterasyonlarında da devreye girer:
