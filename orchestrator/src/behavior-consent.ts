@@ -21,7 +21,6 @@ import { formatIterationTs } from "./devs-paths.js";
 
 const MYCL_DIR = ".mycl";
 const CONSENT_FILE = "behavior-consent.jsonl";
-const PENDING_CHANGES_FILE = "pending-behavior-changes.json";
 const SPEC_ARTIFACT_NAME = "iter-spec.md";
 const DEVS_DIR = "devs";
 
@@ -320,34 +319,6 @@ export async function computeBehaviorChangeSet(args: {
   if (priorMd == null) return empty;
   const changes = diffBehaviors(parseAcRecords(priorMd), parseAcRecords(args.currentSpecMd));
   return { ...empty, changes };
-}
-
-// ============================ I/O: pending değişiklik kümesi (geçici) ============================
-
-function pendingChangesPath(projectRoot: string): string {
-  return join(projectRoot, MYCL_DIR, PENDING_CHANGES_FILE);
-}
-
-export async function writePendingBehaviorChanges(
-  projectRoot: string,
-  set: BehaviorChangeSet,
-): Promise<void> {
-  const p = pendingChangesPath(projectRoot);
-  await fs.mkdir(dirname(p), { recursive: true });
-  await fs.writeFile(p, JSON.stringify(set, null, 2), "utf-8");
-}
-
-export async function readPendingBehaviorChanges(
-  projectRoot: string,
-): Promise<BehaviorChangeSet | null> {
-  const raw = await readFileOrNull(pendingChangesPath(projectRoot));
-  if (raw == null) return null;
-  try {
-    return JSON.parse(raw) as BehaviorChangeSet;
-  } catch (err) {
-    console.error(`[behavior-consent] bad pending-changes file skipped (${err})`);
-    return null;
-  }
 }
 
 // ============================ I/O: onay kaydı deposu (append-only NDJSON) ============================

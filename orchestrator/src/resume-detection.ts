@@ -6,7 +6,7 @@
 import type { AuditEvent, PhaseId, State } from "./types.js";
 
 /**
- * Faz 2-9 yarıda mı kaldı? state.current_phase 2-9 + bu iterasyonda
+ * Faz 2-17 yarıda mı kaldı? state.current_phase 2-17 + bu iterasyonda
  * `phase-N-complete` YOK → resume sinyali (phaseId döner).
  *
  * scopeStartTs (bu iterasyona ait event sınırı) STATE-ÖNCELİKLİ: audit tail'i

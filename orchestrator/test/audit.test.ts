@@ -24,7 +24,6 @@ import {
   readDecisions,
   SpecMissingError,
   SpecSectionMissingError,
-  summarizeAuditForPhase,
   wasPipelineCompleted,
 } from "../src/audit.js";
 import type { CostRecord, DecisionRecord } from "../src/types.js";
@@ -87,66 +86,6 @@ describe("audit", () => {
     const events = await readAuditLog(projectRoot);
     expect(events).toHaveLength(2);
     expect(events.map((e) => e.event)).toEqual(["ok", "ok2"]);
-  });
-
-  describe("summarizeAuditForPhase", () => {
-    it("returns '(no events)' for missing log", async () => {
-      const s = await summarizeAuditForPhase(projectRoot, 9);
-      expect(s).toMatch(/no events/);
-    });
-
-    it("returns '(no events)' for phase with no entries", async () => {
-      await appendAudit(projectRoot, {
-        ts: 1, phase: 1, event: "phase-1-complete", caller: "user",
-      });
-      const s = await summarizeAuditForPhase(projectRoot, 9);
-      expect(s).toMatch(/no events/);
-    });
-
-    it("lists events for the requested phase only", async () => {
-      await appendAudit(projectRoot, {
-        ts: 1, phase: 8, event: "tdd-test-write", caller: "mycl-orchestrator",
-        detail: "src/foo.test.ts",
-      });
-      await appendAudit(projectRoot, {
-        ts: 2, phase: 8, event: "tdd-green", caller: "mycl-orchestrator",
-      });
-      await appendAudit(projectRoot, {
-        ts: 3, phase: 10, event: "lint-pass", caller: "mycl-orchestrator",
-      });
-      const s = await summarizeAuditForPhase(projectRoot, 8);
-      expect(s).toContain("tdd-test-write");
-      expect(s).toContain("tdd-green");
-      expect(s).not.toContain("lint-pass");
-    });
-
-    it("includes green/red aggregate for phase 8", async () => {
-      await appendAudit(projectRoot, {
-        ts: 1, phase: 8, event: "tdd-green", caller: "mycl-orchestrator",
-      });
-      await appendAudit(projectRoot, {
-        ts: 2, phase: 8, event: "tdd-red", caller: "mycl-orchestrator",
-      });
-      await appendAudit(projectRoot, {
-        ts: 3, phase: 8, event: "tdd-green", caller: "mycl-orchestrator",
-      });
-      const s = await summarizeAuditForPhase(projectRoot, 8);
-      expect(s).toMatch(/green=2 red=1/);
-    });
-
-    it("caps to last maxEvents", async () => {
-      for (let i = 0; i < 50; i++) {
-        await appendAudit(projectRoot, {
-          ts: i, phase: 8, event: "tdd-green", caller: "mycl-orchestrator",
-          detail: `event-${i}`,
-        });
-      }
-      const s = await summarizeAuditForPhase(projectRoot, 8, 5);
-      // 50 events total, last 5 shown — event-45 to event-49.
-      expect(s).toContain("event-49");
-      expect(s).toContain("event-45");
-      expect(s).not.toContain("event-10");
-    });
   });
 
   describe("wasPipelineCompleted", () => {

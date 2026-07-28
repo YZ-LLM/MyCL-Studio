@@ -124,7 +124,6 @@ export class PersistentClaudeSession {
   private pending: {
     texts: string[];
     resolve: (r: SessionTurnResult) => void;
-    sawRateLimitBlocked: boolean;
   } | null = null;
   // Oturum-içi model/efor durumu — control_request ile değişir (respawn yok).
   private curModel: string;
@@ -247,10 +246,8 @@ export class PersistentClaudeSession {
     if (type === "rate_limit_event") {
       const info = ev.rate_limit_info as RateLimitInfo | undefined;
       noteRateLimitEvent(info);
-      // blocked sinyali tur sonucu ile finalize edilir (overage kurtarabilir).
-      if (info && /reject|blocked|exceeded/i.test(String(info.status ?? ""))) {
-        this.pending.sawRateLimitBlocked = true;
-      }
+      // blocked sinyali tur sonucu ile finalize edilir — finalizeCliRateLimit(ok)
+      // (overage kurtarabilir); ayrı bir tur içi bayrak tutulmaz.
     } else if (type === "assistant") {
       const msg = ev.message as { content?: unknown[] } | undefined;
       for (const b of Array.isArray(msg?.content) ? msg!.content : []) {
@@ -378,7 +375,6 @@ export class PersistentClaudeSession {
         // pending'i finish ile sar (timeout/exit ikisini de kapsasın).
         this.pending = {
           texts: [],
-          sawRateLimitBlocked: false,
           resolve: finish,
         };
         const msg = {

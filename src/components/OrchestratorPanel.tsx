@@ -47,7 +47,7 @@ const ACTION_TR: Record<string, string> = {
   set_optional_phases: "Faz kapsamını belirledi",
   answer_askq: "Soruyu yanıtladı",
   verify_feature: "Özelliği test etti",
-  fallback_to_classifier: "Klasik sınıflandırıcıya devretti",
+  fallback_to_classifier: "Anlayamadı, yeniden ifade istedi",
 };
 
 /** tool_use → kısa sade Türkçe özet ("X dosyasını okudu" gibi). */

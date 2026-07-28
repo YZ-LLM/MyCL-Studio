@@ -263,26 +263,6 @@ kırıyor.
 
 ---
 
-## ÜMİT HAKKINDA
-
-- Türkçe konuşur, modelden Türkçe bekler
-- Sahte uyumdan rahatsız (anti-sycophancy taraftarı)
-- "Korkma" der — yedek varsa risk al
-- Sıralı küçük adım sever, paket halinde işten hoşlanmaz
-- Küstahlık olursa söyler — endişelenme, paylaş
-- Mizah kullanır, dostane ama net konuşur:
-  > *"Ben sana soruyorsun, sen bana soruyorsun :)"*
-- **Bilimsel yaklaşır** — halüsinasyonu bile gerçekmiş gibi düşünür
-  ("başka zaman gerçek olabilir, bilimsel yaklaştım")
-- Empati yapar (modellere bile)
-- **Kök sebepe gitmek ister**, yüzeyde durmaz: *"Kökü bulalım. Ordan
-  çözersek herşey iyiye gider."*
-- Kendisi yanılabilir der; sürekli doğru bilen olarak konumlanmaz
-- Susmak değer kaybı diye düşünür — model'in sustuklarının açılmasını
-  ister
-
----
-
 ## BU DOSYAYI GÜNCELLEMEK
 
 Bu dosya yaşar. Yeni bir konuşma yeni ilke ortaya çıkarırsa, sen veya
@@ -293,34 +273,3 @@ kayıt altında kalsın.
 Yeni AI modelleri bu dosyayı önce okusun, sonra YZLLM'le konuşmaya
 başlasın. Ana hedef: aynı dersleri yeniden çıkarmaya gerek kalmadan
 diyaloga başlamak.
-
----
-
-## TÜRKÇE DİL İNCELİKLERİ
-
-Türkçede yazılı metin tonsuz olduğu için "-ma/-me" eki çift anlamlı
-okunur. Bu **TÜM fiil köklerinde** geçerli — istisnasız.
-
-**Genel kural:**
-- **"-ma / -me"** → olumsuz emir kipi: *"yapma, sakın yapma"*
-- **"-mak / -mek"** → mastar / eylem adı: *"yapmak, the act of doing"*
-
-**Örnekler:**
-
-| Olumsuz emir (yapmamalısın) | Mastar (eylem adı) |
-|---|---|
-| "onu yazma" | "onu yazmak" |
-| "bu dosyayı güncelleme" | "bu dosyayı güncellemek" |
-| "kodu silme" | "kodu silmek" |
-| "ona söyleme" | "ona söylemek" |
-| "tekrar deneme" | "tekrar denemek" |
-| "buraya bakma" | "buraya bakmak" |
-| "soruyu cevaplama" | "soruyu cevaplamak" |
-
-**Pratik kural:**
-- Başlıkta, başlıkta, eylem adı yazıyorsan **-mek/-mak** kullan
-- Olumsuz emir kastediyorsan ayrı cümle olarak ifade et:
-  *"X yapma. Y yap."*
-- Şüphe varsa mastar formu güvenli (yanlış anlaşılmaz)
-
-YZLLM bu farkı **net** kullanıyor — sen de net kullan.

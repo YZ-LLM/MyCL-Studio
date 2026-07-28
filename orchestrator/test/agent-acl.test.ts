@@ -1,18 +1,11 @@
 // agent-acl.test — Merkezi ACL registry kontrolü.
 //
-// Amaç:
-//   1. Her ajan id'sinin allowed_tools listesi, gerçek phase controller
-//      tool listesiyle eşleşmeli. Yeni tool eklenip registry güncellenmezse
-//      bu test fail eder → discipline koruma.
-//   2. Yardımcı fonksiyonlar (isToolAllowed, getHighRiskAgents) doğru çalışır.
+// Amaç: registry'nin kendi iç tutarlılığı — id benzersizliği, beklenen tool
+// listeleri, risk/slot alanlarının uyumu. Test phase controller'ları import
+// etmez; registry'nin sabit değerlerini burada yazılı beklentilerle karşılaştırır.
 
 import { describe, it, expect } from "vitest";
-import {
-  AGENT_ACL_REGISTRY,
-  getAgentACL,
-  getHighRiskAgents,
-  isToolAllowed,
-} from "../src/agent-acl.js";
+import { AGENT_ACL_REGISTRY, getAgentACL } from "../src/agent-acl.js";
 
 describe("agent-acl registry", () => {
   it("her ajan id'si unique", () => {
@@ -61,28 +54,6 @@ describe("agent-acl registry", () => {
     expect(p6!.allowed_tools).toEqual([]);
     expect(mech!.api_key_slot).toBe("none");
     expect(mech!.allowed_tools).toEqual([]);
-  });
-
-  it("isToolAllowed: allowlist check", () => {
-    expect(isToolAllowed("orchestrator", "Read")).toBe(true);
-    expect(isToolAllowed("orchestrator", "Write")).toBe(false); // orchestrator write yapamaz
-    expect(isToolAllowed("phase-1", "Bash")).toBe(false); // phase-1 read-only domain
-    expect(isToolAllowed("phase-5", "Write")).toBe(true);
-    // Bilinmeyen agent_id
-    expect(isToolAllowed("unknown" as never, "Read")).toBe(false);
-  });
-
-  it("getHighRiskAgents: phase-5, phase-5-tweak, phase-8 (v15.7 phase-0-d3 kaldırıldı)", () => {
-    const high = getHighRiskAgents();
-    expect(high).toContain("phase-5");
-    expect(high).toContain("phase-5-tweak");
-    expect(high).toContain("phase-8");
-    // v15.7: phase-0-d3 silindi
-    expect(high).not.toContain("phase-0-d3");
-    // Düşük riskli olanlar listede olmamalı
-    expect(high).not.toContain("orchestrator");
-    expect(high).not.toContain("translator");
-    expect(high).not.toContain("phase-1");
   });
 
   it("model_slot consistency: api_key_slot ile eşleşmeli", () => {

@@ -6,8 +6,8 @@
 //   3. Classifier (LLM) ile top-K'yi skorla
 //   4. score >= min_score filtrele, ilk max_chunks döndür
 //
-// Fail policy: classifier API fail → RelevanceError yakalanır, emitError +
-// log.warn, boş array döner. Caller (Phase 2 injector vs.) sentinel ile
+// Fail policy: classifier API fail → RelevanceError yakalanır, emitChatMessage
+// (yumuşak bilgi notu) + log.warn, boş array döner. Caller (Phase 2 injector vs.) sentinel ile
 // devam eder. Faz çökmez; relevance opsiyonel yan-yarar.
 
 import { relevanceApiKey, relevanceModelId, type MyclConfig } from "../config.js";
@@ -127,7 +127,7 @@ async function gatherChunks(
 /**
  * Pipeline: gather → pre-filter → LLM scoring → threshold → max.
  *
- * Fail-safe: classifier fail → emitError + log.warn, boş array döner.
+ * Fail-safe: classifier fail → emitChatMessage (yumuşak bilgi notu) + log.warn, boş array döner.
  */
 export async function getRelevantChunks(
   config: MyclConfig,

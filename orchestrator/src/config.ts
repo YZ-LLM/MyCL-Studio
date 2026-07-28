@@ -158,9 +158,10 @@ export interface FeatureFlags {
   /**
    * v15.8 (2026-05-30): Main codegen ajanını Claude Code CLI ile çalıştır.
    * `false` (default): mevcut Anthropic SDK turn-loop. `true`: `claude` CLI
-   * subprocess (Phase 5 + verify-feature kapsamında; Phase 8/0 SDK kalır).
-   * `claude` binary yoksa SDK'ya dürüst fallback. Aktifse `claude_code_flags.
-   * effort` CLI'a `--effort` olarak geçer.
+   * subprocess (CLI_ELIGIBLE_TAGS kapsamı — phase-5 + verify-feature + phase-8 +
+   * parallel-module + gate-autofix; Faz 0 CLI'da phase-0.ts'in ayrı text-JSON yolundan geçer).
+   * `claude` binary yoksa görünür hata + faz fail (API'ye sessizce düşülmez).
+   * Aktifse `claude_code_flags.effort` CLI'a `--effort` olarak geçer.
    */
   claude_code_cli_enabled: boolean;
   /**
@@ -205,7 +206,7 @@ export interface FeatureFlags {
    * Advisor (danışman) — YZLLM 2026-07-11 ("Claude Code Advisor'ı ekle"): GÜVENLİ kalite-takviye modu.
    * `true` iken strong-ALTI CLI reasoning ajanları (mahkeme/müfettiş, tasarım fan-out) `claude --advisor <strong>`
    * ile güçlü (Opus) bir danışmana karar anlarında danışır — executor tier'i DEĞİŞMEZ (kaliteyi düşürmez, ek maliyet
-   * + ek kalite). Yalnız CLI arka ucu + gerçek Anthropic (z.ai değil) + `claude` ≥ v2.1.98 + strong-altı executor'da
+   * + ek kalite). Yalnız CLI arka ucu + gerçek Anthropic + `claude` ≥ v2.1.98 + strong-altı executor'da
    * uygulanır; aksi halde sessizce-görünür atlanır (agent normal koşar). `false` (default): davranış değişmez.
    */
   advisor_enabled?: boolean;
@@ -224,8 +225,8 @@ export interface FeatureFlags {
   codebase_memory_mcp?: boolean;
   /**
    * cognee kalıcı çapraz-oturum hafızası (YZLLM 2026-07-13, Phase B): remember/recall/forget bilgi grafiği (gömülü
-   * SQLite+Kuzu+LanceDB, Docker'sız); codegen ajanına --mcp-config ile bağlanır; LLM = MyCL sağlayıcısı (LiteLLM
-   * anthropic/z.ai). Opt-in default KAPALI (AĞIR: kaynak-klon+uv sync; salt-abonelik modunda key yok → görünür
+   * SQLite+Kuzu+LanceDB, Docker'sız); codegen ajanına --mcp-config ile bağlanır; LLM = MyCL sağlayıcısı
+   * (anthropic — yalnız Claude). Opt-in default KAPALI (AĞIR: kaynak-klon+uv sync; salt-abonelik modunda key yok → görünür
    * fallback, KATI #4). Kurulum: `ensureCognee`. codebase-memory-mcp'nin (yapısal) semantik-kalıcı kardeşi.
    */
   cognee_memory?: boolean;

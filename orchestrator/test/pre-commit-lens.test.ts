@@ -13,7 +13,6 @@ import {
   parseBlindspots,
   isLensClean,
   formatLensFindings,
-  lensHasHighSeverity,
   runBlindspotLens,
   type LensResult,
 } from "../src/pre-commit-lens.js";
@@ -60,7 +59,7 @@ describe("isLensClean (SAF)", () => {
   });
 });
 
-describe("formatLensFindings + lensHasHighSeverity (SAF)", () => {
+describe("formatLensFindings (SAF)", () => {
   const mk = (p: Partial<LensResult>): LensResult => ({ ran: true, clean: false, blindspots: [], ...p });
 
   it("ran=false → null", () => {
@@ -79,10 +78,6 @@ describe("formatLensFindings + lensHasHighSeverity (SAF)", () => {
     expect(msg).toContain("[orta]");
     expect(msg).toContain("auth süresi belirsiz");
     expect(msg).toContain("AC ekle");
-  });
-  it("lensHasHighSeverity: high varsa true, yoksa false", () => {
-    expect(lensHasHighSeverity(mk({ blindspots: [{ severity: "high", note: "x", recommendation: "" }] }))).toBe(true);
-    expect(lensHasHighSeverity(mk({ blindspots: [{ severity: "low", note: "x", recommendation: "" }] }))).toBe(false);
   });
 });
 

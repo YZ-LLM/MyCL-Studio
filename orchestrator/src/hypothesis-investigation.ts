@@ -7,7 +7,8 @@
 // doğrulanabilir, abonelik/CLI yolu. Çıktılar D1 user message'ına enjekte edilir; D1 yine
 // NORMAL koşar (regresyon-güvenli; report_root_cause/D2 akışı değişmez).
 //
-// Maliyet guardrail: caller agent_teams_optin + CLI ile GATE'ler; küçük N (3 mercek) +
+// Maliyet guardrail: Faz 0 çağrısı agent_teams_optin + CLI ile gate'lenir; timeout-diagnosis yolu
+// yalnız CLI backend kontrolü yapar (agent_teams_optin'e bakmaz). Küçük N (3 mercek) +
 // per-inceleme idle-timeout. runClaudeCli'de turn-budget yok → N küçük + gate ile sınırlı.
 
 import { extractKindBlock } from "./cli-json.js";

@@ -1,5 +1,5 @@
-// verify-feature.test — saf yardımcı testleri. LLM + tarayıcı kısmı
-// entegrasyon/manuel; burada sadece deterministik slug üretimi.
+// verify-feature.test — saf yardımcı testleri: slug + mock guard + test varlığı +
+// rapor/prompt kurulumu. LLM + tarayıcı kısmı entegrasyon/manuel.
 
 import { describe, expect, it } from "vitest";
 import {

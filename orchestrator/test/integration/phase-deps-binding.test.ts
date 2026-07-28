@@ -1,7 +1,8 @@
 // v15.1.2 borç: Phase controller PhaseDeps DI binding integration test.
-// 13 controller constructor `(deps: PhaseDeps)` alıyor, field'a binding'i
-// doğrulayalım. Anthropic SDK mock'a gerek yok — sadece constructor + private
-// readonly field assignment kontrol.
+// 10 controller (Faz 0-9) constructor `(deps: PhaseDeps)` alıyor (mekanik fazlar
+// 10-17 MechanicalRunnerBase ile koşar), field'a binding'i doğrulayalım. Anthropic
+// SDK mock'a gerek yok — sadece constructor + private readonly field assignment
+// kontrol.
 
 import { describe, expect, it } from "vitest";
 import { Phase1Controller } from "../../src/phase-1.js";
@@ -24,8 +25,6 @@ const fakeState: State = {
   current_phase: 1,
   session_id: "test-deps-binding",
   spec_approved: false,
-  ui_flow_active: false,
-  regression_block_active: false,
   project_root: "/tmp/test-project",
   created_at: 0,
   updated_at: 0,
@@ -42,7 +41,6 @@ function fakeSpec(id: number): PhaseSpec {
     type: "qa" as const,
     name_i18n_key: `phase.${id}.name`,
     required_audits: [],
-    gate_module_path: "",
   };
 }
 
@@ -57,7 +55,7 @@ describe("Phase controller PhaseDeps binding (v15.1.2)", () => {
     expect(c).toBeInstanceOf(Phase1Controller);
   });
 
-  it("Phase 2-10: instantiate without error", () => {
+  it("Phase 2-9: instantiate without error", () => {
     const controllers = [
       new Phase2Controller({ state: fakeState, config: fakeConfig, spec: fakeSpec(2) }),
       new Phase3Controller({ state: fakeState, config: fakeConfig, spec: fakeSpec(3) }),

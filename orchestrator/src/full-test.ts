@@ -5,9 +5,10 @@
 // deseni birebir: buton → korumalı onay askq → pipeline'sız koşum → TR rapor → düşen bölümler
 // iş kuyruğuna fix işi olarak girer (source:"full-test").
 //
-// Bölümler (4 çekirdek — YZLLM 2026-07-22 "sadece bunları yapsın"): birim suite (profil `test`),
+// Bölümler (5 çekirdek — YZLLM 2026-07-22 "sadece bunları yapsın"): birim suite (profil `test`),
 // entegrasyon (profil `integration`), E2E (Faz 16 altyapısı), rota taraması (MyCL'in kendi Playwright'ı:
-// konsol hataları + ≥400 yanıtlar + boş sayfa). a11y + görsel karşılaştırma ÇIKARILDI (bu modüller Faz 6'da
+// konsol hataları + ≥400 yanıtlar + boş sayfa), işlevsel doğrulama (belgelenen her özellik çalışan app'te
+// gerçekten çalışıyor mu). a11y + görsel karşılaştırma ÇIKARILDI (bu modüller Faz 6'da
 // yaşamaya devam eder; Full Test butonunda artık koşmaz).
 //
 // ASLA throw etmez; her bölüm ayrı try/catch. Koşulamayan bölüm GÖRÜNÜR "atlandı + neden"
@@ -40,7 +41,7 @@ export interface FullTestSection {
   id: FullTestSectionId;
   /** Rapor başlığı (TR). */
   label_tr: string;
-  /** pass/fail hüküm taşır (4 bölümün hepsi çekirdek); koşulamayan bölüm "skipped" (görünür, sahte-yeşil değil). */
+  /** pass/fail hüküm taşır (5 bölümün hepsi çekirdek); koşulamayan bölüm "skipped" (görünür, sahte yeşil değil). */
   status: "pass" | "fail" | "skipped";
   /** Satır gövdesi — pass'te kısa özet, fail'de düşenler, skipped'da NEDEN (zorunlu görünürlük). */
   detail_tr: string;

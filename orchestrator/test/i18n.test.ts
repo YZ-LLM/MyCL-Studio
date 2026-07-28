@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { loadI18n, localizeOptionLabels, t, tFormat } from "../src/i18n.js";
+import { loadI18n, localizeOptionLabels, t } from "../src/i18n.js";
 
 describe("i18n", () => {
   beforeAll(async () => {
@@ -37,12 +37,6 @@ describe("i18n", () => {
       expect(name).not.toMatch(/^\[\?/);
       expect(name.length).toBeGreaterThan(0);
     }
-  });
-
-  it("formats placeholders", () => {
-    expect(
-      tFormat("chat.system.phase_complete", "tr", { n: 4, name: "Spec Yazımı" }),
-    ).toBe("Faz 4 tamamlandı — Spec Yazımı");
   });
 
   it("localizeOptionLabels maps Approve/Revise/Cancel to TR", () => {

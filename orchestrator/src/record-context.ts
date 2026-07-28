@@ -48,16 +48,6 @@ export function setRecordContext(update: Partial<ContextState>): void {
   ctx = { ...ctx, ...update };
 }
 
-/** Mevcut bağlamı kopyalayıp döner — test ve debug için. */
-export function getRecordContext(): Readonly<ContextState> {
-  return { ...ctx };
-}
-
-/** Test / shutdown — bağlamı temizler. */
-export function resetRecordContext(): void {
-  ctx = {};
-}
-
 /**
  * NDJSON satırına metadata enjekte eder. Mevcut alanları üzerine yazmaz (eğer
  * caller `_schema_v` set etmek isterse override eder). Domain field'larıyla

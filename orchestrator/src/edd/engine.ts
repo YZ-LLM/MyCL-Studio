@@ -248,7 +248,8 @@ async function runEdd(config: MyclConfig, state: State): Promise<void> {
  * Böylece bayat sözleşme SESSİZCE kullanılmaz (KATI#4): consumer'lar (Faz 2/3) done'a bakar → pending/unanalyzable birim
  * düşer, tazelenene kadar gösterilmez. Analiz-anı hash'i olmayan (eski) kayıt karşılaştırılamaz → dokunulmaz.
  * NOT: plan "behavior-consent 'yes' → invalidate" der; ama EDD foreign-only + consent kapısı foreign'de erken-return
- * (davranış-onay-gate.ts:206) → foreign'de consent kararı YOK → bu tetik EDD ile hiç çakışmaz (uygulanamaz, atlanır).
+ * (behavior-consent-gate.ts:207, runBehaviorConsentGate foreign erken-return) → foreign'de consent kararı YOK → bu
+ * tetik EDD ile hiç çakışmaz (uygulanamaz, atlanır).
  */
 /** reconcile'ın yeniden-analize-açtığı unanalyzable sebepleri (dosya geri gelirse REVIVE edilir; ilk-enumerate binary/too-large DEĞİL). */
 const RECONCILE_UNANALYZABLE_REASONS = new Set([

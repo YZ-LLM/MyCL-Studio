@@ -15,11 +15,6 @@ let _waiters: Array<() => void> = [];
 /** UI'ye durum bildirimi için opsiyonel kanca (ipc emit; döngüsel import'tan kaçınmak için setter). */
 let _onChange: ((paused: boolean) => void) | null = null;
 
-/** Şu an duraklatılmış mı. */
-export function isPaused(): boolean {
-  return _paused;
-}
-
 /** Durum değişiminde UI'ye haber veren kancayı kur (ipc, boot'ta bir kez). */
 export function setPauseListener(fn: (paused: boolean) => void): void {
   _onChange = fn;

@@ -19,11 +19,7 @@ import { MAX_TASK_AUTO_RETRIES } from "../types/events";
 interface Props {
   open: boolean;
   items: TaskQueueItem[];
-  /** Mevcut faz — sadece Faz 1'de manuel "Uygula" tıklanabilir. */
-  currentPhase: number;
   onClose: () => void;
-  /** Item üzerine tıklama — App.tsx Faz 1 kontrolünü yapar. */
-  onItemApply: (item: TaskQueueItem) => void;
   /** Düşen işi YENİDEN gönder (faz-bağımsız; App.tsx sendUserMessage'a köprüler). FROZEN-GOAL #17. */
   onItemReadd: (item: TaskQueueItem) => void;
   onItemDelete: (id: string) => void;

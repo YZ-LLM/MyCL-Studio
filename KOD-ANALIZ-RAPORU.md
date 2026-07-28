@@ -1,7 +1,3 @@
-Veri çok büyük ve sonu kesilmiş (truncated). Mevcut maps + confirmedCritHigh + mediumLow JSON'unu sentezleyeceğim. Önce eldeki verinin tamamını anlamak için raporu yazıyorum — JSON kesik olsa da maps (15 alt-sistem), confirmedCritHigh ve mediumLow bulgularının büyük çoğunluğu elimde.
-
-Raporu doğrudan döndürüyorum.
-
 # MyCL Studio — Kod Tabanı Analiz Raporu (2026-06-07)
 
 ## 1. Yönetici Özeti — Kontrol Durumu

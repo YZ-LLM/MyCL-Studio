@@ -1,10 +1,9 @@
 // relevance/injectors — per-placeholder context builder'lar.
 //
 // Faz prompt template'larındaki `{{...}}` placeholder'larını relevance
-// engine sonucundan formatlanmış markdown ile doldurur. Bu turda iki
-// injector: spec digest + abandoned intents digest (Phase 2 proof-of-concept).
-// Diğer placeholder'lar (PHASE_6_AUDIT, ACCEPTANCE_CRITERIA, SPEC_RISKS, vs.)
-// sonraki turlara ertelendi.
+// engine sonucundan formatlanmış markdown ile doldurur. Mevcut injector seti:
+// spec digest, feature digest, kararlar (decisions), terk edilmiş niyetler, mühendislik
+// brief'i, Faz 9 audit özeti, proje bağlamı ve orkestratör bağlamı.
 //
 // Boş sonuç durumunda "(no relevant ... found)" sentinel'i — fail-safe pattern;
 // faz çökmez, Claude context'siz devam eder.
@@ -128,18 +127,6 @@ export async function buildRelevantEngineeringBrief(
     return "(no relevant brief sections found)";
   }
   return chunks.map(formatBriefChunk).join("\n\n");
-}
-
-/**
- * Phase 6 `{{PHASE_6_AUDIT}}` — Phase 5'nın audit event'lerinden mevcut intent'e
- * en alakalı olanlar. Eskiden last-30 capping idi; şimdi relevance-filtered.
- */
-export async function buildRelevantPhase6Audit(
-  config: MyclConfig,
-  state: State,
-  intent: string,
-): Promise<string> {
-  return await buildAuditDigest(config, state, intent, 6);
 }
 
 /**

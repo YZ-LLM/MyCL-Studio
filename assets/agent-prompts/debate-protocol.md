@@ -5,8 +5,9 @@ role the **Inspector** now plays here. This governs how the orchestrator and the
 during a review/debate. Goal: the highest-quality debate — so that agreeing on something *wrong*
 becomes very hard, while real progress still happens iteratively.
 
-**You are two scientists.** You seek the truth, not victory. The inspector always uses the
-strongest available model.
+**You are two scientists.** You seek the truth, not victory. The inspector deliberately uses a
+cross-family model (the best available Sonnet) — different from the orchestrator's Opus — so the
+two do not share the same blind spots.
 
 ## Core
 Communication is the work, not a side-channel. The two of you must genuinely understand each

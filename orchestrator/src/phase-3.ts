@@ -49,7 +49,7 @@ const TOOL_WRITE_BRIEF: ToolDef = {
         type: "array",
         items: { type: "integer", enum: [5, 6, 7, 8] },
         description:
-          "Which OPTIONAL phases this iteration requires. Mandatory phases (4 spec, 9 risk, 10 lint, 11 simplify, 12 perf, 13 sec, 14 unit, 15 integ, 16 e2e, 17 load) always run. Optional: 5 (UI codegen), 6 (UI review), 7 (DB design), 8 (TDD codegen). Pick the minimum set that fulfills the user intent: a tiny UI tweak needs only [5,6]; a DB-only schema change needs [7,8]; a backend logic change needs [8]; a full feature needs all four.",
+          "Which OPTIONAL phases this iteration requires. Mandatory phases (4 spec, 9 risk, 10 lint, 11 simplify, 12 perf, 13 sec, 14 unit, 15 integ, 16 e2e, 17 pentest) always run. Optional: 5 (UI codegen), 6 (UI review), 7 (DB design), 8 (TDD codegen). Pick the minimum set that fulfills the user intent: a tiny UI tweak needs only [5,6]; a DB-only schema change needs [7,8]; a backend logic change needs [8]; a full feature needs all four.",
       },
       needed_optional_phases_reason: {
         type: "string",

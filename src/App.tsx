@@ -1399,30 +1399,8 @@ function App() {
   const handleTaskDelete = (id: string) => {
     void orch.send({ kind: "task_queue_remove", data: { id } });
   };
-  const handleTaskApply = (item: TaskQueueItem) => {
-    // Faz kontrolü TaskQueuePanel'de zaten yapıldı (disabled buton); burada
-    // ekstra güvenlik. Faz 1'desek prompt olarak gönder.
-    if (mainState.phase !== 1) {
-      setMainState((s) => ({
-        ...s,
-        messages: [
-          ...s.messages,
-          {
-            id: s.messages.length + 1,
-            role: "system",
-            text: `İş yalnızca Faz 1'de uygulanabilir (şu an Faz ${mainState.phase}).`,
-            ts: Date.now(),
-          },
-        ],
-      }));
-      return;
-    }
-    sendUserMessage(item.text);
-  };
-
   const handleTaskReadd = (item: TaskQueueItem) => {
     // FROZEN-GOAL #17: düşen işi FAZ-BAĞIMSIZ yeniden gönder (yeni kullanıcı mesajı → orkestratör yönlendirir).
-    // handleTaskApply Faz 1'e kapılı; düşen iş genelde başka fazda olduğu için ayrı, kapısız yol.
     sendUserMessage(item.text);
   };
 
@@ -1791,9 +1769,7 @@ function App() {
       <TaskQueuePanel
         open={taskQueueOpen}
         items={mainState.taskQueue}
-        currentPhase={mainState.phase}
         onClose={() => setTaskQueueOpen(false)}
-        onItemApply={handleTaskApply}
         onItemReadd={handleTaskReadd}
         onItemDelete={handleTaskDelete}
       />

@@ -1,4 +1,4 @@
-// base/mechanical-runner — LLM olmadan lokal komut çalıştıran fazlar (P11-P18).
+// base/mechanical-runner — LLM olmadan lokal komut çalıştıran fazlar (Faz 10-17).
 //
 // Pattern:
 //   1. scan_cmd çalıştır → exit=0 ise pass-event yaz, complete.
@@ -103,7 +103,8 @@ const DEFAULT_TIMEOUT = 120_000;
  * Üç biçim (v15.0 Batch A):
  *   - string: literal komut, doğrudan döner (backward-compat).
  *   - profile_key: `state.stack` profilinden komut alır.
- *   - project_type: Faz 16/18 için stack + project_type kombinasyonu.
+ *   - project_type: Faz 16 (E2E) için stack + project_type kombinasyonu. `load` ucu
+ *     Faz 17 pentest'e geçtiğinden üretimde koşmaz (yalnız birim testlerinde).
  */
 /** Shell tek-tırnak quote (regex yok): tek tırnakları '\'' ile escape. */
 export function shellQuote(p: string): string {

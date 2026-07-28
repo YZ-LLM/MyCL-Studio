@@ -61,7 +61,7 @@ const SAFE_ENV_KEYS = new Set([
   "OS",
   "OSTYPE",
   "ARCH",
-  // Endüstri tooling — Faz 13 semgrep + Faz 17 k6 user customization.
+  // Endüstri tooling — Faz 13 semgrep (K6_* load test desteği, Faz 17 sızma testine geçince kullanımdan düştü).
   // Bunlar secret değil, sadece scan davranışını yönlendiren config path /
   // numeric value. Token gerektiren tool'lar (snyk SNYK_TOKEN) bilinçli olarak
   // dahil edilmedi — onlar ayrı tur.

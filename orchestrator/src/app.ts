@@ -1,15 +1,13 @@
 // app — composition root (v15.1 Core).
 //
 // Orchestrator subprocess boot logic'inin App sınıfına taşınmış hâli.
-// Mevcut module-global state (activeState/activeConfig/activeController/
-// pendingX) hâlâ index.ts'de duruyor — bunlar v15.1.1'de App instance
-// field'larına taşınacak ve constructor injection ile Phase controller'lara
-// yönlendirilecek. Şu an sadece boot + stdin loop App.start()'ta.
+// Module-global state (index.ts'teki `runtime` nesnesi: state/config/controller/
+// pending*) bilinçli olarak index.ts'te tutuluyor — App instance field'larına
+// taşıma planı ertelendi. Şu an sadece boot + stdin loop App.start()'ta.
 //
 // Plan ref: v15.1 K10-K15 (Clean Architecture katmanlama + DI). Full
 // directory restructure (core/controllers/infrastructure/ipc/) ve handler
-// ayrımı sonraki minor sprint'lere bölünüyor — refactor risk azaltma
-// stratejisi.
+// ayrımı da ertelendi — refactor risk azaltma stratejisi.
 
 import * as readline from "node:readline";
 import { emit, emitError } from "./ipc.js";
@@ -18,8 +16,8 @@ import { autoUpdateClaude } from "./claude-updater.js";
 
 /**
  * Inbound IPC mesaj formatı. `data` çoğu handler için `any` (eski runtime
- * davranışı). Strict tipleme handler-level cast'lerde sürdürülüyor; v15.1.1
- * IPC router refactor'unda discriminated union'a geçecek.
+ * davranışı). Strict tipleme handler-level cast'lerde sürdürülüyor; IPC router'ın
+ * discriminated union'a geçişi ertelendi.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface IncomingCommand { kind: string; data?: any }

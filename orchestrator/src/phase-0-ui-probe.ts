@@ -8,11 +8,10 @@
 // message'a inject edilir. Ana ajan kaçınamaz.
 //
 // Akış:
-//   1. UI keyword check (bug text)
-//   2. Playwright dep check (package.json @playwright/test)
-//   3. Dev server alive check (audit'ten son port + kill -0 PID)
-//   4. Temp probe spec yaz → npx playwright test → çıktıyı capture → spec sil
-//   5. Formatted markdown blok döndür (D1 prompt'a inject için)
+//   1. Playwright dep check (package.json @playwright/test)
+//   2. Dev server alive check (audit'ten son port + kill -0 PID)
+//   3. Temp probe spec yaz → npx playwright test → çıktıyı capture → spec sil
+//   4. Formatted markdown blok döndür (D1 prompt'a inject için)
 //
 // Skip durumlarında null döner — caller bunu prompt'a eklemez.
 
@@ -134,8 +133,8 @@ test('d1-probe', async ({ page }) => {
  * ```
  * ## Pre-D1 Playwright Probe (otomatik)
  *
- * Bug raporu UI-related olarak sınıflandırıldı; dev server alive
- * (pid=X port=Y); Playwright kurulu. Probe çıktısı:
+ * Dev server ayakta (pid=X, port=Y) + Playwright kurulu → probe yapıldı.
+ * Probe çıktısı:
  *
  * <pre>
  * [stdout snippet]
@@ -209,7 +208,7 @@ export async function runPreD1UiProbe(
   return [
     "## Pre-D1 Playwright Probe (otomatik gözlem)",
     "",
-    `Bug raporu UI-related: dev server alive (pid=${server.pid}, port=${server.port}), Playwright kurulu. Probe yapıldı.`,
+    `Dev server ayakta (pid=${server.pid}, port=${server.port}) + Playwright kurulu → probe yapıldı.`,
     `Probe durumu: \`${probeStatus}\`.`,
     "",
     "```",

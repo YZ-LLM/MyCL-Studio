@@ -271,8 +271,6 @@ describe("relevance/injectors · buildRelevantProjectContext (Phase 1, integrati
       current_phase: 1,
       session_id: "s",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: projectRoot,
       created_at: 0,
       updated_at: 0,

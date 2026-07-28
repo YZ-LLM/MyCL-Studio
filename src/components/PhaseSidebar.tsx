@@ -1,7 +1,7 @@
 // PhaseSidebar — Sol panel: pipeline fazlarının tıklanabilir listesi.
 //
-// Niyetler bölümü (Soru Sor / Hata Ayıkla / Sohbet) buradan kaldırıldı;
-// composer altına taşındı (ChatPanel.intent-row, kullanıcı talebi 2026-05-23).
+// Niyetler bölümü (Soru Sor / Hata Ayıkla / Sohbet) buradan kaldırıldı
+// (composer'a da taşınmadı — orkestratör ajan niyeti kendisi çıkarıyor).
 // Sidebar artık sadece faz navigasyonu içerir, tüm 1-17 fazları listelenir.
 
 import { useRef } from "react";

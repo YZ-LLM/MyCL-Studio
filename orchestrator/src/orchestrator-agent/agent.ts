@@ -5,11 +5,13 @@
 // iletişimi kurmak ve kullanıcının MyCL Studio'dan aldığı verimi artırmak.
 // Ana modelde ne seçili ise onu kullansın."
 //
-// Mimari: handleUserMessage agent'ı ÖNCE dener; agent error/timeout/
-// fallback_to_classifier → klasik Haiku classifier devreye girer. Bu sayede:
-//   - Agent'ı pasifize etmek için sadece orchestrator API key boş bırakmak
-//     yeterli.
-//   - Production'da agent fail ederse user kesintisiz çalışmaya devam eder.
+// Mimari: her kullanıcı mesajını agent yorumlar — arkasında classifier YOK.
+//   - Agent `fallback_to_classifier` derse (emin değil) kullanıcıya görünür
+//     "anlayamadım, tekrar yazar mısın" mesajı döner; iş yapılmaz.
+//   - Agent error/timeout'ta da sessiz düşüş yok: görünür hata mesajı (LLM
+//     erişim hatasında bekle ve devam et) — bkz index.ts handleUserMessage.
+//   - orchestrator API key boş bırakılırsa agent PASİFLEŞMEZ; main key
+//     kullanılır (config.orchestratorApiKey).
 //
 // Tool loop: max 8 turn (Read/Grep/Bash safe-list ile araştır → decide_action
 // ile son karar). Tool_choice="any" ile model her turda en az bir tool çağırır;

@@ -48,7 +48,6 @@
       "../assets/agent-prompts/**/*",
       "../assets/profiles/**/*",
       "../assets/provision/**/*",
-      "../assets/gates/**/*",
       "../assets/schemas/**/*",
       "../assets/security-rules/**/*",
       "../assets/quality-rules/**/*",

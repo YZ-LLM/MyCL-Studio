@@ -3,7 +3,7 @@
 > Bu doküman, MyCL orkestratörünün bir geliştirme iterasyonunda koştuğu **17 fazın** her birinin
 > gerçek koddan (controller + `phase-registry.ts` + şablon + gate) çıkarılmış eksiksiz açıklamasıdır.
 > Kaynak: `orchestrator/src/phase-*.ts`, `orchestrator/src/phase-registry.ts` (`PHASE_SPECS`),
-> `orchestrator/src/base/*`, `assets/templates/phase-*.md`, `assets/gates|profiles|security-rules/*`.
+> `orchestrator/src/base/*`, `assets/templates/phase-*.md`, `assets/profiles|security-rules/*`.
 
 ## Genel çerçeve
 
@@ -80,7 +80,7 @@ proje bağlamı + konuşma bağlamını enjekte eder; sonra qa-askq base control
 varsayımla geçer ve 3-5 cümlelik özet üretir. Odak **WHAT** (ne isteniyor); HOW (mimari/kütüphane) sormak yasaktır.
 
 - **Girdi:** kullanıcının TR niyeti → `intent_en`. `buildRelevantProjectContext` (spec/brief/audit/git'ten
-  LLM-filtreli bağlam), `buildConversationContext` (son 3 mesaj; `isolatedIntent` ise katılmaz),
+  LLM-filtreli bağlam), `buildConversationContext` (son 5 mesaj; `isolatedIntent` ise katılmaz),
   `buildCodebaseSnapshot` (dil-agnostik FS gezisi).
 - **Çıktı:** `approvedSummary` (EN) → orkestratör `state.intent_summary_raw`'a yazar (Faz 4 girdisi).
   Audit: `phase-1-intent-approve`, `phase-1-complete`.
@@ -106,7 +106,7 @@ varsayımla geçer ve 3-5 cümlelik özet üretir. Odak **WHAT** (ne isteniyor);
 
 **Amaç.** Faz 1'in onaylı niyetini **8 boyutta** denetler, kritik belirsizlikleri yüzeye çıkarır ve Faz
 3/4'ün güvenebileceği **`enriched_summary`** (4-6 cümle, kullanıcının literal seçimleri korunarak) üretir.
-Ayrıca `classifyProjectType` (Haiku) ile proje tipini türetir → `project_type` + `skip_ui_phases` +
+Ayrıca `classifyProjectType` (çevirmen rolünün seçili modeli) ile proje tipini türetir → `project_type` + `skip_ui_phases` +
 `has_database` + `ui_complexity` state'e yazılır (Faz 5/6/7 skip ve Faz 16 runner seçimi buna bağlanır).
 8. boyut **COMPLIANCE** en sonda koşar; kullanıcı uyumsuzlukları görüp "Vazgeç" derse faz `abandoned` döner.
 
@@ -167,7 +167,7 @@ varsayımlar. `write_spec` ile bir kez yazılır, `request_spec_approval` ile on
   (Faz 3 brief'i relevance-filtreli); "yalnız BU iterasyonun niyetini kapsa" talimatı.
 - **Çıktı:** `devs/_pending/<ts>/iter-spec.md` (her iterasyon kendi spec'i). Audit: `spec-block`,
   `phase-4-spec-approve`, `phase-4-complete`. ADR kaydı.
-- **Kapı & denetim:** gate `assets/gates/phase-04.ts` (saf fonksiyon: approve→complete/cancel→fail).
+- **Kapı & denetim:** `required_audits` (spec-block → phase-4-spec-approve → phase-4-complete); kapı mantığı controller içinde (approve→complete/cancel→fail).
   `output_schema` `phase-04-spec.json` (AC 3-7, id pattern `^AC[0-9]+$`).
 - **Model & eskalasyon:** `escalatedModelEffort(…, 'spec')`. Model değişince chat'e "🧠 Spec: <model> · efor N".
 - **Stack-bağımsızlık:** spec yalnız **gözlemlenebilir davranışı** tanımlar — dosya yolu/kütüphane/mimari
@@ -178,7 +178,7 @@ varsayımlar. `write_spec` ile bir kez yazılır, `request_spec_approval` ile on
   - **Incremental/merge modu KALDIRILDI (2026-06-16):** alakasız eski işi diriltip Faz 8'i boğuyordu.
   - GWT temizliği: fantom-AC guard (boş given/when/then placeholder'ları elenir → yanlış-fail önlenir).
   - `runComprehensionGate` şu an **NO-OP** (kullanıcı okuma sorumluluğunu alıyor, spec chat'te biçimli).
-- **Anahtar dosyalar:** `phase-4.ts`, `phase-registry.ts:158-175`, `assets/gates/phase-04.ts`,
+- **Anahtar dosyalar:** `phase-4.ts`, `phase-registry.ts`,
   `assets/schemas/phase-04-spec.json`, `assets/templates/phase-04-spec.md`.
 
 ## Faz 5 — UI Yapımı (UI Build) · codegen · **opsiyonel**

@@ -30,8 +30,9 @@ const SKIP_DIRS = new Set([
 // hex entropi tavanı 4.0, git-SHA'dan ayrılamaz). Sır dosyaları zaten "davranış" değil (config/kimlik-bilgisi).
 // MEKANİZMA: sabit DOSYA-ADI deseni (aşağıda), gitignore-parse DEĞİL. DÜRÜST KALAN-RİSK: standart-olmayan adlı
 // gitignore'lu bir sır dosyası (ör. `terraform.tfvars`, `local.settings.json`) bu listede yoksa EDD yine analiz eder →
-// o sınıf için tek savunma increment-2'nin yumuşak LLM-redaksiyonu (tam güvenlik ağı DEĞİL). Tam kapanış için gelecek
-// iş: gerçek gitignore-farkındalığı (`git check-ignore`) → EDD kapsamı = tarama kapsamı. GÖRÜNÜR: analyzable:false + sebep.
+// o sınıf için ikinci savunma increment-2'nin yumuşak LLM-redaksiyonu (tam güvenlik ağı DEĞİL). Bu kalan risk
+// aşağıdaki gitignore filtresiyle (listIgnoredUntrackedFiles, satır ~132) büyük ölçüde kapatıldı — alt modül
+// özel durumu halen geçerli. GÖRÜNÜR: analyzable:false + sebep.
 const SECRET_FILE_RE = new RegExp(
   "^(" +
     // .env, .env.local, .env.production, .env.example — AMA .env.d.ts/.env.ts/.env.schema.json (kaynak) DEĞİL:

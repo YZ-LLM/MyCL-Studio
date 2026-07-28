@@ -5,7 +5,8 @@
 // erken-return ediyor → bugün foreign kod onaysız değişebiliyor (mahkemenin UNSAFE kökü). Bu kapı o deliği kapatır.
 //
 // Desen: behavior-consent-gate.ts AYNEN yansıtılır — pending map + emitConsentAskq (DOĞRUDAN emitAskq; oto-cevap
-// allowlist'inden GEÇMEZ, bu karar HER ZAMAN kullanıcıda) + resolver + id-öneki predicate + handleAskqAnswer kancası.
+// allowlist'inden GEÇMEZ, bu karar normal modda HER ZAMAN kullanıcıda; "hiçbir şey sorma" modunda sormadan ama
+// dokunulacak davranışı GÖSTEREREK otomatik onaylanır) + resolver + id-öneki predicate + handleAskqAnswer kancası.
 // EDD davranış haritasından (edd/progress) "dokunulan mevcut davranış" özeti gösterilir → kullanıcı bilerek karar verir.
 //
 // ANTİ-FALSE-SAFE (en kritik kural): "EDD kaydı yok = güvenli" ÇIKARIMI YASAK — birim henüz analiz edilmemiş olabilir.
@@ -61,7 +62,8 @@ function emitConsentAskq(question: string, options: string[]): Promise<string> {
   const id = `${CONSENT_ID_PREFIX}${randomUUID()}`;
   return new Promise<string>((resolve) => {
     pendingConsent.set(id, resolve);
-    // DOĞRUDAN emitAskq — oto-cevap allowlist'ine UĞRAMAZ (yabancı-yazma kararı her zaman kullanıcıda).
+    // DOĞRUDAN emitAskq — oto-cevap allowlist'ine UĞRAMAZ (yabancı-yazma kararı normal modda her zaman kullanıcıda;
+    // "hiçbir şey sorma" modunda buraya hiç gelinmez, çağıran sormadan ama göstererek onaylar).
     emitAskq({ id, question, options });
   });
 }
@@ -158,7 +160,8 @@ function toRel(root: string, abs: string): string {
 /**
  * Yabancı-yazma onay kapısı. origin!=="foreign" → items DEĞİŞMEDEN döner (non-foreign parite, byte-aynı). Foreign'de
  * EDD-bilgili BATCH onay ister; ONAYLANAN alt-kümeyi döndürür (boş = tümü atlandı). Best-effort: EDD/graph okunamazsa
- * yine onay ister (kapsam-belirsiz uyarısıyla), ASLA sessiz oto-onaya düşmez. Karar HER ZAMAN kullanıcıda.
+ * yine onay ister (kapsam-belirsiz uyarısıyla), ASLA sessiz oto-onaya düşmez. Karar normal modda HER ZAMAN
+ * kullanıcıda; "hiçbir şey sorma" modunda sormadan ama dokunulan davranışı GÖSTEREREK otomatik onaylanır.
  */
 // KAPSAM (mahkeme doğrulaması 2026-07-08): şu an YALNIZ "risk-fix" bağlı. gate-autofix (index.ts:5081/5330) ve debug
 // oto-uygula (phase-0.ts) ZATEN `autoAnswerSuggested()` ile kapılı → foreign'de false → ULAŞILMAZ (failPhase'e düşer,

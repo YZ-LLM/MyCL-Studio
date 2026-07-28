@@ -49,11 +49,3 @@ export function startLivenessWatchdog(tick: () => Promise<void>, intervalMs = WA
   _timer = t;
   log.info("liveness", "canlılık bekçisi başladı", { intervalMs });
 }
-
-/** Test/teşhis: bekçiyi durdur. */
-export function stopLivenessWatchdog(): void {
-  if (_timer !== null) {
-    clearInterval(_timer);
-    _timer = null;
-  }
-}

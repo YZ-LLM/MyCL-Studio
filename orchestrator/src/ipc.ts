@@ -257,10 +257,6 @@ const sessionTokenTotals = {
   api_calls: 0,
 };
 
-export function getSessionTokenTotals(): typeof sessionTokenTotals {
-  return { ...sessionTokenTotals };
-}
-
 /**
  * v15.8 (2026-05-31): Per-faz token kovası — merkezî, kontrolcü dokunmadan.
  * index.ts faz başlamadan `beginPhaseCost`, bittiğinde `takePhaseCost` çağırır.

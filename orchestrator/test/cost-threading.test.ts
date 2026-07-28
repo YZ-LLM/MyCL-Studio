@@ -114,21 +114,4 @@ describe("askq-bekleme süresi (faz süresinden düşülür)", () => {
     const b = takePhaseCost();
     expect(b!.askqWaitMs).toBeLessThan(15); // pratikte ~0ms
   });
-
-  it("faz süresi = (flush - started_at) - askqWaitMs (düşme doğrulaması)", () => {
-    // index.ts flush formülünün birim testi: askq-bekleme süresi gerçek süreden düşülür.
-    const started_at = 1_000_000;
-    const flushNow = started_at + 30_000; // 30sn geçti
-    const askqWaitMs = 18_000; // 18sn'i kullanıcı cevabını bekledik
-    const duration = Math.max(0, flushNow - started_at - askqWaitMs);
-    expect(duration).toBe(12_000); // gerçek MyCL çalışması 12sn
-  });
-
-  it("askqWaitMs > geçen süre → duration negatife düşmez (Math.max 0)", () => {
-    const started_at = 1_000_000;
-    const flushNow = started_at + 5_000;
-    const askqWaitMs = 9_000; // saat kayması / ölçüm artefaktı
-    const duration = Math.max(0, flushNow - started_at - askqWaitMs);
-    expect(duration).toBe(0);
-  });
 });

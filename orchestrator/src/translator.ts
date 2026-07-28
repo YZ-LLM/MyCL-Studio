@@ -1,7 +1,8 @@
-// translator — Anthropic SDK direct API. Sonnet 4.6 + max effort.
+// translator — Anthropic SDK direct API. SABİT hızlı/ucuz katman
+// (claude-haiku-4-5), kullanıcı model ayarı yok sayılır.
 //
 // Spec §5.1:
-// - Model: claude-sonnet-4-6 (config.models_translator), max effort
+// - Model: claude-haiku-4-5 (TRANSLATOR_MODEL, cheap tier sabiti)
 // - System prompt: strict translator, output only translation (no markers)
 // - API key: config.api_keys.translator (translator için ayrı key)
 // - Retry: 5x exponential backoff. 529 Overloaded için daha uzun base (3s);
@@ -130,10 +131,6 @@ function isOverloadError(err: unknown): boolean {
     return msg.includes("overloaded_error") || msg.includes("Overloaded");
   }
   return false;
-}
-
-export class TranslatorError extends Error {
-  override readonly name = "TranslatorError";
 }
 
 export interface TranslateResult {

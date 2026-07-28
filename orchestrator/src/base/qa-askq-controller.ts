@@ -7,7 +7,7 @@
 //     translator'dan getir (Aşama I tasarrufu)
 //   - Approval karar tool'unu özel olarak işle ve outcome döndür
 //
-// Faz controller'ları (Phase 1, P2, P7, P10, P19) bu sınıfı kullanır;
+// Faz controller'ları (Faz 1, Faz 2, Faz 9) bu sınıfı kullanır;
 // kendi audit yazma + state mutasyon mantığını ekler. Bu sınıf audit yazmaz.
 
 import { randomUUID } from "node:crypto";
@@ -56,7 +56,8 @@ export type QaAskqOutcome =
    * kullanıcı "şu butonu değiştir" gibi UI tweak istediğinde) bu outcome
    * döner. Caller (Phase 6) tweakInput.description'ı çıkarıp orchestrator'a
    * iletir; orchestrator state.pending_ui_tweak set edip Faz 5 mini-loop'una
-   * döner.
+   * döner. NOT: Faz 6 şu an DEFERRED modda çalışır (controller askq açmaz) — bu dal
+   * yalnız olası gelecekteki qa-askq dönüşü için tutulur.
    */
   | { kind: "ui_tweak"; tweakInput: Record<string, unknown> }
   /**
@@ -64,7 +65,9 @@ export type QaAskqOutcome =
    * bridge — kullanıcı "Giriş başarısız" gibi functional fail raporlarsa
    * Claude `report_ac_failure` çağırır) bu outcome döner. Phase 6 controller
    * failureInput'tan scope hint'leri çıkarıp `runSingleFix` ile fix uygular,
-   * sonra base'i aynı AC için yeniden instantiate eder.
+   * sonra base'i aynı AC için yeniden instantiate eder. NOT: Faz 6 şu an DEFERRED
+   * modda çalışır (controller askq açmaz) — bu dal yalnız olası gelecekteki qa-askq
+   * dönüşü için tutulur.
    */
   | { kind: "ac_failure"; failureInput: Record<string, unknown> }
   | { kind: "cancelled" }
@@ -587,7 +590,7 @@ If the user's answer is a delegation or non-answer ("sen tespit et", "sen karar 
       };
     }
     // Clarifying: question + options dinamik. Bilinen impact classification
-    // token'ları (Faz 19) için deterministik TR override — translator'ın
+    // token'ları (Faz 9 Risk) için deterministik TR override — translator'ın
     // literal çevirileri ("güvenli dağıtım / taşıma-gerekli / kırılan
     // değişiklik") kullanıcıya anlam ifade etmiyor (YZLLM 2026-05-23).
     //

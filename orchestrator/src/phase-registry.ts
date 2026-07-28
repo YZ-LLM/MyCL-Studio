@@ -27,14 +27,6 @@ export function repoRootFile(name: string): string {
   return resolve(ASSETS_ROOT, "..", name);
 }
 
-function gatePath(name: string): string {
-  return join(ASSETS_ROOT, "gates", name);
-}
-
-function runnerPath(name: string): string {
-  return join(ASSETS_ROOT, "runners", name);
-}
-
 function schemaPath(name: string): string {
   return join(ASSETS_ROOT, "schemas", name);
 }
@@ -93,7 +85,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     // onayı bekler.
     allowed_tools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
     prompt_template_path: templatePath("phase-00-debug.md"),
-    gate_module_path: gatePath("phase-00.ts"),
     required_audits: ["debug-triage-complete"],
   },
   1: {
@@ -103,7 +94,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     model_role: "translator",
     allowed_tools: ["AskUserQuestion"],
     prompt_template_path: templatePath("phase-01-intent.md"),
-    gate_module_path: gatePath("phase-01.ts"),
     required_audits: ["phase-1-intent-approve", "phase-1-complete"],
     askq_config: {
       approval_tool_name: "request_intent_approval",
@@ -119,7 +109,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     name_i18n_key: "phase.2.name",
     model_role: "translator",
     prompt_template_path: templatePath("phase-02-precision.md"),
-    gate_module_path: gatePath("phase-02.ts"),
     required_audits: [
       "precision-dimension",
       "phase-2-precision-complete",
@@ -154,7 +143,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     name_i18n_key: "phase.3.name",
     model_role: "main",
     prompt_template_path: templatePath("phase-03-brief.md"),
-    gate_module_path: gatePath("phase-03.ts"),
     required_audits: ["phase-3-brief-approve", "phase-3-complete"],
     production_config: {
       write_tool_name: "write_brief",
@@ -171,7 +159,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     allowed_tools: ["AskUserQuestion"],
     prompt_template_path: templatePath("phase-04-spec.md"),
     output_schema_path: schemaPath("phase-04-spec.json"),
-    gate_module_path: gatePath("phase-04.ts"),
     required_audits: ["spec-block", "phase-4-spec-approve", "phase-4-complete"],
     production_config: {
       write_tool_name: "write_spec",
@@ -204,7 +191,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
       "migrations/",
     ],
     prompt_template_path: templatePath("phase-05-ui.md"),
-    gate_module_path: gatePath("phase-05.ts"),
     required_audits: ["ui-file-write", "ui-ready", "phase-5-complete"],
   },
   6: {
@@ -216,7 +202,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     // Sadece chat'e yön gösterici mesaj yazıp "deferred" döner; bir sonraki
     // user_message intent classifier ile yorumlanır (approve_ui/revise_ui/
     // cancel_pipeline). Bu nedenle prompt_template_path field'ı YOK.
-    gate_module_path: gatePath("phase-06.ts"),
     required_audits: ["phase-6-complete"],
     askq_config: {
       // askq_config field'ları deferred mode'da kullanılmıyor ama PhaseSpec
@@ -236,7 +221,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     name_i18n_key: "phase.7.name",
     model_role: "main",
     prompt_template_path: templatePath("phase-07-db.md"),
-    gate_module_path: gatePath("phase-07.ts"),
     required_audits: ["phase-7-db-approve", "phase-7-complete"],
     production_config: {
       write_tool_name: "write_db_schema",
@@ -253,7 +237,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     // AskUserQuestion = doubt-driven eskalasyon (Faz 8 her zaman SDK backend).
     allowed_tools: ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "AskUserQuestion"],
     prompt_template_path: templatePath("phase-08-tdd.md"),
-    gate_module_path: gatePath("phase-08.ts"),
     required_audits: ["tdd-test-write", "tdd-prod-write", "tdd-green"],
   },
   9: {
@@ -262,7 +245,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     name_i18n_key: "phase.9.name",
     model_role: "translator",
     prompt_template_path: templatePath("phase-09-risk.md"),
-    gate_module_path: gatePath("phase-9.ts"),
     required_audits: ["risk-decision", "phase-9-complete"],
     askq_config: {
       approval_tool_name: "complete_risk_review",
@@ -279,8 +261,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     id: 10,
     type: "mechanical",
     name_i18n_key: "phase.10.name",
-    runner_module_path: runnerPath("phase-10.ts"),
-    gate_module_path: gatePath("phase-10.ts"),
     required_audits: ["lint-pass", "lint-fail"],
     mechanical_config: {
       // v15.0: stack profilinden resolve. node-npm → "npm run lint", python-uv
@@ -326,7 +306,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     id: 11,
     type: "mechanical",
     name_i18n_key: "phase.11.name",
-    gate_module_path: gatePath("phase-11.ts"),
     required_audits: ["simplify-pass", "simplify-fail"],
     mechanical_config: {
       // ts-prune (Node) / non-Node stack'lerde profilde tanımlıysa kendi aracı.
@@ -339,7 +318,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     id: 12,
     type: "mechanical",
     name_i18n_key: "phase.12.name",
-    gate_module_path: gatePath("phase-12.ts"),
     required_audits: ["perf-pass", "perf-fail"],
     mechanical_config: {
       // Performance: stack profilinde "perf" tanımlı projeler için çalışır.
@@ -353,7 +331,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     id: 13,
     type: "mechanical",
     name_i18n_key: "phase.13.name",
-    gate_module_path: gatePath("phase-13.ts"),
     required_audits: ["security-pass", "security-fail"],
     mechanical_config: {
       // Security: stack profilinden (npm audit, pip-audit, cargo audit, ...).
@@ -450,7 +427,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     id: 14,
     type: "mechanical",
     name_i18n_key: "phase.14.name",
-    gate_module_path: gatePath("phase-14.ts"),
     required_audits: ["unit-pass", "unit-fail"],
     mechanical_config: {
       // v15.9: scoped varyant — değişen dosyalarla ilgili testler (profilde
@@ -464,7 +440,6 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     id: 15,
     type: "mechanical",
     name_i18n_key: "phase.15.name",
-    gate_module_path: gatePath("phase-15.ts"),
     required_audits: ["integration-pass", "integration-fail"],
     mechanical_config: {
       scan_cmd: { type: "profile_key", key: "integration" },
@@ -476,8 +451,7 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     id: 16,
     type: "mechanical",
     name_i18n_key: "phase.16.name",
-    gate_module_path: gatePath("phase-16.ts"),
-    required_audits: ["e2e-pass", "e2e-fail", "phase-15-skipped"],
+    required_audits: ["e2e-pass", "e2e-fail", "phase-16-skipped"],
     mechanical_config: {
       // v15.0 Batch B: project_type-aware E2E runner. node-npm + web →
       // Playwright, python-uv + api → hurl, library → null (skip). Her stack
@@ -494,10 +468,10 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     // index.ts `if (next === 17)` runPhase17Pentest'i (DAST katana+nuclei) çağırır. Bu mechanical_config
     // yalnız faz-tipini + skip kapısını belirler; scan_cmd kullanılmaz.
     name_i18n_key: "phase.17.name",
-    gate_module_path: gatePath("phase-17.ts"),
-    required_audits: ["phase-17-complete", "phase-16-skipped"],
+    required_audits: ["phase-17-complete", "phase-17-skipped"],
     mechanical_config: {
-      // scan_cmd interceptör tarafından BYPASS edilir (load test kaldırıldı). YZLLM 2026-06-20:
+      // scan_cmd interceptör tarafından BYPASS edilir (load test kaldırıldı) → `which: "load"` resolve
+      // dalı üretimde HİÇ tetiklenmez, yalnız birim testlerinde koşar. YZLLM 2026-06-20:
       // skip_unless has_ui DEĞİL has_web_target — sızma testi UI gerektirmez; HTTP sunan her proje
       // (web VEYA API) taranır. Yalnız HTTP-hedefi olmayan (CLI/library/ml) projelerde atlanır.
       scan_cmd: { type: "project_type", which: "load" },
@@ -527,24 +501,3 @@ export function getSpec(phase: PhaseId): PhaseSpec | undefined {
   return PHASE_SPECS[phase];
 }
 
-/**
- * Zorunlu fazlar — her geliştirmede mutlaka çalışır. Opsiyonel fazlar
- * (5,6,7,8,9) orkestra ajanı tarafından Faz 1 sonrası kullanıcıya sorulur.
- * Faz 0 (Debug Triage) standalone — pipeline'a dahil değil, ne zorunlu ne
- * opsiyonel.
- *
- * Tek source of truth — frontend PhaseSidebar.tsx senkron tutmalı.
- */
-// Faz 9 (Risk İncelemesi) ZORUNLU (YZLLM 2026-06-11: "Faz 9 asla atlanmasın" — düşman-gözü doğrulama katmanı,
-// insan-incelemesinin yerini alır; atlanırsa kontrol delinir). Runtime zaten 9'u atlamıyor (isPhaseSkippedByScope
-// yalnız 5-8); bu set'ler de artık gerçeği yansıtır.
-export const REQUIRED_PHASES: ReadonlySet<PhaseId> = new Set([
-  1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-]);
-
-// Yalnız 5 (UI)/6 (UI review)/7 (DB) gerçekten opsiyonel (UI/DB yoksa atlanır). Faz 8 (TDD) artık ZORUNLU.
-export const OPTIONAL_PHASES: ReadonlySet<PhaseId> = new Set([5, 6, 7]);
-
-export function isRequiredPhase(phase: PhaseId): boolean {
-  return REQUIRED_PHASES.has(phase);
-}

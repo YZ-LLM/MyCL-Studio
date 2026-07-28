@@ -24,15 +24,16 @@ export interface ToolContext {
   /**
    * Default-denied prefix'leri (örn. `.mycl/`) içinde KALAN ama bu faz için
    * yazımına izin verilen spesifik dosyalar. Match varsa denied check
-   * atlanır. Örnek: Faz 5 `.mycl/patterns.md`, Faz 20 `.mycl/validation-report.md`
-   * yazımı için bu listeyi kullanır. Proje köküne göreli ya da mutlak yol.
+   * atlanır. Proje köküne göreli ya da mutlak yol.
+   * NOT: şu an yalnız test/ileriye dönük — üretimde hiçbir faz bu alanı set etmiyor.
    */
   extra_allowed_paths?: string[];
   /**
-   * Glob pattern'leri olarak phase-specific deny. Faz 20 mock cleanup gibi
-   * "test dosyalarına dokunma" kurallarını uygular. Örn:
+   * Glob pattern'leri olarak phase-specific deny — "test dosyalarına dokunma"
+   * gibi kuralları uygular. Örn:
    *   ["**\/*.test.*", "**\/__tests__/**"]
    * Match path proje köküne göreli olarak değerlendirilir.
+   * NOT: şu an yalnız test/ileriye dönük — üretimde hiçbir faz bu alanı set etmiyor.
    */
   extra_denied_patterns?: string[];
   /**
@@ -295,10 +296,10 @@ export async function handleBash(
     timeoutMs,
   });
   return new Promise<ToolResult>((resolve) => {
-    // v15.8 (2026-05-28): Cross-platform shell spawn.
-    // - macOS/Linux: bash -lc (login shell, pulls .bashrc PATH adjustments)
-    // - Windows: cmd /c (PowerShell de mümkün ama npm/git komutları cmd'de
-    //   uyumlu; PowerShell quoting daha karmaşık → cmd seçilir)
+    // Shell spawn. Desteklenen platformlar macOS + Linux: bash -lc (login shell,
+    // .bashrc PATH ayarlarını çeker). Windows KAPSAM DIŞI (katı kural #7) —
+    // aşağıdaki cmd.exe dalı v15.8'den kalma savunma amaçlı kalıntıdır, henüz
+    // görünür fail-closed'a taşınmadı.
     const isWin = process.platform === "win32";
     const shellCmd = isWin ? "cmd.exe" : "bash";
     const shellArgs = isWin ? ["/c", command] : ["-lc", command];

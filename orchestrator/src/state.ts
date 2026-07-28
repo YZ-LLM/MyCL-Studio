@@ -15,7 +15,7 @@ import {
 import { LockError, withFileLockRetry } from "./state-lock.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
-import type { PhaseId, State } from "./types.js";
+import type { State } from "./types.js";
 
 const STATE_FILE = "state.json";
 const MYCL_DIR = ".mycl";
@@ -39,10 +39,7 @@ function defaultState(projectRoot: string): State {
     session_id: randomUUID(),
     spec_approved: false,
     spec_hash: undefined,
-    ui_flow_active: false,
-    regression_block_active: false,
     tdd_compliance_score: undefined,
-    last_write_ts: undefined,
     project_root: projectRoot,
     created_at: now,
     updated_at: now,
@@ -138,10 +135,3 @@ async function saveStateUnlocked(p: string, state: State): Promise<void> {
   await fs.rename(tmp, p);
 }
 
-/**
- * Faz ilerletme — yan etkisiz state.current_phase'i set eder. Çağıran
- * save'i bizzat çağırmalı.
- */
-export function advancePhase(state: State, to: PhaseId): State {
-  return { ...state, current_phase: to, updated_at: Date.now() };
-}

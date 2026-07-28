@@ -49,10 +49,6 @@ const SPLIT_PROMPT = `Sen MyCL'in iş-ayrıştırma yardımcısısın. Kullanıc
 
 Kurallar: Geçerli JSON (çift tırnak, trailing comma YOK). Açıklama/yorum yazma. Yeni iş yoksa \`"tasks":[]\` geçerlidir.`;
 
-export function buildSplitPrompt(): string {
-  return SPLIT_PROMPT;
-}
-
 const SPLIT_USER = (rawText: string, pendingTexts: string[]): string => {
   const pendingBlock =
     pendingTexts.length > 0

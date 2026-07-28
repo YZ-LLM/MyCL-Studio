@@ -57,19 +57,6 @@ export function t(key: string, locale: Locale): string {
   return dig(bundles[locale], parts) ?? dig(bundles.en, parts) ?? `[?${key}]`;
 }
 
-/** {name} placeholder substitution — minimal, no escaping. */
-export function tFormat(
-  key: string,
-  locale: Locale,
-  vars: Record<string, string | number>,
-): string {
-  let out = t(key, locale);
-  for (const [k, v] of Object.entries(vars)) {
-    out = out.replaceAll(`{${k}}`, String(v));
-  }
-  return out;
-}
-
 /**
  * Map English canonical labels (e.g., ["Approve", "Revise", "Cancel"]) to the
  * locale-specific i18n strings — avoids per-call translator round-trips.

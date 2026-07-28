@@ -14,7 +14,7 @@ import {
   mkdir,
   open as openFile,
 } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { globalConfigDir } from "./paths.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -158,6 +158,3 @@ class Logger {
 }
 
 export const log = new Logger();
-
-// Helper: dirname yer alıyor diye eslint'ten kaçar.
-export const _dirname = dirname;

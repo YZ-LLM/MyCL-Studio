@@ -2777,7 +2777,7 @@ async function handleTaskQueueRemove({ id }: { id: string }): Promise<void> {
  *
  * BOOT UZLAŞTIRMA (YZLLM 2026-06-14, düşman-inceleme #3/#13): currentTaskId
  * yalnız bellektedir → restart/çökme sonrası "running" damgalı bir iş ORPHAN
- * kalır (gerçekte koşmuyor). nextAutoPendingTask yalnız "pending" seçtiğinden bu
+ * kalır (gerçekte koşmuyor). nextPendingTask yalnız "pending" seçtiğinden bu
  * iş asla yeniden seçilmez + kuyruk dürüst yansımaz. Açılışta "running" işleri
  * "dropped"a çevir (görünür "tamamlanmadan durdu"; gerekirse kullanıcı yeniden
  * ekler). Yeni pencere = yeni süreç → in-memory _drainActive zaten false.
@@ -4451,8 +4451,6 @@ async function runDevelopIteration(
       dev_server_pid: undefined,
       intent_summary: undefined,
       intent_summary_raw: undefined,
-      ui_flow_active: false,
-      regression_block_active: false,
       // UI tweak state'i yeni iterasyon'a sızmamalı — Phase 6 onayı sonrası
       // zaten sıfırlanıyor ama force-complete veya yarım kalan pipeline'da
       // kalmış olabilir; defensive.
@@ -6011,8 +6009,6 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           dev_server_pid: undefined,
           intent_summary: undefined,
           intent_summary_raw: undefined,
-          ui_flow_active: false,
-          regression_block_active: false,
           pending_ui_tweak: undefined,
           ui_tweak_count: undefined,
           pending_backend_fix: undefined,
@@ -6553,15 +6549,15 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       const passEvent = spec.required_audits[0] ?? `phase-${next}-pass`;
       const failEvent = spec.required_audits[1];
 
-      // Faz 17 = SIZMA TESTİ (YZLLM 2026-06-19): yük testi YERİNE pentest. Mekanik runner KOŞMAZ —
-      // runPhase17Pentest (DAST katana+nuclei) çalışır; bulgular gate'i düşürmez, Faz-3 iş-kuyruğuna
-      // sistem işi olur (cascade-guard'lı). Faz her zaman "complete" (pentest bulgu bulsa da akış sürer).
+      // Faz 17 = SIZMA TESTİ (YZLLM 2026-06-19 → 2026-06-22): Faz 17 pentesti OTOMATİK KOŞMAZ. Mekanik
+      // runner de koşmaz — runPhase17Pentest yalnız no-op bilgi mesajı basar; gerçek DAST (katana+nuclei)
+      // artık YALNIZ 🛡️ Güvenlik Taraması butonuyla MANUEL çalışır. Faz her zaman "complete".
       if (next === 17) {
         const { status: pentestStatus, partial } = await runPhase17Pentest(state, cfg);
         disarmRollback();
-        // Faz 17 YEŞİL ancak pentest tam-koşup 0-bulgu ise (YZLLM 2026-06-20). `partial` (bulgu>0 veya timeout)
-        // → "soft_complete_after_fail" → verdict PARTIAL (sahte-yeşil yok). Koşamadı (env) → partial=false →
-        // verdict cezalanmaz. Pipeline yine tamamlandı (phase-17-complete → completed=true).
+        // `partial` (bulgu>0 veya timeout) → "soft_complete_after_fail" → verdict PARTIAL (sahte yeşil yok).
+        // ŞU AN ERİŞİLEMEZ: otomatik pentest kalktığından runPhase17Pentest her zaman partial=false döner;
+        // dal, otomatik tetik geri gelirse diye korunuyor. Pipeline yine tamamlanır (phase-17-complete).
         await appendAuditModule(state.project_root, {
           ts: Date.now(),
           phase: 17,
@@ -7189,11 +7185,10 @@ async function enqueueSystemFixTask(
 }
 
 /**
- * Faz 17 = SIZMA TESTİ (YZLLM 2026-06-19): yük testi YERİNE gerçek pentest. Mevcut DAST motoru
- * (katana+nuclei) çalışan app'i AKTİF tarar. Canlı dev server gerekir → ensureDevServerForReview;
- * yoksa runDast görünür "no_target" döner (sahte-yeşil yok). Bulgular gate'i DÜŞÜRMEZ — her biri
- * enqueueSecurityFindings ile Faz-3 iterasyonu olur. CASCADE-GUARD: bu iterasyon güvenlik-fix'inden
- * doğduysa re-enqueue YAPILMAZ (bulgu→Faz3→Faz17→bulgu sonsuz döngüsü kırılır; yalnız doğrular).
+ * Faz 17 (YZLLM 2026-06-19 → 2026-06-22): otomatik sızma testi KALDIRILDI — bu fonksiyon pentest
+ * KOŞMAZ, yalnız no-op bilgi mesajı basıp "complete" döner. Gerçek DAST (katana+nuclei, canlı dev
+ * server + AKTİF tarama) artık YALNIZ 🛡️ Güvenlik Taraması butonuyla MANUEL çalışır
+ * (handleRunDastRequest) — makine yükünü kullanıcı kontrol eder.
  */
 async function runPhase17Pentest(
   _state: State,
@@ -9354,8 +9349,9 @@ ipcRouter.register("save_settings", async (data: unknown) => {
 ipcRouter.register("read_selected_models", async () => {
   await handleReadSelectedModels();
 });
-// Denetim Ajanı (YZLLM 2026-06-11): "MyCL Kalite Kontrol Testi" butonu → (düzenlenmiş) sorularla orkestratörü
-// denetle → rapor → MyCL-içi çözülebilirler vs kaynak-kodu-değişikliği gerekenler ayrımı → chat.
+// Denetim Ajanı (YZLLM 2026-06-11): sorularla orkestratörü denetle → rapor → MyCL-içi çözülebilirler
+// vs kaynak-kodu-değişikliği gerekenler ayrımı → chat. NOT (2026-07-03): 🕵️ Kalite Kontrol butonu
+// UI'dan kaldırıldı; bu handler bilinçli korunuyor (event tetiklenirse akış aynen koşar).
 ipcRouter.register("start_quality_audit", async (data: unknown) => {
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);

@@ -297,10 +297,10 @@ export class Phase2Controller {
       caller: "mycl-orchestrator",
     }).catch(() => {});
     // v15.0 Batch D: project_type sınıflandırma. Haiku ile spec özetinden
-    // tip türetilir; state'e yazılır. Faz 16/18 runner seçimi + Faz 5/7 skip
-    // kararı buna bağlı. Confirm askq v15.1'e ertelendi — şimdilik auto +
-    // chat'e bilgi mesajı; yanlış tespit edilirse kullanıcı sonraki fazlarda
-    // fark edip sidebar üzerinden müdahale eder.
+    // tip türetilir; state'e yazılır. Faz 16 (E2E) runner seçimi + Faz 17 (pentest)
+    // kapsamı + Faz 5/7 skip kararı buna bağlı. Tespiti kullanıcıya onaylatan bir confirm
+    // askq YOK (planlanmadı) — şimdilik auto + chat'e bilgi mesajı; yanlış tespit edilirse
+    // kullanıcı sonraki fazlarda fark edip sidebar üzerinden müdahale eder.
     const classification = await classifyProjectType(this.config, enriched);
     const projectType = classification.project_type;
     const hasDatabase = classification.has_database;
@@ -312,7 +312,7 @@ export class Phase2Controller {
       emitChatMessage(
         "system",
         `⚠️ Proje tipi otomatik belirlenemedi. UI fazları varsayılan olarak çalıştırılacak. ` +
-          `Yanlışsa Phase 5 öncesi mesaj yazarak yönlendirme yapabilirsin (v15.1'de ayarlardan override gelecek).`,
+          `Yanlışsa Phase 5 öncesi mesaj yazarak yönlendirme yapabilirsin.`,
       );
     } else {
       const dbNote =

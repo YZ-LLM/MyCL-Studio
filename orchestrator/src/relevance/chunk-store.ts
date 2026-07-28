@@ -137,6 +137,10 @@ export async function extractAbandonedChunks(
  * blokları özetlenir (ilk 200 char).
  *
  * Faz id'si zorunlu — history per-phase tutuluyor.
+ *
+ * NOT: üretim çağıranı yok, bilinçli tutuluyor. relevance-engine yalnız
+ * `options.history_phase` verildiğinde çağırır; şu an hiçbir üretim yolu
+ * bu alanı doldurmuyor.
  */
 export async function extractHistoryChunks(
   projectRoot: string,

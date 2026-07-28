@@ -140,45 +140,6 @@ export async function insertErrors(dbPath: string, rows: ErrorRow[]): Promise<nu
   return ids;
 }
 
-/**
- * Hatayı çözümle birlikte resolved=1 işaretler. solution_tr TR çeviri özet.
- * sqlite3 CLI yoksa no-op.
- */
-export async function markResolved(
-  dbPath: string,
-  id: number,
-  solution_tr: string,
-): Promise<void> {
-  const sql = `UPDATE errors SET resolved=1, solution_tr=${q(solution_tr)} WHERE id=${id};`;
-  await runSqlite(dbPath, sql);
-}
-
-/**
- * Son `sinceMs` ms içinde yakalanan `RUNTIME_` prefix'li çözülmemiş hataları
- * batch olarak resolved=1 yapar. Smoke test 2xx probe başarılı olduğunda
- * çağrılır — fix uygulandı, dev server canlı, sayfa açılıyor → son N saniyedeki
- * runtime hatalar artık tarihsel sayılır.
- *
- * Returns: kaç satır güncellendi (UI bildirimi için).
- */
-export async function markRecentRuntimeResolved(
-  dbPath: string,
-  sinceMs: number,
-  solution_tr: string,
-): Promise<number> {
-  const cutoff = Date.now() - sinceMs;
-  // Önce kaç row etkilenecek say (UPDATE row count almak sqlite3 CLI'da
-  // dolaylı, ayrı SELECT daha güvenilir).
-  const countSql = `SELECT COUNT(*) FROM errors WHERE error_code LIKE 'RUNTIME\\_%' ESCAPE '\\' AND resolved=0 AND ts >= ${cutoff};`;
-  const countOut = await runSqliteQuery(dbPath, countSql);
-  const count = countOut ? Number(countOut.trim()) : 0;
-  if (!Number.isFinite(count) || count === 0) return 0;
-
-  const updateSql = `UPDATE errors SET resolved=1, solution_tr=${q(solution_tr)} WHERE error_code LIKE 'RUNTIME\\_%' ESCAPE '\\' AND resolved=0 AND ts >= ${cutoff};`;
-  await runSqlite(dbPath, updateSql);
-  return count;
-}
-
 export interface RuntimeErrorRow {
   id: number;
   ts: number;
@@ -192,8 +153,7 @@ export interface RuntimeErrorRow {
  * `resolved=0` olan TÜM hataları döner (SCAN_ + RUNTIME_ hepsi). "Hata Ara"
  * butonunda Claude'a tam scan yaptırmadan önce kontrol edilir: açık hata
  * varsa onları doğrudan checklist olarak göster, yeni Claude turn'üne ihtiyaç
- * yok. Kullanıcı resolved=1 işaretledikten sonra (markResolved) kayıt
- * "kapalı" sayılır ve listeden düşer.
+ * yok.
  */
 export async function selectUnresolvedFindings(
   dbPath: string,

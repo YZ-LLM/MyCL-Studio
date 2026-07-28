@@ -174,12 +174,3 @@ export function nextPendingTask(items: TaskQueueItem[]): TaskQueueItem | null {
   });
   return pending[0] ?? null;
 }
-
-/**
- * Auto-drain için sıradaki iş: `source==="auto"` (intake/çok-problem) VEYA `source==="security"`
- * (güvenlik/pentest bulgusu sistem-işi, YZLLM 2026-06-19) işler otomatik işlenir. Manuel "İş Ekle"
- * (source="manual") + kaynağı belirsiz eski kayıtlar auto-drain'e GİRMEZ (istemsiz oto-çalıştırma yok).
- */
-export function nextAutoPendingTask(items: TaskQueueItem[]): TaskQueueItem | null {
-  return nextPendingTask(items.filter((it) => it.source === "auto" || it.source === "security"));
-}

@@ -1,4 +1,5 @@
-// base/codegen-controller — codegen tipi fazların ortak akışı (P6, P9).
+// base/codegen-controller — codegen tipi fazların ortak akışı (Faz 0/5/8 +
+// gate-autofix / verify-feature / module-parallel / risk-fix-parallel).
 //
 // Pattern:
 //   - Anthropic SDK + tool_use loop (Read/Write/Edit/Bash/Glob/Grep)

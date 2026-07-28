@@ -5,8 +5,8 @@ import { getMessages } from '@/lib/i18n';
 import { ThemeInit } from '@/components/ThemeInit';
 
 export const metadata = {
-  title: 'Arçelik Back-Office',
-  description: 'Arçelik on-premise back-office yönetim paneli',
+  title: 'Back-Office',
+  description: 'On-premise back-office yönetim paneli',
 };
 
 export default function RootLayout({ children }) {

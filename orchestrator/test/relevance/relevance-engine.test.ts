@@ -136,8 +136,6 @@ describe("relevance/engine · audit_phase post-filter", () => {
       current_phase: 7,
       session_id: "s",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: projectRoot,
       created_at: 0,
       updated_at: 0,

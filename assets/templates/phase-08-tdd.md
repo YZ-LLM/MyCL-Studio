@@ -155,8 +155,7 @@ tekrar tıklar veya spec'i revize eder.
 - Test fail kalırsa (3+ red runs aynı assertion'da) strateji değiştir; ASLA
   test'i `.skip` etme veya silme.
 - Beklenmedik blocker → Bash/Read ile araştır, devam et. Stop ETME.
-- Phase 8 controller fail olursa retry yapar (10 attempt'e kadar, ilerleme
-  varsa) — yine de tek atışta bitirmeye çalış.
+- Tek atışta bitirmeye çalış.
 
 Your job:
 1. Read the spec. Count ACs, group them into 3-8 user scenarios. Announce
@@ -218,7 +217,7 @@ patterns.md gives the backend + frontend pattern. You MUST implement:
    the UI's Hata Kodları page.
 3. **Frontend**: a global `fetch` wrapper that POSTs to `/api/log-error`
    on non-2xx responses, and a React ErrorBoundary that calls the same
-   endpoint on render errors. (Phase 6 builds the Hata Kodları page itself
+   endpoint on render errors. (Phase 5 builds the Hata Kodları page itself
    that reads from `/api/errors`.)
 4. `.gitignore` must include `error_folder/`.
 5. Write TDD tests for: (a) `recordError` writes a row; (b) error middleware

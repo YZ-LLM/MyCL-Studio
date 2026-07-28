@@ -4,7 +4,7 @@ import { SUPPORTED_LANGS, DEFAULT_LANG } from '@/lib/auth-constants';
 
 export const messages = {
   tr: {
-    'app.name': 'Arçelik Back-Office',
+    'app.name': 'Back-Office',
     'app.tagline': 'Yönetim Paneli',
 
     'common.loading': 'Yükleniyor…',
@@ -129,7 +129,7 @@ export const messages = {
     'notfound.home': 'Ana sayfaya dön',
   },
   en: {
-    'app.name': 'Arçelik Back-Office',
+    'app.name': 'Back-Office',
     'app.tagline': 'Management Panel',
 
     'common.loading': 'Loading…',

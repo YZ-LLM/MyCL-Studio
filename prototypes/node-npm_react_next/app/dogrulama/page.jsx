@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { t } from '@/lib/i18n';
 import { VerificationForm } from '@/app/dogrulama/VerificationForm';
 
-export const metadata = { title: 'Doğrulama — Arçelik Back-Office' };
+export const metadata = { title: 'Doğrulama — Back-Office' };
 
 // Step-up verification page (used when visitor fingerprint differs) — deferred to a
 // later iteration as advanced auth is out of scope here. It leaks no protected data

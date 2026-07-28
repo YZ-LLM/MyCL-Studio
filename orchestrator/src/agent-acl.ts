@@ -11,8 +11,7 @@
 // inşa eder (her tool definition'ı kendi modülünde) — bu registry **doğruluk
 // referansı + audit**, runtime'da hard enforcement değil.
 //
-// Cross-check için `test/agent-acl.test.ts` (eklenecek) registry'deki her tool
-// adının gerçekten o ajanın kullandığı listesinde olduğunu doğrular.
+// Cross-check için `test/agent-acl.test.ts` doğrular.
 
 /**
  * Tüm ajan kimlikleri — production readiness madde 01.
@@ -198,21 +197,6 @@ export const AGENT_ACL_REGISTRY: readonly AgentACL[] = [
 /** Quick lookup by id. */
 export function getAgentACL(agentId: AgentId): AgentACL | undefined {
   return AGENT_ACL_REGISTRY.find((a) => a.agent_id === agentId);
-}
-
-/**
- * Verilen ajan toolName'i çağırabilir mi? Allowlist check.
- * Defansif: bilinmeyen agent_id → false. Bilinmeyen tool name → false.
- */
-export function isToolAllowed(agentId: AgentId, toolName: string): boolean {
-  const acl = getAgentACL(agentId);
-  if (!acl) return false;
-  return acl.allowed_tools.includes(toolName);
-}
-
-/** Risk level filter — yüksek riskli ajanların listesi. */
-export function getHighRiskAgents(): AgentId[] {
-  return AGENT_ACL_REGISTRY.filter((a) => a.risk_level === "high").map((a) => a.agent_id);
 }
 
 /**

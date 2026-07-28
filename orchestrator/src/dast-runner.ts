@@ -230,8 +230,6 @@ export interface ScanCoverage {
   capped: boolean;
   /** katana kurulu değil mi (kullanıcıya kurulum önerisi). */
   katanaMissing: boolean;
-  /** Faz 17: yalnız bu iterasyonda değişen işe scope'landı mı (tüm proje değil). */
-  scoped?: boolean;
   /** Full Security: nuclei template'leri güncel CVE setine çekildi mi (true) / denenip
    *  başarısız (false) / hiç denenmedi (undefined). */
   templatesUpdated?: boolean;
@@ -239,10 +237,6 @@ export interface ScanCoverage {
 
 /** Kapsamı tek satırda TR olarak betimle (özet başlığına eklenir). */
 export function coverageLine(cov: ScanCoverage): string {
-  if (cov.scoped) {
-    // Faz 17 scoped pentest — dürüstçe "yalnız değişen iş" de (tüm-proje iddiası YOK).
-    return `bu iterasyonda değişen işe scope'landı — ${cov.urlCount} route (tüm proje için 🛡️ Güvenlik Taraması)`;
-  }
   if (cov.crawled) {
     if (cov.capped) {
       return `${cov.urlCount} route tarandı (ilk ${MAX_SCAN_URLS} ile sınırlandı — daha fazla route var; en kritik yüzeyi kapsar)`;
@@ -556,65 +550,6 @@ export function dedupeFindingsByTemplate(findings: NucleiFinding[]): NucleiFindi
   return [...byTemplate.values()];
 }
 
-/** SAF: route segment yolunu URL route'una çevir — route-grupları `(x)` ve `@slot` atılır,
- *  dinamik `[id]` segmentinde kesilir (en yakın statik ataya inilir; katana çocukları doldurur). */
-function segmentsToRoute(segs: string): string {
-  const out: string[] = [];
-  for (const p of segs.split("/").filter(Boolean)) {
-    if (/^\(.*\)$/.test(p) || p.startsWith("@")) continue; // route group / parallel slot → URL'e yansımaz
-    if (/^\[.*\]$/.test(p)) break; // dinamik segment → en yakın statik ataya indir
-    out.push(p);
-  }
-  return "/" + out.join("/");
-}
-
-/**
- * SAF: iterasyonda değişen kaynak dosyalardan **dosya-tabanlı yönlendirme** (file-based routing)
- * konvansiyonlarıyla etkilenen app-route'larını türet — Faz 17 pentest'ini O İŞE scope'lamak için.
- *
- * STACK-BAĞIMSIZLIK (YZLLM İş 4): bu, dosya-yolundan-türetilebilir yönlendirmeyi kapsar
- * (Next.js app/pages, Nuxt pages, SvelteKit src/routes, Remix app/routes). Decorator/kod-tabanlı
- * yönlendirme (FastAPI/Flask/Express/Rails/Go) route'u DOSYA YOLUNDAN türetilemez → boş döner →
- * çağıran TÜM yüzeyi tarar (kuşkuda dahil et — güvenli). Yani "Next-only bug" değil; türetilebilen
- * yerde scope'lar, türetilemeyende dürüstçe full'e düşer. `/` = kök sayfa/layout → tüm yüzey.
- */
-export function deriveRoutesFromFiles(files: string[]): string[] {
-  const routes = new Set<string>();
-  for (const raw of files ?? []) {
-    const f = raw.replace(/\\/g, "/").replace(/^\.?\//, "");
-    // SvelteKit: (src/)?routes/<segs>/+page|+server|+layout.* → /<segs>
-    const svelteM = /(?:^|\/)(?:src\/)?routes\/(.+?)\/\+(?:page|server|layout)\b/.exec(f);
-    if (svelteM) {
-      routes.add(segmentsToRoute(svelteM[1].replace(/\/\([^/]+\)/g, ""))); // grup (x) at
-      continue;
-    }
-    if (/(?:^|\/)(?:src\/)?routes\/\+(?:page|server|layout)\b/.test(f)) {
-      routes.add("/");
-      continue;
-    }
-    // Next.js app router + Remix (app/routes/): (src/)?app/<segs>/(page|route|layout).(t|j)sx?
-    const appM = /(?:^|\/)(?:src\/)?app\/(.+?)\/(?:page|route|layout)\.[tj]sx?$/.exec(f);
-    if (appM) {
-      routes.add(segmentsToRoute(appM[1].replace(/^routes\//, ""))); // Remix app/routes/ → çıkar
-      continue;
-    }
-    if (/(?:^|\/)(?:src\/)?app\/(?:page|route|layout)\.[tj]sx?$/.test(f)) {
-      routes.add("/");
-      continue;
-    }
-    // Next.js / Nuxt pages router: (src/)?pages/<segs>.(t|j)sx? | .vue
-    const pagesM = /(?:^|\/)(?:src\/)?pages\/(.+)\.(?:[tj]sx?|vue)$/.exec(f);
-    if (pagesM) {
-      if (/(?:^|\/)_(?:app|document|error)$/.test(pagesM[1])) continue; // route değil
-      const p = pagesM[1].replace(/(?:^|\/)index$/, "");
-      routes.add(segmentsToRoute(p));
-      continue;
-    }
-    // diğer dosyalar (components/lib/util/css/test/config) + kod-tabanlı route → atla (full'e düşer)
-  }
-  return [...routes].filter((r) => r.length > 0);
-}
-
 // nuclei community template'leri = "internette yayınlanan GÜNCEL açıklar/CVE'ler".
 // Full Security (🛡️ buton) bunları son sürüme çeker; bounded + süreç-başına bir kez.
 const TEMPLATE_UPDATE_TIMEOUT_MS = 120_000;
@@ -635,7 +570,7 @@ async function ensureNucleiTemplatesUpdated(cwd: string): Promise<boolean> {
 
 export async function runDast(
   state: State,
-  opts?: { scopeRoutes?: string[]; updateTemplates?: boolean; noAutologin?: boolean },
+  opts?: { updateTemplates?: boolean; noAutologin?: boolean },
 ): Promise<DastResult> {
   // YZLLM 2026-06-20: login modülünü autologin BYPASS'lamadan test et — `mycl_no_autologin`
   // çerezi katana+nuclei'ye eklenir → app otomatik dev-oturumu açmaz, gerçek login akışı taranır.
@@ -688,7 +623,8 @@ export async function runDast(
     katanaMissing: false,
   };
   // Full Security (🛡️ buton): internette yayınlanan GÜNCEL açıkları/CVE'leri tara → önce
-  // nuclei template'lerini son sürüme çek. Faz 17 scoped'da YAPILMAZ (hafif kalsın).
+  // nuclei template'lerini son sürüme çek. Yalnız `updateTemplates` verildiğinde (hafif
+  // koşumlar template çekmez).
   if (opts?.updateTemplates) {
     cov.templatesUpdated = await ensureNucleiTemplatesUpdated(state.project_root);
   }
@@ -710,30 +646,6 @@ export async function runDast(
     }
   } else {
     cov.katanaMissing = true;
-  }
-
-  // Faz 17 SCOPED pentest: yalnız bu iterasyonda değişen route'ları + çocuklarını tara.
-  // Değişen route'lar seed olarak EKLENİR (katana keşfetmese bile taranır) + keşfedilen
-  // eşleşen URL'ler korunur. Eşleşme hiç çıkmazsa full kalır (kuşkuda dahil et). `/` scope'u
-  // = kök değişti → tüm yüzey (filtre her şeyi kapsar). Güvenlik butonu opts vermez → full.
-  const scope = opts?.scopeRoutes?.map((r) => r.replace(/\/+$/, "") || "/") ?? [];
-  if (scope.length > 0) {
-    const base = target.replace(/\/+$/, "");
-    const inScope = (u: string): boolean => {
-      try {
-        const path = new URL(u).pathname.replace(/\/+$/, "") || "/";
-        return scope.some((r) => r === "/" || path === r || path.startsWith(r + "/"));
-      } catch {
-        return false;
-      }
-    };
-    const seeds = scope.map((r) => (r === "/" ? `${base}/` : `${base}${r}`));
-    const merged = [...new Set([...seeds, ...scanUrls.filter(inScope)])].slice(0, MAX_SCAN_URLS);
-    if (merged.length > 0) {
-      scanUrls = merged;
-      cov.urlCount = merged.length;
-      cov.scoped = true;
-    }
   }
 
   // nuclei input: tek URL → -u; çok-route → -l geçici dosya (büyük argv/E2BIG'den kaçın).

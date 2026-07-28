@@ -16,7 +16,11 @@ import { VERIFY_BEFORE_CLAIM, DECISION_PRINCIPLES } from "./agent-language.js";
 import type { MyclConfig } from "./config.js";
 import type { State } from "./types.js";
 
-/** Varsayılan kalite kontrol soruları (YZLLM). Kullanıcı popup'ta düzenleyebilir; düzenlenmiş hali buraya gelir. */
+/**
+ * Varsayılan kalite kontrol soruları (YZLLM). UI girişi (düzenleme popup'ı) 2026-07-03'te
+ * kaldırıldı; `start_quality_audit` event'i tetiklenirse özel questions gelir, aksi halde bu
+ * varsayılan kullanılır (backend bilinçli korunuyor, CHANGELOG).
+ */
 export const DEFAULT_QUALITY_QUESTIONS = `MyCL Kalite Kontrol Testi — orkestratör ajanın son koşudaki davranışını denetle:
 
 1. Sorunu tespit etti mi?
@@ -82,10 +86,8 @@ async function gatherEvidence(state: State): Promise<string> {
   } catch {
     return "(audit log okunamadı)";
   }
-  const since = state.iteration_started_at ?? 0;
   const rows = audit
-    .filter((e) => (e.ts ?? 0) >= since || true) // son iterasyon + biraz öncesi (bağlam)
-    .slice(-160)
+    .slice(-160) // son iterasyon + biraz öncesi (bağlam)
     .map((e) => `[p${e.phase ?? "?"}] ${e.event}: ${String(e.detail ?? "").slice(0, 160)}`);
   let evidence = rows.join("\n").slice(0, 12000);
   // YZLLM 2026-06-11: arka plan kalıcı oturumları (çevirmen/reasoning/codegen) KÖR NOKTADA kalmasın — ne

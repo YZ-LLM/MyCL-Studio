@@ -410,7 +410,7 @@ const CODE_SNIPPET_CONTEXT = 3;
  * tool-handlers normalizeAndCheck deseni — dosya kök DIŞINDAysa veya okunamıyorsa `undefined` döner
  * (buton çıkmaz; fail-soft — kod gösterememek akışı bozmaz). Ön yüz dosyaya ASLA dokunmaz (snippet gömülür).
  */
-export async function resolveCodeRef(
+async function resolveCodeRef(
   projectRoot: string,
   ref: CodeRef | undefined,
 ): Promise<CodeRef | undefined> {

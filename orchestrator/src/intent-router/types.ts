@@ -52,7 +52,8 @@ export interface IntentClassification {
    * v15.7 (2026-05-27): "command" intent için: UI butonundan gelen alt-tür
    * (run/test/build/install/lint). Önceden orchestrator metni regex'le
    * yorumluyordu (`detectIntentKind`); artık caller doğrudan veriyor.
-   * Yoksa varsayılan "run" kabul edilir (gerizek bypass için).
+   * Yoksa (ve extracted_command da yoksa) görünür hata verilir: komut
+   * anlaşılamadı — sessiz "run" varsayımı YOK.
    */
   intent_kind?: "run" | "test" | "build" | "install" | "lint";
   /**

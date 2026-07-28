@@ -16,7 +16,6 @@
 //
 // Test path'leri (isTestPath) tarama dışı tutulur — mock/dummy oralarda OK.
 
-import type { State } from "./types.js";
 
 export interface TechDebtFinding {
   category:
@@ -180,14 +179,6 @@ export function scanTechDebt(
   }
 
   return findings;
-}
-
-/**
- * Helper: state üzerinden Phase 8 progress için Tech debt count okuma.
- * Audit log'tan değil; observer state'e patch eder.
- */
-export function getTechDebtCount(state: State): number {
-  return (state as State & { tdd_tech_debt_count?: number }).tdd_tech_debt_count ?? 0;
 }
 
 /**

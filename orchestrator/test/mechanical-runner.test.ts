@@ -22,8 +22,6 @@ function fakeState(): State {
     current_phase: 11,
     session_id: "test",
     spec_approved: false,
-    ui_flow_active: false,
-    regression_block_active: false,
     project_root: projectRoot,
     created_at: 0,
     updated_at: 0,
@@ -296,8 +294,6 @@ describe("resolveMechanicalCmd (v15.0 Batch A)", () => {
       current_phase: 11,
       session_id: "test",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: "/tmp",
       created_at: 0,
       updated_at: 0,
@@ -378,7 +374,9 @@ describe("resolveMechanicalCmd (v15.0 Batch A)", () => {
     expect(r).toBeNull();
   });
 
-  it("project_type spec (Faz 18 load) + web → k6 (node-npm)", async () => {
+  // load bloğu: Faz 17 artık sızma testi (pentest) — scan_cmd bypass edilir. Aşağıdaki
+  // üç test yük komutunun koşumunu değil, generic project_type çözümleme sözleşmesini kilitler.
+  it("project_type spec: load bloğu + web → k6 (node-npm)", async () => {
     const r = await resolveMechanicalCmd(
       { type: "project_type", which: "load" },
       stateWith("node-npm", "web"),
@@ -386,7 +384,7 @@ describe("resolveMechanicalCmd (v15.0 Batch A)", () => {
     expect(r).toBe("k6 run loadtest.js");
   });
 
-  it("project_type spec (Faz 18 load) + library → null (no load test)", async () => {
+  it("project_type spec: load bloğu + library → null (no load test)", async () => {
     const r = await resolveMechanicalCmd(
       { type: "project_type", which: "load" },
       stateWith("node-npm", "library"),
@@ -394,7 +392,7 @@ describe("resolveMechanicalCmd (v15.0 Batch A)", () => {
     expect(r).toBeNull();
   });
 
-  it("project_type spec (Faz 18 load) + api (python-uv) → locust", async () => {
+  it("project_type spec: load bloğu + api (python-uv) → locust", async () => {
     const r = await resolveMechanicalCmd(
       { type: "project_type", which: "load" },
       stateWith("python-uv", "api"),
@@ -422,8 +420,6 @@ describe("MechanicalRunnerBase profile_key integration (v15.0 Batch A)", () => {
       current_phase: 11,
       session_id: "test",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: projectRoot,
       created_at: 0,
       updated_at: 0,
@@ -459,8 +455,6 @@ describe("MechanicalRunnerBase profile_key integration (v15.0 Batch A)", () => {
       current_phase: 17,
       session_id: "test",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: projectRoot,
       created_at: 0,
       updated_at: 0,
@@ -495,8 +489,6 @@ describe("MechanicalRunnerBase profile_key integration (v15.0 Batch A)", () => {
       current_phase: 11,
       session_id: "test",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: projectRoot,
       created_at: 0,
       updated_at: 0,
@@ -529,8 +521,6 @@ describe("resolveMechanicalCmd · scoped (v15.9)", () => {
       current_phase: 10,
       session_id: "test",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: "/tmp",
       created_at: 0,
       updated_at: 0,

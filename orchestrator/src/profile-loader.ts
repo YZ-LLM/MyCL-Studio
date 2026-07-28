@@ -46,9 +46,10 @@ export type ProfileCommandKey =
   | "test_scoped";
 
 /**
- * project_type-aware komut anahtarları — Faz 16 (E2E) + Faz 17 (Load) gibi
- * proje tipine göre runner'ı değişen fazlar için. Web app → Playwright,
- * REST API → hurl/supertest, CLI → shell, library → null vb.
+ * project_type-aware komut anahtarları — proje tipine göre runner'ı değişen
+ * fazlar için. Web app → Playwright, REST API → hurl/supertest, CLI → shell,
+ * library → null vb. Bugün yalnız Faz 16 (E2E) bu yolu kullanır; Faz 17 sızma
+ * testine (pentest) geçtiğinden `load` ucu kalıntıdır (üretimde koşmaz).
  */
 export interface ProjectTypeCommands {
   web?: string | null;
@@ -70,7 +71,8 @@ export interface StackProfile {
   commands: Partial<Record<ProfileCommandKey, string | null>>;
   /** Faz 16 E2E test — project_type'a göre. */
   e2e_by_project_type?: ProjectTypeCommands;
-  /** Faz 17 Load test — project_type'a göre. */
+  /** Kalıntı: eski Faz 17 yük testi — project_type'a göre. Faz 17 artık sızma
+   *  testi (pentest) olduğundan üretimde okunmaz; profil JSON'larında duruyor. */
   load_by_project_type?: ProjectTypeCommands;
   /** Dev server default port (Phase 5 sonrası bekleme). */
   default_port?: number;

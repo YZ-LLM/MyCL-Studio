@@ -123,11 +123,6 @@ export async function runBlindspotLens(
   }
 }
 
-/** SAF: mercekte HIGH-önem bulgu var mı (caller "sor" tetiği için). */
-export function lensHasHighSeverity(lens: LensResult): boolean {
-  return lens.blindspots.some((b) => b.severity === "high");
-}
-
 /**
  * SAF: mercek sonucundan GÖRÜNÜR kullanıcı mesajı (null = mesaj basma). clean→güven-veren tek satır;
  * error→görünür not (sessiz değil); bulgu→madde liste. Caller emitChatMessage'a verir / pitch'e ekler.

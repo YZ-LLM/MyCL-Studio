@@ -12,7 +12,6 @@ import {
   removeTask,
   patchTask,
   nextPendingTask,
-  nextAutoPendingTask,
   taskStatus,
 } from "../src/task-queue/store.js";
 import { intakeAndEnqueue, parseSplitBlock } from "../src/task-queue/intake.js";
@@ -84,23 +83,6 @@ describe("task-queue store", () => {
     ];
     // priority 1 olanlar (b@20, c@30) → FIFO ile b önce.
     expect(nextPendingTask(items)?.id).toBe("b");
-  });
-
-  it("nextAutoPendingTask: yalnız source=auto işler auto-drain'e girer (manuel/eski hariç)", async () => {
-    const mixed: TaskQueueItem[] = [
-      { id: "m", ts: 1, text: "manuel", priority: 1, status: "pending", source: "manual" },
-      { id: "legacy", ts: 2, text: "eski (source yok)", priority: 1, status: "pending" },
-      { id: "a", ts: 3, text: "auto-düşük", priority: 5, status: "pending", source: "auto" },
-      { id: "b", ts: 4, text: "auto-yüksek", priority: 2, status: "pending", source: "auto" },
-    ];
-    // Manuel (öncelik 1) + eski daha yüksek öncelikli ama auto-drain'e girmez →
-    // yalnız auto işler arasından öncelik 2 (b) seçilir.
-    expect(nextAutoPendingTask(mixed)?.id).toBe("b");
-    // Auto iş yoksa null (manuel işler oto-koşmaz).
-    const onlyManual: TaskQueueItem[] = [
-      { id: "m", ts: 1, text: "m", status: "pending", source: "manual" },
-    ];
-    expect(nextAutoPendingTask(onlyManual)).toBeNull();
   });
 
   it("nextPendingTask: önceliksiz iş en sona (Infinity); hepsi bitince null", async () => {

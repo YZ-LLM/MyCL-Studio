@@ -71,7 +71,8 @@ void _allStackIdsExhaustive;
 
 /**
  * Proje tipi — Phase 2 hassasiyet sonu Haiku ile sınıflandırılır. Faz 16 (E2E)
- * ve Faz 17 (Load) test runner seçimi + Faz 5/7 skip kararı buna bağlıdır.
+ * test runner seçimi, Faz 17 (sızma testi/pentest) kapsamı + Faz 5/7 skip
+ * kararı buna bağlıdır.
  * Web app → Playwright, API → hurl/supertest, CLI → shell, library → null vb.
  */
 export type ProjectType =
@@ -118,8 +119,7 @@ export type PhaseType =
   | "qa"           // AskUserQuestion (Haiku micro-call)
   | "production"   // JSON schema strict output
   | "codegen"      // Read/Edit/Write/Bash
-  | "mechanical"   // MyCL lokal komut, Claude'a gitmez
-  | "validation";  // MyCL audit log okur
+  | "mechanical";  // MyCL lokal komut, Claude'a gitmez
 
 /** Faz hangi model tier'ını kullanır (config.selected_models.translator vs .main).
  *  NOT: Bu API key seçimi DEĞİL. Tüm Claude API çağrıları daima
@@ -205,9 +205,11 @@ export interface ProductionConfig {
  *      `null` → mechanical-runner `phase-N-skipped` yazar (mevcut isMissingCommand
  *      path'iyle paralel ama erken; subprocess spawn denemesi yok).
  *
- *   3. **`{ type: "project_type", which: "e2e" | "load" }`** — Faz 16/18 için;
+ *   3. **`{ type: "project_type", which: "e2e" | "load" }`** — Faz 16 (E2E) için;
  *      `state.stack` + `state.project_type` kombinasyonundan profil'in
- *      `e2e_by_project_type` veya `load_by_project_type` bloğundan resolve.
+ *      `e2e_by_project_type` bloğundan resolve. `load` ucu Faz 17'nin scan_cmd'inde
+ *      tanımlı ama Faz 17 sızma testine (pentest) geçtiğinden (index.ts
+ *      runPhase17Pentest) üretimde hiç koşmuyor — yalnız birim testlerinde tetiklenir.
  */
 export type MechanicalCommandSpec =
   | string
@@ -279,17 +281,6 @@ export interface PhaseSpec {
   denied_paths?: string[];
   prompt_template_path?: string;
   output_schema_path?: string;
-  /**
-   * @deprecated v15.7 (2026-05-27) — Lazy gate loading planlamasından kalma
-   * dead field. Hiçbir yerde runtime'da import edilmiyor; PHASE_SPECS girişleri
-   * tutuyor ama gerçek gate logic'i controller içinde inline veya hook'larda.
-   * Silmek için: PHASE_SPECS girişlerinden de kaldırılmalı (~17 entry).
-   */
-  gate_module_path: string;
-  /**
-   * @deprecated v15.7 (2026-05-27) — gate_module_path ile aynı dead field.
-   */
-  runner_module_path?: string;
   required_audits: string[];
   /** Faz tipi başına ayar — sadece o tipte dolu olur. */
   askq_config?: AskqConfig;
@@ -315,8 +306,8 @@ export interface State {
   /**
    * Proje tipi (web/api/cli/library/mobile/desktop/ml/game/unknown). Phase 2
    * hassasiyet sonu Haiku ile sınıflandırılır + confirm askq ile kullanıcıya
-   * doğrulattırılır. Faz 16 E2E + Faz 17 Load runner seçimi ve Faz 5/7 skip
-   * kararı buna bağlı.
+   * doğrulattırılır. Faz 16 (E2E) runner seçimi, Faz 17 (pentest) kapsamı ve
+   * Faz 5/7 skip kararı buna bağlı.
    */
   project_type?: ProjectType;
   /**
@@ -406,10 +397,7 @@ export interface State {
   session_id: string;                 // UUIDv4
   spec_approved: boolean;
   spec_hash?: string;
-  ui_flow_active: boolean;
-  regression_block_active: boolean;
   tdd_compliance_score?: number;      // 0-100, Phase 8 sonrası
-  last_write_ts?: number;
   /**
    * Faz 5 dev server'ı arka planda spawn ettiğinde pid burada saklanır.
    * Orchestrator startup'ta (open_project) yaşıyor mu kontrol eder; zombi

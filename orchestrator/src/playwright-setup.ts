@@ -938,7 +938,7 @@ async function ensureMyclGitignore(projectRoot: string): Promise<void> {
 // (`@playwright/test` imzası). Vitest `.test.js` dosyaları yanlışlıkla
 // "gerçek e2e testi" sayılmaz (eski memory kuralı).
 // ---------------------------------------------------------------------------
-// (MYCL_MARKER_ANY yukarıda MYCL_SCAFFOLD_MARKER ile birlikte tanımlı.)
+// (MYCL_MARKER_PREFIX yukarıda MYCL_SCAFFOLD_MARKER ile birlikte tanımlı.)
 
 export type SmokeKind = "placeholder" | "real" | "none";
 export type AuthStatus = "configured" | "placeholder" | "none";

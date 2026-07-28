@@ -34,7 +34,7 @@ export interface FixSnapshot {
 }
 
 /** Proje başına tutulacak kopya-yedek sayısı (YZLLM 2026-06-27). Eskiler budanır → ~/.mycl/backups şişmez. */
-export const BACKUP_KEEP = 3;
+const BACKUP_KEEP = 3;
 
 /**
  * SAF-yan-etkili: bir projenin ~/.mycl/backups altındaki `<proje>-autofix-<ts>` kopya-yedeklerinden EN YENİ
@@ -323,7 +323,7 @@ export async function restoreSnapshot(snap: FixSnapshot, projectRoot: string): P
 let _rollback: FixSnapshot | null = null;
 
 /** İlk-kazanır: dizinin ilk (en temiz) snapshot'ını rollback noktası yap (sonrakiler ezmez — junk birikmesin). */
-export function armRollback(snap: FixSnapshot): void {
+function armRollback(snap: FixSnapshot): void {
   if (_rollback === null && (snap.method === "git" || snap.method === "copy")) {
     _rollback = snap;
   }

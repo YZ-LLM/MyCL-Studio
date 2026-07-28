@@ -26,7 +26,7 @@ const BATCH_WALL_CLOCK_MS = 20 * 60_000;
 /** API yolunda batch başına tur tavanı (küçük batch → bol; runaway koruması). */
 const API_MAX_TURNS = 80;
 
-/** Birim kimliği + davranış-sözleşmesi (EddBehavior tek tanım progress.ts'te; tech-doc buradan türer). */
+/** Birim kimliği + davranış-sözleşmesi (EddBehavior tek tanım progress.ts'te; edd-analysis.md buradan türer). */
 export type EddBehaviorRecord = { unit: string } & EddBehavior;
 
 const SYSTEM_PROMPT = `You are EDD (Integration-Driven Define). MyCL is integrating with an EXISTING codebase and must fully UNDERSTAND + DOCUMENT its CURRENT behavior so future changes never break it.

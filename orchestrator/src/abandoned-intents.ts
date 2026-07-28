@@ -2,8 +2,9 @@
 // vazgeçerse `.mycl/abandoned-intents.jsonl`'a kalıcı kayıt.
 //
 // "MyCL hiç birşeyi unutmaz" garantisi: vazgeçilen niyetler diskte JSON
-// Lines olarak tutulur, gelecek Faz 2 çağrılarında digestAbandonedIntents()
-// ile özet prompt'a enjekte edilir → Claude "daha önce benzer bir niyetten
+// Lines olarak tutulur, gelecek Faz 2 çağrılarında relevance yolu
+// (buildRelevantAbandonedDigest) bu kayıtlardan yalnız MEVCUT niyetle alakalı
+// olanları seçip prompt'a enjekte eder → Claude "daha önce benzer bir niyetten
 // vazgeçilmişti" diyebilir.
 //
 // Pattern: audit.ts appendAudit (POSIX O_APPEND + fsync, PIPE_BUF altında
@@ -87,25 +88,4 @@ export async function readAbandonedIntents(
     }
   }
   return entries;
-}
-
-/**
- * Faz 2 promptuna enjekte için kısa özet üretir. En son `max` vazgeçme
- * listelenir. Hiç yoksa "(none)" döner.
- */
-export async function digestAbandonedIntents(
-  projectRoot: string,
-  max = 5,
-): Promise<string> {
-  const all = await readAbandonedIntents(projectRoot);
-  if (all.length === 0) return "(none)";
-  const recent = all.slice(-max);
-  const lines = recent.map((e) => {
-    const date = new Date(e.ts).toISOString().slice(0, 10);
-    const intentSnip = e.intent.slice(0, 120).replace(/\s+/g, " ");
-    const concerns = e.concerns.length > 0 ? e.concerns.join("; ") : "(none)";
-    const reason = e.reason.slice(0, 200);
-    return `- Iter ${e.iteration} (${date}, phase ${e.phase}): "${intentSnip}"\n  Concerns: ${concerns}\n  Reason: ${reason}`;
-  });
-  return lines.join("\n");
 }

@@ -80,8 +80,3 @@ export async function _loadServicesFromPath(path: string): Promise<KnownService[
   log.info("provision-services", "loaded", { path, count: services.length });
   return services;
 }
-
-/** Test için cache temizleme. */
-export function _clearServicesCache(): void {
-  servicesCache = null;
-}

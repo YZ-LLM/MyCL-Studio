@@ -17,13 +17,6 @@ const BUNDLES: Record<Locale, Record<string, string>> = {
     "settings.tab.features": "Özellikler",
     "settings.tab.about": "Hakkında",
     "settings.close": "Kapat",
-    "phases.title": "Aşamalar",
-    "phases.refresh": "Yenile",
-    "phases.close": "Kapat",
-    "phases.filter.all": "Tümü",
-    "phases.filter.missing": "Eksik",
-    "phases.add_new": "+ Yeni Faz Ekle",
-    "phases.add_close": "− Faz Ekleme Formunu Kapat",
   },
   en: {
     "settings.title": "Settings",
@@ -32,13 +25,6 @@ const BUNDLES: Record<Locale, Record<string, string>> = {
     "settings.tab.features": "Features",
     "settings.tab.about": "About",
     "settings.close": "Close",
-    "phases.title": "Phases",
-    "phases.refresh": "Refresh",
-    "phases.close": "Close",
-    "phases.filter.all": "All",
-    "phases.filter.missing": "Missing",
-    "phases.add_new": "+ Add New Phase",
-    "phases.add_close": "− Close Add Phase Form",
   },
 };
 

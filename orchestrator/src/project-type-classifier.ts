@@ -2,8 +2,8 @@
 // (web/api/cli/library/mobile/desktop/ml/game) sınıflandırır.
 //
 // Haiku (translator role) ile tool_use yapısal output → ProjectType döner.
-// Faz 16 (E2E) ve Faz 17 (Load) runner seçimi + Faz 5/7 skip kararı için
-// state'e yazılır.
+// Faz 16 (E2E) runner seçimi + Faz 5/7 skip kararı için state'e yazılır
+// (Faz 17 artık pentest/DAST, project_type kullanmıyor).
 //
 // Hata case'i: API fail veya model "unknown" derse → "unknown" dönülür,
 // pipeline durmaz. v15.1 confirm askq ile kullanıcı override edebilir.
@@ -85,10 +85,6 @@ const TOOL_DEF = {
     },
   },
 };
-
-export class ProjectTypeClassifyError extends Error {
-  override readonly name = "ProjectTypeClassifyError";
-}
 
 /**
  * Classifier sonucu. v15.2.3 borç: has_database eklendi — Faz 7 (Veritabanı

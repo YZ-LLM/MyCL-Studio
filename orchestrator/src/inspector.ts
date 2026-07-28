@@ -10,9 +10,9 @@
 //   - "Kazanan" = kanıtı/ilkeyi tutan, ikna eden DEĞİL. İtiraf yalnız düşünce-tükenişinden sonra.
 //   - Tartışma TÜRKÇE (translator'sız, insana-yükseltme kayıpsız); protokol talimatı İngilizce.
 //
-// Bu AŞAMA 1: çekirdek modül (müfettiş-geçişi + sınırlı tartışma + çözüm). Orkestratör
-// döngüsüne bağlama (checkpoint hook) + müdahale-seçimi (mekanik taban/asimetrik eşik) +
-// tecrübe katmanı + API-paritesi = sonraki aşamalar.
+// Bugünkü kapsam: çekirdek modül (müfettiş geçişi + sınırlı tartışma + çözüm) + orkestratör
+// döngüsüne bağlama (checkpoint hook) + müdahale seçimi (mekanik taban/asimetrik eşik) +
+// tecrübe katmanı (experience-layer recall/record) + tam API paritesi (CLI ve API arka ucu).
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { readFile } from "node:fs/promises";

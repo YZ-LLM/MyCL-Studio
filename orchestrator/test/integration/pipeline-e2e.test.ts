@@ -5,12 +5,11 @@
 // (scope-confirm + faz onayları) test tarafından OTOMATİK cevaplanır.
 //
 // KAPSAM (dürüst): orkestrasyon glue'sunu kanıtlar — faz geçişleri, scope-confirm,
-// scope-skip (5/6/7/8), mekanik 10-17, artefakt yazımı (spec/brief/decisions/cost).
-// LLM çıktı KALİTESİNİ değil. Faz 1 (intent bootstrap) handleUserMessage yolundan
-// girer (advanceToNextPhase inline işlemez) → testte intent ön-set edilir.
-// Codegen 5/8 + UI-review 6 bilinçli scope-skip: Phase 5'te gerçek bir bug var
-// (observer phase:5 yazıyor, kontrol phase:6 arıyor) + dev-server spawn; Phase 6
-// deferred döngüyü durdurur. Bunlar ayrı ele alınır.
+// scope-skip (5/7); Faz 6+8 ZORUNLU, mekanik 10-17, artefakt yazımı
+// (spec/brief/decisions/cost). LLM çıktı KALİTESİNİ değil. Faz 1 (intent bootstrap)
+// handleUserMessage yolundan girer (advanceToNextPhase inline işlemez) → testte
+// intent ön-set edilir. Phase 5 bug'ı düzeltildi, testte doğrulanır
+// (ui-file-write + dev-server spawn yolu koşar).
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";

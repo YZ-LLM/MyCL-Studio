@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
-import { loadOrInit, save, advancePhase } from "../src/state.js";
+import { loadOrInit, save } from "../src/state.js";
 
 describe("state", () => {
   let projectRoot: string;
@@ -36,26 +36,9 @@ describe("state", () => {
 
   it("save updates updated_at and persists changes", async () => {
     const s = await loadOrInit(projectRoot);
-    const advanced = advancePhase(s, 11);
-    await save(advanced);
+    await save({ ...s, current_phase: 11 });
     const reloaded = await loadOrInit(projectRoot);
     expect(reloaded.current_phase).toBe(11);
     expect(reloaded.updated_at).toBeGreaterThanOrEqual(s.updated_at);
-  });
-
-  it("advancePhase is pure — does not mutate input", () => {
-    const s = {
-      current_phase: 1 as const,
-      session_id: "x",
-      spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
-      project_root: "/tmp",
-      created_at: 1,
-      updated_at: 1,
-    };
-    const next = advancePhase(s, 4);
-    expect(next.current_phase).toBe(4);
-    expect(s.current_phase).toBe(1);
   });
 });

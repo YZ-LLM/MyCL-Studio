@@ -1,7 +1,9 @@
-// claude-api — Anthropic SDK doğrudan API. Subprocess YOK.
+// claude-api — Anthropic SDK doğrudan API. Bu modül YALNIZ SDK/API yolu.
 //
-// Neden subprocess kaldırıldı?
-// API key kullandığımız için `claude` CLI'ya ihtiyaç yok. SDK direkt:
+// CLI yolu (varsayılan/birincil kanal) ayrı modüllerde: cli-run.ts,
+// cli-session.ts, persistent-cli-session.ts. Burada subprocess YOK.
+//
+// API key ile SDK'nın doğrudan verdikleri:
 //   - 1M context beta `betas: [...]` parameter ile (CLI'da warning veriyordu)
 //   - AskUserQuestion'a benzer custom tool'lar tool_use definitions ile
 //   - Multi-turn conversation in-process — bridge management yok

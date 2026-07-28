@@ -5,7 +5,6 @@
 import { describe, expect, it } from "vitest";
 import {
   coverageLine,
-  deriveRoutesFromFiles,
   isLocalhostTarget,
   parseKatanaUrls,
   parseNucleiJsonl,
@@ -282,46 +281,5 @@ describe("dast-runner · coverageLine (dürüst kapsam — sahte 'tüm proje' yo
     const line = coverageLine({ crawled: false, urlCount: 1, capped: false, katanaMissing: true });
     expect(line).not.toContain("tüm proje");
     expect(line).toContain("katana");
-  });
-
-  it("scoped (Faz 17) → 'değişen işe scope'landı' + 'tüm proje' demez", () => {
-    const line = coverageLine({ crawled: true, urlCount: 3, capped: false, katanaMissing: false, scoped: true });
-    expect(line).toContain("değişen işe scope");
-    expect(line).not.toContain("tüm proje tarandı");
-    expect(line).toContain("3");
-  });
-});
-
-// İŞ 1 (YZLLM 2026-06-20): Faz 17 pentest yalnız değişen işe scope'lanır → dosya→route türetme.
-describe("dast-runner · deriveRoutesFromFiles (Next.js app/pages → route)", () => {
-  it("app router: page/route/layout → route; kök → /", () => {
-    expect(deriveRoutesFromFiles(["app/users/page.tsx"])).toEqual(["/users"]);
-    expect(deriveRoutesFromFiles(["src/app/page.tsx"])).toEqual(["/"]);
-    expect(deriveRoutesFromFiles(["app/api/orders/route.ts"])).toEqual(["/api/orders"]);
-  });
-
-  it("route grubu (x) atılır, dinamik [id] en yakın statik ataya iner", () => {
-    expect(deriveRoutesFromFiles(["app/(admin)/dashboard/page.tsx"])).toEqual(["/dashboard"]);
-    expect(deriveRoutesFromFiles(["app/users/[id]/page.tsx"])).toEqual(["/users"]);
-  });
-
-  it("pages router: index → kök segment; _app/_document atlanır", () => {
-    expect(deriveRoutesFromFiles(["pages/raporlar.tsx"])).toEqual(["/raporlar"]);
-    expect(deriveRoutesFromFiles(["pages/index.tsx"])).toEqual(["/"]);
-    expect(deriveRoutesFromFiles(["pages/_app.tsx", "src/components/Btn.tsx"])).toEqual([]);
-  });
-
-  it("route olmayan dosyalar (component/lib/css/test) atlanır → boş (full'e düşer)", () => {
-    expect(deriveRoutesFromFiles(["lib/db.ts", "app/users/UserCard.tsx", "styles.css"])).toEqual([]);
-  });
-
-  it("SvelteKit src/routes + Nuxt pages/.vue (stack-bağımsızlık İş 4)", () => {
-    expect(deriveRoutesFromFiles(["src/routes/dashboard/+page.svelte"])).toEqual(["/dashboard"]);
-    expect(deriveRoutesFromFiles(["src/routes/+page.svelte"])).toEqual(["/"]);
-    expect(deriveRoutesFromFiles(["pages/raporlar.vue"])).toEqual(["/raporlar"]);
-  });
-
-  it("kod-tabanlı route (FastAPI/Express/Rails) → boş → full tarama (dürüst fallback)", () => {
-    expect(deriveRoutesFromFiles(["app/main.py", "routes.rb", "server/index.ts"])).toEqual([]);
   });
 });

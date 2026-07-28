@@ -302,7 +302,7 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
   }
   // v15.8: Son kararlar (ADR) — agent yeni isteğin önceki kararla çelişip
   // çelişmediğini görür ("zaten X'e karar vermiştik").
-  lines.push("", "### Recent decisions (ADR, last 3)", "");
+  lines.push("", "### Recent decisions (ADR, last 8)", "");
   if (ctx.recent_decisions.length === 0) {
     lines.push("(no decisions)");
   } else {
@@ -344,7 +344,7 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
   // v15.6: Hafıza bölümü — agent karar verirken geçmiş kararları referans alır
   lines.push(
     "",
-    "## RELEVANT MEMORY (last 10 project + 5 general)",
+    "## RELEVANT MEMORY (last 15 project + 8 general)",
     "",
     "### Projeye özel",
   );

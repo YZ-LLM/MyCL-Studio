@@ -117,7 +117,7 @@ export function hasReproRedThenGreen(events: Array<{ event: string }>): boolean 
 
 // Dosya sınıflandırma (kaynak/test/kozmetik/config) 2026-07-16'da file-classify.ts'e
 // taşındı — TEK kaynak (eski üç tutarsız kopyanın birleşimi). Buradan re-export:
-// mevcut import yolları (phase-9-tech-debt, testler) kırılmadan çalışır.
+// mevcut import yolları (testler) kırılmadan çalışır.
 export {
   isTestPath,
   isProdPath,

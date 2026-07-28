@@ -1,7 +1,8 @@
 // codegen/cli-backend — Claude Code CLI (`claude -p`) tabanlı codegen backend.
 //
 // v15.8 (2026-05-30): Flag açıkken (Settings → Özellikler → Claude Code CLI)
-// codegen fazları (Phase 5 + verify-feature) main ajanı SDK turn-loop yerine
+// codegen fazları (Phase 5 + verify-feature + Phase 8 + parallel-module + gate-autofix)
+// main ajanı SDK turn-loop yerine
 // `claude` CLI subprocess'i ile çalıştırır.
 //
 // Gerçek bayraklar (claude 2.1.141 ile doğrulandı):

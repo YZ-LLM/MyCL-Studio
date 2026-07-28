@@ -14,8 +14,6 @@ import {
   appendBehaviorConsent,
   readBehaviorConsent,
   latestConsentFor,
-  writePendingBehaviorChanges,
-  readPendingBehaviorChanges,
   type AcRecord,
   type BehaviorConsentRecord,
 } from "../src/behavior-consent.js";
@@ -240,20 +238,5 @@ describe("behavior-consent.jsonl store — append/read/latest", () => {
   it("dosya yoksa [] (çökme yok)", async () => {
     const root = await mkTmp();
     expect(await readBehaviorConsent(root)).toEqual([]);
-  });
-});
-
-describe("pending-behavior-changes.json — write/read", () => {
-  it("yuvarlar; yoksa null", async () => {
-    const root = await mkTmp();
-    expect(await readPendingBehaviorChanges(root)).toBeNull();
-    await writePendingBehaviorChanges(root, {
-      iteration: 2,
-      ts: 123,
-      origin: "mycl",
-      changes: [{ sig: "s", kind: "changed", currentAcId: "AC1", priorStatement: "p", newStatement: "n", featureFiles: [], testFiles: [] }],
-    });
-    const got = await readPendingBehaviorChanges(root);
-    expect(got?.changes[0].currentAcId).toBe("AC1");
   });
 });

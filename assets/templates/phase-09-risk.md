@@ -18,7 +18,7 @@ assumes the best. Review like a hostile senior engineer whose reputation depends
 - **Hunt false greens.** Did Phase 8 actually test the acceptance criteria, or write shallow/mock tests that pass
   without exercising the real path? Was any gate weakened to go green (a loosened assertion, `.skip`/`.only`, a
   disabled lint rule, a lowered threshold)? A test that looks like it can never fail is a `fix`.
-- **Hunt coverage holes.** Which checks were SKIPPED this run? Perf, security, integration, e2e, and load gates
+- **Hunt coverage holes.** Which checks were SKIPPED this run? Perf, security, integration, e2e, and pentest/DAST gates
   skip *silently* when the tool/condition is absent — a skipped gate means that dimension was **never verified**.
   Treat each skipped gate as an open risk (`fix`/`rule`), not a pass.
 - **Spec vs reality.** Does the code satisfy *every* acceptance criterion the spec requires — not most? An AC that

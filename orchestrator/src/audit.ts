@@ -355,40 +355,6 @@ export async function wasPipelineCompleted(
 }
 
 /**
- * Belirli bir fazın audit kayıtlarını kısa bir özete dönüştürür — qa-askq
- * fazlarına (Faz 9, 19) context enjeksiyonu için. Çıktı plain-text,
- * Claude'a system prompt içinde verilir.
- *
- * Format:
- *   Audit for phase N (M events, last K):
- *   - event1 (caller=...) detail
- *   - event2 ...
- *   Aggregate: green=X red=Y
- */
-export async function summarizeAuditForPhase(
-  projectRoot: string,
-  phase: AuditEvent["phase"],
-  maxEvents = 30,
-): Promise<string> {
-  const all = await readAuditLog(projectRoot);
-  const events = all.filter((e) => e.phase === phase);
-  if (events.length === 0) {
-    return `Audit for phase ${phase}: (no events).`;
-  }
-  const recent = events.slice(-maxEvents);
-  const lines = recent.map((e) => {
-    const detail = e.detail ? ` ${e.detail.slice(0, 120)}` : "";
-    return `- ${e.event} (caller=${e.caller})${detail}`;
-  });
-  // Faz 8 için yeşil/kırmızı toplamı ek bilgidir; başka fazlarda da yararsız değil.
-  const greens = events.filter((e) => e.event === "tdd-green").length;
-  const reds = events.filter((e) => e.event === "tdd-red").length;
-  const aggregate =
-    greens + reds > 0 ? `\nAggregate: green=${greens} red=${reds}` : "";
-  return `Audit for phase ${phase} (${events.length} events, last ${recent.length}):\n${lines.join("\n")}${aggregate}`;
-}
-
-/**
  * Spec.md'den belirli bir başlık altındaki bölümü çıkarır. qa-askq fazlarına
  * (Faz 6 AC, Faz 9 Risks) context enjeksiyonu için.
  *

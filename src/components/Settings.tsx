@@ -1,4 +1,4 @@
-// Settings — ayarlar paneli. Tab'lar: Modeller, API Keys, Hakkında.
+// Settings — ayarlar paneli. Tab'lar: Modeller, API Keys, Özellikler, Hakkında.
 
 import { useEscapeToClose } from "../hooks/useDismissable";
 import { useEffect, useMemo, useState } from "react";
@@ -237,8 +237,8 @@ export function Settings({
   // API Keys form state
   const [apiKeyTranslator, setApiKeyTranslator] = useState("");
   const [apiKeyMain, setApiKeyMain] = useState("");
-  // v15.5 Orkestrator agent API key — opsiyonel; explicit set edilirse agent
-  // aktif olur, boş bırakılırsa klasik Haiku classifier kullanılır.
+  // v15.5 Orkestrator agent API key — opsiyonel; boş bırakılırsa main key
+  // kullanılır (orchestratorApiKey), agent yine çalışır.
   const [apiKeyOrchestrator, setApiKeyOrchestrator] = useState("");
   const [showSecret, setShowSecret] = useState(false);
 
@@ -431,8 +431,11 @@ export function Settings({
                 />
               </div>
               <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: 0 }}>
-                Boş bırakırsan main model kullanılır. Agent kullanıcı niyetini
-                doğru anlamak için daha güçlü model seçilebilir (örn. Opus).
+                Orkestratör ajanının KARAR modeli her zaman en güçlü katmandan
+                (strong tier) gelir — bu seçim onu değiştirmez. Buradaki model
+                yardımcı orkestratör işlerinde kullanılır (modül stoğu, yaşayan
+                dökümantasyon, kalite denetimi, spec tazeleme); boş bırakırsan
+                main model kullanılır.
                 <br />
                 <strong>Backend</strong>: API = Anthropic (çağrı başına faturalı);
                 Claude Code Aboneliği = `claude` CLI ile çalışır, API faturası yok
@@ -594,15 +597,15 @@ export function Settings({
                   style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
                 />
               </label>
-              {/* v15.5 Orkestrator Agent API Key — opsiyonel. Explicit set ise
-                  agent aktif, yoksa klasik Haiku classifier kullanılır. */}
+              {/* v15.5 Orkestrator Agent API Key — opsiyonel. Boş bırakılırsa
+                  main key kullanılır, agent yine çalışır. */}
               <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <span style={{ fontSize: 11, color: "var(--fg-dim)", textTransform: "uppercase" }}>
                   Orkestrator Ajan API Key (opsiyonel)
                 </span>
                 <input
                   type={showSecret ? "text" : "password"}
-                  placeholder="sk-ant-... (boş bırak → klasik classifier kullanılır)"
+                  placeholder="sk-ant-... (boş bırak → main key kullanılır, agent yine çalışır)"
                   value={apiKeyOrchestrator}
                   onChange={(e) => setApiKeyOrchestrator(e.target.value)}
                   style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}

@@ -65,7 +65,9 @@ const BLAST_RADIUS_DEPTH = 2;
 /**
  * Scope'lanamayan sistem-seviye mekanik fazlar — scoped-touch modunda atlanır
  * (tam taramada/büyük milestone'da koşar). Sadeleştirme(11)/Perf(12)/
- * Entegrasyon(15)/Load(17): doğası gereği tüm-graf/tüm-sistem. Lint(10)/
+ * Entegrasyon(15)/Pentest(17) (Faz 17 artık sızma testi; yük testi otomatik
+ * koşumu kalktı, buradaki giriş yalnız skip listesinde durur): doğası gereği
+ * tüm-graf/tüm-sistem. Lint(10)/
  * Güvenlik(13)/Birim(14) scoped veya tüm-proje koşmaya devam eder.
  */
 export const SCOPED_SKIP_PHASES: ReadonlySet<number> = new Set([11, 12, 15, 17]);

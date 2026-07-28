@@ -1,9 +1,11 @@
 // codegen/backend — Codegen backend soyutlaması.
 //
 // v15.8 (2026-05-30): Main codegen ajanı iki backend ile çalışabilir:
-//   - SDK (varsayılan): Anthropic SDK turn-loop (CodegenBaseController) —
-//     MyCL'in kendi tool'ları + bash-guard + path-sandbox + turn-bütçesi.
-//   - CLI (opt-in, flag): `claude` CLI subprocess (Aşama 3'te eklenir).
+//   - SDK: Anthropic SDK turn-loop (CodegenBaseController) — MyCL'in kendi
+//     tool'ları + bash-guard + path-sandbox + turn-bütçesi.
+//   - CLI: `claude` CLI subprocess.
+// Varsayılan backend "auto" (YZLLM 2026-06-12): CLI ile başla, abonelik limiti
+// dolunca API/SDK'ya çöz; kullanıcı UI'dan API/CLI'ye sabitleyebilir.
 //
 // Factory `createCodegenBackend(opts)` config flag'ine göre uygun backend'i
 // döner. CodegenBaseController zaten `run()`/`abort()` içerdiği için

@@ -1,5 +1,6 @@
-// git — proje git history'sine read-only erişim. Relevance engine'in
-// `extractGitChunks` çağrısı için commit log + diff stats.
+// git — proje git erişimi: çoğunlukla read-only + kısıtlı yazma (checkout/clean
+// allowlist'li, worktree doğrudan). Relevance engine'in `extractGitChunks` çağrısı
+// için commit log + diff stats.
 //
 // Pattern: child_process.spawn + safeEnv() allowlist + LC_ALL=C deterministic
 // output. tool-handlers.ts'in Bash handler örneğine paralel ama doğrudan
@@ -310,9 +311,10 @@ export async function getBlameForLines(
 }
 
 // ── Write işlemleri (checkpoint / rollback) ──────────────────────────────────
-// runGit READ-ONLY kalır; write komutları ayrı allowlist'li runGitWrite'tan
-// geçer (saldırı yüzeyi ayrımı). MyCL state'i (.mycl) ve hata kataloğu
-// (error_folder) rollback'ten DAİMA hariç tutulur.
+// checkpoint/rollback write komutları ayrı allowlist'li runGitWrite'tan geçer
+// (saldırı yüzeyi ayrımı). İSTİSNA: paralel codegen worktree'leri (worktree
+// add/remove/prune) doğrudan runGit'ten geçer — allowlist dışıdır. MyCL state'i
+// (.mycl) ve hata kataloğu (error_folder) rollback'ten DAİMA hariç tutulur.
 
 const GIT_WRITE_ALLOWED = new Set(["checkout", "clean", "reset", "stash", "add"]);
 const ROLLBACK_EXCLUDES = [".mycl", "error_folder"];

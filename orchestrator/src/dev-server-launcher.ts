@@ -228,7 +228,8 @@ export function openBrowser(url: string): void {
  */
 export function isProcessAlive(pid: number): boolean {
   // v15.8 (2026-05-30): process-utils tek otorite — duplicate raw process.kill
-  // kaldırıldı. Bu wrapper backward-compat (dahili call site'lar 287/333).
+  // kaldırıldı. Bu wrapper backward-compat (dahili tek çağıran:
+  // buildDevServerFailMessage, satır ~492).
   // Yeni call site'lar async `process-utils.isProcessAlive` kullanmalı
   // (Windows'ta tasklist ile doğru sonuç verir; bu sync versiyon Windows'ta
   // pessimistic false döner).

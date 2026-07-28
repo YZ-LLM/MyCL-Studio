@@ -359,7 +359,8 @@ async function collectAllFiles(root: string, rel = ""): Promise<string[]> {
 
 /**
  * IMPURE: pipeline-end'de çağrılır. Koşu YEŞİL (gate-fail yok) + stack biliniyorsa,
- * baseline dosyalarını ~/.mycl/prototypes/<stack>/ altına kaydeder (overwrite=tazele) +
+ * baseline dosyalarını prototypes/<stack>/ altına kaydeder (repo-içi; MYCL_HOME /
+ * MYCL_PROTOTYPES_DIR ile override edilebilir; overwrite=tazele) +
  * meta yazar. NON-BLOCKING — asla throw etmez (yan-yarar). Yeşil değilse / stack yoksa no-op.
  */
 export async function snapshotPrototype(state: State, opts?: { force?: boolean }): Promise<void> {

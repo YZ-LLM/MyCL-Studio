@@ -4,7 +4,7 @@ import { LoginForm } from '@/app/login/LoginForm';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
-export const metadata = { title: 'Giriş — Arçelik Back-Office' };
+export const metadata = { title: 'Giriş — Back-Office' };
 
 export default function LoginPage({ searchParams }) {
   const lang = headers().get('x-lang') || 'tr';

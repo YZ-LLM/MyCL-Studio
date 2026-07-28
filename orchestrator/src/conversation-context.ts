@@ -6,7 +6,7 @@
 //    ana ajan: bilmesi gerekeni bilir ki işi düzgün yapsın."
 //
 // Hem orkestratör hem ana ajan (Phase 1/2/3/4/7/9) konuşma bağlamını görür:
-//   - Son 3 user mesajı: ORKESTRATÖR'e RAW (TR); ANA AJAN'a İngilizce ÇEVRİLEREK
+//   - Son 5 user mesajı: ORKESTRATÖR'e RAW (TR); ANA AJAN'a İngilizce ÇEVRİLEREK
 //     (recentLanguage:"en" → translate; ana ajan Türkçe görmemeli — v15.12).
 //   - Önceki mesajlar (5+ user mesajı varsa) 1-2 cümle özet (EN)
 //
@@ -31,15 +31,15 @@ const HISTORY_LOOKBACK = 50; // history.log'tan son N event oku
 const SUMMARY_MAX_TOKENS = 200;
 
 export interface ConversationContext {
-  /** Son 3 user mesajı, kronolojik (eskiden yeniye). TR/raw — ORKESTRATÖR içindir. */
+  /** Son 5 user mesajı, kronolojik (eskiden yeniye). TR/raw — ORKESTRATÖR içindir. */
   recent_messages: string[];
   /**
-   * Son 3 user mesajının İngilizce çevirisi (recentLanguage:"en" ile doldurulur) —
+   * Son 5 user mesajının İngilizce çevirisi (recentLanguage:"en" ile doldurulur) —
    * ANA AJAN içindir (yalnız İngilizce görmeli). Çeviri başarısızsa boş; renderer
    * forMainAgent modunda ham TR'ye ASLA düşmez (Türkçe sızıntısı engeli).
    */
   recent_messages_en?: string[];
-  /** 4. ve öncesi mesajların 1-2 cümle özeti (EN). 5+ user mesajı yoksa null. */
+  /** 6. ve öncesi mesajların 1-2 cümle özeti (EN). 7+ user mesajı yoksa null. */
   earlier_summary: string | null;
   /** Toplam user mesajı sayısı (debug için). */
   total_user_messages: number;

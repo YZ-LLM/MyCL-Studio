@@ -11,9 +11,10 @@
 //   2. Diğer tüm komutlar (test/build/install/lint + non-Node run) → exec
 //      one-shot. Çıktı stdout/stderr ile chat'e yansıtılır.
 //
-// Non-Node web framework'lerinin dev server'larını (uvicorn, rails server,
-// mix phx.server, vs.) detached spawn etmek henüz desteklenmiyor — run intent
-// runOneShot'a düşer ve uzun ömürlü server'da timeout'a yakalanır. İleri tur.
+// NOT: 1. yol Node'a özel DEĞİL — isDevServerCommand non-Node web framework dev
+// server'larını da tanır (uvicorn/gunicorn, rails server/puma, php -S/artisan serve,
+// mix phx.server, spring-boot:run/bootRun, dotnet run) ve onlar da detached spawn edilir
+// (launchWithProvision). runOneShot yalnız dev-server OLMAYAN komutlar içindir.
 //
 // state.current_phase **DEĞİŞMEZ** — komut bir yan-eylem. dev_server_pid
 // güncellenebilir (Node dev server spawn edildiyse).

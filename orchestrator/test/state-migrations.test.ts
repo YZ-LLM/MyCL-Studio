@@ -49,8 +49,6 @@ describe("state-migrations", () => {
       project_root: projectRoot,
       created_at: 1,
       updated_at: 1,
-      ui_flow_active: false,
-      regression_block_active: false,
     };
     const migrated = await applyMigrations(
       oldState,
@@ -251,8 +249,6 @@ describe("state-migrations", () => {
       current_phase: 3,
       session_id: "legacy-session",
       spec_approved: false,
-      ui_flow_active: false,
-      regression_block_active: false,
       project_root: projectRoot,
       created_at: 100,
       updated_at: 100,

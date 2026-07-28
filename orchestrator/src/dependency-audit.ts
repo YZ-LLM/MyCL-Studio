@@ -86,6 +86,6 @@ export async function runDependencyAudit(state: State): Promise<DependencyAuditR
 export function dependencyAuditLine(r: DependencyAuditResult): string {
   if (!r.ran) return `• Bağımlılık taraması: atlandı (${r.error ?? "uygulanamaz"})`;
   if (r.error === "timeout") return `• Bağımlılık taraması (${r.tool}): ⏱ zaman aşımı — temiz doğrulanamadı`;
-  if (r.clean) return `• Bağımlılık taraması (${r.tool}): ✅ eşik-üstü (yüksek+) zafiyet yok`;
-  return `• Bağımlılık taraması (${r.tool}): ⚠️ yüksek+ seviye zafiyet VAR — güncelle/düzelt`;
+  if (r.clean) return `• Bağımlılık taraması (${r.tool}): ✅ eşik-üstü zafiyet yok`;
+  return `• Bağımlılık taraması (${r.tool}): ⚠️ eşik-üstü seviye zafiyet VAR — güncelle/düzelt`;
 }

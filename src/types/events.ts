@@ -8,7 +8,7 @@ export type PhaseId =
   | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
   | 11 | 12 | 13 | 14 | 15 | 16 | 17;
 
-export type PhaseType = "qa" | "production" | "codegen" | "mechanical" | "validation" | "unknown";
+export type PhaseType = "qa" | "production" | "codegen" | "mechanical" | "unknown";
 export type ModelRole = "translator" | "main";
 
 export interface PhaseSummary {
@@ -43,7 +43,6 @@ export interface NeededPhasesEvent {
 export type PhaseStatus = "running" | "waiting" | "complete" | "error" | "idle";
 
 /** Orchestrator → UI event'leri.
- *  UnknownEvent union'a dahil DEĞİL — discriminated narrowing'i bozar.
  *  Bilinmeyen event'ler runtime'da kind === string literal'larını eşlemeyince
  *  default branch'e düşer. */
 export type OrchestratorEvent =
@@ -533,11 +532,6 @@ export interface HistoryChunkEvent {
 export interface ErrorEvent {
   kind: "error";
   data: { reason: string; detail?: unknown };
-}
-
-export interface UnknownEvent {
-  kind: string;
-  data?: unknown;
 }
 
 /** UI → orchestrator komut tipleri. */

@@ -1,7 +1,7 @@
 // sast-scan — 🛡️ Full Security butonu için SAST (semgrep) güvenlik + secret taraması.
 //
 // STACK-AGNOSTİK: semgrep çok-dillidir; proje KÖKÜNÜ tarar (node_modules/.git semgrep'çe
-// auto-skip) — Faz 13'ün `src/` varsayımından daha stack-bağımsız. Faz 13 de semgrep koşar
+// auto-skip) — Faz 13 ile aynı kök tarama kapsamını paylaşır. Faz 13 de semgrep koşar
 // (extra_scans); buton aynı SAST sınıfını on-demand kapsar. Secret taraması semgrep p/secrets
 // iledir (MyCL kararı: gitleaks YERİNE — dil-agnostik, sürüm/scope kırılganlığı yok).
 //

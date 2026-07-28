@@ -17,7 +17,7 @@ export type EddUnitStatus = "pending" | "done" | "unanalyzable";
 
 /**
  * Birimin davranış-sözleşmesi (analyzer çıktısı). TEK doğruluk kaynağı burada (progress kaydında) tutulur;
- * tech-doc.md bundan TÜRETİLİR (bağımsız ikinci kaynak yok → drift yok, mahkeme bulgusu). Faz 2/3 enjeksiyonu bunu okur.
+ * edd-analysis.md bundan TÜRETİLİR (bağımsız ikinci kaynak yok → drift yok, mahkeme bulgusu). Faz 2/3 enjeksiyonu bunu okur.
  */
 export interface EddBehavior {
   what_it_does: string;
@@ -34,7 +34,7 @@ export interface EddUnitRecord {
   reason?: string;
   /** analiz anındaki kaynak-hash (bayatlama tespiti — Faz 4). */
   hash?: string;
-  /** done ise davranış-sözleşmesi (yapılandırılmış kaynak; tech-doc buradan türer). */
+  /** done ise davranış-sözleşmesi (yapılandırılmış kaynak; edd-analysis.md buradan türer). */
   behavior?: EddBehavior;
   ts: number;
 }

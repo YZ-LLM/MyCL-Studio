@@ -4,7 +4,7 @@
 // her katmanı (chunk-store, classifier, engine, injectors) bu tipleri kullanır.
 //
 // Tasarım kararı: ChunkSource union literal — derleme zamanı discriminated
-// narrowing için. "git" sonraki turda eklenir (plan kapsamı dışında).
+// narrowing için.
 
 export type ChunkSource =
   | "audit"
@@ -73,7 +73,7 @@ export interface RelevanceQueryOptions {
 /**
  * Relevance call sırasında oluşan hata tipi — caller fail-safe karar verir
  * (boş array döndürmek veya throw etmek). Engine layer boş array döndürür +
- * emitError; caller (Phase 2 vs.) sentinel ile devam eder.
+ * emitChatMessage (yumuşak bilgi notu); caller (Phase 2 vs.) sentinel ile devam eder.
  */
 export class RelevanceError extends Error {
   override readonly name = "RelevanceError";

@@ -30,7 +30,6 @@ export interface UseOrchestratorResult {
   events: OrchestratorEvent[];
   lastError: string | null;
   send: (cmd: OrchestratorCommand) => Promise<void>;
-  clearEvents: () => void;
   /** Her `ready` event'inde artar. Orchestrator restart (auto-update veya
    *  crash recovery) sonrası frontend'in `open_project`'i yeniden göndermesi
    *  için sinyal — App.tsx useEffect'inde deps olarak kullanılır. */
@@ -141,7 +140,5 @@ export function useOrchestrator(): UseOrchestratorResult {
     }
   }, []);
 
-  const clearEvents = useCallback(() => setEvents([]), []);
-
-  return { ready, events, lastError, send, clearEvents, bootSequence };
+  return { ready, events, lastError, send, bootSequence };
 }

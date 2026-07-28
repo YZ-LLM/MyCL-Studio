@@ -1,6 +1,6 @@
 // base/production-schema-controller — production-schema fazlarının ortak akışı.
 //
-// Pattern (P3, P4, P5, P8, P20):
+// Pattern (Faz 3, 4, 7):
 //   - Anthropic SDK ile multi-turn, JSON schema'lı write_X tool ve approval tool
 //   - write_X geldiğinde: tool input → artifact (renderer fonksiyonu), dosyaya
 //     yaz, sha256, opsiyonel audit event (spec-block gibi)

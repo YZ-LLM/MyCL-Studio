@@ -5,7 +5,8 @@
 //   - Ders = İDDİA (kanıtla çürütülebilir), HAKİKAT değil → recall'da YİNE DOĞRULA, auto-uygula YOK.
 //   - Geri-alınabilir/zırhlı: yanlış ders yakalanınca retract (tecrübe-katmanı zehirlenmesin).
 //   - verified: yalnız düşman-doğrulanmış ders güçlü; doğrulanmamış = zayıf öneri.
-// Bu AŞAMA 3 TEMELİ: depo + recall (SAF, test-edilebilir). İnspector'a bağlama + populate = sonraki.
+// Bu AŞAMA 3 TEMELİ: depo + recall (SAF, test-edilebilir). Inspector'a bağlı (recall: inspector.ts:547,
+// record: inspector.ts:797).
 
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
