@@ -196,9 +196,29 @@ export interface ChatMessage {
   detail?: string;
   /** YZLLM 2026-07-05 (Feature B): MyCL kodla ilgili cevapta ilgili kod konumu — "Kodu göster" popup'ı besler. */
   code_ref?: { file: string; startLine: number; endLine: number; snippet: string };
+  /** YZLLM 2026-07-28: cevabı ÜRETEN model id'si — balonda rozet. Yalnız LLM cevaplarında dolu. */
+  model?: string;
+  /** Rozet etiketi için rol (orkestratör/ana ajan/çevirmen/müfettiş). */
+  model_role?: "orchestrator" | "main" | "translator" | "inspector";
   /** Cross-panel focus için. Backend emit ts'i, frontend mesajlar Date.now(). */
   ts: number;
 }
+
+/** SAF: model id'sini rozet için kısalt ("claude-opus-5" → "Opus 5", "claude-sonnet-4-6" → "Sonnet 4.6").
+ *  Tanınmayan id kısaltılmadan gösterilir (uydurma yok — ne geldiyse o). */
+export function shortModelLabel(model: string): string {
+  const m = /^claude-(opus|sonnet|haiku|fable|mythos)-([0-9-]+)$/.exec(model.trim());
+  if (!m) return model;
+  const family = m[1].charAt(0).toUpperCase() + m[1].slice(1);
+  return `${family} ${m[2].replace(/-/g, ".")}`;
+}
+
+const MODEL_ROLE_TR: Record<string, string> = {
+  orchestrator: "Orkestratör",
+  main: "Ana ajan",
+  translator: "Çevirmen",
+  inspector: "Müfettiş",
+};
 
 export interface PendingAskq {
   id: string;
@@ -525,6 +545,16 @@ export function ChatPanel({
                     <span className="msg-ts date-badge">
                       <span className="date-badge-date">{tsParts.date}</span>
                       <span className="date-badge-time">{tsParts.time}</span>
+                    </span>
+                  )}
+                  {/* YZLLM 2026-07-28: bu cevabı hangi model verdi — rozet. Yalnız LLM cevaplarında dolu;
+                      mekanik/sistem mesajlarında model yok → rozet çıkmaz (uydurma atıf yapılmaz). */}
+                  {m.model && (
+                    <span
+                      className="msg-model-badge"
+                      title={`${m.model_role ? `${MODEL_ROLE_TR[m.model_role] ?? m.model_role} · ` : ""}${m.model}`}
+                    >
+                      {shortModelLabel(m.model)}
                     </span>
                   )}
                   {linkifyText(splitSentences(m.text))}

@@ -311,6 +311,8 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
       ...(data.detail ? { detail: data.detail } : {}),
       // YZLLM 2026-07-05 (Feature B): kod konumu → ChatPanel "Kodu göster" popup'ında (varsa).
       ...(data.code_ref ? { code_ref: data.code_ref } : {}),
+      // YZLLM 2026-07-28: cevabı üreten model → balon rozeti (yalnız LLM cevaplarında dolu).
+      ...(data.model ? { model: data.model, model_role: data.model_role } : {}),
     };
     // Runtime hata mesajları rolling window — chat'e spam etmesin (2026-05-22).
     // Yeni "🔴 Runtime hata yakalandı" mesajı gelince eski runtime mesajlarından
@@ -533,6 +535,10 @@ function reduce(state: MainState, ev: OrchestratorEvent): MainState {
           // YZLLM 2026-07-05 (Feature B): geçmişten yüklenen mesajlarda da kod konumu korunur (varsa).
           ...(data.code_ref && typeof data.code_ref === "object"
             ? { code_ref: data.code_ref as ChatMessage["code_ref"] }
+            : {}),
+          // YZLLM 2026-07-28: geçmişten yüklenen mesajlarda da model rozeti korunur (varsa).
+          ...(typeof data.model === "string" && data.model
+            ? { model: data.model, model_role: data.model_role as ChatMessage["model_role"] }
             : {}),
         });
       } else if (e.kind === "translation") {

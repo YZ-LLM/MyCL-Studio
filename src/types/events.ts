@@ -290,6 +290,11 @@ export interface ChatMessageEvent {
     /** YZLLM 2026-07-05 (Feature B): detail'in yapısal hali — MyCL kodla ilgili bir cevap verdiğinde
      *  ilgili kod konumu. Doluysa UI "Kodu göster" butonu çıkarır (salt-okunur popup). Yoksa buton çıkmaz. */
     code_ref?: { file: string; startLine: number; endLine: number; snippet: string };
+    /** YZLLM 2026-07-28: bu cevabı ÜRETEN model id'si (örn. "claude-opus-5") — balonda rozet olarak gösterilir.
+     *  YALNIZ gerçekten bir LLM'in ürettiği mesajlarda dolu; mekanik/sistem mesajlarında yok (rozet çıkmaz). */
+    model?: string;
+    /** Rozet etiketi için rol: orkestratör / ana ajan / çevirmen / müfettiş. */
+    model_role?: "orchestrator" | "main" | "translator" | "inspector";
   };
 }
 

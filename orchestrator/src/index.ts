@@ -20,6 +20,7 @@ import {
   readClaudeCodeFlags,
   readFeatures,
   readSelectedModels,
+  orchestratorModelId,
   type AgentBackends,
   type ApiKeys,
   type ClaudeCodeFlags,
@@ -104,6 +105,7 @@ import {
   setHistoryRoot,
   takePhaseCost,
   setAutonomousAskqHook,
+  setChatModelIds,
   type ActiveAskqSnapshot,
 } from "./ipc.js";
 import {
@@ -153,7 +155,7 @@ import { ensureAgentSkills } from "./skills-setup.js";
 import { ensureCodebaseMemoryMcp } from "./codebase-memory-setup.js";
 import { ensureCognee } from "./cognee-setup.js";
 import { runGateAutofix } from "./gate-autofix.js";
-import { inspectGateFinding, mahkemeRuling, inspectClarify, recordMahkemeLesson, type MahkemeAction, type MahkemeRuling } from "./inspector.js";
+import { inspectGateFinding, mahkemeRuling, inspectClarify, recordMahkemeLesson, INSPECTOR_MODEL_DEFAULT, type MahkemeAction, type MahkemeRuling } from "./inspector.js";
 import { Phase0Controller } from "./phase-0.js";
 import { snapshotPrototype } from "./prototype-cache.js";
 import { runPhaseContributionReport } from "./phase-contribution.js";
@@ -712,6 +714,24 @@ const AUTO_SOLVE_MAX = 6;
 // (kullanıcı her seferinde bekleyip cevaplıyor) → oto-taban 6'dan düşük. FIX B: priorSolutions sig-başına önceki
 // kararları tutar → error-analysis "bunlar denendi, tekrarlama" olarak enjekte eder (aynı-soru döngüsü kırılır).
 const MANUAL_LOOP_MAX = 3;
+/**
+ * KANIT TAŞIYAN FAZLAR (YZLLM 2026-07-28: "hedefe ilerlerken karşısına çıkan engellerin önemini bilmesi lazım…
+ * sonucu çok kötü olacak bir şey varsa durur ve bana söylerdi").
+ *
+ * Bir engelin AĞIRLIĞI vardır: lint bulgusu geçilebilir, ama "yazılım gerçekten çalışıyor mu" sorusunu yanıtlayan
+ * kapılar geçilemez. Bu fazların hepsi ÇALIŞIRLIK KANITI üretir: 8 = uygulama kodu + testleri yazıldı, 14 = birim,
+ * 15 = entegrasyon, 16 = uçtan uca. Bunlardan biri KIRMIZI iken "kabul edip devam" demek, doğrulanmamış işi
+ * "tamamlandı" diye damgalamaktır (sahte yeşil) — sonucu en kötü olan hata sınıfı.
+ *
+ * CANLI KANIT (cave, iterasyon 51 ve 52): Faz 16 E2E kırmızı → mahkeme "escalate" → kabul-devam → Faz 17 complete.
+ * 51'de müfettiş hatayı BİZZAT yeniden üretmişti ("playwright test --list → TypeError + 0 tests in 0 files") ve
+ * sistem yine de yürüdü. Artık bu fazlarda "escalate" (müfettiş çözemedi/kararsız) kabul-devam ETMEZ: akış gerçek
+ * çözüm yoluna düşer (oto-fix → hata analizi → Faz 0); o da tükenirse iş kuyruğa yazılıp pipeline PARK eder
+ * (advanceToNextPhase YOK → sahte "tamamlandı" yok, kullanıcı görünür şekilde bilgilendirilir).
+ *
+ * "suppress" (iki bağımsız değerlendirme KANITLA false-positive dedi) bu fazlarda da geçerli kalır — orada kanıt var.
+ */
+const PROOF_BEARING_PHASES: ReadonlySet<number> = new Set([8, 14, 15, 16]);
 const autoSolveSig = new Map<number, { sig: string; count: number; priorSolutions: string[] }>();
 // YZLLM 2026-07-09 (gate-timeout "atlama yok → çöz → orkestra → dürüst dur"): bir faz için timeout-divert deneme sayacı
 // — sonsuz-döngü emniyeti. TIMEOUT_DIVERT_MAX aşılınca gerçek-çözüm/orkestra denemesi durur → dürüst görünür-dur. MODÜL-
@@ -1814,7 +1834,29 @@ async function failPhase(
           ts: Date.now(),
         });
       }
-      if (ruling.convened && ruling.action !== "proceed" && !timeoutDivertActive) {
+      // ENGEL AĞIRLIĞI (YZLLM 2026-07-28): kanıt taşıyan fazda "escalate" (müfettiş çözemedi/kararsız) kabul-devam
+      // ETMEZ — doğrulanmamış işi "tamamlandı" damgalamak en kötü sonuç. Gerçek çözüm yoluna düşülür (aşağıdaki
+      // oto-fix/hata-analizi akışı); tükenirse iş kuyruğa yazılıp pipeline park eder (sahte yeşil yok).
+      // "suppress" HARİÇ: orada iki bağımsız değerlendirme KANITLA false-positive demiştir.
+      const proofGateEscalate = ruling.action === "escalate" && PROOF_BEARING_PHASES.has(n);
+      if (proofGateEscalate) {
+        await appendAuditModule(runtime.state.project_root, {
+          ts: Date.now(),
+          phase: n,
+          event: "mahkeme-escalate-refused-proof-gate",
+          caller: "mycl-orchestrator",
+          detail: `kanıt taşıyan faz — kabul-devam reddedildi, gerçek çözüme yönlendirildi: ${ruling.summary.slice(0, 300)}`,
+        }).catch(() => {});
+        emitChatMessage(
+          "system",
+          `⛔ Faz ${n} bu işin ÇALIŞTIĞINI kanıtlayan kapılardan biri ve kırmızı. Müfettiş kesin hüküm veremedi ` +
+            `("escalate") — bunu kabul edip devam ETMİYORUM, çünkü doğrulanmamış işi "tamamlandı" saymak en kötü ` +
+            `sonuç olurdu. Gerçek çözümü deniyorum; çözemezsem işi kuyruğa yazıp duracağım ve sana söyleyeceğim.` +
+            `\n${ruling.summary}`,
+          { modelRole: "inspector" },
+        );
+      }
+      if (ruling.convened && ruling.action !== "proceed" && !timeoutDivertActive && !proofGateEscalate) {
         // TIMEOUT-DIVERT İSTİSNASI (mahkeme 2026-07-09 sahte-yeşil fix): timeout-divert'te bu accept-continue dalı
         // ATLANIR — gate hiç yeniden koşulmadan "escalate → advanceToNextPhase" ile geçmek SAHTE-YEŞİL olurdu (E2E
         // koşmadı). Timeout-divert'te mahkeme escalate/suppress dese bile GERÇEK-çözüm (analyzeAndAskError + Faz 0 D1)
@@ -1869,6 +1911,7 @@ async function failPhase(
                 `hemfikir) — oto-fix yapılmadı, geçti sayıldı.\n${ruling.summary}`
             : `⚖️ Mahkeme (escalate): Faz ${n} bulgusu KUŞKULU/çözülmedi — otomatik modda akış bloklanmadı (sessiz ` +
                 `tıkanma önleme), RAPORA yazıldı, çalışan kod riske atılmadı; sonra incele.\n${ruling.summary}`,
+          { modelRole: "inspector" },
         );
         await advanceToNextPhase(n);
         return;
@@ -1951,6 +1994,7 @@ async function failPhase(
               `⚖️ Mahkeme (döngü → suppress): Faz ${n} hatası ${priorCount} denemeye rağmen sürüyordu çünkü ` +
                 `GERÇEK bir kod sorunu DEĞİL (false-positive — iki bağımsız değerlendirme kanıtla hemfikir, ` +
                 `düşük-risk). Çalışan koda geri dönüldü, bulgu rapora yazıldı, devam ediliyor.\n${ruling.summary}`,
+              { modelRole: "inspector" },
             );
             await advanceToNextPhase(n);
             return;
@@ -1967,6 +2011,7 @@ async function failPhase(
     emitChatMessage(
       "system",
       `🕵️ Müfettişin bağımsız döngü okuması (kararına yardımcı; orkestratörün göremediği açı):\n${mahkemeLoopSummary}`,
+      { modelRole: "inspector" },
     );
   }
   runtime.pendingErrorAnalysis = await analyzeAndAskError(runtime.state, runtime.config, errCtx, {
@@ -2003,6 +2048,17 @@ async function failPhase(
 function applyConfigDerivedSettings(config: MyclConfig): void {
   setSandboxPolicy(config.claude_code_flags.agent_sandbox_policy ?? "enforce");
   setCacheTtl(config.claude_code_flags.cache_ttl);
+  // Sohbet rozeti (YZLLM 2026-07-28): hangi cevabı hangi model verdi. Config'ten TÜRER → kullanıcı modeli
+  // değiştirince rozet de anında doğru (bayat model adı gösterilmez). MAHKEME (2026-07-28): orkestratör rozeti
+  // `selected_models.orchestrator ?? main` DEĞİL — ajanın GERÇEKTE kullandığı çözümleyici `orchestratorModelId`
+  // (= model_tiers.strong; eski orchestrator/main override'ı kullanılmıyor). Yanlış model yazmak = yalan atıf.
+  // inspector çapraz-aile sabiti (kullanıcı ayarına bağlı DEĞİL — inspector.ts tek kaynak).
+  setChatModelIds({
+    orchestrator: orchestratorModelId(config.selected_models),
+    main: config.selected_models.main,
+    translator: config.selected_models.translator,
+    inspector: INSPECTOR_MODEL_DEFAULT,
+  });
 }
 
 /** Config'i yüklemeyi dener, durumu UI'a yollar. */
@@ -3304,7 +3360,7 @@ async function handleAskQuestion(text: string): Promise<void> {
       decision.message_to_user?.trim() ||
       decision.reason?.trim() ||
       "Bu soruya verecek bir cevabım yok (ilgili veriyi bulamadım).";
-    emitChatMessage("assistant", answer);
+    emitChatMessage("assistant", answer, { modelRole: "orchestrator" });
     // Oturum geçmişine yaz (ham soru + cevap) + cap (en yeniler kalır).
     questionModeHistory.push({ role: "user", text: q }, { role: "assistant", text: answer });
     if (questionModeHistory.length > QM_HISTORY_MAX_MSGS) {
@@ -3446,7 +3502,7 @@ async function handlePlanModeMessage(text: string, revisePrevious?: PlanProposal
   }
   const askqId = `plan_approve_${randomUUID()}`;
   runtime.pendingPlan = { askqId, plan };
-  emitChatMessage("assistant", formatPlanTR(plan));
+  emitChatMessage("assistant", formatPlanTR(plan), { modelRole: "orchestrator" });
   await appendAuditModule(runtime.state.project_root, {
     ts: Date.now(),
     phase: runtime.state.current_phase,
@@ -3685,7 +3741,7 @@ async function executeAgentDecision(
   switch (decision.action) {
     case "chat": {
       const msg = decision.message_to_user ?? decision.reason;
-      emitChatMessage("assistant", msg);
+      emitChatMessage("assistant", msg, { modelRole: "orchestrator" });
       return;
     }
     case "ask_clarify": {
@@ -3856,7 +3912,7 @@ async function executeAgentDecision(
         runtime.state.pending_ui_review &&
         decision.phase6_approval
       ) {
-        emitChatMessage("assistant", decision.reason);
+        emitChatMessage("assistant", decision.reason, { modelRole: "orchestrator" });
         // Yeni iş(ler)i KUYRUĞA ekle (BAŞLATMA — mevcut UI işi park'ta; kuyruk-drain onu bekler).
         // Mesaj salt onaysa intake boş döner (yeni iş yok) — sorun değil.
         try {
@@ -3903,7 +3959,7 @@ async function executeAgentDecision(
       // adımı sadece friction yaratıyor. Chat'e tek satır açıklama yazılır
       // ve direkt execute edilir. Phase 1 (develop_new_or_iter) zaten kendi
       // clarification askq'larını sorar.
-      emitChatMessage("assistant", decision.reason);
+      emitChatMessage("assistant", decision.reason, { modelRole: "orchestrator" });
       // Decision log (audit-like) — dedup şu an kapalı ama record persist.
       try {
         await appendAgentDecisionLog(runtime.state.project_root, {
@@ -3979,7 +4035,7 @@ async function executeAgentDecision(
         decision.message_to_user
           ? `${decision.reason}\n\n${decision.message_to_user}`
           : decision.reason;
-      emitChatMessage("assistant", chatMsg);
+      emitChatMessage("assistant", chatMsg, { modelRole: "orchestrator" });
       const askqId = `agent_decision_${randomUUID()}`;
       runtime.pendingAgentDecision = { askqId, decision, text };
       emitAskq({
@@ -4013,7 +4069,7 @@ async function executeAgentDecision(
         (proposal.change_description
           ? `\n🔧 **Değişiklik**: ${proposal.change_description}`
           : "");
-      emitChatMessage("assistant", summaryMsg);
+      emitChatMessage("assistant", summaryMsg, { modelRole: "orchestrator" });
       const askqId = `mem_propose_${randomUUID()}`;
       runtime.pendingMemoryProposal = {
         askqId,
@@ -4066,9 +4122,9 @@ async function executeAgentDecision(
         caller: "mycl-orchestrator",
         detail: `optional=[${optional.join(",")}] scope=[${newScope.join(",")}]`,
       });
-      emitChatMessage("assistant", decision.reason);
+      emitChatMessage("assistant", decision.reason, { modelRole: "orchestrator" });
       if (decision.message_to_user) {
-        emitChatMessage("assistant", decision.message_to_user);
+        emitChatMessage("assistant", decision.message_to_user, { modelRole: "orchestrator" });
       }
       return;
     }
@@ -4088,7 +4144,7 @@ async function executeAgentDecision(
         return;
       }
       if (decision.reason) {
-        emitChatMessage("assistant", decision.reason);
+        emitChatMessage("assistant", decision.reason, { modelRole: "orchestrator" });
       }
       log.info("orchestrator", "answer_askq forwarding", {
         askqId: active.id,
@@ -4105,7 +4161,7 @@ async function executeAgentDecision(
       const cfg = runtime.config;
       if (!st || !cfg) return;
       const feature = decision.target_feature ?? text;
-      if (decision.reason) emitChatMessage("assistant", decision.reason);
+      if (decision.reason) emitChatMessage("assistant", decision.reason, { modelRole: "orchestrator" });
       try {
         const res = await verifyFeatureHandler(feature, { state: st, config: cfg });
         if (res.statePatch) {

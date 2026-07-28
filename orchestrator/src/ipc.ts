@@ -69,6 +69,18 @@ function persistHistory(kind: string, data: { ts?: number; [k: string]: unknown 
   });
 }
 
+/** Sohbet rozeti için model rolü — hangi ajan konuştu (YZLLM 2026-07-28: "cevabı hangi AI modelin verdiğini yaz"). */
+export type ChatModelRole = "orchestrator" | "main" | "translator" | "inspector";
+
+// Rol → gerçek model id eşlemesi. Config'ten TÜREYEN tek kaynak: applyConfigDerivedSettings her config
+// yüklemesinde tazeler (kullanıcı modeli değiştirince rozet de değişir; bayat kalmaz). Kayıt yoksa rozet
+// BASILMAZ — yanlış model adı yazmaktansa hiç yazmamak doğru (uydurma atıf yok).
+let chatModelIds: Partial<Record<ChatModelRole, string>> = {};
+
+export function setChatModelIds(ids: Partial<Record<ChatModelRole, string>>): void {
+  chatModelIds = { ...ids };
+}
+
 export function emitChatMessage(
   role: "user" | "assistant" | "system" | "error",
   text: string,
@@ -77,10 +89,13 @@ export function emitChatMessage(
   // (teknik detay olduğu gibi gösterilir). detail yoksa payload'a eklenmez → mevcut mesajlar/UI aynen (geriye uyumlu).
   // YZLLM 2026-07-03: code_ref → "Kodu göster" salt-okunur popup'ının verisi (dosya + satır aralığı + snippet).
   // detail gibi opsiyonel + yalnız doluysa payload'a eklenir (geriye uyumlu). Şekil ön yüzle birebir (yapısal).
+  // YZLLM 2026-07-28: modelRole → bu cevabı hangi ajan/model üretti (UI rozet). YALNIZ gerçekten bir LLM'in
+  // ürettiği mesajlarda verilir; mekanik/sistem mesajlarında verilmez (rozet çıkmaz — doğru, model yok).
   opts?: {
     persist?: boolean;
     detail?: string;
     code_ref?: { file: string; startLine: number; endLine: number; snippet: string };
+    modelRole?: ChatModelRole;
   },
 ): void {
   // Kullanıcı talebi (2026-05-23): MyCL chat'te assistant cümleleri tek satıra.
@@ -90,12 +105,15 @@ export function emitChatMessage(
   const processed = role === "assistant" ? splitSentences(text) : text;
   const detail = opts?.detail && opts.detail.trim() ? opts.detail.trim() : undefined;
   const code_ref = opts?.code_ref;
+  // Rozet: rol verildiyse GERÇEK model id'sine çevir. Eşleme yoksa alan eklenmez (uydurma atıf yok).
+  const model = opts?.modelRole ? chatModelIds[opts.modelRole] : undefined;
   const payload = {
     role,
     text: processed,
     ts: Date.now(),
     ...(detail ? { detail } : {}),
     ...(code_ref ? { code_ref } : {}),
+    ...(model ? { model, model_role: opts?.modelRole } : {}),
   };
   emit("chat_message", payload);
   // `persist: false` → transient boot/welcome mesajları için. Her açılışta

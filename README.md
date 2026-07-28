@@ -177,6 +177,12 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   bırakılmaz: MyCL "aracı kur + doğrulamayı gerçekten koştur" işini kuyruğa
   kendisi ekler ve otomatik dener (boyut başına bir kez; MyCL'in kendi araç
   hatası proje işine dönüşmez).
+- **Engelin ağırlığını bilir** — her engel aynı değildir. Lint/stil bulgusu
+  netleşmezse akış görünür bir notla devam eder; ama işin **çalıştığını
+  kanıtlayan** kapılar (uygulama kodu, birim, entegrasyon, uçtan uca) kırmızıysa
+  MyCL "kabul edip devam" ETMEZ — önce gerçekten çözmeyi dener, çözemezse işi
+  kuyruğa yazıp durur ve sana söyler. Doğrulanmamış iş asla "tamamlandı"
+  damgalanmaz.
 - **Gerçek uygulama doğrulaması (bug fix'leri için)** — bir hata düzeltmesi
   "çözüldü" sayılmadan önce, gerçek çalışan uygulamada bildirilen sorunun
   GERÇEKTEN gittiği Playwright E2E ile doğrulanır (birim testi yeşili ≠ çalışan
@@ -474,6 +480,10 @@ görünür, denetim izine yazılır.
   yazılmaz, çalışan iterasyonu etkilemez. Panelde "Yenile" ile güncel sohbete
   göre yeniden üretilir. Döküm çok uzunsa en yeni kısım özetlenir ve bu, özetin
   başında belirtilir.
+- **Model rozeti.** Bir cevabı hangi modelin verdiği balonun üstünde küçük bir
+  rozette yazar (ör. "Opus 5"); üstüne gelince hangi rol olduğu da görünür
+  (orkestratör / ana ajan / çevirmen / müfettiş). Rozet yalnız gerçekten bir
+  modelin ürettiği cevaplarda çıkar — mekanik/sistem mesajlarında çıkmaz.
 
 ## Erişilebilirlik ve hafif oturumlar
 
