@@ -15,8 +15,10 @@
 //     bunu görmeli — hata GİZLENMEZ.
 
 import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { safeEnv } from "./safe-env.js";
+import { ensureGitignoreEntry } from "./gitignore-util.js";
 import { log } from "./logger.js";
 
 export class GitError extends Error {
@@ -88,6 +90,78 @@ export async function isGitRepo(projectRoot: string): Promise<boolean> {
   if (r.code === 0) return true;
   if (r.code === 128) return false;
   throw new GitError(`unexpected git exit ${r.code}: ${r.stderr.slice(0, 200)}`);
+}
+
+/** Baseline commit'lerin lokal kimliği — kullanıcının global git config'ine ASLA dokunulmaz.
+ *  gpgsign=false: global commit.gpgsign=true olan makinede imza sorup asılmasın (mahkeme bulgusu). */
+const MYCL_GIT_IDENTITY = [
+  "-c", "user.name=MyCL",
+  "-c", "user.email=mycl@local",
+  "-c", "commit.gpgsign=false",
+];
+
+export interface EnsureRepoResult {
+  /** "already" = zaten git'liydi; "initialized" = MyCL yerel depo başlattı; "failed" = başlatamadı (görünür neden). */
+  status: "already" | "initialized" | "failed";
+  reason?: string;
+}
+
+/**
+ * OE denetimi (YZLLM onayı 2026-07-29): git olmayan projede MyCL YEREL bir git deposu başlatır —
+ * uzak sunucuya bağlanmaz, kullanıcının global git config'ine dokunmaz. Amaç: checkpoint/rollback,
+ * Faz 9 tech-debt taraması ve değişen-dosya sinyallerinin git'siz projede de çalışması (canlı cave
+ * kanıtı: git yok → her iterasyon FULL güvenlik taraması → aynı 26 bulgu 42 kez yeniden bulundu).
+ * Zaten git'liyse (üst dizin deposu dahil) no-op. Fail-soft AMA yarım durum bırakmaz: init'ten sonra
+ * herhangi bir adım başarısızsa KENDİ oluşturduğu .git dizini geri silinir (HEAD'siz yarım repo,
+ * isGitRepo'ya bağlı yolları yanıltırdı — mahkeme bulgusu). Başaramazsa mevcut git'siz akış (backups)
+ * aynen sürer, neden GÖRÜNÜR döner.
+ */
+export async function ensureLocalGitRepo(projectRoot: string): Promise<EnsureRepoResult> {
+  try {
+    if (await isGitRepo(projectRoot)) return { status: "already" };
+  } catch (e) {
+    return { status: "failed", reason: `git durumu okunamadı: ${String(e).slice(0, 120)}` };
+  }
+  // init'ten sonraki her başarısızlıkta kendi açtığımız .git'i geri sil (yarım repo bırakma).
+  const failCleanup = async (reason: string): Promise<EnsureRepoResult> => {
+    await rm(join(projectRoot, ".git"), { recursive: true, force: true }).catch((e: unknown) =>
+      log.warn("git", "ensureLocalGitRepo cleanup failed", e),
+    );
+    return { status: "failed", reason };
+  };
+  try {
+    const init = await runGit(projectRoot, ["init"]);
+    if (init.code !== 0) {
+      return { status: "failed", reason: `git init exit ${init.code}: ${init.stderr.slice(0, 120)}` };
+    }
+    // Kritik ignore'lar — baseline commit'e sızmasınlar (idempotent; mevcut .gitignore korunur).
+    // Yazılamazsa (izin/disk) SESSİZ devam YOK: .env/node_modules commit'e sızardı → fail-closed (mahkeme bulgusu).
+    for (const entry of ["node_modules/", ".mycl/", "error_folder/", ".env", ".env.*", ".DS_Store"]) {
+      try {
+        await ensureGitignoreEntry(projectRoot, entry);
+      } catch (e) {
+        return failCleanup(`.gitignore yazılamadı (${entry}): ${String(e).slice(0, 100)}`);
+      }
+    }
+    const add = await runGit(projectRoot, ["add", "-A"]);
+    if (add.code !== 0) {
+      return failCleanup(`git add exit ${add.code}: ${add.stderr.slice(0, 120)}`);
+    }
+    const commit = await runGit(projectRoot, [
+      ...MYCL_GIT_IDENTITY,
+      "commit",
+      "--no-verify",
+      "-m",
+      "MyCL baseline (yerel depo - degisiklik takibi/checkpoint icin)",
+    ]);
+    // "nothing to commit" (boş dizin) de kabul — depo yine kuruldu.
+    if (commit.code !== 0 && !/nothing to commit/i.test(commit.stdout + commit.stderr)) {
+      return failCleanup(`baseline commit exit ${commit.code}: ${commit.stderr.slice(0, 120)}`);
+    }
+    return { status: "initialized" };
+  } catch (e) {
+    return failCleanup(String(e).slice(0, 160));
+  }
 }
 
 /**

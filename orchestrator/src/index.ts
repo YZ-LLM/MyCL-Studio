@@ -231,7 +231,7 @@ import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { runParallelModules } from "./module-parallel/dispatch.js";
 import { makeScopedCodegenWorker } from "./module-parallel/worker.js";
 import { candidatesToModules, judgeBatch, MAX_BATCH } from "./task-batch.js";
-import { isGitRepo, isWorkingTreeClean, getChangedFiles } from "./git.js";
+import { isGitRepo, isWorkingTreeClean, getChangedFiles, ensureLocalGitRepo } from "./git.js";
 import { realAppGateDecision, buildRealAppVerifyMarker, decideFullDevelopGate } from "./realapp-gate-signal.js";
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
@@ -2245,6 +2245,30 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
     void copySchemaDocToProject(path).catch((err: unknown) =>
       log.warn("orchestrator", "SCHEMA.md copy failed", err),
     );
+    // OE denetimi (YZLLM onayı 2026-07-29): git olmayan projede YEREL git deposu başlat — checkpoint/
+    // rollback, Faz 9 tech-debt taraması ve değişen-dosya sinyalleri git'siz projede de çalışsın (canlı
+    // cave kanıtı: git yok → her iterasyon FULL güvenlik taraması → aynı 26 bulgu 42 kez). AWAIT bilinçli
+    // (mahkeme bulgusu): arka planda bırakılırsa boot işi git init bitmeden git durumuna bakabilirdi.
+    // Fail-soft (başaramazsa mevcut git'siz akış sürer, neden görünür); uzak sunucu YOK, global config'e
+    // dokunulmaz. Zaten git'liyse sessiz no-op. Yabancı köken projeler BİLEREK dahil (mahkeme sorusu,
+    // karar): OE-3'ün kanıtı ve amacı tam da yabancı köken git'siz bir projeydi (cave) — mesaj görünür,
+    // .git tek klasör, kullanıcı isterse siler.
+    try {
+      const repoInit = await ensureLocalGitRepo(path);
+      if (repoInit.status === "initialized") {
+        emitChatMessage(
+          "system",
+          "📦 Bu proje git deposu değildi — değişiklik takibi, geri alma noktaları ve hedefli taramalar için MyCL yerel bir git deposu başlattı. Uzak sunucuya bağlanmaz; istersen `.git` klasörünü silebilirsin.",
+        );
+      } else if (repoInit.status === "failed") {
+        emitChatMessage(
+          "system",
+          `ℹ️ Proje git deposu değil ve MyCL yerel depo başlatamadı (${repoInit.reason ?? "bilinmeyen"}). Sorun değil — yedekler ~/.mycl/backups üzerinden sürer; yalnız taramalar tüm projeyi tarar.`,
+        );
+      }
+    } catch (err) {
+      log.warn("orchestrator", "ensureLocalGitRepo failed", err);
+    }
 
     // YZLLM 2026-06-16: iş-göstergesi (başlık) HER ZAMAN kullanıcının yazdığı KISA ORİJİNAL metin (kuyruk task.text) —
     // türetilmiş uzun intent_summary_raw / fix-dispatch prompt'u DEĞİL ("işi başlığa yazmıştık, şimdi görünmüyor").

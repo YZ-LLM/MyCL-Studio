@@ -92,6 +92,11 @@ gördüğü — var olan bir projeyi MyCL'e taşır:
   dil/framework ve README + git geçmişinden "neden" türetilir (ağır graph DB yok).
 - **MyCL dosyaları yalnız `.mycl/` altına kurulur:** `state.json`, `project-map.json`,
   yaşayan dökümantasyon (`features.md` / `tech-doc.md`) ve `onboarding-report.md`.
+- **Git deposu yoksa yerel depo başlatılır (tek istisna):** değişiklik takibi, geri alma
+  noktaları ve hedefli taramalar çalışsın diye MyCL açılışta yerel bir git deposu kurar
+  (`git init` + temel `.gitignore` girişleri + başlangıç commit'i) ve bunu görünür şekilde
+  bildirir. Uzak sunucuya bağlanmaz, global git ayarlarına dokunmaz; istemezsen `.git`
+  klasörünü silebilirsin.
 - **Eksikler iş-listesine OTOMATİK eklenir + sırayla yapılır:** test / responsive /
   güvenlik / parmak-izi gibi kaynak-değiştiren MyCL standartları GAP-raporu olur, her biri
   iş-listesine eklenip **onay beklemeden** normal gate'li iterasyonda sırayla işlenir.
