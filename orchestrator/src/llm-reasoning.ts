@@ -7,10 +7,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { runClaudeCli } from "./cli-run.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { getPersistentSession, shortHash } from "./persistent-cli-session.js";
 import { resolveLlmClient, modelSupportsAdaptive } from "./claude-api.js";
 import { backendForRole, type MyclConfig } from "./config.js";
-import { log } from "./logger.js";
 
 export interface ReasoningResult {
   ok: boolean;
@@ -37,24 +35,10 @@ export async function runReasoning(
 ): Promise<ReasoningResult> {
   const backend = backendForRole(config, "main");
   if (backend === "cli") {
-    // YZLLM 2026-06-11: KALICI oturum (read-only reasoning — verify-up/audit/vb.). Süreç-tipi (systemPrompt+model)
-    // başına tek canlı süreç → respawn yok → ısı↓; biriken bağlam tutarlılık. Başarısızsa cold-start'a düş.
-    try {
-      // Oturum systemPrompt'a göre anahtarlanır (model DEĞİL) → model/efor oturum-İÇİNDE değişir (respawn yok).
-      const session = getPersistentSession({
-        id: `reasoning-${shortHash(opts.systemPrompt)}`,
-        modelId: opts.modelId,
-        systemPrompt: opts.systemPrompt,
-        effort: opts.effort,
-        cwd: opts.projectRoot,
-        disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf reasoning: yazma + Bash + alt-ajan yasak
-      });
-      const r = await session.send(opts.userMessage, { model: opts.modelId, effort: opts.effort, timeoutMs: 180_000 });
-      if (r.ok && r.text.trim()) return { ok: true, text: r.text };
-      log.warn("llm-reasoning", "kalıcı oturum başarısız → cold-start", { error: r.error });
-    } catch (e) {
-      log.warn("llm-reasoning", "kalıcı oturum hata → cold-start", { error: String(e) });
-    }
+    // KALICI OTURUM KALDIRILDI (OE denetimi 2026-07-29, canlı cave kanıtı): reasoning çağrıları seyrek →
+    // oturum 20 dk idle-kill'e hep yakalanıyordu; 36 "kalıcı oturum başarısız → cold-start" + 27 turn-timeout =
+    // her çağrı önce ölü oturumu deneyip timeout bekliyor, SONRA cold-start yapıyordu (çift maliyet, net negatif).
+    // Doğrudan cold-start: aynı prompt/araç-politikası, tek deneme.
     const res = await runClaudeCli({
       systemPrompt: opts.systemPrompt,
       userMessage: opts.userMessage,

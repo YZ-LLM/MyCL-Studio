@@ -174,8 +174,8 @@ export interface TokenUsage {
 }
 
 /**
- * PARİTE (mahkeme denetimi 2026-07-11): bu blok cli-run/cli-session/codegen-cli-backend/persistent-cli-session'da
- * BİREBİR kopyaydı (4×) → tek saf helper. Nesne değilse undefined (çağıran no-op — davranış birebir korunur).
+ * PARİTE (mahkeme denetimi 2026-07-11): bu blok cli-run/cli-session/codegen-cli-backend'de (ve o zamanki
+ * kalıcı oturumda) BİREBİR kopyaydı → tek saf helper. Nesne değilse undefined (çağıran no-op — davranış korunur).
  */
 export function extractTokenUsage(raw: unknown): TokenUsage | undefined {
   if (!raw || typeof raw !== "object") return undefined;

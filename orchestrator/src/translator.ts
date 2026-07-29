@@ -18,7 +18,6 @@ import { backendForRole, isAutoMode } from "./config.js";
 import { API_LABEL, CLI_LABEL } from "./cli-rate-limit.js";
 import { runClaudeCli } from "./cli-run.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { getPersistentSession } from "./persistent-cli-session.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
 import { emitChatMessage, emitError, emitTranslation } from "./ipc.js";
 import { loadCommunicationGuide } from "./communication-guide.js";
@@ -227,27 +226,12 @@ async function callCli(
 ): Promise<string> {
   const userMessage = `<text_to_translate>\n${text}\n</text_to_translate>`;
   const to = Math.max(timeoutMs, 60_000);
-  // YZLLM 2026-06-27: müfettiş.md → Türkçe çıktının biçim disiplini. NOT: KALICI oturum systemPrompt'u İLK spawn'da
-  // sabitler (sonraki çağrılar yeni guide'ı yok sayar — getPersistentSession mevcut oturumu döndürür). müfettiş.md
-  // nadiren değişen statik rehber + 20dk idle sonrası oturum kapanıp taze guide ile yeniden açılır → düşük risk
-  // (bilinçli tradeoff). API yolu (callApi) her çağrıda taze okur. Anlık tazelik şartsa oturum dispose edilmeli.
+  // YZLLM 2026-06-27: müfettiş.md → Türkçe çıktının biçim disiplini (her çağrıda taze okunur).
   const guide = await loadCommunicationGuide();
-  // YZLLM 2026-06-11: KALICI oturum (rol+yön başına tek süreç, respawn yok → ısı↓; biriken bağlam tutarlı çeviri).
-  // Doğrulandı: katı promptla turlar boyunca sağlam çevirir. BAŞARISIZSA eski cold-start'a düş (fail-safe, regresyon yok).
-  try {
-    const session = getPersistentSession({
-      id: `translator-${dir}`,
-      modelId: model,
-      systemPrompt: buildSystemPrompt(dir, guide),
-      cwd: process.cwd(),
-      disallowedTools: PURE_REASONING_DISALLOWED_TOOLS, // saf çeviri — araç + alt-ajan yok
-    });
-    const r = await session.send(userMessage, { timeoutMs: to });
-    if (r.ok && r.text.trim()) return stripTranslateTags(r.text);
-    log.warn("translator", "kalıcı oturum başarısız → cold-start fallback", { dir, error: r.error });
-  } catch (e) {
-    log.warn("translator", "kalıcı oturum hata → cold-start fallback", { dir, error: String(e) });
-  }
+  // KALICI OTURUM KALDIRILDI (OE denetimi 2026-07-29, canlı cave kanıtı): çeviri çağrıları seyrek → oturum
+  // 20 dk idle-kill'e hep yakalanıyordu; 276 "kalıcı oturum başarısız → cold-start" + 126 timeout/oturum-yenileme
+  // = her çağrı önce ölü oturumu deneyip timeout bekliyor, SONRA cold-start yapıyordu (çift maliyet, net negatif).
+  // Doğrudan cold-start: aynı prompt/parite, tek deneme; guide da her çağrıda taze (eski bilinçli-bayatlık kalktı).
   const res = await runClaudeCli({
     systemPrompt: buildSystemPrompt(dir, guide),
     userMessage,
