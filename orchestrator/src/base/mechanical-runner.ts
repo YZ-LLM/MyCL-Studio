@@ -94,6 +94,26 @@ export function isToolInstallableSkip(reason: string | undefined | null): boolea
   return first === "missing_command" || first === "stub_script";
 }
 
+// OE denetimi (YZLLM onayı 2026-07-29): DEĞİŞMEYEN skip mesajları chat'e aynı neden sürdükçe BİR kez
+// yazılır (canlı cave kanıtı: "Faz 12 atlandı — komut tanımlı değil" 40 iterasyon boyunca her tur aynı
+// mesaj). Yalnız chat tekrarı kesilir — audit event'i HER iterasyon yazılmaya devam eder ve doğrulama
+// özeti atlanan boyutları her tur listeler (KATI #4 görünürlük kaybolmaz). Gate GERÇEKTEN koştuğunda
+// kayıt silinir → araç sonradan kaldırılır/bozulursa skip YENİDEN duyurulur; neden değişirse de duyurulur.
+// Bellek içi (süreç yeniden başlarsa bir kez daha söylenir — kasıtlı, kalıcı dosya durumu gerekmez).
+const announcedSkips = new Map<string, string>(); // key(proje|faz|kapsam) → son duyurulan skip nedeni
+
+/** SAF karar: bu skip chat'e duyurulmalı mı? İlk görüş / neden değişimi → true (ve kaydedilir). */
+export function shouldAnnounceSkip(key: string, reason: string): boolean {
+  if (announcedSkips.get(key) === reason) return false;
+  announcedSkips.set(key, reason);
+  return true;
+}
+
+/** Gate gerçekten koştu (pass/fail) → skip kaydını sil ki sonraki skip yeniden duyurulsun. */
+export function clearAnnouncedSkip(key: string): void {
+  announcedSkips.delete(key);
+}
+
 const DEFAULT_TIMEOUT = 120_000;
 
 /**
@@ -346,6 +366,8 @@ export class MechanicalRunnerBase {
     timeout_ms: number,
   ): Promise<"pass" | "fail" | "skipped"> {
     const { opts } = this;
+    // OE denetimi: aynı skip nedeni sürdükçe chat mesajı bir kez (audit her zaman yazılır).
+    const skipKey = `${opts.state.project_root}|${opts.phaseId}|extra:${extra.name}`;
 
     // require_file: project_root içinde dosya yoksa skip (örn. snyk için
     // ".snyk", k6 için "loadtest.js").
@@ -380,10 +402,11 @@ export class MechanicalRunnerBase {
           caller: "mycl-orchestrator",
           detail: `missing_file file="${extra.require_file}"`,
         });
-        emitChatMessage(
-          "system",
-          `⏭ ${extra.name} atlandı — gerekli dosya yok (${extra.require_file}).`,
-        );
+        if (shouldAnnounceSkip(skipKey, "missing_file"))
+          emitChatMessage(
+            "system",
+            `⏭ ${extra.name} atlandı — gerekli dosya yok (${extra.require_file}).`,
+          );
         return "skipped";
       }
     }
@@ -412,10 +435,11 @@ export class MechanicalRunnerBase {
         caller: "mycl-orchestrator",
         detail: `missing_command cmd="${extra.cmd}"`,
       });
-      emitChatMessage(
-        "system",
-        `⏭ ${extra.name} atlandı — bu araç sistemde kurulu değil.`,
-      );
+      if (shouldAnnounceSkip(skipKey, "missing_command"))
+        emitChatMessage(
+          "system",
+          `⏭ ${extra.name} atlandı — bu araç sistemde kurulu değil.`,
+        );
       return "skipped";
     }
 
@@ -429,10 +453,11 @@ export class MechanicalRunnerBase {
         caller: "mycl-orchestrator",
         detail: `mycl_tool_broken code=${result.code} cmd="${extra.cmd}"`,
       });
-      emitChatMessage(
-        "system",
-        `⏭ ${extra.name} atlandı — MyCL'in kendi tarama aracı çalışmadı (paketleme bug'ım, proje sorunu DEĞİL; güvenlik açığı anlamına GELMEZ). Bunu kendi tarafımda düzelteceğim.`,
-      );
+      if (shouldAnnounceSkip(skipKey, "mycl_tool_broken"))
+        emitChatMessage(
+          "system",
+          `⏭ ${extra.name} atlandı — MyCL'in kendi tarama aracı çalışmadı (paketleme bug'ım, proje sorunu DEĞİL; güvenlik açığı anlamına GELMEZ). Bunu kendi tarafımda düzelteceğim.`,
+        );
       return "skipped";
     }
     // TS-only araç JS projesinde (tsconfig yok) → uygulanamaz → skip (tsconfig oluştur saçmalığı yok).
@@ -444,10 +469,11 @@ export class MechanicalRunnerBase {
         caller: "mycl-orchestrator",
         detail: `ts_tool_not_applicable code=${result.code} cmd="${extra.cmd}"`,
       });
-      emitChatMessage(
-        "system",
-        `⏭ ${extra.name} atlandı — bu TypeScript aracı JS projesine (tsconfig yok) uygulanamaz. Bu bir proje hatası DEĞİL; tsconfig oluşturmuyorum.`,
-      );
+      if (shouldAnnounceSkip(skipKey, "ts_tool_not_applicable"))
+        emitChatMessage(
+          "system",
+          `⏭ ${extra.name} atlandı — bu TypeScript aracı JS projesine (tsconfig yok) uygulanamaz. Bu bir proje hatası DEĞİL; tsconfig oluşturmuyorum.`,
+        );
       return "skipped";
     }
 
@@ -463,12 +489,16 @@ export class MechanicalRunnerBase {
         caller: "mycl-orchestrator",
         detail: `tool_error code=${result.code} cmd="${extra.cmd}"`,
       });
-      emitChatMessage(
-        "system",
-        `⏭ ${extra.name} atlandı — araç düzgün çalışmadı (çıkış kodu ${result.code}; bulgu değil, araç/sürüm sorunu).`,
-      );
+      if (shouldAnnounceSkip(skipKey, "tool_error"))
+        emitChatMessage(
+          "system",
+          `⏭ ${extra.name} atlandı — araç düzgün çalışmadı (çıkış kodu ${result.code}; bulgu değil, araç/sürüm sorunu).`,
+        );
       return "skipped";
     }
+
+    // Tarama GERÇEKTEN koştu (pass/fail) → skip kaydını sil; sonraki skip yeniden duyurulur.
+    clearAnnouncedSkip(skipKey);
 
     if (result.code === 0) {
       await appendAudit(opts.state.project_root, {
@@ -508,6 +538,8 @@ export class MechanicalRunnerBase {
    */
   private async runMainScan(timeout: number): Promise<MechanicalOutcome> {
     const { opts } = this;
+    // OE denetimi: aynı skip nedeni sürdükçe chat mesajı bir kez (audit her zaman yazılır).
+    const skipKey = `${opts.state.project_root}|${opts.phaseId}|main`;
     // v15.0 Batch A: scan_cmd ve fix_cmd artık literal string olabilir veya
     // profile_key/project_type resolver spec'i. Resolve sonucu null ise (profile
     // yok, key tanımsız) → phase-N-skipped (subprocess spawn denemesi yok).
@@ -539,7 +571,8 @@ export class MechanicalRunnerBase {
         caller: "mycl-orchestrator",
         detail: auditDetail,
       });
-      emitChatMessage("system", userMsg);
+      if (shouldAnnounceSkip(skipKey, stackDetected ? "profile_resolve_null" : "stack_not_detected"))
+        emitChatMessage("system", userMsg);
       return { kind: "skipped", reason: "profile_resolve_null" };
     }
     // 2026-06-11 (YZLLM "1 saniyede geçti — normal mi?"): echo-stub script (gerçek kontrol değil) → bu boyut
@@ -552,10 +585,11 @@ export class MechanicalRunnerBase {
         caller: "mycl-orchestrator",
         detail: `stub_script cmd="${scanCmd}"`,
       });
-      emitChatMessage(
-        "system",
-        `⚠️ ${this.label} atlandı — script gerçek bir kontrol içermiyor (echo-stub: "${scanCmd.slice(0, 80)}"). Bu boyut DOĞRULANMADI; gerçek bir kontrol komutu ekleyin.`,
-      );
+      if (shouldAnnounceSkip(skipKey, "stub_script"))
+        emitChatMessage(
+          "system",
+          `⚠️ ${this.label} atlandı — script gerçek bir kontrol içermiyor (echo-stub: "${scanCmd.slice(0, 80)}"). Bu boyut DOĞRULANMADI; gerçek bir kontrol komutu ekleyin.`,
+        );
       return { kind: "skipped", reason: "stub_script" };
     }
     // TS-only araç (ts-prune/tsc) + JS projesi (tsconfig kalıntısı olsa bile .ts kaynağı yok) → koşmak anlamsız
@@ -570,10 +604,11 @@ export class MechanicalRunnerBase {
           caller: "mycl-orchestrator",
           detail: `ts_tool_js_project cmd="${scanCmd}"`,
         });
-        emitChatMessage(
-          "system",
-          `⏭ ${this.label} atlandı — TypeScript aracı ama proje JavaScript (kaynakta .ts yok${facts.hasTsconfig ? "; tsconfig.json kalıntı görünüyor" : ""}). Boş tarama "geçti" sayılmaz.`,
-        );
+        if (shouldAnnounceSkip(skipKey, "ts_tool_js_project"))
+          emitChatMessage(
+            "system",
+            `⏭ ${this.label} atlandı — TypeScript aracı ama proje JavaScript (kaynakta .ts yok${facts.hasTsconfig ? "; tsconfig.json kalıntı görünüyor" : ""}). Boş tarama "geçti" sayılmaz.`,
+          );
         return { kind: "skipped", reason: "ts_tool_js_project" };
       }
     }
@@ -634,10 +669,11 @@ export class MechanicalRunnerBase {
           caller: "mycl-orchestrator",
           detail: `missing_command cmd="${scanCmd}"`,
         });
-        emitChatMessage(
-          "system",
-          `⏭ ${this.label} atlandı — bu proje için ilgili komut tanımlı değil.`,
-        );
+        if (shouldAnnounceSkip(skipKey, "missing_command"))
+          emitChatMessage(
+            "system",
+            `⏭ ${this.label} atlandı — bu proje için ilgili komut tanımlı değil.`,
+          );
         return { kind: "skipped", reason: "missing_command" };
       }
       // MyCL'in kendi aracı bozuk (bundle module-not-found) → proje hatası DEĞİL → skip.
@@ -650,10 +686,11 @@ export class MechanicalRunnerBase {
           caller: "mycl-orchestrator",
           detail: `mycl_tool_broken cmd="${scanCmd}"`,
         });
-        emitChatMessage(
-          "system",
-          `⏭ ${this.label} atlandı — MyCL'in kendi aracı çalışmadı (paketleme bug'ım, proje sorunu DEĞİL).`,
-        );
+        if (shouldAnnounceSkip(skipKey, "mycl_tool_broken"))
+          emitChatMessage(
+            "system",
+            `⏭ ${this.label} atlandı — MyCL'in kendi aracı çalışmadı (paketleme bug'ım, proje sorunu DEĞİL).`,
+          );
         return { kind: "skipped", reason: "mycl_tool_broken" };
       }
       // TS-only araç (ts-prune/ts-morph/tsc) JS projesinde (tsconfig yok) → uygulanamaz → skip.
@@ -667,12 +704,15 @@ export class MechanicalRunnerBase {
           caller: "mycl-orchestrator",
           detail: `ts_tool_not_applicable cmd="${scanCmd}"`,
         });
-        emitChatMessage(
-          "system",
-          `⏭ ${this.label} atlandı — bu TypeScript aracı JS projesine (tsconfig yok) uygulanamaz. Proje hatası DEĞİL; tsconfig oluşturmuyorum.`,
-        );
+        if (shouldAnnounceSkip(skipKey, "ts_tool_not_applicable"))
+          emitChatMessage(
+            "system",
+            `⏭ ${this.label} atlandı — bu TypeScript aracı JS projesine (tsconfig yok) uygulanamaz. Proje hatası DEĞİL; tsconfig oluşturmuyorum.`,
+          );
         return { kind: "skipped", reason: "ts_tool_not_applicable" };
       }
+      // Tarama GERÇEKTEN koştu (skip sınıfına girmedi) → skip kaydını sil; sonraki skip yeniden duyurulur.
+      clearAnnouncedSkip(skipKey);
       // Ortam/spawn faultu VEYA timeout (süreç bile başlatılamadı / asıldı) → testler KOŞMADI. Bunu "fail"
       // (kod hatası) sanıp fix_cmd retry + orkestratör codegen döngüsüne sokmak YANLIŞ (adminpanel 21-iter kökü).
       // GÖRÜNÜR fail + [ENV]-imzalı stderr döndür (retry YOK) → failPhase'in isEnvironmentError gate'i durdurur.

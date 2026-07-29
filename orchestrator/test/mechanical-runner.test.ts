@@ -11,6 +11,8 @@ import {
   shellQuote,
   isNotApplicableSkip,
   isToolInstallableSkip,
+  shouldAnnounceSkip,
+  clearAnnouncedSkip,
 } from "../src/base/mechanical-runner.js";
 import { _clearProfileCache } from "../src/profile-loader.js";
 import type { State } from "../src/types.js";
@@ -629,5 +631,33 @@ describe("isToolInstallableSkip (araç kurulumuyla oto-çözülebilir skip)", ()
     expect(isToolInstallableSkip("ts_tool_js_project")).toBe(false); // N/A sınıfı
     expect(isToolInstallableSkip(undefined)).toBe(false);
     expect(isToolInstallableSkip("")).toBe(false);
+  });
+});
+
+// OE denetimi 2026-07-29 (canlı cave kanıtı: "Faz 12 atlandı" 40 iterasyon aynı mesaj): değişmeyen
+// skip mesajı aynı neden sürdükçe BİR kez chat'e yazılır; gate gerçekten koşunca kayıt sıfırlanır.
+describe("shouldAnnounceSkip / clearAnnouncedSkip (skip mesajı tekrar kesme)", () => {
+  it("ilk görüş → true; aynı neden tekrar → false (mesaj bir kez)", () => {
+    const key = "/p1|12|main";
+    expect(shouldAnnounceSkip(key, "missing_command")).toBe(true);
+    expect(shouldAnnounceSkip(key, "missing_command")).toBe(false);
+    expect(shouldAnnounceSkip(key, "missing_command")).toBe(false);
+  });
+  it("neden değişirse yeniden duyurulur", () => {
+    const key = "/p2|13|extra:gitleaks";
+    expect(shouldAnnounceSkip(key, "missing_command")).toBe(true);
+    expect(shouldAnnounceSkip(key, "tool_error")).toBe(true); // araç kuruldu ama bozuk çıktı — farklı durum
+  });
+  it("gate gerçekten koşunca (clear) sonraki skip yeniden duyurulur — araç sonradan bozulma senaryosu", () => {
+    const key = "/p3|10|main";
+    expect(shouldAnnounceSkip(key, "missing_command")).toBe(true);
+    clearAnnouncedSkip(key); // araç kuruldu, tarama koştu
+    expect(shouldAnnounceSkip(key, "missing_command")).toBe(true); // araç kaldırıldı → tekrar görünür
+  });
+  it("farklı proje/faz/kapsam anahtarları bağımsız", () => {
+    expect(shouldAnnounceSkip("/pA|12|main", "missing_command")).toBe(true);
+    expect(shouldAnnounceSkip("/pB|12|main", "missing_command")).toBe(true);
+    expect(shouldAnnounceSkip("/pA|14|main", "missing_command")).toBe(true);
+    expect(shouldAnnounceSkip("/pA|12|extra:semgrep", "missing_command")).toBe(true);
   });
 });
