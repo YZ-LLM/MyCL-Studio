@@ -25,6 +25,7 @@ import { executeTool, TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { modelForTier } from "./model-catalog.js";
 import { decideIntervention, type InterventionSignals, type InterventionDecision } from "./inspector-trigger.js";
+import { isLlmOutageWaiting } from "./llm-outage.js";
 import { recordLesson, recallLessons, retractLesson, type Lesson } from "./experience-layer.js";
 import { distillAndStoreGlobalLesson } from "./lesson-distill.js";
 import { emitChatMessage, emitPhaseRunning, emitPhaseIdle } from "./ipc.js";
@@ -493,11 +494,32 @@ async function withMahkemeBanner<T>(label: string, fn: () => Promise<T>): Promis
   }
 }
 
+/** BİLİNEN LLM KESİNTİSİ guard'ı (OE denetimi 2026-07-29, canlı cave kanıtı: 157 escalate'in 116'sı
+ *  "müfettiş değerlendirmesi üretilemedi" — kredi yok / abonelik limiti). İki kanal da kapalıyken
+ *  (bekle-ve-devam aktif) mahkemeyi KURMAK anlamsız: 5'e kadar deneme + timeout yakılıp yine escalate
+ *  dönülüyordu. Bilinen kesintide hiç kurmadan aynı fail-closed sonucu dön (davranış aynı: escalate →
+ *  insana; yalnız boşa yakım ve sahte "mahkeme koşuyor" banner'ı yok). YALNIZ isLlmOutageWaiting —
+ *  cliCurrentlyLimited tek başına yeterli DEĞİL (API kanalı çalışıyor olabilir; mahkeme gereksiz atlanmasın). */
+function knownOutageResult(): CheckpointResult | null {
+  if (!isLlmOutageWaiting()) return null;
+  log.info("inspector", "bilinen LLM kesintisi (bekle-ve-devam aktif) — mahkeme kurulmadı, hızlı escalate");
+  return {
+    acted: true,
+    decision: { level: "flag", reason: "bilinen LLM kesintisi — mahkeme kurulamaz" },
+    outcome: {
+      stance: "escalate",
+      reason: "Bilinen LLM kesintisi (iki kanal da kapalı, bekleme aktif) — mahkeme kurulmadı, deneme yakılmadı → güvenli taraf: insana.",
+    },
+  };
+}
+
 /** Gate bulgu mahkemesi — sticky banner ile (görünürlük); çekirdek inspectGateFindingInner. */
 export function inspectGateFinding(
   config: MyclConfig,
   opts: Parameters<typeof inspectGateFindingInner>[1],
 ): Promise<CheckpointResult> {
+  const outage = knownOutageResult();
+  if (outage) return Promise.resolve(outage);
   // MAHKEME LOW (2026-07-21): label gateLabel ("Faz N: …") İÇERMEZ — ActivityBar zaten faz-prefiksi ekliyor,
   // yoksa "Faz 13 · Güvenlik — ⚖️ Mahkeme: Faz 13: Güvenlik…" çift-Faz olurdu. Faz bağlamı prefiksten gelir.
   return withMahkemeBanner("⚖️ Mahkeme: bulgu bağımsız doğrulanıyor (gerçek mi false-positive mi)…", () =>
@@ -510,6 +532,10 @@ export function inspectClarify(
   config: MyclConfig,
   opts: Parameters<typeof inspectClarifyInner>[1],
 ): Promise<ClarifyRuling> {
+  if (isLlmOutageWaiting()) {
+    log.info("inspector", "bilinen LLM kesintisi — netleştirme mahkemesi kurulmadı (soru olduğu gibi geçer)");
+    return Promise.resolve({ ask: true, summary: "Bilinen LLM kesintisi — mahkeme kurulmadı; soru olduğu gibi soruluyor." });
+  }
   return withMahkemeBanner("⚖️ Mahkeme: soru gerçekten gerekli mi, doğrulanıyor…", () =>
     inspectClarifyInner(config, opts),
   );
