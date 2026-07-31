@@ -13,6 +13,7 @@ import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { buildProjectFacts } from "./project-facts.js";
 import { snapshotBeforeAutofix } from "./fix-snapshot.js";
+import { appendAudit } from "./audit.js";
 import type { MyclConfig } from "./config.js";
 import type { PhaseId, State } from "./types.js";
 
@@ -83,6 +84,23 @@ export async function runGateAutofix(
       maxTurns: 50,
       budgetNudge:
         "⚠ TURN BUDGET: Wrap up now — apply the minimal fix for the reported errors and stop; do not refactor or explore new directions.",
+      // YAZMA İZİ (mahkeme bulgusu 2026-07-30): bu yol gözlemci bağlamadığı için ajanın yaptığı düzenlemeler
+      // audit'e HİÇ düşmüyordu → "bu iterasyonda iş yapıldı mı?" sorusuna kanıt üretmiyordu (Faz 8'in
+      // observeTool deseniyle asimetri). Artık her başarılı Edit `code-edit` olayı yazar — tamamlanma kanıtı
+      // özel durumlara değil, gerçek yazma izine dayansın (kaynağında çözüm).
+      observer: async (ctx) => {
+        if (ctx.result.is_error) return;
+        if (ctx.tool_use.name !== "Edit" && ctx.tool_use.name !== "MultiEdit") return;
+        const path = String(ctx.tool_use.input.file_path ?? ctx.tool_use.input.path ?? "");
+        if (!path) return;
+        await appendAudit(state.project_root, {
+          ts: Date.now(),
+          phase: phaseId,
+          event: "code-edit",
+          caller: "mycl-orchestrator",
+          detail: path,
+        }).catch((e) => log.warn("gate-autofix", "code-edit audit yazılamadı", e));
+      },
     });
     const outcome = await backend.run();
     log.info("gate-autofix", "focused fix done", { phaseId, kind: outcome.kind });
