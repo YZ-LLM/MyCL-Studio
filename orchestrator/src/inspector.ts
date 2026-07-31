@@ -527,6 +527,10 @@ function knownOutageResult(): CheckpointResult | null {
     outcome: {
       stance: "escalate",
       reason: "Bilinen LLM kesintisi (iki kanal da kapalı, bekleme aktif) — mahkeme kurulmadı, deneme yakılmadı → güvenli taraf: insana.",
+      // MAHKEME DÜZELTMESİ (2026-07-30): bu da SAĞLAYICI erişilemezliğidir (denetim hiç yapılmadı) —
+      // bayrak konmazsa en sık karşılaşılan durumda (kesinti zaten aktif) yeni "kabul-devam yok" koruması
+      // hiç tetiklenmez ve eski davranış sessizce sürerdi.
+      providerUnavailable: true,
     },
   };
 }

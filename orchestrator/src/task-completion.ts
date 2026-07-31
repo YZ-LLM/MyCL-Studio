@@ -64,6 +64,20 @@ const NO_CHANGE_NEEDED_EVENTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * MAHKEME DÜZELTMESİ (2026-07-30): iki meşru iş `phase-N-complete` olayını DETAY ile ayırt ediyor —
+ * olay adı genel olduğu için (her fazda yazılır) yalnız bu detaylar kanıt sayılır:
+ *  - `mahkeme_false_positive_suppressed`: gate döngüsündeki mahkeme bulguyu kanıtla false-positive ilan etti
+ *    (çalışan koda dokunulmadı — meşru "değişiklik gerekmedi").
+ *  - `gate_autofix_resolved`: gate kendi içinde oto-düzeltildi. Bu yolda codegen gözlemcisi bağlı olmadığı
+ *    için dosya yazma olayı audit'e düşmüyor; kanıt bu olaydır (yoksa düzeltilmiş güvenlik işi
+ *    "kanıtsız" sayılıp kuyruğa geri dönerdi).
+ */
+const COMPLETE_DETAIL_EVIDENCE: ReadonlySet<string> = new Set([
+  "mahkeme_false_positive_suppressed",
+  "gate_autofix_resolved",
+]);
+
+/**
  * BİLEREK kanıt sayılmayan olaylar: bunlar HER pipeline sonunda koşar (yaşayan dökümantasyon tazeleme,
  * kılavuz ekran görüntüleri, spec yenileme). Kanıt sayılsalardı düzeltme tamamen etkisiz olurdu —
  * hiçbir iş yapılmayan bir koşu bile "dosya yazıldı" görünürdü.
@@ -114,6 +128,10 @@ export function decideTaskCompletion(inp: CompletionInput): CompletionDecision {
     // Gerçek uygulama kapısı bu işe UYGULANAMADI (nötr) → ayrı bir eksiklik değil.
     if (ev === "realapp-verify-skipped" && String(e.detail ?? "").startsWith("not_applicable")) {
       return { verdict: "done", evidence: { kind: "no-change-needed", signal: `${ev}:not_applicable` } };
+    }
+    // Faz tamamlanma olayının DETAYI kanıt taşıyor mu (mahkeme false-positive / gate oto-düzeltmesi)?
+    if (ev.startsWith("phase-") && ev.endsWith("-complete") && COMPLETE_DETAIL_EVIDENCE.has(String(e.detail ?? ""))) {
+      return { verdict: "done", evidence: { kind: "no-change-needed", signal: `${ev}:${e.detail}` } };
     }
   }
   // R4 — hiçbir kanıt yok: iterasyon boşa döndü. "Tamamlandı" demek yalan olur.

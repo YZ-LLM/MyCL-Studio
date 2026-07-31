@@ -88,9 +88,11 @@ async function gatherEvidence(state: State): Promise<string> {
   const rows = audit
     .slice(-160) // son iterasyon + biraz öncesi (bağlam)
     .map((e) => `[p${e.phase ?? "?"}] ${e.event}: ${String(e.detail ?? "").slice(0, 160)}`);
-  // NOT (OE denetimi 2026-07-29): eskiden buraya kalıcı oturum transkripti de ekleniyordu; kalıcı
-  // CLI oturumu kaldırıldı (net negatifti) → o kaynak artık üretilmiyor, bölüm de kaldırıldı.
-  // Arka plan çağrılarının kanıtı audit event'lerinde zaten görünür.
+  // NOT (OE denetimi 2026-07-29 + mahkeme düzeltmesi 2026-07-30): eskiden buraya kalıcı oturum
+  // transkripti de ekleniyordu (çevirmen/reasoning turlarının "ne düşündüğü"). Kalıcı CLI oturumu
+  // kaldırıldı (net negatifti) → o kaynak artık ÜRETİLMİYOR ve YERİNE KONMADI: denetim ajanı bu iki
+  // rolün iç muhakemesini artık göremiyor. DÜRÜST SINIR — "audit'te zaten var" DEĞİL; çevirmen ve
+  // reasoning proje audit'ine yazmaz. Denetim kanıtı bu koşuda yalnız faz/gate olaylarıdır.
   return rows.join("\n").slice(0, 12000);
 }
 

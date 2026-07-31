@@ -894,7 +894,9 @@ async function emitVerificationSummary(state: State): Promise<void> {
             "verify-gap",
             { kind: "verify-gap", subject: String(gap.n), includeDone: true },
           );
-          if (dec?.action === "create") queuedDims.push(gap.dim);
+          // Mahkeme düzeltmesi: zaten kuyrukta olan (refresh) boyut da "otomatik işleniyor" sayılır —
+          // aksi halde özet "elle ekle" diyordu ama iş zaten kuyrukta işleniyordu.
+          if (dec?.action === "create" || dec?.action === "refresh") queuedDims.push(gap.dim);
         }
       } catch (e) {
         // İş açma başarısız → görünür (sessiz fallback yok); özetin kendisi yine basılır.
@@ -5038,7 +5040,13 @@ async function startNextPendingTask(): Promise<boolean> {
     _drainActive = false; // bekleyen iş kalmadı → oturum bitti
     return false;
   }
-  await patchTask(root, next.id, { status: "running", started_at: Date.now() }); // started_at → süre görünürlüğü (YZLLM 2026-07-13)
+  // Mahkeme düzeltmesi (2026-07-30): resume bilgisi TÜKETİLİR — iş başladıktan sonra kalırsa, ileride
+  // başka bir nedenle kuyruğa dönen aynı iş bayat fazdan sürmeye çalışırdı. 0 = "resume yok" (decide >1 ister).
+  await patchTask(root, next.id, {
+    status: "running",
+    started_at: Date.now(), // süre görünürlüğü (YZLLM 2026-07-13)
+    ...(next.resume_phase !== undefined ? { resume_phase: 0, resume_iter_ts: 0 } : {}),
+  });
   _escalateAcceptChain = 0; // per-iş escalate bütçesi (mahkeme major: kuyruk-drain 3226/1688 reset'inden GEÇMİYOR →
   // sayaç görevler-arası birikip sağlıklı sağlayıcıda 4. işi yanlış-halt ederdi; "occasional tolere" sözleşmesi ihlali).
   _inspectorUnavailableChain = 0;
@@ -5162,9 +5170,15 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   let auditReadable = true;
   let iterEvents: { event?: string; detail?: string; ts?: number }[] = [];
   const since = runtime.state?.iteration_started_at ?? 0;
+  // Mahkeme düzeltmesi (2026-07-30): pencere TAM olmalı. Uzun iterasyonlarda (cave'de 476 olaylı iterasyon
+  // var) kuyruğun sonundan sabit sayıda okumak erken yazma kanıtını pencereden düşürüp işi haksız yere
+  // kuyruğa döndürebilirdi. Geniş oku + en eski kayıt iterasyon başlangıcından ÖNCE mi diye bak; değilse
+  // pencere eksik demektir → kanıt yok sayma, "kayıt okunamadı" dalına düş (görünür not + done).
+  let windowComplete = since > 0;
   try {
-    const tail = await readAuditLogTail(projectRoot, 500);
+    const tail = await readAuditLogTail(projectRoot, 4000);
     iterEvents = tail.filter((e) => (e.ts ?? 0) >= since);
+    if (tail.length > 0 && (tail[0]?.ts ?? 0) > since) windowComplete = false;
   } catch (e) {
     auditReadable = false;
     log.warn("orchestrator", "tamamlanma kanıtı için audit okunamadı", { error: String(e) });
@@ -5172,7 +5186,7 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   const completion = decideTaskCompletion({
     events: iterEvents,
     auditReadable,
-    iterationWindowKnown: since > 0,
+    iterationWindowKnown: windowComplete,
     deliverableExists,
     writeEvents: WRITE_EVENTS,
   });
@@ -7202,7 +7216,11 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           } catch (e) {
             // Mahkeme hatası → güvenli varsayılan proceed (mevcut davranış korunur; mahkeme akışı BOZMAZ).
             log.warn("orchestrator", "mahkeme gate-incelemesi hata (yutuldu → proceed)", { error: String(e) });
-            emitChatMessage("system", "⚖️ Mahkeme (gate incelemesi) erişilemedi — bulgu denetimsiz geçti (proceed).");
+            emitChatMessage(
+              "system",
+              "⚖️ Mahkeme (gate incelemesi) erişilemedi — bulgu denetlenemedi. Gate ATLANMIYOR: bulgu normal " +
+                "oto-düzeltme yoluna gidiyor ve kapı yeniden koşacak.",
+            );
           }
         }
         if (mahkemeAction === "suppress") {
@@ -7442,6 +7460,11 @@ async function enqueueSystemFixTask(
         seen_count: seen,
         last_fail: `yeniden tespit edildi (${seen}. kez): ${text.slice(0, 160)}`,
         ...(decision.revive ? { attempts: 0 } : {}),
+        // Mahkeme düzeltmesi: bulgu şiddeti arttıysa (ör. orta → kritik) öncelik de yükselsin —
+        // eskiden yalnız ilk tespitteki öncelik kalıyordu.
+        ...(dedup.priority !== undefined && dedup.priority < (cur?.priority ?? Number.POSITIVE_INFINITY)
+          ? { priority: dedup.priority }
+          : {}),
       });
       await emitQueueChangedFor(projectRoot);
       if (decision.revive) {

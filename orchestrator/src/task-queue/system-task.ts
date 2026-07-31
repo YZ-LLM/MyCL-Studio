@@ -22,8 +22,13 @@ export type SystemTaskKind =
   | "deferred-phase-error"; // çözülmeden ertelenen faz hatası (konu: faz + imza)
 
 /**
- * SAF: konuyu kanonik hale getir — küçük harf, boşluk sıkıştırma, rakam maskeleme (sayı değişse de aynı
- * bulgu aynı anahtarı alsın), ilk 12 kelime. Regex yok (deterministik karakter döngüsü).
+ * SAF: konuyu kanonik hale getir — küçük harf, boşluk sıkıştırma, ilk 12 kelime. Regex yok.
+ *
+ * MAHKEME DÜZELTMESİ (2026-07-30): ilk sürüm rakamları "#" ile maskeliyordu ("14 bulgu" ile "22 bulgu"
+ * aynı sınıf olsun diye). Ama konular çoğu zaman SAYISAL KİMLİK taşıyor: verify-gap'in konusu faz
+ * numarası → "13" ve "16" ikisi de "##" oluyordu → Faz 13 için açılan iş, Faz 16'nın işini yutuyordu
+ * (tam da bu düzeltmenin önlemeye çalıştığı kayıp). Maskeleme kaldırıldı: çağıranların hiçbiri sayaç
+ * içeren serbest metin geçirmiyor (hepsi kararlı kimlik: şablon kimliği, etiket, bölüm kimliği, faz no).
  */
 export function normalizeSubject(s: string): string {
   const out: string[] = [];
@@ -34,14 +39,12 @@ export function normalizeSubject(s: string): string {
       word = "";
     }
   };
-  for (const chRaw of String(s ?? "").toLowerCase()) {
-    const ch = chRaw;
+  for (const ch of String(s ?? "").toLowerCase()) {
     if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
       flush();
       continue;
     }
-    // Rakamlar maskelenir: "14 bulgu" ile "22 bulgu" AYNI bulgu sınıfıdır.
-    word += ch >= "0" && ch <= "9" ? "#" : ch;
+    word += ch;
   }
   flush();
   return out.slice(0, 12).join(" ");

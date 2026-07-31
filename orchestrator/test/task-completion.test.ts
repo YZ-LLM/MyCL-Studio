@@ -92,6 +92,27 @@ describe("decideTaskCompletion", () => {
     expect(b.verdict).toBe("done");
   });
 
+  it("MAHKEME: gate döngüsündeki mahkeme false-positive kararı KANITTIR (detaydan)", () => {
+    const d = decideTaskCompletion({
+      ...base,
+      events: [ev("phase-13-complete", "mahkeme_false_positive_suppressed")],
+    });
+    expect(d.verdict).toBe("done");
+  });
+
+  it("MAHKEME: gate kendi içinde oto-düzeltildiyse KANITTIR (codegen gözlemcisi bağlı değil)", () => {
+    const d = decideTaskCompletion({ ...base, events: [ev("phase-13-complete", "gate_autofix_resolved")] });
+    expect(d.verdict).toBe("done");
+  });
+
+  it("çıplak phase-N-complete kanıt DEĞİLDİR (her fazda yazılır, iş yapılmasa da)", () => {
+    const d = decideTaskCompletion({
+      ...base,
+      events: [ev("phase-13-complete", "security_accepted_by_user"), ev("phase-17-complete")],
+    });
+    expect(d.verdict).toBe("requeue");
+  });
+
   it("audit boş ama ajan kaynaklı değişen dosya varsa → tamamlandı (git yolu yedek kanıt)", () => {
     const d = decideTaskCompletion({ ...base, events: [], agentAuthoredFiles: ["src/app.ts"] });
     expect(d.verdict).toBe("done");

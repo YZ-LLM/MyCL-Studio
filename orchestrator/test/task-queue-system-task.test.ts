@@ -21,10 +21,19 @@ const task = (p: Partial<TaskQueueItem> & { id: string }): TaskQueueItem => ({
 });
 
 describe("normalizeSubject / systemTaskKey", () => {
-  it("büyük-küçük harf, fazla boşluk ve rakam farkı anahtarı DEĞİŞTİRMEZ", () => {
+  it("büyük-küçük harf ve fazla boşluk anahtarı DEĞİŞTİRMEZ", () => {
     expect(normalizeSubject("  Semgrep   OWASP  Top-10 ")).toBe(normalizeSubject("semgrep owasp top-10"));
-    // "14 bulgu" ile "22 bulgu" aynı bulgu sınıfı → aynı anahtar (sayı maskeleniyor).
-    expect(normalizeSubject("14 Code Findings")).toBe(normalizeSubject("22 Code Findings"));
+  });
+
+  it("MAHKEME REGRESYON KİLİDİ: sayısal konular ÇAKIŞMAZ (Faz 13 ile Faz 16 ayrı iş)", () => {
+    // İlk sürüm rakamları maskeliyordu → "13" ve "16" ikisi de "##" oluyordu ve Faz 13'ün işi
+    // Faz 16'nınkini yutuyordu (tam da bu düzeltmenin önlemek istediği kayıp).
+    expect(normalizeSubject("13")).not.toBe(normalizeSubject("16"));
+    const k13 = systemTaskKey({ source: "verify-gap", kind: "verify-gap", subject: "13" });
+    const k16 = systemTaskKey({ source: "verify-gap", kind: "verify-gap", subject: "16" });
+    expect(k13).not.toBe(k16);
+    // Aynı faz iki kez → aynı anahtar (tekrar önleme çalışmaya devam ediyor).
+    expect(systemTaskKey({ source: "verify-gap", kind: "verify-gap", subject: "13" })).toBe(k13);
   });
 
   it("anahtar kaynak+tür+konudan üretilir; METİN şablonu değişse de kaymaz", () => {
