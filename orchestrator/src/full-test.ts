@@ -610,14 +610,17 @@ export function formatFullTestReport(r: FullTestReport): string {
 }
 
 /** SAF: düşen ÇEKİRDEK bölüm başına ≤1 kaba fix işi metni (kuyruk floodu olmasın). */
-export function fixTasksFromReport(r: FullTestReport): string[] {
-  const tasks: string[] = [];
+export function fixTasksFromReport(r: FullTestReport): { id: FullTestSectionId; text: string }[] {
+  // 2026-07-30: bölüm KİMLİĞİ de dönüyor — çağıran kuyruk tekrar anahtarını ondan üretiyor (aynı bölüm
+  // her koşuda yeni iş açmasın; canlı cave: aynı E2E/rota bölümü için 3'er kayıt). Metin değişmedi.
+  const tasks: { id: FullTestSectionId; text: string }[] = [];
   for (const s of r.sections) {
     if (!CORE_SECTIONS.has(s.id) || s.status !== "fail") continue;
     const evidence = (s.failures ?? []).slice(0, 8).join("; ");
-    tasks.push(
-      `Full Test '${s.label_tr}' bölümü düştü — kök nedeni bul ve düzelt. Kanıt: ${evidence || s.detail_tr}. Düzeltme sonrası ilgili suite yeşil geçmeli.`,
-    );
+    tasks.push({
+      id: s.id,
+      text: `Full Test '${s.label_tr}' bölümü düştü — kök nedeni bul ve düzelt. Kanıt: ${evidence || s.detail_tr}. Düzeltme sonrası ilgili suite yeşil geçmeli.`,
+    });
   }
   return tasks;
 }

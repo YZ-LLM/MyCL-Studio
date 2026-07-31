@@ -57,6 +57,12 @@ export interface TaskQueueItem {
   attempts?: number;
   /** Son tamamlanamama nedeni (kısa) — yeniden denemede ajana "farklı yaklaşım" bağlamı olarak verilir. */
   last_fail?: string;
+  /** SİSTEM işlerinin kanonik tekrar anahtarı (2026-07-30) — `kaynak:tür:konu`. Metinden BAĞIMSIZ:
+   *  şablon cümlesi değişse de aynı bulgu aynı anahtarı alır → aynı iş ikinci kez açılmaz.
+   *  Kullanıcının kendi yazdığı işlerde yoktur (onlar intake'in semantik ayıklamasından geçer). */
+  dedup_key?: string;
+  /** Aynı bulgunun kaç kez yeniden tespit edildiği (tekrar açmak yerine sayaç artar) — görünürlük. */
+  seen_count?: number;
 }
 
 /** Bir işin ard arda otomatik yeniden denenme tavanı — sonrası görünür bekleme (sonsuz döngü/token yakımı yok). */
@@ -82,6 +88,7 @@ export interface TaskQueuePatch {
   completed_at?: number;
   attempts?: number;
   last_fail?: string;
+  seen_count?: number;
 }
 
 /** Geçerli durum değerleri — patch/parse doğrulaması için. */

@@ -86,6 +86,13 @@ import { intakeAndEnqueue } from "./task-queue/intake.js";
 import { MAX_TASK_AUTO_RETRIES, type TaskQueueItem } from "./task-queue/types.js";
 import { textSimilarity } from "./task-queue/intake.js";
 import {
+  decideSystemTask,
+  systemTaskKey,
+  buildDeferredErrorTaskText,
+  type DedupAction,
+  type SystemTaskKind,
+} from "./task-queue/system-task.js";
+import {
   beginPhaseCost,
   clearActiveAskq,
   emit,
@@ -864,13 +871,13 @@ async function emitVerificationSummary(state: State): Promise<void> {
     const queuedDims: string[] = [];
     if (installable.length > 0) {
       try {
-        const existing = await readTasks(state.project_root);
         for (const gap of installable) {
-          // Dedup anahtarı aşağıdaki sabit cümle başlangıcı — şablonu değiştirirsen anahtarı da güncelle.
           const dedupKey = `Faz ${gap.n} (${gap.dim}) doğrulaması atlandı`;
-          if (existing.some((t) => t.source === "verify-gap" && t.text.includes(dedupKey))) continue;
           const cmd = /cmd="([^"]+)"/.exec(gap.detail)?.[1];
-          await enqueueSystemFixTask(
+          // 2026-07-30: tekrar kontrolü artık kanonik anahtarla (metin şablonu değişse de kaymaz).
+          // includeDone KORUNDU (eski davranış: bu boyut için daha önce AÇILMIŞ iş varsa — bitmiş olsa
+          // bile — yenisi açılmaz; özet dürüst kalır, sonsuz açma döngüsü yok).
+          const dec = await enqueueSystemFixTask(
             state.project_root,
             `${dedupKey} — neden: ${gap.detail || "araç yok"}. ` +
               `${cmd ? `Beklenen komut: ${cmd}. ` : ""}` +
@@ -878,8 +885,9 @@ async function emitVerificationSummary(state: State): Promise<void> {
               `gerekli config + GERÇEK kontrol komutu; echo/stub YASAK) ve komutun gerçekten koşup anlamlı ` +
               `sonuç ürettiğini kanıtla.`,
             "verify-gap",
+            { kind: "verify-gap", subject: String(gap.n), includeDone: true },
           );
-          queuedDims.push(gap.dim);
+          if (dec?.action === "create") queuedDims.push(gap.dim);
         }
       } catch (e) {
         // İş açma başarısız → görünür (sessiz fallback yok); özetin kendisi yine basılır.
@@ -7209,23 +7217,30 @@ async function enqueueSecurityFindings(
 ): Promise<number> {
   if (!summary || summary.findings.length === 0) return 0;
   const unique = dedupeFindingsByTemplate(summary.findings);
+  // 2026-07-30: dedupeFindingsByTemplate yalnız BU taramanın içinde tekilleştiriyordu → aynı zafiyet her
+  // taramada yeni iş açıyordu. Artık kuyruğa karşı da tekilleştirilir (açık iş varsa tazelenir).
+  let created = 0;
   for (const f of unique) {
-    const task: TaskQueueItem = {
-      id: randomUUID(),
-      ts: Date.now(),
-      text: findingToTaskText(f),
+    const dec = await enqueueSystemFixTask(projectRoot, findingToTaskText(f), "security", {
+      kind: "security-finding",
+      subject: f.templateId,
+      // Öncelik şiddetten (kritik → önce) — eski davranış AYNEN korunuyor.
       priority: severityToPriority(f.severity),
-      status: "pending",
-      source: "security",
-      from_phase: 3,
-    };
-    await appendTask(projectRoot, task);
+    });
+    if (!dec || dec.action === "create") created++;
   }
   await emitQueueChangedFor(projectRoot);
   const more = summary.total > summary.findings.length ? ` (nuclei toplam ${summary.total} bulgu raporladı; örneklem tekilleştirildi)` : "";
+  if (created === 0) {
+    emitChatMessage(
+      "system",
+      `🛡️ ${origin}: ${unique.length} bulgu — hepsi zaten iş kuyruğunda (yeni iş açılmadı, mevcut işler tazelendi).`,
+    );
+    return 0;
+  }
   emitChatMessage(
     "system",
-    `🛡️ ${origin}: ${unique.length} benzersiz güvenlik bulgusu iş kuyruğuna **sistem işi** olarak eklendi${more} — ` +
+    `🛡️ ${origin}: ${created} benzersiz güvenlik bulgusu iş kuyruğuna **sistem işi** olarak eklendi${more} — ` +
       `her biri Faz 3'ten yeni bir iterasyon başlatıp sona kadar gidecek (öncelik kritik→düşük). ` +
       `Otomatik işlenir; durdurmak istersen **Duraklat**.`,
   );
@@ -7237,8 +7252,12 @@ async function enqueueSecurityFindings(
  * Coarse güvenlik fix-işi kuyruğa (bağımlılık-audit / SAST gibi exit-kodlu, per-bulgu detayı
  * olmayan taramalar için). DAST'ın per-bulgu enqueue'sinden farklı: tek "şu sınıfı gider" işi.
  */
-async function enqueueSecurityFixTask(projectRoot: string, text: string): Promise<void> {
-  await enqueueSystemFixTask(projectRoot, text, "security");
+async function enqueueSecurityFixTask(
+  projectRoot: string,
+  text: string,
+  subject: string,
+): Promise<void> {
+  await enqueueSystemFixTask(projectRoot, text, "security", { kind: "security-class", subject });
 }
 
 /**
@@ -7249,19 +7268,67 @@ async function enqueueSystemFixTask(
   projectRoot: string,
   text: string,
   source: "security" | "full-test" | "maintenance" | "verify-gap",
-): Promise<void> {
+  /** TEKRAR ANAHTARI (2026-07-30): aynı bulgu ikinci kez iş açmasın. Verilmezse eski davranış (hep açar) —
+   *  ama tüm çağıranlar verir; parametre opsiyonel kalması yalnız geriye uyum içindir. */
+  dedup?: { kind: SystemTaskKind; subject: string; includeDone?: boolean; priority?: number },
+): Promise<DedupAction | null> {
+  let decision: DedupAction | null = null;
+  if (dedup) {
+    const key = systemTaskKey({ source, kind: dedup.kind, subject: dedup.subject });
+    const existing = await readTasks(projectRoot).catch(() => []);
+    decision = decideSystemTask({
+      key,
+      text,
+      existing,
+      includeDone: dedup.includeDone,
+      maxRetries: MAX_TASK_AUTO_RETRIES,
+    });
+    if (decision.action === "refresh") {
+      // YENİ İŞ AÇMA: aynı bulgu için ikinci kayıt kuyruğu şişirir (canlı cave: aynı iş 4 kez).
+      // Bunun yerine mevcut işi TAZE kanıtla güncelle; deneme hakkı dolmuşsa canlandır (bulgu hâlâ gerçek).
+      const refreshId = decision.taskId;
+      const cur = existing.find((t) => t.id === refreshId);
+      const seen = (cur?.seen_count ?? 1) + 1;
+      await patchTask(projectRoot, decision.taskId, {
+        seen_count: seen,
+        last_fail: `yeniden tespit edildi (${seen}. kez): ${text.slice(0, 160)}`,
+        ...(decision.revive ? { attempts: 0 } : {}),
+      });
+      await emitQueueChangedFor(projectRoot);
+      if (decision.revive) {
+        emitChatMessage(
+          "system",
+          `🔁 Bu bulgu hâlâ duruyor (${seen}. tespit) — kuyruktaki iş yeniden denenebilir yapıldı: ${text.slice(0, 120)}`,
+        );
+        await kickWorkQueue();
+      }
+      return decision;
+    }
+    if (decision.action === "skip") {
+      // done (yalnız includeDone) → zaten kapatılmış; dropped → kullanıcı iptal etmiş, sessizce diriltme yok.
+      if (decision.why === "cancelled") {
+        emitChatMessage(
+          "system",
+          `ℹ️ Aynı bulgu yeniden çıktı ama bu işi daha önce iptal etmiştin — yeniden açmıyorum: ${text.slice(0, 120)}`,
+        );
+      }
+      return decision;
+    }
+  }
   const task: TaskQueueItem = {
     id: randomUUID(),
     ts: Date.now(),
     text,
-    priority: 2, // sistem bulgusu → yüksek öncelik
+    priority: dedup?.priority ?? 2, // sistem bulgusu → yüksek öncelik (DAST: bulgu şiddetinden)
     status: "pending",
     source,
     from_phase: 3,
+    ...(decision ? { dedup_key: decision.key, seen_count: 1 } : {}),
   };
   await appendTask(projectRoot, task);
   await emitQueueChangedFor(projectRoot);
   await kickWorkQueue();
+  return decision;
 }
 
 /**
@@ -7653,12 +7720,14 @@ export async function handleAskqAnswer(
         await enqueueSecurityFixTask(
           st.project_root,
           `Bağımlılık zafiyetlerini gider — \`${dep.tool}\` eşik üstü (yüksek+) zafiyet bildirdi. İlgili paketleri güvenli sürüme güncelle; tarama temiz geçsin.`,
+          "dependency-audit",
         );
       }
       for (const label of sast.findings) {
         await enqueueSecurityFixTask(
           st.project_root,
           `SAST güvenlik bulgularını gider (semgrep ${label}). Bulguları Faz 13/audit'ten oku, kök nedeni düzelt; yeniden tara temiz olsun.`,
+          `sast:${label}`,
         );
       }
     } catch (err) {
@@ -7716,8 +7785,11 @@ export async function handleAskqAnswer(
         detail: report.sections.map((s) => `${s.id}=${s.status}`).join(" "),
       }).catch(() => {});
       // Düşen çekirdek bölümler → iş kuyruğuna görünür fix işi (DAST bulgu deseni).
-      for (const text of fixTasksFromReport(report)) {
-        await enqueueSystemFixTask(st.project_root, text, "full-test");
+      for (const t of fixTasksFromReport(report)) {
+        await enqueueSystemFixTask(st.project_root, t.text, "full-test", {
+          kind: "full-test-section",
+          subject: t.id,
+        });
       }
     } catch (err) {
       emitChatMessage("error", `Full Test başarısız: ${String(err).slice(0, 200)}`);
@@ -7838,6 +7910,7 @@ export async function handleAskqAnswer(
           st.project_root,
           "Bağımlılık zafiyetlerini gider — bakım turu güncellemesi sonrası audit hâlâ eşik üstü zafiyet bildiriyor. Paketleri güvenli sürüme taşı; tarama temiz geçsin.",
           "maintenance",
+          { kind: "maintenance-audit", subject: "dependency-audit" },
         );
       }
       for (const label of report.sastFindings) {
@@ -7845,10 +7918,14 @@ export async function handleAskqAnswer(
           st.project_root,
           `SAST güvenlik bulgularını gider (semgrep ${label}). Bulguları audit'ten oku, kök nedeni düzelt; yeniden tara temiz olsun.`,
           "maintenance",
+          { kind: "maintenance-sast", subject: label },
         );
       }
-      for (const text of fixTasksFromReport(report.fullTest)) {
-        await enqueueSystemFixTask(st.project_root, `Bakım turu sonrası ${text}`, "maintenance");
+      for (const t of fixTasksFromReport(report.fullTest)) {
+        await enqueueSystemFixTask(st.project_root, `Bakım turu sonrası ${t.text}`, "maintenance", {
+          kind: "full-test-section",
+          subject: `maintenance:${t.id}`,
+        });
       }
     } catch (err) {
       emitChatMessage("error", `Bakım turu başarısız: ${String(err).slice(0, 200)}`);
@@ -7999,15 +8076,54 @@ export async function handleAskqAnswer(
       // sentinel-routing finding-f: appendTask throws → eski .catch sadece log yapıyordu
       // → task kuyrukta yok ama pendingErrorAnalysis=null → pipeline sessiz devam ediyordu
       // (frozen-goal ihlali). Artık I/O hatası görünür emitChatMessage ile yüzeye çıkar.
+      // 2026-07-30 (canlı cave: aynı "—" işi 4 kez açıldı, hiçbiri çözülemedi): metin artık KANIT taşıyor
+      // (faz + gerçek hata + audit işaretçisi + ne yapılacağı) ve aynı hata için ikinci iş AÇILMAZ.
+      const deferredText = buildDeferredErrorTaskText({
+        phase: cached.phase,
+        failReason: cached.fail_detail,
+        solutionTr: cached.solutions_tr[0],
+        auditEvent: "error-analysis-no-provider",
+        auditTs: Date.now(),
+      });
+      const deferKey = systemTaskKey({
+        source: "manual",
+        kind: "deferred-phase-error",
+        subject: `${cached.phase}:${cached.sig ?? cached.fail_detail ?? ""}`,
+      });
+      const existingTasks = await readTasks(runtime.state.project_root).catch(() => []);
+      const deferDecision = decideSystemTask({
+        key: deferKey,
+        text: deferredText,
+        existing: existingTasks,
+        maxRetries: MAX_TASK_AUTO_RETRIES,
+      });
+      if (deferDecision.action !== "create") {
+        // Aynı faz hatası zaten kuyrukta — ikinci kayıt açmak yerine görünür kal.
+        if (deferDecision.action === "refresh") {
+          await patchTask(runtime.state.project_root, deferDecision.taskId, {
+            seen_count: (existingTasks.find((t) => t.id === deferDecision.taskId)?.seen_count ?? 1) + 1,
+            last_fail: `aynı faz hatası yeniden ertelendi: ${(cached.fail_detail ?? "").slice(0, 140)}`,
+            ...(deferDecision.revive ? { attempts: 0 } : {}),
+          }).catch(() => {});
+          await emitQueueChangedFor(runtime.state.project_root).catch(() => {});
+        }
+        emitChatMessage(
+          "system",
+          "📋 Bu hata iş listesinde zaten var — yeni kayıt açmadım, mevcut işi güncelledim.",
+        );
+        return;
+      }
       let appendOk = true;
       await appendTask(runtime.state.project_root, {
         id: randomUUID(),
         ts: Date.now(),
-        text: `Faz ${cached.phase} hatası (çözülmeden ertelendi): ${cached.solutions_tr[0] ?? "—"}`,
+        text: deferredText,
         // Ertelenmiş hatırlatma → source=manual: auto-drain'e GİRMEZ (istemsiz
         // oto-çalıştırma yok; kullanıcı "Uygula" ile bilerek tetikler).
         status: "pending",
         source: "manual",
+        dedup_key: deferKey,
+        seen_count: 1,
       }).catch((e) => {
         appendOk = false;
         log.warn("orchestrator", "error-analysis task append fail", e);

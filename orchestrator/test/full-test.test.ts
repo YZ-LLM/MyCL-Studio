@@ -111,8 +111,10 @@ describe("formatFullTestReport + fixTasksFromReport", () => {
   it("fix işleri YALNIZ düşen çekirdek bölümlerden; bölüm başına ≤1", () => {
     const tasks = fixTasksFromReport(report);
     expect(tasks).toHaveLength(2); // unit + route-sweep; skipped/pass üretmez
-    expect(tasks[0]).toContain("Birim testleri");
-    expect(tasks[1]).toContain("Rota taraması");
+    // 2026-07-30: artık {id, text} dönüyor — id kuyruk tekrar anahtarını besliyor (aynı bölüm ikinci iş açmasın).
+    expect(tasks[0]!.text).toContain("Birim testleri");
+    expect(tasks[0]!.id).toBe("unit");
+    expect(tasks[1]!.text).toContain("Rota taraması");
   });
 
   it("skipped/pass bölümler fix işi üretmez (yalnız fail)", () => {
@@ -469,7 +471,8 @@ describe("fixTasksFromReport — işlevsel bölüm çekirdek (düşünce → fix
     };
     const tasks = fixTasksFromReport(r);
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]).toContain("İşlevsel doğrulama");
-    expect(tasks[0]).toContain("Arama");
+    expect(tasks[0]!.id).toBe("functional");
+    expect(tasks[0]!.text).toContain("İşlevsel doğrulama");
+    expect(tasks[0]!.text).toContain("Arama");
   });
 });

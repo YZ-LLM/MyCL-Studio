@@ -124,6 +124,9 @@ export interface PendingErrorAnalysis {
   blocking: boolean;
   /** YZLLM 2026-07-01 (FIX B): bu hatanın imzası — kullanıcı cevap verince seçim bu sig'e kaydedilir (karar hafızası). */
   sig?: string;
+  /** 2026-07-30: fazın GERÇEK hata çıktısı (kısaltılmış). Kullanıcı "ertele" derse iş metnine kanıt olarak
+   *  girer — eskiden analiz yapılamadığında iş "—" ile kuyruğa giriyordu ve hiç çözülemiyordu. */
+  fail_detail?: string;
   /** Sıralı askq seçenekleri (UI'daki sırayla — index eşlemesi için). */
   options: string[];
   /** Ajanın önerdiği çözümler (TR — kullanıcı gösterimi). "Çöz" → debug akışına bunlar bağlam olur. */
@@ -475,6 +478,7 @@ export function emitBlockingFindingAskq(
       acceptContinuePhase: opts.acceptContinuePhase,
       code_ref: finding.code_ref,
       auto_selected_solution: best.trim(),
+      fail_detail: (opts.rawDetail ?? finding.detail_tr ?? "").slice(0, 400),
     };
   }
   emitChatMessage(
@@ -499,6 +503,7 @@ export function emitBlockingFindingAskq(
     solutions_en: finding.solutions_en,
     acceptContinuePhase: opts.acceptContinuePhase,
     code_ref: finding.code_ref,
+    fail_detail: (opts.rawDetail ?? finding.detail_tr ?? "").slice(0, 400),
   };
 }
 
@@ -668,6 +673,8 @@ export async function analyzeAndAskError(
       options: optionLabels,
       solutions_tr: [],
       acceptContinuePhase: errCtx.acceptContinuePhase,
+      // Analiz yapılamadı ama GERÇEK hata elimizde — "ertele" seçilirse iş metnine kanıt olarak girer.
+      fail_detail: (errCtx.detail ?? errCtx.message ?? "").slice(0, 400),
     };
   };
   try {
