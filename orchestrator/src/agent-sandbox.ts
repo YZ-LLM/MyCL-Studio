@@ -192,6 +192,38 @@ export interface SandboxBuildResult {
 }
 
 /**
+ * Ajanın kum havuzunda EK yetenekleri (YZLLM onayı 2026-07-30, canlı cave kanıtı: 245 kez
+ * "EPERM: listen 0.0.0.0:5173"). Yerli sandbox ağı DENY-ALL yapar; yerel port bağlama da buna dahil →
+ * ajan kendi test sunucusunu/dev sunucusunu açamıyor, tarayıcı testi hiç koşamıyor ve ajan bunu PROJE
+ * hatası sanıp günlerce "düzeltmeye" çalışıyor. Ampirik (claude 2.1.220, /tmp): mevcut ayarla
+ * BIND_ERROR:EPERM; `network.allowLocalBinding` ile BIND_OK.
+ * EN AZ YETKİ: yetenek YALNIZ gerçekten sunucu/tarayıcı testi koşan rollere verilir (kod yazan ajan,
+ * müfettiş — bulguyu KENDİ yeniden üretmek zorunda, Faz 0 hata ayıklama). Çeviri/özet/planlama
+ * rollerinde verilmez; onların üretilen ayarı bugünle BİREBİR aynı kalır (network anahtarı yazılmaz).
+ */
+export interface SandboxCaps {
+  /** Ajan 127.0.0.1'e bağlanabilsin (kendi test/dev sunucusunu açabilsin). Varsayılan: kapalı. */
+  localBinding?: boolean;
+}
+
+/**
+ * Yerel port iznine ihtiyaç duyan codegen etiketleri — AÇIK liste (kuşkuda VERME; yeni bir salt-okunur
+ * codegen rolü eklenirse otomatik yetki almasın). Kaynak: codegen/backend.ts CLI_ELIGIBLE_TAGS.
+ */
+const LOCAL_BINDING_TAGS: ReadonlySet<string> = new Set([
+  "phase-5", // UI kurulumu — dev sunucu + smoke
+  "phase-8", // BDD+TDD — testler sunucu ayağa kaldırır
+  "verify-feature", // gerçek uygulama doğrulaması — Playwright
+  "parallel-module", // modül paralel codegen (aynı işler)
+  "gate-autofix", // gate düzeltmesi — testi yeniden koşar
+]);
+
+/** SAF: bu codegen etiketi yerel port izni almalı mı. */
+export function needsLocalBinding(tag: string): boolean {
+  return LOCAL_BINDING_TAGS.has(tag);
+}
+
+/**
  * SAF: home top-level girdilerinden (runtime + proje HARİÇ) denyRead + Claude Code
  * `--settings` nesnesi üret. platform enjekte edilir (test edilebilir).
  *   - off → yalnız ultracode (sandbox yok).
@@ -205,12 +237,16 @@ export function buildAgentSandboxSettings(params: {
   policy: SandboxPolicy;
   platform: NodeJS.Platform;
   home: string;
+  /** Ek yetenekler (yerel port). Verilmezse hiçbir ek yetenek yok — üretilen ayar eski davranışla birebir. */
+  caps?: SandboxCaps;
 }): SandboxBuildResult {
-  const { projectRoot, ultracode, policy, platform, home } = params;
+  const { projectRoot, ultracode, policy, platform, home, caps } = params;
   const base: Record<string, unknown> = ultracode ? { ultracode: true } : {};
   if (policy === "off") return { settings: base, denyCount: 0 };
 
   const failIfUnavailable = policy === "enforce";
+  // Yalnız istendiğinde yazılır → istenmeyen rollerde `network` anahtarı HİÇ oluşmaz (argv birebir eski).
+  const networkBlock = caps?.localBinding ? { network: { allowLocalBinding: true } } : {};
 
   // mac/linux dışı platform: yerli sandbox yok → POSIX-olmayan yollarla anlamsız
   // denyRead üretme. Gerçek fail-closed guardSandboxOrWarn (spawn-öncesi) +
@@ -219,7 +255,7 @@ export function buildAgentSandboxSettings(params: {
     return {
       settings: {
         ...base,
-        sandbox: { enabled: true, allowUnsandboxedCommands: false, failIfUnavailable },
+        sandbox: { enabled: true, allowUnsandboxedCommands: false, failIfUnavailable, ...networkBlock },
       },
       denyCount: 0,
     };
@@ -288,10 +324,15 @@ export function buildAgentSandboxSettings(params: {
       failIfUnavailable, // sandbox kurulamazsa claude fail-closed (enforce)
       allowedDomains: PACKAGE_REGISTRY_DOMAINS, // güvenilir paket registry + binary host (ağ default deny-all)
       filesystem: { denyRead, allowRead, denyWrite, allowWrite },
+      ...networkBlock, // yalnız yetenek istendiğinde (yerel port); istenmezse anahtar HİÇ yok
     },
     // Defense-in-depth (prompt katmanı): .git + .mycl YAZMA reddi (hook-persistence + audit-forge vektörleri).
     permissions: {
-      deny: [...permDeny, `Write(${gitDir}/**)`, `Edit(${gitDir}/**)`, `Write(${myclDir}/**)`, `Edit(${myclDir}/**)`],
+      // NOT (2026-07-30, claude'un KENDİ uyarısı — her ajan spawn'ında iki satır gürültü basıyordu):
+      // "Write(path) is not matched by file permission checks — only Edit(path) rules are. Edit rules
+      // cover all file-editing tools." → Write(...) formu ETKİSİZ; koruma zaten Edit(...) ile sağlanıyor.
+      // Etkisiz formu kaldırdık: koruma AYNI (Edit tüm yazma araçlarını kapsıyor), uyarı gürültüsü bitti.
+      deny: [...permDeny, `Edit(${gitDir}/**)`, `Edit(${myclDir}/**)`],
       allow: permAllow,
     },
   };
@@ -303,7 +344,11 @@ export function buildAgentSandboxSettings(params: {
  * modülden/process'ten. policy="off" → eski davranış (yalnız ultracode).
  * home okunamazsa enforce/warn'da GÖRÜNÜR uyarı (sessiz read-koruma kaybı yasak).
  */
-export function sandboxSettingsArgs(projectRoot: string, ultracode: boolean): string[] {
+export function sandboxSettingsArgs(
+  projectRoot: string,
+  ultracode: boolean,
+  caps?: SandboxCaps,
+): string[] {
   if (_policy === "off") {
     return ultracode ? ["--settings", JSON.stringify({ ultracode: true })] : [];
   }
@@ -318,6 +363,7 @@ export function sandboxSettingsArgs(projectRoot: string, ultracode: boolean): st
     policy: _policy,
     platform,
     home,
+    caps,
   });
   return ["--settings", JSON.stringify(settings)];
 }

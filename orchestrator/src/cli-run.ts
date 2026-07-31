@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
+import { guardSandboxOrWarn, sandboxSettingsArgs, type SandboxCaps } from "./agent-sandbox.js";
 import { waitIfPaused } from "./pause.js";
 import {
   noteRateLimitEvent,
@@ -63,6 +63,9 @@ export interface CliRunOpts {
   /** 🧾 AYRI SÜREÇ (2026-07-19): true → token kullanımı session toplamına yazılır ama aktif faz maliyet
    *  kovasına/ajan atfına EKLENMEZ (özet koşan iterasyonun muhasebesini kirletmesin). */
   sideTask?: boolean;
+  /** Kum havuzu EK yetenekleri (2026-07-30): yalnız gerçekten sunucu açması gereken roller (müfettiş
+   *  repro'su, Faz 0 hata ayıklama) verir. Verilmezse hiçbir ek yetenek yok — ayar eski haliyle aynı. */
+  sandboxCaps?: SandboxCaps;
 }
 
 export interface CliRunResult {
@@ -125,7 +128,8 @@ function buildArgs(opts: CliRunOpts): string[] {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }
   // v15.11 GÜVENLİK: --settings ile sandbox (+ ultracode) — ajanı opts.cwd'ye hapset.
-  args.push(...sandboxSettingsArgs(opts.cwd, opts.effort === "ultracode"));
+  // sandboxCaps verilmezse (rollerin çoğu) üretilen ayar eski davranışla BİREBİR aynı.
+  args.push(...sandboxSettingsArgs(opts.cwd, opts.effort === "ultracode", opts.sandboxCaps));
   if (opts.effort && opts.effort !== "ultracode") {
     args.push("--effort", opts.effort);
   }

@@ -91,6 +91,10 @@ async function runInspectorTurn(
     allowedTools: ["Read", "Grep", "Glob", "Bash"],
     disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
     extraEnv: env,
+    // YZLLM onayı 2026-07-30: müfettişin görevi bulguyu KENDİ yeniden üretmek (prompt: "first ATTEMPT to
+    // reproduce it"). Yerel port kapalıyken sunucu gerektiren bulguyu üretemiyor → "değerlendirme üretilemedi"
+    // → escalate. Yazma zaten yasak (salt-okunur araç seti), yalnız 127.0.0.1 bağlama açılıyor.
+    sandboxCaps: { localBinding: true },
   });
   return { ok: res.ok, text: res.text, error: res.error };
 }

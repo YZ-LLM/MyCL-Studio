@@ -868,6 +868,9 @@ Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
       cwd: this.state.project_root,
       allowedTools: ["Read", "Grep", "Glob", "Bash"],
       disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // D1 salt-okunur araştırma: yazma + alt-ajan yasak, Bash açık
+      // YZLLM onayı 2026-07-30: hata ayıklama bug'ı YENİDEN ÜRETİR — sunucu gerektiren bug'da yerel port şart
+      // (kapalıyken EPERM'i proje hatası sanıp yanlış kök neden koyuyordu). Yazma hâlâ yasak.
+      sandboxCaps: { localBinding: true },
       effort: this.config.claude_code_flags.effort,
       onText: (text) => emitClaudeStream({ sub: "text", text }),
       // tool_use aktivitesini yüzeye çıkar (D1 araştırması Read/Grep/Bash yoğun).
@@ -898,6 +901,7 @@ Alanlar AYNEN şu şemaya uy (kind hariç): ${schema}`;
         cwd: this.state.project_root,
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
         disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
+        sandboxCaps: { localBinding: true }, // ilk atışla aynı yetenek (force-retry aynı araştırmayı sürdürür)
         effort: this.config.claude_code_flags.effort,
         onText: (text) => emitClaudeStream({ sub: "text", text }),
         observer: (tu) => emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),

@@ -4,6 +4,7 @@ import {
   detectSandboxAvailability,
   runtimeAllowFor,
   sandboxGuard,
+  needsLocalBinding,
 } from "../src/agent-sandbox.js";
 
 // Saf fonksiyonlar — platform/home/policy/projectRoot enjekte edilir; host'tan bağımsız (çapraz-platform).
@@ -146,8 +147,11 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS home-deny + allowR
     expect(permAllow).toContain(`Read(${HOME}/.claude/**)`);
     // GÜVENLİK paritesi: gizli girdiler prompt-katmanında da allow EDİLMEZ.
     expect(permAllow).not.toContain(`Read(${HOME}/.ssh/**)`);
-    expect(permDeny).toContain("Write(/tmp/mycl-validate/shop/.git/**)");
-    expect(permDeny).toContain("Write(/tmp/mycl-validate/shop/.mycl/**)");
+    // 2026-07-30: Write(...) formu claude'da dosya izin kontrolüne GİRMİYOR (aracın kendi uyarısı) —
+    // koruma Edit(...) ile sağlanıyor (tüm yazma araçlarını kapsar). Etkisiz form kaldırıldı.
+    expect(permDeny).toContain("Edit(/tmp/mycl-validate/shop/.git/**)");
+    expect(permDeny).toContain("Edit(/tmp/mycl-validate/shop/.mycl/**)");
+    expect(permDeny).not.toContain("Write(/tmp/mycl-validate/shop/.git/**)");
     const denyWrite = (settings.sandbox as { filesystem: { denyWrite: string[] } }).filesystem.denyWrite;
     expect(denyWrite).toEqual([`${PROJ}/.git`, `${PROJ}/.git/**`, `${PROJ}/.mycl`, `${PROJ}/.mycl/**`]);
   });
@@ -301,5 +305,56 @@ describe("agent-sandbox · ultracode merge + policy modları", () => {
       projectRoot: "/tmp/x", ultracode: false, policy: "off", platform: "darwin", home: HOME,
     });
     expect(offNoUltra.settings).toEqual({});
+  });
+});
+
+// YEREL PORT İZNİ (YZLLM onayı 2026-07-30, canlı cave kanıtı: 245 kez "EPERM: listen 0.0.0.0:5173").
+// Ampirik olarak doğrulandı (claude 2.1.220, /tmp): ayar `sandbox.network.allowLocalBinding` olmadan
+// BIND_ERROR:EPERM, onunla BIND_OK. En az yetki: yalnız gerçekten sunucu açan roller.
+describe("agent-sandbox · yerel port yeteneği (SandboxCaps)", () => {
+  const P = { projectRoot: "/tmp/proj", ultracode: false, policy: "enforce" as const, home: "/Users/u" };
+
+  it("REGRESYON KİLİDİ: caps verilmezse üretilen ayar caps:{} ile BİREBİR aynı (network anahtarı YOK)", () => {
+    for (const platform of ["darwin", "linux", "win32"] as NodeJS.Platform[]) {
+      const a = buildAgentSandboxSettings({ ...P, platform });
+      const b = buildAgentSandboxSettings({ ...P, platform, caps: {} });
+      const c = buildAgentSandboxSettings({ ...P, platform, caps: { localBinding: false } });
+      expect(b.settings).toEqual(a.settings);
+      expect(c.settings).toEqual(a.settings);
+      expect((a.settings.sandbox as Record<string, unknown>).network).toBeUndefined();
+    }
+  });
+
+  it("caps.localBinding → sandbox.network.allowLocalBinding=true (darwin/linux/diğer platform dahil)", () => {
+    for (const platform of ["darwin", "linux", "win32"] as NodeJS.Platform[]) {
+      const { settings } = buildAgentSandboxSettings({ ...P, platform, caps: { localBinding: true } });
+      const sb = settings.sandbox as { network?: { allowLocalBinding?: boolean } };
+      expect(sb.network?.allowLocalBinding).toBe(true);
+    }
+  });
+
+  it("yerel port AÇILINCA dosya koruması aynen durur (izin genişlemesi yalnız ağ tarafında)", () => {
+    const open = buildAgentSandboxSettings({ ...P, platform: "darwin", caps: { localBinding: true } });
+    const closed = buildAgentSandboxSettings({ ...P, platform: "darwin" });
+    const fs1 = (open.settings.sandbox as { filesystem: unknown }).filesystem;
+    const fs2 = (closed.settings.sandbox as { filesystem: unknown }).filesystem;
+    expect(fs1).toEqual(fs2);
+    expect((open.settings.sandbox as { allowUnsandboxedCommands: boolean }).allowUnsandboxedCommands).toBe(false);
+    expect(open.settings.permissions).toEqual(closed.settings.permissions);
+  });
+
+  it("policy=off: caps yok sayılır (sandbox hiç kurulmaz — eski davranış)", () => {
+    const { settings } = buildAgentSandboxSettings({
+      ...P, policy: "off", platform: "darwin", caps: { localBinding: true },
+    });
+    expect(settings.sandbox).toBeUndefined();
+  });
+
+  it("needsLocalBinding: yalnız sunucu/tarayıcı testi koşan codegen etiketleri (açık liste)", () => {
+    for (const t of ["phase-5", "phase-8", "verify-feature", "parallel-module", "gate-autofix"])
+      expect(needsLocalBinding(t)).toBe(true);
+    // Kod yazmayan / sunucu açmayan roller: izin YOK (kuşkuda verme).
+    for (const t of ["phase-2", "phase-4", "phase-7", "translator", "quality-audit", "phase-9-debate", ""])
+      expect(needsLocalBinding(t)).toBe(false);
   });
 });

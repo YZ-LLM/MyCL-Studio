@@ -29,7 +29,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { MAIN_AGENT_LANGUAGE_REMINDER } from "../agent-language.js";
-import { guardSandboxOrWarn, sandboxSettingsArgs } from "../agent-sandbox.js";
+import { guardSandboxOrWarn, sandboxSettingsArgs, needsLocalBinding } from "../agent-sandbox.js";
 import {
   noteRateLimitEvent,
   noteCliRateLimitError,
@@ -570,7 +570,13 @@ export class CliCodegenBackend implements CodegenBackend {
     // talimatını ezerdi — mahkeme CRITICAL). null → eklenmez (grep fallback; KATI #4 görünür uyarı ensure'da verildi).
     args.push(...cbm.mcpArgs);
     // v15.11 GÜVENLİK: --settings ile sandbox (+ ultracode) — ajanı proje-root'a hapset.
-    args.push(...sandboxSettingsArgs(opts.state.project_root, effort === "ultracode"));
+    // YEREL PORT (2026-07-30): yalnız gerçekten sunucu/tarayıcı testi koşan codegen fazlarına
+    // (needsLocalBinding açık listesi) — diğer etiketlerde ayar eski haliyle birebir aynı.
+    args.push(
+      ...sandboxSettingsArgs(opts.state.project_root, effort === "ultracode", {
+        localBinding: needsLocalBinding(opts.tag),
+      }),
+    );
     if (effort && effort !== "ultracode") {
       args.push("--effort", effort);
     }
