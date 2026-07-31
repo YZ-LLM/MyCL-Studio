@@ -226,3 +226,59 @@ describe("inspector · extractText (SDK araç-döngüsü verdict-çıkarımı)",
     expect(extractText([{ type: "tool_use", id: "1", name: "Read", input: {} }, { type: "text", text: '{"stance":"agree"}' }] as never)).toBe('{"stance":"agree"}');
   });
 });
+
+// DENETİM YAPILAMADI ≠ KUŞKULU BULGU (YZLLM kararı 2026-07-30). Canlı cave: "Müfettiş değerlendirmesi
+// üretilemedi" 129 kez → hepsi "kabul-devam" ile geçti. Artık sağlayıcı kaynaklı escalate ayırt ediliyor:
+// caller onu kabul-devam yoluna SOKMAZ, gerçek çözüme yönlendirir.
+describe("mahkemeRuling · providerUnavailable taşınması", () => {
+  const verdict = (extra: Record<string, unknown> = {}) => ({
+    stance: "escalate" as const,
+    reason: "Müfettiş değerlendirmesi üretilemedi → güvenli taraf: insana.",
+    ...extra,
+  });
+
+  it("tek geçiş: sağlayıcıya ulaşılamadı → ruling.providerUnavailable=true", () => {
+    const r = mahkemeRuling({
+      acted: true,
+      decision: { level: "flag", reason: "x" },
+      outcome: verdict({ providerUnavailable: true }),
+    });
+    expect(r.action).toBe("escalate");
+    expect(r.providerUnavailable).toBe(true);
+  });
+
+  it("model KOŞTU ama blok bozuk (gerçek kalite sorunu) → providerUnavailable YOK", () => {
+    const r = mahkemeRuling({
+      acted: true,
+      decision: { level: "flag", reason: "x" },
+      outcome: { stance: "escalate", reason: "Müfettiş verdict bloğu üretmedi → insana." },
+    });
+    expect(r.action).toBe("escalate");
+    expect(r.providerUnavailable).toBeUndefined();
+  });
+
+  it("tartışma yolu: finalVerdict sağlayıcı hatasıysa bayrak taşınır", () => {
+    const r = mahkemeRuling({
+      acted: true,
+      decision: { level: "debate", reason: "x" },
+      outcome: {
+        resolution: "escalate",
+        rounds: 2,
+        summary: "çözülmedi",
+        finalVerdict: verdict({ providerUnavailable: true }),
+      },
+    });
+    expect(r.action).toBe("escalate");
+    expect(r.providerUnavailable).toBe(true);
+  });
+
+  it("agree/suppress bayrak TAŞIMAZ (yalnız escalate'e takılı)", () => {
+    const agree = mahkemeRuling({
+      acted: true,
+      decision: { level: "flag", reason: "x" },
+      outcome: { stance: "agree", reason: "ok", providerUnavailable: true } as never,
+    });
+    expect(agree.action).toBe("proceed");
+    expect(agree.providerUnavailable).toBeUndefined();
+  });
+});

@@ -72,7 +72,15 @@ export async function patchTask(
   taskId: string,
   patch: Pick<
     TaskQueuePatch,
-    "priority" | "status" | "started_at" | "completed_at" | "attempts" | "last_fail" | "seen_count"
+    | "priority"
+    | "status"
+    | "started_at"
+    | "completed_at"
+    | "attempts"
+    | "last_fail"
+    | "seen_count"
+    | "resume_phase"
+    | "resume_iter_ts"
   >,
 ): Promise<void> {
   const record: TaskQueuePatch = { _patch: taskId, ts: Date.now(), ...patch };
@@ -123,6 +131,8 @@ export async function readTasks(
       if (typeof obj.attempts === "number") merged.attempts = obj.attempts;
       if (typeof obj.last_fail === "string") merged.last_fail = obj.last_fail;
       if (typeof obj.seen_count === "number") merged.seen_count = obj.seen_count;
+      if (typeof obj.resume_phase === "number") merged.resume_phase = obj.resume_phase;
+      if (typeof obj.resume_iter_ts === "number") merged.resume_iter_ts = obj.resume_iter_ts;
       patches.set(obj._patch, merged);
       continue;
     }
@@ -145,6 +155,8 @@ export async function readTasks(
       if (typeof obj.from_phase === "number") item.from_phase = obj.from_phase;
       if (typeof obj.dedup_key === "string") item.dedup_key = obj.dedup_key;
       if (typeof obj.seen_count === "number") item.seen_count = obj.seen_count;
+      if (typeof obj.resume_phase === "number") item.resume_phase = obj.resume_phase;
+      if (typeof obj.resume_iter_ts === "number") item.resume_iter_ts = obj.resume_iter_ts;
       items.push(item);
     }
   }

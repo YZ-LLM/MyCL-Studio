@@ -63,6 +63,13 @@ export interface TaskQueueItem {
   dedup_key?: string;
   /** Aynı bulgunun kaç kez yeniden tespit edildiği (tekrar açmak yerine sayaç artar) — görünürlük. */
   seen_count?: number;
+  /** KESİNTİDEN DÖNÜŞ (2026-07-30): iş sağlayıcı kesintisinde bu fazda duraklamıştı → erişim dönünce
+   *  Faz 1'den DEĞİL buradan sürer (canlı cave: 23 kez baştan başlayıp spec/niyeti yeniden üretti).
+   *  from_phase'ten AYRI alan: from_phase "bu iş şu fazdan BAŞLAR" (güvenlik işleri), bu ise
+   *  "bu iş şu fazda KALDI". Karıştırılırsa full-test/bakım işleri sessizce Faz 3'e kayardı. */
+  resume_phase?: number;
+  /** resume_phase'in ait olduğu iterasyon damgası — state ile eşleşmezse resume YAPILMAZ (bayat koruma). */
+  resume_iter_ts?: number;
 }
 
 /** Bir işin ard arda otomatik yeniden denenme tavanı — sonrası görünür bekleme (sonsuz döngü/token yakımı yok). */
@@ -89,6 +96,8 @@ export interface TaskQueuePatch {
   attempts?: number;
   last_fail?: string;
   seen_count?: number;
+  resume_phase?: number;
+  resume_iter_ts?: number;
 }
 
 /** Geçerli durum değerleri — patch/parse doğrulaması için. */

@@ -93,6 +93,11 @@ import {
   type SystemTaskKind,
 } from "./task-queue/system-task.js";
 import {
+  shouldPreserveIterationState,
+  decideIterationStart,
+  resumeWasStale,
+} from "./resume-decision.js";
+import {
   beginPhaseCost,
   clearActiveAskq,
   emit,
@@ -933,6 +938,7 @@ async function recordPhaseComplete(n: PhaseId): Promise<void> {
   await recordRungOutcome(n, true);
   _autoAnswerChain = 0; // faz GERÇEKTEN tamamlandı → otonom-cevap döngü sayacı sıfır (ilerleme var; MAX yanlış-tetiklenmesin).
   _escalateAcceptChain = 0; // gerçek faz-tamamlanması = müfettiş O fazda çalıştı → escalate 'art arda' semantiği korunur
+  _inspectorUnavailableChain = 0; // faz gerçekten bitti → müfettiş-erişim zinciri de sıfır (aynı semantik)
   // (kaskat ara-tamamlanma ÜRETMEZ → bu reset devre-kesiciyi defeat etmez; mahkeme onayladı).
   gateFailStreak.delete(n); // gerçek tamamlanma → faz-seviyesi döngü sayacı sıfır (ardışık-fail semantiği korunur).
 }
@@ -1846,6 +1852,40 @@ async function failPhase(
       // ETMEZ — doğrulanmamış işi "tamamlandı" damgalamak en kötü sonuç. Gerçek çözüm yoluna düşülür (aşağıdaki
       // oto-fix/hata-analizi akışı); tükenirse iş kuyruğa yazılıp pipeline park eder (sahte yeşil yok).
       // "suppress" HARİÇ: orada iki bağımsız değerlendirme KANITLA false-positive demiştir.
+      // DENETİM YAPILAMADI ≠ KUŞKULU BULGU (YZLLM kararı 2026-07-30, canlı cave: "değerlendirme üretilemedi"
+      // 129 kez → hepsi "kabul-devam" ile geçti, hiçbir denetim olmadan). Müfettişe SAĞLAYICI yüzünden hiç
+      // ulaşılamadıysa ortada bir hüküm YOKTUR; bunu "otomatik modda akış bloklanmadı" diye geçmek, kontrol
+      // edilmemiş işi kontrol edilmiş göstermektir. Bu dal kanıt taşıyan faz dalıyla AYNI yola gider: gerçek
+      // çözüm denenir. Art arda 3 kez ulaşılamazsa dürüstçe durur (aşağıdaki devre kesici).
+      const providerEscalate = ruling.action === "escalate" && ruling.providerUnavailable === true;
+      if (providerEscalate) {
+        _inspectorUnavailableChain++;
+        await appendAuditModule(runtime.state.project_root, {
+          ts: Date.now(),
+          phase: n,
+          event: "mahkeme-escalate-refused-provider",
+          caller: "mycl-orchestrator",
+          detail: `müfettişe ulaşılamadı (${_inspectorUnavailableChain}. kez) — kabul-devam reddedildi, gerçek çözüme yönlendirildi`,
+        }).catch(() => {});
+        if (_inspectorUnavailableChain > INSPECTOR_UNAVAILABLE_MAX) {
+          emitChatMessage(
+            "system",
+            `⛔ Müfettişe art arda ${_inspectorUnavailableChain} kez ulaşılamadı (sağlayıcı sınırı/kredi). Denetim ` +
+              `yapılamadan devam etmiyorum — bu iş "tamamlandı" SAYILMADI. Erişim dönünce KALDIĞIM FAZDAN otomatik süreceğim.`,
+          );
+          _drainActive = false;
+          armLlmOutageWait("müfettişe erişilemiyor", makePhaseOutageResume(n));
+          return; // advance YOK → halt; ilerleme korunur (reconcile kesintide state'i sıfırlamaz)
+        }
+        emitChatMessage(
+          "system",
+          `⚠️ Faz ${n}: bağımsız denetim yapılamadı (müfettişe ulaşılamadı) — bunu "geçti" saymıyorum. Hatanın ` +
+            `gerçek çözümünü deniyorum.`,
+        );
+        // proofGateEscalate ile aynı yola düş: aşağıdaki kabul-devam dalı ATLANIR, gerçek çözüm akışı sürer.
+      } else if (ruling.action !== "escalate") {
+        _inspectorUnavailableChain = 0; // müfettiş konuştu (agree/suppress/flag) → sağlayıcı zinciri kırıldı
+      }
       const proofGateEscalate = ruling.action === "escalate" && PROOF_BEARING_PHASES.has(n);
       if (proofGateEscalate) {
         await appendAuditModule(runtime.state.project_root, {
@@ -1864,7 +1904,13 @@ async function failPhase(
           { modelRole: "inspector" },
         );
       }
-      if (ruling.convened && ruling.action !== "proceed" && !timeoutDivertActive && !proofGateEscalate) {
+      if (
+        ruling.convened &&
+        ruling.action !== "proceed" &&
+        !timeoutDivertActive &&
+        !proofGateEscalate &&
+        !providerEscalate // denetim hiç yapılamadı → kabul-devam YOK (gerçek çözüme gider)
+      ) {
         // TIMEOUT-DIVERT İSTİSNASI (mahkeme 2026-07-09 sahte-yeşil fix): timeout-divert'te bu accept-continue dalı
         // ATLANIR — gate hiç yeniden koşulmadan "escalate → advanceToNextPhase" ile geçmek SAHTE-YEŞİL olurdu (E2E
         // koşmadı). Timeout-divert'te mahkeme escalate/suppress dese bile GERÇEK-çözüm (analyzeAndAskError + Faz 0 D1)
@@ -2175,6 +2221,7 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
   _clarifyInspectChain = 0;
   _autoAnswerChain = 0; // otonom-cevap döngü sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
   _escalateAcceptChain = 0; // escalate-kaskat devre-kesici sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
+  _inspectorUnavailableChain = 0;
   // Timeout-divert sayacı da sıfırlanmalı (mahkeme minor 2026-07-09): faz-numarasıyla anahtarlı → eski projede TIMEOUT_
   // DIVERT_MAX'a ulaşan sayaç yeni projeye TAŞINIR → yeni projenin İLK timeout'u yanlışça "tükendi" sayılıp erken escalate olur.
   timeoutRetried.clear();
@@ -3703,6 +3750,12 @@ let _clarifyInspectChain = 0;
 // (CLARIFY_INSPECT_MAX) faz-hatası kardeşi: art arda escalate-accept say → MAX'ta DÜRÜST DUR (görevi done sayma).
 const ESCALATE_ACCEPT_MAX = 3;
 let _escalateAcceptChain = 0;
+// 2026-07-30 (YZLLM kararı, canlı cave: "değerlendirme üretilemedi" 129 kez → hepsi kabul-devam ile geçti):
+// SAĞLAYICI kaynaklı escalate (müfettişe hiç ulaşılamadı = denetim YAPILMADI) ile GERÇEK kuşkulu bulgu
+// escalate'i ayrı sayılır. Sağlayıcı dalında kabul-devam HİÇ yok — akış gerçek çözüm yoluna gider; art arda
+// 3 kez ulaşılamazsa dürüstçe durur ve erişim dönünce KALDIĞI FAZDAN sürer.
+const INSPECTOR_UNAVAILABLE_MAX = 3;
+let _inspectorUnavailableChain = 0;
 
 /**
  * v15.5 — Orkestrator agent AgentDecision'ı executeDispatchedIntent'in
@@ -3769,6 +3822,7 @@ async function executeAgentDecision(
   if (decision.action !== "ask_clarify") {
     _clarifyInspectChain = 0;
     _escalateAcceptChain = 0; // gerçek orkestratör aksiyonu (yeni iş/faz) → escalate-kaskat sayacı sıfır (per-iş devre-kesici).
+    _inspectorUnavailableChain = 0;
   }
   switch (decision.action) {
     case "chat": {
@@ -4496,7 +4550,14 @@ let _lastDevelopText: string | null = null;
 
 async function runDevelopIteration(
   text: string,
-  opts?: { seedIntent?: string; startPhase?: PhaseId },
+  opts?: {
+    seedIntent?: string;
+    startPhase?: PhaseId;
+    /** KESİNTİDEN DÖNÜŞ (2026-07-30): iterasyon zaten sürüyordu, yalnız sağlayıcı beklendi → yeni iterasyon
+     *  SAYILMAZ, durum sıfırlanmaz, kaldığı fazdan devam edilir. Bu bayrak olmadan wasPipelineCompleted
+     *  (proje ömründe ilk Faz 17'den sonra HEP true) niyeti/spec'i her seferinde siliyordu. */
+    resumePaused?: boolean;
+  },
 ): Promise<void> {
   _lastDevelopText = text;
   if (!runtime.state || !runtime.config) {
@@ -4507,6 +4568,20 @@ async function runDevelopIteration(
   // iterasyon → tüm fazlar (1..9) konuşma geçmişini KATMASIN, yoksa orijinal çok-bug'lı
   // mesaj sızıp işleri birleştirir. Bayrak state üzerinden advanceToNextPhase'e taşınır.
   runtime.state = { ...runtime.state, iteration_isolated: true };
+  if (opts?.resumePaused && opts.startPhase && opts.startPhase > 1) {
+    // Duraklamış iterasyonu SÜRDÜR: state (niyet/spec/kapsam) olduğu gibi kalır, yalnız kesilen fazdan
+    // devam edilir. Yeni iterasyon sayacı artmaz, audit'e iteration-start yazılmaz (bu AYNI iterasyon).
+    setRecordContext({ iteration: runtime.state.iteration_count ?? 1, phase: opts.startPhase });
+    await appendAuditModule(runtime.state.project_root, {
+      ts: Date.now(),
+      phase: opts.startPhase,
+      event: "iteration-resumed",
+      caller: "mycl-orchestrator",
+      detail: `kesinti sonrası kaldığı fazdan devam (Faz ${opts.startPhase})`,
+    }).catch(() => {});
+    await advanceToNextPhase((opts.startPhase - 1) as PhaseId);
+    return;
+  }
   // wasPipelineCompleted ise yeni iterasyon (state reset), değilse fresh Phase 1.
   if (await wasPipelineCompleted(runtime.state.project_root)) {
     const prevIter = runtime.state.iteration_count ?? 1;
@@ -4860,6 +4935,7 @@ async function tryStartTaskBatch(): Promise<boolean> {
     detail: `n=${candidates.length} ids=${candidates.map((c) => c.task.id.slice(0, 8)).join(",")}`,
   }).catch(() => {});
   _escalateAcceptChain = 0; // per-iş escalate bütçesi (startNextPendingTask sözleşmesiyle aynı)
+  _inspectorUnavailableChain = 0;
   const outcome = await runParallelModules(
     root,
     candidatesToModules(candidates),
@@ -4963,6 +5039,7 @@ async function startNextPendingTask(): Promise<boolean> {
   await patchTask(root, next.id, { status: "running", started_at: Date.now() }); // started_at → süre görünürlüğü (YZLLM 2026-07-13)
   _escalateAcceptChain = 0; // per-iş escalate bütçesi (mahkeme major: kuyruk-drain 3226/1688 reset'inden GEÇMİYOR →
   // sayaç görevler-arası birikip sağlıklı sağlayıcıda 4. işi yanlış-halt ederdi; "occasional tolere" sözleşmesi ihlali).
+  _inspectorUnavailableChain = 0;
   runtime.currentTaskId = next.id;
   _drainTaskId = next.id; // yeşil-son 'done' kurtarması için (mid-flow drop'a rağmen); yeni iş → üzerine yaz
   await emitQueueChangedFor(root);
@@ -4981,11 +5058,36 @@ async function startNextPendingTask(): Promise<boolean> {
       ? `\n\n[YENİDEN ELE ALMA${attempts > 0 ? ` — DENEME ${attempts + 1}/${MAX_TASK_AUTO_RETRIES}` : ""}] Bu iş daha önce tamamlanamadı/bekletildi. Son not: ${next.last_fail ?? "kaydedilmedi"}. AYNI yaklaşımı tekrarlama — sorunu FARKLI bir bakış açısıyla ele al (farklı kök neden hipotezi, farklı yöntem); kuralları çiğnemeden, sahte yeşile kaçmadan çöz.`
       : "";
   const taskPrompt = `${next.text}${retryContext}`;
-  // Güvenlik/pentest sistem-işi → niyet bulgudan türetildi → from_phase'ten (Faz 3) başla, Faz 1/2 atla.
-  if (next.source === "security" && typeof next.from_phase === "number" && next.from_phase > 1) {
+  const start = decideIterationStart({
+    task: next,
+    stateIterationStartedAt: runtime.state?.iteration_started_at,
+    stateHasIntent: Boolean(runtime.state?.intent_summary),
+  });
+  if (
+    resumeWasStale({
+      task: next,
+      stateIterationStartedAt: runtime.state?.iteration_started_at,
+      stateHasIntent: Boolean(runtime.state?.intent_summary),
+    })
+  ) {
+    // SESSİZ FALLBACK YOK: "kaldığı yerden" sözü tutulamadıysa kullanıcı bunu bilsin.
+    emitChatMessage(
+      "system",
+      "ℹ️ Bu işi kaldığı yerden sürdüremedim (iterasyon durumu bu arada değişmiş) — baştan ele alıyorum.",
+    );
+  }
+  if (start.kind === "resume") {
+    // KESİNTİDEN DÖNÜŞ (2026-07-30): niyet/spec korunmuş → Faz 1'den değil kaldığı fazdan devam.
+    emitChatMessage("system", `🔄 Kaldığım yerden devam ediyorum (Faz ${start.startPhase}).`);
+    await runDevelopIteration(taskPrompt, {
+      startPhase: start.startPhase as PhaseId,
+      resumePaused: true,
+    });
+  } else if (start.kind === "seeded") {
+    // Güvenlik/pentest sistem-işi → niyet bulgudan türetildi → from_phase'ten (Faz 3) başla, Faz 1/2 atla.
     await runDevelopIteration(taskPrompt, {
       seedIntent: taskPrompt,
-      startPhase: next.from_phase as PhaseId,
+      startPhase: start.startPhase as PhaseId,
     });
   } else {
     await runDevelopIteration(taskPrompt);
@@ -5386,6 +5488,24 @@ async function reconcileAndDrainTasks(): Promise<void> {
         const stopReason = _pendingStopReason ?? "pipeline iş tamamlanmadan durdu (terminal hata/kesinti)";
         _pendingStopReason = null;
         await returnTaskToPending(root, id, stopReason);
+        // KESİNTİ AYRIMI (YZLLM kararı 2026-07-30): sağlayıcı kapalı olduğu için duraklamışsak ortada
+        // TERMİNAL HATA YOK — iterasyon durumunu (faz/niyet/spec) SİLMEK 23 kez spec'i baştan ürettirdi.
+        // Kesintide durumu koru + işe "hangi fazda kaldı" yaz; erişim dönünce oradan sürer.
+        const keep = shouldPreserveIterationState({
+          outageWaiting: isLlmOutageWaiting(),
+          currentPhase: runtime.state.current_phase,
+          hasIntent: Boolean(runtime.state.intent_summary),
+          iterationStartedAt: runtime.state.iteration_started_at,
+        });
+        if (keep.preserve) {
+          await patchTask(root, id, {
+            resume_phase: keep.resumePhase,
+            resume_iter_ts: keep.resumeIterTs,
+          }).catch((e) => log.warn("orchestrator", "resume bilgisi yazılamadı", e));
+          log.info("orchestrator", "kesinti — iterasyon durumu korundu", { phase: keep.resumePhase });
+          await emitQueueChangedFor(root);
+          continue; // state reset + clarify temizliği ATLANIR (ilerleme korunur)
+        }
         // YZLLM 2026-07-03 (mahkeme — kritik): düşen iş BAYAT iterasyon-state'i (current_phase/intent_summary/spec/
         // iteration_started_at) bırakıyordu → SONRAKİ kuyruk işi bunları devralıp (wasPipelineCompleted reset'i proje-
         // ömründe ilk tamamlamadan ÖNCE hiç koşmaz) yanlış resume + yanlış clarify-enjeksiyonu yapıyordu (kapat-aç'ta

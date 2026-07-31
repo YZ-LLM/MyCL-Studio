@@ -204,6 +204,15 @@ export interface InspectorVerdict {
   reason: string;
   /** Bizzat toplanan doğrulanabilir kanıt (varsa). */
   evidence?: string;
+  /**
+   * 2026-07-30 (canlı cave: 129 kez "değerlendirme üretilemedi" → akış "kabul-devam" ile ilerledi):
+   * escalate'in nedeni MÜFETTİŞE ULAŞILAMAMASI mı (sağlayıcı limiti/kredi/ağ), yoksa GERÇEK kuşku mu?
+   * İkisi apayrı: gerçek kuşkuda "otomatik modda akış bloklanmaz, rapora yazılır" makuldür; sağlayıcı
+   * erişilemezliğinde ise HİÇBİR denetim yapılmamıştır → "kontrol edildi" izlenimi sahte olur.
+   * true YALNIZ taşıma/sağlayıcı katmanı çöktüğünde (model hiç koşmadı). Model koşup blok bozuk üretirse
+   * false kalır (o gerçek bir kalite sorunudur).
+   */
+  providerUnavailable?: true;
 }
 
 export type DebateResolution =
@@ -331,8 +340,13 @@ export async function runInspectorPass(
   });
   if (!res.ok || !res.text.trim()) {
     // Müfettiş üretemedi → KÖRü körüne "agree" DEME (sessiz-gömme). Kuşkuda insana.
+    // providerUnavailable: model HİÇ koşmadı (taşıma/sağlayıcı) → bu "kuşkulu bulgu" değil, "denetim YOK".
     log.warn("inspector", "müfettiş-geçişi başarısız → escalate (fail-closed)", { error: res.error });
-    return { stance: "escalate", reason: "Müfettiş değerlendirmesi üretilemedi → güvenli taraf: insana." };
+    return {
+      stance: "escalate",
+      reason: "Müfettiş değerlendirmesi üretilemedi → güvenli taraf: insana.",
+      providerUnavailable: true,
+    };
   }
   const v = parseVerdict(res.text);
   if (!v) {
@@ -728,6 +742,9 @@ export interface MahkemeRuling {
   convened: boolean;
   /** İnsan-okunur özet (chat / askq için). */
   summary: string;
+  /** 2026-07-30: escalate'in nedeni MÜFETTİŞE ULAŞILAMAMASI mı (denetim hiç yapılmadı) — gerçek kuşkudan
+   *  ayırt edilir; caller sağlayıcı kaynaklı escalate'te akışı "geçti" gibi ilerletMEZ. */
+  providerUnavailable?: boolean;
 }
 
 /**
@@ -750,7 +767,12 @@ export function mahkemeRuling(r: CheckpointResult): MahkemeRuling {
           ? { action: "escalate", convened: true, summary: `[yüksek-risk → oto-suppress YOK, insana] ${o.summary}` }
           : { action: "suppress", convened: true, summary: o.summary };
       case "escalate":
-        return { action: "escalate", convened: true, summary: o.summary };
+        return {
+          action: "escalate",
+          convened: true,
+          summary: o.summary,
+          ...(o.finalVerdict.providerUnavailable ? { providerUnavailable: true } : {}),
+        };
       case "agree": // müfettiş baştan katıldı (yüksek-risk değil) → karar doğru
       case "inspector-conceded": // müfettiş teslim → orkestratörün yolu doğru
         return { action: "proceed", convened: true, summary: o.summary };
@@ -759,7 +781,12 @@ export function mahkemeRuling(r: CheckpointResult): MahkemeRuling {
   // Tek-geçiş verdict (tartışma YOK): agree→proceed; flag/escalate→insana (tartışmasız suppress YOK).
   const v = r.outcome;
   if (v.stance === "agree") return { action: "proceed", convened: true, summary: v.reason };
-  return { action: "escalate", convened: true, summary: v.reason };
+  return {
+    action: "escalate",
+    convened: true,
+    summary: v.reason,
+    ...(v.providerUnavailable ? { providerUnavailable: true } : {}),
+  };
 }
 
 /**
