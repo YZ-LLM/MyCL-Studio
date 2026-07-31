@@ -97,6 +97,8 @@ import {
   decideIterationStart,
   resumeWasStale,
 } from "./resume-decision.js";
+import { decideTaskCompletion } from "./task-completion.js";
+import { WRITE_EVENTS } from "./fix/scope.js";
 import {
   beginPhaseCost,
   clearActiveAskq,
@@ -5152,15 +5154,42 @@ async function onTaskMaybeComplete(projectRoot: string): Promise<void> {
   // YEŞİL DEĞİL" uyarısını basıyor; task-queue makine-durumu o uyarıyla TUTARLI olmalı — yoksa kuyruk "Tamamlandı"
   // gösterir, retry edilmez, sıradaki iş başlar (sahte-tamamlanma; kullanıcının en büyük korkusu). Boş-build → 'dropped'
   // (UI'da "Yeniden Ekle" görünür → kullanıcı sorunu çözüp yeniden gönderebilir). Bkz MEMORY project_faz5_skip_false_green.
-  if (!(await hasDeliverable(projectRoot))) {
-    await returnTaskToPending(projectRoot, doneId, "boş build — hiç uygulama/kaynak dosyası üretilmedi (sahte tamamlanma kilidi)");
+  // GERÇEK İŞ KANITI (YZLLM kararı 2026-07-30, canlı cave: altı standart iş ~70 saniyede "tamamlandı"
+  // damgalandı, o dakikalarda TEK bir dosya yazma olayı yok). Eski tek ölçüt "proje klasörü boş mu"ydu →
+  // mevcut projede hep doğru → süreç Faz 17'ye ulaşınca iş kilitleniyordu. Artık BU İTERASYONDA gerçekten
+  // iş yapıldığına dair pozitif kanıt aranır; yoksa iş kuyrukta kalır (kaybolmaz, deneme merdiveni sürer).
+  const deliverableExists = await hasDeliverable(projectRoot);
+  let auditReadable = true;
+  let iterEvents: { event?: string; detail?: string; ts?: number }[] = [];
+  const since = runtime.state?.iteration_started_at ?? 0;
+  try {
+    const tail = await readAuditLogTail(projectRoot, 500);
+    iterEvents = tail.filter((e) => (e.ts ?? 0) >= since);
+  } catch (e) {
+    auditReadable = false;
+    log.warn("orchestrator", "tamamlanma kanıtı için audit okunamadı", { error: String(e) });
+  }
+  const completion = decideTaskCompletion({
+    events: iterEvents,
+    auditReadable,
+    iterationWindowKnown: since > 0,
+    deliverableExists,
+    writeEvents: WRITE_EVENTS,
+  });
+  if (completion.verdict === "requeue") {
+    await returnTaskToPending(projectRoot, doneId, completion.reason);
+    await appendAuditModule(projectRoot, {
+      ts: Date.now(),
+      phase: (runtime.state?.current_phase ?? 17) as PhaseId,
+      event: "task-completion-refused",
+      caller: "mycl-orchestrator",
+      detail: completion.reason,
+    }).catch(() => {});
     await emitQueueChangedFor(projectRoot);
-    emitChatMessage(
-      "system",
-      "⛔ İş 'Tamamlandı' DAMGALANMADI — boş build (hiç uygulama/kaynak dosyası üretilmedi). İş kuyruğa geri kondu; bir sonraki denemede farklı yaklaşım kullanılacak.",
-    );
+    emitChatMessage("system", completion.userMessage);
     return;
   }
+  if (completion.note) emitChatMessage("system", completion.note);
   await patchTask(projectRoot, doneId, { status: "done", completed_at: Date.now() });
   await emitQueueChangedFor(projectRoot);
 }

@@ -21,7 +21,8 @@ import { hasSourceExt } from "./evidence.js";
 // EKSİK-kapsam tehlikeli (gate dokunulan dosyayı atlar → false-green), fazla-kapsam
 // zararsız (zaten yalnız codegen'in dokunduğu dosyalar, tüm-proje değil) → kuşkuda DAHİL ET.
 // Faz 8: tdd-prod-write/tdd-test-write/code-edit · Faz 5: ui-file-write (Write) / ui-tweak-applied (Edit).
-const WRITE_EVENTS: ReadonlySet<string> = new Set([
+/** TEK DOĞRULUK KAYNAĞI: task-completion.ts de bunu kullanır (kanıt kümesi iki yerde ayrışmasın). */
+export const WRITE_EVENTS: ReadonlySet<string> = new Set([
   "tdd-prod-write",
   "tdd-test-write",
   "code-edit",
