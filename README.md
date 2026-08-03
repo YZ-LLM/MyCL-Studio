@@ -61,12 +61,12 @@ ortak controller'a dayanır:
 | 9 | Risk İncelemesi | qa-askq |
 | 10 | Lint | mechanical |
 | 11 | Sadeleştirme | mechanical |
-| 12 | Performans | mechanical |
-| 13 | Güvenlik | mechanical |
+| 12 | Performans — sayfa skoru (Lighthouse) + paket boyutu bütçesi + DB index | mechanical |
+| 13 | Güvenlik — semgrep + gizli anahtar + bağımlılık zafiyeti (osv) + DB şeması | mechanical |
 | 14 | Birim Testler | mechanical |
 | 15 | Entegrasyon Testleri | mechanical |
 | 16 | E2E Testler (UI varsa) | mechanical |
-| 17 | Sızma Testi — **otomatik koşmaz**, 🛡️ Güvenlik Taraması butonuyla manuel | — |
+| 17 | Sızma Testi — **otomatik koşar** (hızlı profil); tam tarama 🛡️ butonuyla | — |
 
 **Faz 8 davranış öncelikli (BDD → TDD, çift döngü):** Faz 8, kod yazmadan önce yeni/değişen her
 davranış için proje kökünde görünür `features/*.feature` yaşayan dokümantasyonu yazar (spec'in
@@ -249,10 +249,13 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   sebebini teşhis edip (asılan komutu yeniden çalıştırarak, dev-server'ı gözlemleyerek) çözmeye
   çalışır, çözemezse farklı açılardan orkestra çözümü üretir; yalnız hiç çözemezse dürüstçe durup
   bildirir (asılmayı "geçti" saymaz — sahte-yeşil yok).
-- **Sızma testi / DAST** — `katana` (gezinme) + `nuclei` ile çalışan uygulama
-  aktif taranır. **Yalnız 🛡️ Güvenlik Taraması butonuyla manuel** çalışır (kullanıcı
-  onaylı; pipeline'da otomatik koşmaz — pentest ağır olduğundan yükü kullanıcı kontrol
-  eder). Bulgular önceliklenip otomatik düzeltme iterasyonlarına (Faz 3'ten) dönüşür.
+- **Sızma testi / DAST** — `katana` (gezinme) + `nuclei` ile çalışan uygulama aktif
+  taranır. **Faz 17'de otomatik koşar (hızlı profil):** yalnız yüksek/kritik açıklar,
+  yaklaşık bir dakikalık sabit bütçe — uygulama zaten ayakta olduğu için ek yük düşüktür.
+  **Tam kapsamlı tarama** (tüm şiddetler, güncel şablonlar, giriş akışı ayrıca test edilir)
+  🛡️ Güvenlik Taraması butonuyla, senin onayınla çalışır. Tarama koşamazsa (araç yok,
+  uygulama kapalı) sonuç "geçti" sayılmaz — doğrulama özetinde açıkça "DOĞRULANMADI" görünür.
+  Bulgular önceliklenip otomatik düzeltme iterasyonlarına (Faz 3'ten) dönüşür.
 - **🧪 Full Test butonu** — istediğin an TÜM projeyi test eder (5 bölüm): birim
   testleri, entegrasyon, Playwright ile uçtan uca (E2E), tüm sayfaların taranması
   (konsol hataları, kırık istekler, boş sayfa) ve **işlevsel doğrulama** — her
@@ -502,14 +505,23 @@ görünür, denetim izine yazılır.
   açılışta değil, açık kalan oturumda birkaç saatte bir de koşar — günlerce açık
   uygulamada disk şişmez. Proje içi günlüklere dokunulmaz.
 
-## Resimli kullanım kılavuzu
+## Resimli kullanım kılavuzu (Türkçe + İngilizce, her zaman güncel)
 
-Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü Türkçe bir kullanım
-kılavuzu** hazırlar: çalışan uygulamayı Playwright (headless Chromium) ile gezip
-ilgili adımların ekran görüntülerini alır. Kılavuz **üretilen projenin içine**
-gömülür — her sayfadaki bir **"?" popup'ından** açılır; tarihlidir ve içerik
-değiştikçe bayatlayan görüntüler temizlenip yenilenir. Ayrıca MyCL Studio'da
-projeye dair Türkçe bir teknik döküman ("Proje Dökümanı") gösterilir.
+Bir projeyi geliştirirken MyCL, o proje için **ekran görüntülü kullanım kılavuzu**
+hazırlar — **iki dilde**: `docs/kullanim-kilavuzu.md` (Türkçe) ve `docs/user-guide.md`
+(İngilizce). Çalışan uygulamayı Playwright (headless Chromium) ile gezip her dil için
+ayrı ekran görüntüleri alır.
+
+Kılavuz **üretilen projenin içine** yazılır (depoyla birlikte gider) ve uygulamanın her
+sayfasındaki **"?" penceresinden** açılır; veri kaynağını çalışma anında
+`/docs/help-pages.json` üzerinden okur, böylece proje yayına alındığında da çalışır.
+
+**Her zaman güncel:** MyCL kılavuzun bayat olup olmadığını damgayla izler (git commit'i,
+kaynak özeti, üretilen dosyaların içerik özeti). Bayatsa otomatik tazelenir — yalnız
+iterasyon sonunda değil, proje açılışında ve Full Test / Bakım Turu / Güvenlik Taraması
+sonrasında da. Bayat değilse hiçbir model çağrısı yapılmaz. Kılavuz üretimi hem abonelik
+hem API modunda çalışır. Ayrıca MyCL Studio'da projeye dair Türkçe teknik döküman
+("Proje Dökümanı") gösterilir.
 
 ## Güvenlik sınırları
 

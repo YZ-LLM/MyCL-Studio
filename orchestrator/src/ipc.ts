@@ -680,15 +680,11 @@ export function emitAgentEvent(opts: {
   void traceAgentEvent(payload);
 }
 
-/**
- * v15.11: UI kullanma kılavuzu (.mycl/user-guide.md) içeriğini frontend'e push.
- * Açılışta (varsa) + her güncellemede. "Kılavuz" sekmesi/modalı bunu gösterir.
- */
-export function emitUserGuide(content: string): void {
-  emit("user_guide", { content });
-}
+// NOT (2026-08-03): `emitUserGuide` KALDIRILDI — MyCL arayüzündeki "Kılavuz" butonu kaldırıldığından
+// (kılavuz artık HEDEF projenin içinde: /kilavuz sayfası + "?" penceresi) ön yüz bu olayı zaten
+// yok sayıyordu. Ölü olay yolu temizlendi; teknik doküman push'u (aşağıda) kullanımda kalıyor.
 
-/** YZLLM 2026-06-14: TR teknik dökümanı (.mycl/tech-doc.md) MyCL penceresine push (emitUserGuide ikizi). */
+/** YZLLM 2026-06-14: TR teknik dökümanı (.mycl/tech-doc.md) MyCL penceresine push. */
 export function emitTechDoc(content: string): void {
   emit("tech_doc", { content });
 }

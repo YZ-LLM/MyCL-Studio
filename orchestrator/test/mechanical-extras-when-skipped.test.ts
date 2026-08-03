@@ -113,3 +113,47 @@ describe("faz kaydı sözleşmesi", () => {
     }
   });
 });
+
+// MAHKEME BULGUSU (2026-08-03): ana komut yoksa ama stack bağımsız alt taramalar GERÇEKTEN koştuysa
+// bu boyut ölçülmüştür. Eskiden özet her turda "DOĞRULANMADI" deyip gereksiz "aracı kur" işi açıyordu
+// (node projelerinde `npm run perf` script'i yok — ölçümü alt taramalar yapıyor).
+describe("kapsama kanıtı", () => {
+  it("ana tarama atlandı + ek tarama koştu → 'covered-by-extras' olayı yazılır", async () => {
+    const runner = new MechanicalRunnerBase({
+      tag: "t-cov",
+      phaseId: 12,
+      state: fakeState(),
+      mechanical: {
+        scan_cmd: { type: "profile_key", key: "perf" },
+        max_rescans: 0,
+        skip_unless: "always",
+        run_extras_when_main_skipped: true,
+        extra_scans: [{ name: "bundle-budget", cmd: "true" }],
+      },
+      pass_event: "perf-pass",
+    });
+    await runner.run();
+    const audit = await readFile(join(projectRoot, ".mycl/audit.log"), "utf-8");
+    expect(audit).toContain("phase-12-covered-by-extras");
+    expect(audit).toContain("bundle-budget");
+  });
+
+  it("ek taramaların HEPSİ atlandıysa kapsama olayı YAZILMAZ (sahte kapsama yok)", async () => {
+    const runner = new MechanicalRunnerBase({
+      tag: "t-nocov",
+      phaseId: 12,
+      state: fakeState(),
+      mechanical: {
+        scan_cmd: { type: "profile_key", key: "perf" },
+        max_rescans: 0,
+        skip_unless: "always",
+        run_extras_when_main_skipped: true,
+        extra_scans: [{ name: "bundle-budget", cmd: "definitely-not-a-real-binary-xyz" }],
+      },
+      pass_event: "perf-pass",
+    });
+    await runner.run();
+    const audit = await readFile(join(projectRoot, ".mycl/audit.log"), "utf-8");
+    expect(audit).not.toContain("phase-12-covered-by-extras");
+  });
+});

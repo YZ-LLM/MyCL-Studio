@@ -22,6 +22,10 @@ if (probe.error) {
   process.exit(127);
 }
 
+// stderr KRİTİK: osv-scanner "0 bulgu" ile "0 kaynak tarandı"yı JSON'da AYIRT ETMİYOR — ikisinde de
+// `results: []` döner (ampirik olarak doğrulandı: temiz npm projesi de boş results verir). Gerçek sinyal
+// stderr'deki "Scanned <dosya> file and found N packages" satırlarıdır. Bu ayrım olmadan TEMİZ bir proje
+// kalıcı olarak "ölçülemedi" (sarı) görünürdü — kapatmaya çalıştığımız boşluğun aynısı.
 const res = spawnSync(
   "osv-scanner",
   ["scan", "source", "--recursive", "--format", "json", projectRoot],
@@ -42,9 +46,12 @@ try {
 }
 
 const results = Array.isArray(parsed.results) ? parsed.results : [];
-const scannedSources = results.flatMap((r) =>
-  Array.isArray(r.packages) ? [r.source?.path ?? "?"] : [],
-);
+// Gerçekten kaç kaynak tarandı? (stderr'den — JSON bunu söylemiyor)
+const scannedLines = (res.stderr || "").split("\n").filter((l) => /Scanned .* found \d+ package/i.test(l));
+const scannedSources = scannedLines.map((l) => {
+  const m = /Scanned (.+?) file and found/i.exec(l);
+  return m?.[1]?.split("/").slice(-1)[0] ?? "?";
+});
 const findings = results.flatMap((r) =>
   (Array.isArray(r.packages) ? r.packages : []).flatMap((p) =>
     (Array.isArray(p.vulnerabilities) ? p.vulnerabilities : []).map((v) => ({
@@ -56,21 +63,23 @@ const findings = results.flatMap((r) =>
   ),
 );
 
-if (results.length === 0) {
-  // SAHTE TEMİZ KORUMASI: hiçbir kaynak/kilit dosyası tanınmadı → tarama YAPILMADI say.
+if (scannedSources.length === 0) {
+  // SAHTE TEMİZ KORUMASI: hiçbir kaynak/kilit dosyası tanınmadı → tarama YAPILMADI say ("temiz" DEĞİL).
   process.stdout.write("osv-scanner: taranacak bağımlılık kilidi bulunamadı (bu proje için kaynak tanınmadı)\n");
   process.exit(3);
 }
 
 if (findings.length === 0) {
-  process.stdout.write(`osv-scanner: temiz — ${results.length} kaynak tarandı (${scannedSources.join(", ")})\n`);
+  process.stdout.write(
+    `osv-scanner: temiz — ${scannedSources.length} bağımlılık kaynağı tarandı (${scannedSources.join(", ")})\n`,
+  );
   process.exit(0);
 }
 
 const bySeverity = new Map();
 for (const f of findings) bySeverity.set(f.id, f);
 process.stdout.write(
-  `osv-scanner: ${findings.length} zafiyet bulundu (${results.length} kaynak)\n` +
+  `osv-scanner: ${findings.length} zafiyet bulundu (${scannedSources.length} kaynak)\n` +
     [...bySeverity.values()]
       .slice(0, 40)
       .map((f) => `  - ${f.pkg}@${f.version}: ${f.id} ${f.summary}`)

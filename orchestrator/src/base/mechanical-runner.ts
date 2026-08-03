@@ -440,6 +440,7 @@ export class MechanicalRunnerBase {
     }
 
     let anyFail = mainOutcome.kind === "fail";
+    let ranExtras: string[] = [];
     // Ekstra taramalar (örn. Faz 13: semgrep/gitleaks/csp/headers) BAĞIMSIZ + salt-okunur → PARALEL koş.
     // Saf hız kazancı; kod YAZMADIKLARI için çakışma riski yok (yalnız analiz). abort'ta hiç başlatma.
     // (Fazlar-ARASI paralel DEĞİL — o faz-makinesini/singleton'ı bozar; yalnız faz-İÇİ bağımsız taramalar.)
@@ -448,8 +449,22 @@ export class MechanicalRunnerBase {
         extras.map((extra) => this.runExtraScan(extra, timeout)),
       );
       if (extraResults.some((r) => r === "fail")) anyFail = true;
+      // GERÇEKTEN koşan (atlanmayan) ek taramaların adları — ana boyut atlandıysa kapsama kanıtı.
+      ranExtras = extras.filter((_, i) => extraResults[i] !== "skipped").map((e) => e.name);
     }
 
+    // 2026-08-03 (mahkeme bulgusu): ana tarama atlandı AMA ek taramalar gerçekten koştuysa, bu boyut
+    // ÖLÇÜLDÜ demektir. Bunu görünür kıl — yoksa doğrulama özeti her turda "DOĞRULANMADI" deyip gereksiz
+    // "aracı kur" işi açıyordu (node projelerinde `npm run perf` script'i yok → kalıcı sahte sarı).
+    if (mainOutcome.kind === "skipped" && ranExtras.length > 0) {
+      await appendAudit(opts.state.project_root, {
+        ts: Date.now(),
+        phase: opts.phaseId,
+        event: `phase-${opts.phaseId}-covered-by-extras`,
+        caller: "mycl-orchestrator",
+        detail: ranExtras.join(","),
+      }).catch(() => {});
+    }
     // Kombinasyon: main fail veya herhangi bir extra fail ise final fail.
     if (anyFail) {
       // YZLLM 2026-06-14: extra-scan BULGULARINI da stderr'e KAT — yoksa error-analysis yalnız main-scan çıktısını

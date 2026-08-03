@@ -18,7 +18,7 @@ import { runClaudeCli } from "./cli-run.js";
 import { runReadOnlySdkLoop } from "./sdk-read-loop.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { backendForRole, claudeKeyForRole, type MyclConfig } from "./config.js";
-import { emitChatMessage, emitClaudeStream, emitUserGuide, emitTechDoc, emitPhaseRunning, emitPhaseIdle, type ClaudeUsage } from "./ipc.js";
+import { emitChatMessage, emitClaudeStream, emitTechDoc, emitPhaseRunning, emitPhaseIdle, type ClaudeUsage } from "./ipc.js";
 import { log } from "./logger.js";
 import { templatePath } from "./phase-registry.js";
 import { resolvePublicDir } from "./public-dir.js";
@@ -569,7 +569,6 @@ export async function updateLivingDocs(
       const guide = withTrailingNewline(parsed.user_guide_tr_md);
       await fs.writeFile(join(state.project_root, USER_GUIDE_REL), guide, "utf-8");
       await writeProjectDoc(state, PROJECT_GUIDE_TR_REL, guide);
-      emitUserGuide(guide); // "Kılavuz" sekmesini güncelle (TR)
     }
     // YZLLM 2026-06-20: kullanım kılavuzunun İngilizce sürümü ayrı dosyaya.
     if (includeUserGuide && parsed.user_guide_en_md.trim()) {

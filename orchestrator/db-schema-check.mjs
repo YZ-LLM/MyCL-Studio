@@ -77,19 +77,29 @@ try {
   allow = [];
 }
 const active = findings.filter((f) => !allow.some((a) => a.file === f.file && a.kind === f.kind));
+// YANLIŞ ALARM YASAĞI: yalnız TARTIŞMASIZ (blocking) bulgular kapıyı düşürür. Yorumlanabilir olanlar
+// (ör. adı sır ima eden ama kesin olmayan sütun) yalnız RAPOR edilir — kullanıcı görür, akış durmaz.
+const blocking = active.filter((f) => f.blocking);
+const advisory = active.filter((f) => !f.blocking);
+const advisoryLines = advisory.length
+  ? "\n  bilgi (kapıyı düşürmez):\n" +
+    advisory.slice(0, 10).map((f) => `    · ${f.file}: ${f.detail}`).join("\n")
+  : "";
 
-if (active.length === 0) {
+if (blocking.length === 0) {
   process.stdout.write(
     `db-schema (${dimension}): temiz — ${files.length} şema/migration dosyası tarandı` +
       (findings.length > active.length ? ` (${findings.length - active.length} bulgu kullanıcı istisnasında)` : "") +
+      advisoryLines +
       "\n",
   );
   process.exit(0);
 }
 
 process.stdout.write(
-  `db-schema (${dimension}): ${active.length} bulgu (${files.length} dosya tarandı)\n` +
-    active.slice(0, 30).map((f) => `  - [${f.kind}] ${f.file}: ${f.detail}`).join("\n") +
+  `db-schema (${dimension}): ${blocking.length} bulgu (${files.length} dosya tarandı)\n` +
+    blocking.slice(0, 30).map((f) => `  - [${f.kind}] ${f.file}: ${f.detail}`).join("\n") +
+    advisoryLines +
     "\n",
 );
 process.exit(1);

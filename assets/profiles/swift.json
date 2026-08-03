@@ -41,7 +41,11 @@
     },
     "perf": {
       "reason": "swift_icin_standart_olcum_araci_yok",
-      "covered_by": []
+      "covered_by": [
+        "bundle-budget",
+        "perf-web",
+        "db-schema-perf"
+      ]
     },
     "simplify": {
       "reason": "swift_icin_olu_kod_araci_yok",

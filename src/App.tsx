@@ -1078,7 +1078,6 @@ function App() {
           ev.kind === "phases_list" ||
           ev.kind === "needed_phases" ||
           ev.kind === "features_value" ||
-          ev.kind === "user_guide" ||
           ev.kind === "tech_doc"
         ) {
           continue;

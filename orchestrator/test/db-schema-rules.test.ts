@@ -123,3 +123,42 @@ describe("analyzeDbSchemas", () => {
     expect(r.performance).toHaveLength(0);
   });
 });
+
+// MAHKEME DÜZELTMELERİ (2026-08-03): iki müfettiş bu yanlış alarmları buldu; hepsi kanıtla doğrulandı.
+describe("mahkeme: yanlış alarm düzeltmeleri", () => {
+  it("password_reset_token / password_salt / api_key_last_four kapıyı DÜŞÜRMEZ (yalnız bilgi)", () => {
+    for (const col of ["password_reset_token TEXT", "password_salt VARCHAR(255)", "api_key_last_four VARCHAR(4)"]) {
+      const out = analyzeDbFile(f(`CREATE TABLE t (\n id SERIAL PRIMARY KEY,\n ${col}\n);`));
+      const blocking = out.filter((x) => x.kind === "plaintext_password" && x.blocking);
+      expect(blocking, col).toHaveLength(0);
+    }
+  });
+
+  it("tam sır sütunu (password TEXT) HÂLÂ kapıyı düşürür", () => {
+    const out = analyzeDbFile(f("CREATE TABLE t (\n id SERIAL PRIMARY KEY,\n password TEXT\n);"));
+    expect(out.some((x) => x.kind === "plaintext_password" && x.blocking)).toBe(true);
+  });
+
+  it("kompozit UNIQUE'li ilişki tablosu birincil anahtar eşdeğeri sayılır", () => {
+    const sql =
+      "CREATE TABLE user_roles (\n user_id INT REFERENCES users(id),\n role_id INT REFERENCES roles(id),\n UNIQUE(user_id, role_id)\n);";
+    expect(analyzeDbFile(f(sql)).some((x) => x.kind === "table_without_pk")).toBe(false);
+  });
+
+  it("index BAŞKA dosyada tanımlıysa yanlış alarm YOK (Postgres CONCURRENTLY deseni)", () => {
+    const t = f("CREATE TABLE orders (\n id SERIAL PRIMARY KEY,\n user_id INT REFERENCES users(id)\n);", "001.sql");
+    const idx = f("CREATE INDEX CONCURRENTLY idx_orders_user ON orders(user_id);", "002.sql");
+    // Tek dosya bakılırsa bulgu üretir (eski davranış); tüm şema birlikte analiz edilince ÜRETMEZ.
+    expect(analyzeDbFile(t).some((x) => x.kind === "fk_without_index")).toBe(true);
+    expect(analyzeDbSchemas([t, idx]).performance.some((x) => x.kind === "fk_without_index")).toBe(false);
+  });
+
+  it("Prisma + MySQL: yabancı anahtar otomatik indexlenir → bulgu ÜRETİLMEZ", () => {
+    const model =
+      "model Order {\n  id Int @id\n  userId Int\n  user User @relation(fields: [userId], references: [id])\n}";
+    const mysql = { path: "prisma/schema.prisma", content: `datasource db {\n provider = "mysql"\n}\n${model}` };
+    const pg = { path: "prisma/schema.prisma", content: `datasource db {\n provider = "postgresql"\n}\n${model}` };
+    expect(analyzeDbSchemas([mysql]).performance.some((x) => x.kind === "fk_without_index")).toBe(false);
+    expect(analyzeDbSchemas([pg]).performance.some((x) => x.kind === "fk_without_index")).toBe(true);
+  });
+});

@@ -834,7 +834,13 @@ async function emitVerificationSummary(state: State): Promise<void> {
     const n = Number(nStr);
     const skip = thisIter.find((e) => e.event === `phase-${n}-skipped`);
     const done = thisIter.some((e) => e.event === `phase-${n}-complete`);
-    if (skip) {
+    // 2026-08-03 (mahkeme bulgusu): ana komut yoktu AMA stack bağımsız alt taramalar gerçekten koştuysa
+    // bu boyut ÖLÇÜLDÜ — "DOĞRULANMADI" demek ve "aracı kur" işi açmak yanlış alarm olurdu (node
+    // projelerinde `npm run perf` script'i yok; ölçümü bundle-budget + sayfa skoru yapıyor).
+    const covered = thisIter.find((e) => e.event === `phase-${n}-covered-by-extras`);
+    if (skip && covered) {
+      passed.push(`${dim} (${String(covered.detail ?? "alt taramalar")})`);
+    } else if (skip) {
       const reason = skip.detail ? String(skip.detail).split(" ")[0] : "";
       const label = `${dim}${reason ? ` (${reason})` : ""}`;
       // KESİN-N/A (ts-prune JS'te / profil null) → nötr; şüpheli/araç-eksik → sarı (false-green önleme).
@@ -6809,15 +6815,14 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       const passEvent = spec.required_audits[0] ?? `phase-${next}-pass`;
       const failEvent = spec.required_audits[1];
 
-      // Faz 17 = SIZMA TESTİ (YZLLM 2026-06-19 → 2026-06-22): Faz 17 pentesti OTOMATİK KOŞMAZ. Mekanik
-      // runner de koşmaz — runPhase17Pentest yalnız no-op bilgi mesajı basar; gerçek DAST (katana+nuclei)
-      // artık YALNIZ 🛡️ Güvenlik Taraması butonuyla MANUEL çalışır. Faz her zaman "complete".
+      // Faz 17 = SIZMA TESTİ (2026-08-03 güncel): pentest artık OTOMATİK koşar (hızlı profil — yalnız
+      // yüksek/kritik açıklar, ~1-2 dk). Tam kapsamlı tarama 🛡️ butonunda kalır. Koşamazsa (araç yok,
+      // uygulama kapalı) "phase-17-skipped" yazılır → özet "DOĞRULANMADI" der, asla "geçti" demez.
       if (next === 17) {
         const { status: pentestStatus, partial } = await runPhase17Pentest(state, cfg);
         disarmRollback();
         // `partial` (bulgu>0 veya timeout) → "soft_complete_after_fail" → verdict PARTIAL (sahte yeşil yok).
-        // ŞU AN ERİŞİLEMEZ: otomatik pentest kalktığından runPhase17Pentest her zaman partial=false döner;
-        // dal, otomatik tetik geri gelirse diye korunuyor. Pipeline yine tamamlanır (phase-17-complete).
+        // Bulgu varsa partial=true döner → "soft_complete_after_fail" → hüküm KISMİ (sahte yeşil yok).
         await appendAuditModule(state.project_root, {
           ts: Date.now(),
           phase: 17,
@@ -7556,8 +7561,8 @@ async function runPhase17Pentest(
   }
   emitChatMessage(
     "system",
-    "🔪 Faz 17 — sizma testi kosuyor (hizli profil: yalniz yuksek/kritik acikler, ~1-2 dk). " +
-      "Tam kapsamli tarama icin 🛡️ Guvenlik Taramasi butonunu kullanabilirsin.",
+    "🔪 Faz 17 — sızma testi koşuyor (hızlı profil: yalnız yüksek ve kritik açıklar, ~1-2 dk). " +
+      "Tam kapsamlı tarama için 🛡️ Güvenlik Taraması butonunu kullanabilirsin.",
   );
   setPentestActive(true);
   let res;
@@ -7575,17 +7580,17 @@ async function runPhase17Pentest(
       caller: "mycl-orchestrator",
       detail: `scan_failed ${res.error ?? ""}`.trim(),
     }).catch(() => {});
-    emitChatMessage("system", `⚠️ Sizma testi tamamlanamadi — bu boyut DOGRULANMADI.\n${res.summary_tr}`);
+    emitChatMessage("system", `⚠️ Sızma testi tamamlanamadı — bu boyut DOĞRULANMADI.\n${res.summary_tr}`);
     return { status: "complete", partial: false };
   }
   const found = res.summary?.findings.length ?? res.findings_count ?? 0;
   if (found > 0) {
     emitChatMessage("system", res.summary_tr);
-    await enqueueSecurityFindings(state.project_root, res.summary, "Faz 17 (hizli sizma testi)");
+    await enqueueSecurityFindings(state.project_root, res.summary, "Faz 17 (hızlı sızma testi)");
     // partial=true → "soft_complete_after_fail" → hukum KISMI (sahte yesil yok).
     return { status: "complete", partial: true };
   }
-  emitChatMessage("system", `✅ Sizma testi (hizli profil) temiz — yuksek/kritik acik bulunamadi.`);
+  emitChatMessage("system", "✅ Sızma testi (hızlı profil) temiz — yüksek ya da kritik açık bulunamadı.");
   return { status: "complete", partial: false };
 }
 

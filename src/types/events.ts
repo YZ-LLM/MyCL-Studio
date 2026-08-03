@@ -73,7 +73,6 @@ export type OrchestratorEvent =
   | TaskQueueLoadedEvent
   | TaskQueueChangedEvent
   | FeaturesValueEvent
-  | UserGuideEvent
   | TechDocEvent
   | SpecReviewEvent
   | OpenProjectRequestEvent
@@ -179,13 +178,6 @@ export interface FeaturesValueEvent {
       parallel_task_batching?: boolean;
     };
   };
-}
-
-/** v15.11: UI kullanma kılavuzu (.mycl/user-guide.md) içeriği — "Kılavuz"
- * sekmesi/modalında gösterilir. Açılışta (varsa) + her güncellemede push edilir. */
-export interface UserGuideEvent {
-  kind: "user_guide";
-  data: { content: string };
 }
 
 /** YZLLM 2026-06-15: Proje teknik dökümanı (.mycl/tech-doc.md) içeriği —

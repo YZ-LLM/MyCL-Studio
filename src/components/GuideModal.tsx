@@ -1,9 +1,8 @@
-// GuideModal — v15.11: UI kullanma kılavuzu (.mycl/user-guide.md) görüntüleyici.
+// GuideModal — markdown içerik görüntüleyici (salt okunur popup).
 //
-// Composer altındaki "📖 Kılavuz" butonu açar. İçerik backend'den `user_guide`
-// event'i ile gelir (açılışta varsa + MyCL projeye dokundukça güncellenir).
-// Son-kullanıcı uygulamayı bu kılavuzdan öğrenir. Markdown render minimal
-// (harici lib yok): başlık / liste / paragraf.
+// 2026-08-03 GÜNCEL KULLANIM: "Proje Dökümanı" (.mycl/tech-doc.md) ve "Spec İncelemesi" popup'ları.
+// Son kullanıcının kullanım kılavuzu artık HEDEF projenin İÇİNDE (docs/ + uygulama içi "?" penceresi),
+// MyCL arayüzünde ayrı bir "Kılavuz" butonu YOK. Markdown render minimal (harici lib yok).
 
 import { useEscapeToClose } from "../hooks/useDismissable";
 import type { ReactNode } from "react";

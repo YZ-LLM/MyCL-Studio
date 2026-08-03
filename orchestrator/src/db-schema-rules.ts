@@ -33,15 +33,47 @@ export interface DbSchemaFile {
   content: string;
 }
 
+/**
+ * BLOKLAYAN eşleşme: sütun adı TAM olarak bir sır alanı (mahkeme bulgusu — alt dize eşleşmesi
+ * `password_reset_token`, `password_salt`, `password_updated_at`, `api_key_last_four` gibi MEŞRU
+ * sütunları yanlışlıkla blokluyordu; kullanıcının en sert kuralı yanlış alarmı yasaklıyor).
+ */
+const SECRET_COLUMN_EXACT = new Set([
+  "password",
+  "passwd",
+  "parola",
+  "secret",
+  "api_key",
+  "apikey",
+  "token",
+  "access_token",
+  "refresh_token",
+  "private_key",
+]);
+/** Sır İMASI taşıyan ama kesin olmayan adlar → yalnız RAPOR (kapıyı düşürmez). */
 const SECRET_COLUMN_HINTS = ["password", "passwd", "parola", "secret", "api_key", "apikey", "token"];
-/** Hash'lendiğini gösteren adlandırmalar — bunlar düz metin DEĞİLDİR. */
-const HASHED_HINTS = ["hash", "digest", "encrypted", "bcrypt", "argon", "scrypt", "sha256"];
+/** Hash'lendiğini/güvenli olduğunu gösteren adlandırmalar — bunlar düz metin DEĞİLDİR. */
+const HASHED_HINTS = [
+  "hash", "digest", "encrypted", "bcrypt", "argon", "scrypt", "sha256",
+  "salt", "last_four", "masked", "updated_at", "created_at", "expires", "reset",
+];
 
-/** SAF: tek dosyayı analiz et. */
-export function analyzeDbFile(file: DbSchemaFile): DbFinding[] {
+/** Çok dosyalı bağlam: index'ler AYRI migration'da tanımlanmış olabilir (mahkeme bulgusu). */
+export interface DbAnalysisContext {
+  /** TÜM şema dosyalarının birleşik metni — index araması burada yapılır. */
+  allText?: string;
+  /** Prisma `datasource.provider` (mysql/postgresql/sqlite…) — MySQL yabancı anahtarı OTOMATİK indexler. */
+  prismaProvider?: string;
+}
+
+/** SAF: tek dosyayı analiz et. `ctx.allText` verilirse index araması tüm şemada yapılır. */
+export function analyzeDbFile(file: DbSchemaFile, ctx: DbAnalysisContext = {}): DbFinding[] {
   const out: DbFinding[] = [];
   const lower = file.content.toLowerCase();
   const isPrisma = file.path.toLowerCase().endsWith(".prisma");
+  // Index'ler başka bir migration dosyasında olabilir (Postgres'te CREATE INDEX CONCURRENTLY ayrı
+  // migration'da yapılır — resmi öneri). Tek dosyaya bakmak kalıcı yanlış alarm üretiyordu.
+  const indexHaystack = ctx.allText ?? file.content;
 
   // 1) GÜVENLİK — parola/gizli alan düz metin mi? (tartışmasız: "password TEXT" hash imasi yok)
   for (const line of file.content.split("\n")) {
@@ -49,17 +81,21 @@ export function analyzeDbFile(file: DbSchemaFile): DbFinding[] {
     if (l.startsWith("--") || l.startsWith("//") || l.startsWith("#")) continue;
     const hasSecret = SECRET_COLUMN_HINTS.some((h) => l.includes(h));
     if (!hasSecret) continue;
-    if (HASHED_HINTS.some((h) => l.includes(h))) continue; // password_hash → temiz
+    if (HASHED_HINTS.some((h) => l.includes(h))) continue; // password_hash / password_salt → temiz
     const isTextCol = /\b(text|varchar|char|string)\b/.test(l);
-    if (isTextCol) {
-      out.push({
-        kind: "plaintext_password",
-        dimension: "security",
-        blocking: true,
-        file: file.path,
-        detail: `gizli alan düz metin saklanıyor görünüyor: ${line.trim().slice(0, 100)}`,
-      });
-    }
+    if (!isTextCol) continue;
+    // Sütun adı TAM sır alanı mı? Öyleyse tartışmasız (bloklar); yalnız ima taşıyorsa RAPOR.
+    const colName = /^["'`]?(\w+)["'`]?\s/.exec(l)?.[1] ?? "";
+    const exact = SECRET_COLUMN_EXACT.has(colName);
+    out.push({
+      kind: "plaintext_password",
+      dimension: "security",
+      blocking: exact,
+      file: file.path,
+      detail: exact
+        ? `gizli alan düz metin saklanıyor: ${line.trim().slice(0, 100)}`
+        : `gizli alan olabilir, elle bak (bloklamaz): ${line.trim().slice(0, 100)}`,
+    });
   }
 
   // 2) GÜVENLİK/BÜTÜNLÜK — birincil anahtarsız tablo (tartışmasız: satır kimliği yok → güncelleme/silme riskli)
@@ -67,7 +103,10 @@ export function analyzeDbFile(file: DbSchemaFile): DbFinding[] {
     for (const m of file.content.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?["'`]?(\w+)["'`]?\s*\(([\s\S]*?)\);/gi)) {
       const [, name, body] = m;
       const b = (body ?? "").toLowerCase();
-      if (!b.includes("primary key") && !b.includes("serial primary")) {
+      // UNIQUE(...) kısıtı satır kimliğini garanti eder → birincil anahtar EŞDEĞERİ (mahkeme bulgusu:
+      // surrogate id'siz, kompozit UNIQUE ile tasarlanan ilişki tabloları meşrudur, bloklanmamalı).
+      const hasPk = b.includes("primary key") || b.includes("serial primary") || /\bunique\s*\(/.test(b);
+      if (!hasPk) {
         out.push({
           kind: "table_without_pk",
           dimension: "security",
@@ -80,7 +119,7 @@ export function analyzeDbFile(file: DbSchemaFile): DbFinding[] {
       for (const fk of b.matchAll(/(\w+)\s+[^,]*references\s+/g)) {
         const col = fk[1];
         if (!col) continue;
-        const hasIndex = new RegExp(`create\\s+(unique\\s+)?index[^;]*\\(\\s*["'\`]?${col}`, "i").test(file.content);
+        const hasIndex = new RegExp(`create\\s+(unique\\s+)?index[^;]*\\(\\s*["'\`]?${col}`, "i").test(indexHaystack);
         if (!hasIndex && !b.includes(`primary key (${col})`)) {
           out.push({
             kind: "fk_without_index",
@@ -107,7 +146,9 @@ export function analyzeDbFile(file: DbSchemaFile): DbFinding[] {
         });
       }
       // Prisma ilişki alanı + index yoksa performans bulgusu.
-      for (const rel of b.matchAll(/@relation\(fields:\s*\[(\w+)\]/g)) {
+      // MySQL/CockroachDB yabancı anahtarı OTOMATİK indexler (InnoDB) → orada bu kural YANLIŞ ALARM olur.
+      const autoIndexed = ["mysql", "cockroachdb"].includes((ctx.prismaProvider ?? "").toLowerCase());
+      for (const rel of autoIndexed ? [] : b.matchAll(/@relation\(fields:\s*\[(\w+)\]/g)) {
         const col = rel[1];
         if (!col) continue;
         if (!b.includes(`@@index([${col}`) && !b.includes(`@unique`) && !b.includes(`@@unique([${col}`)) {
@@ -147,7 +188,11 @@ export function analyzeDbSchemas(files: readonly DbSchemaFile[]): {
   security: DbFinding[];
   performance: DbFinding[];
 } {
-  const all = files.flatMap((f) => analyzeDbFile(f));
+  const allText = files.map((f) => f.content).join("\n");
+  const prismaProvider = /provider\s*=\s*["'](\w+)["']/.exec(
+    files.find((f) => f.path.toLowerCase().endsWith(".prisma"))?.content ?? "",
+  )?.[1];
+  const all = files.flatMap((f) => analyzeDbFile(f, { allText, prismaProvider }));
   // Aynı bulgunun tekrarı (aynı dosya + tür + detay) tekilleştirilir.
   const seen = new Set<string>();
   const uniq = all.filter((f) => {
