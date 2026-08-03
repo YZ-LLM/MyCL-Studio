@@ -75,7 +75,7 @@ npm install || { echo "✗ npm install (kök) başarısız"; exit 1; }
 npm --prefix orchestrator install || { echo "✗ npm install (orchestrator) başarısız"; exit 1; }
 ok "node bağımlılıkları kuruldu (kök + orchestrator)"
 
-# ── 5. Güvenlik araçları (nuclei, katana, semgrep, gitleaks) ──
+# ── 5. Güvenlik araçları (nuclei, katana, semgrep, gitleaks, osv-scanner) ──
 say "5. Güvenlik araçları"
 install_tool() {  # bin brew_pkg [go_pkg]
   local bin="$1" brew_pkg="$2" go_pkg="${3:-}"
@@ -88,6 +88,9 @@ install_tool() {  # bin brew_pkg [go_pkg]
 install_tool nuclei   nuclei   "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
 install_tool katana   katana   "github.com/projectdiscovery/katana/cmd/katana@latest"
 install_tool gitleaks gitleaks "github.com/gitleaks/gitleaks/v8@latest"
+# osv-scanner: STACK BAĞIMSIZ bağımlılık zafiyeti taraması (dart/deno/flutter/swift gibi kendi denetim
+# aracı olmayan stack'lerin tek kapsamı — 2026-08-03).
+install_tool osv-scanner osv-scanner "github.com/google/osv-scanner/v2/cmd/osv-scanner@latest"
 # semgrep: go paketi yok → brew (mac) / pipx|pip (linux)
 if have semgrep; then ok "semgrep (zaten kurulu)"
 elif [ "$OS" = "Darwin" ] && have brew && brew install semgrep; then ok "semgrep (brew)"

@@ -91,7 +91,21 @@ export function isNotApplicableSkip(reason: string | undefined | null): boolean 
 export function isToolInstallableSkip(reason: string | undefined | null): boolean {
   if (!reason) return false;
   const first = String(reason).trim().split(/\s+/)[0];
-  return first === "missing_command" || first === "stub_script";
+  if (first === "missing_command" || first === "stub_script") return true;
+  // 2026-08-03: profilde komut BOŞ olması iki ayrı şey olabilir —
+  //  (a) gerekçesi yazılmış ve başka bir tarayıcı kapsıyor  → nötr, iş açma (yanlış alarm olurdu)
+  //  (b) gerekçesiz boşluk (profil eksik)                    → GERÇEK eksik → "aracı kur" işi aç
+  // Ayrım skip detayına yazılan `gap=` / `covered=` alanlarından okunur (aşağıdaki sınıflandırıcı).
+  if (first === "profile_resolve_null") return classifyProfileNullDetail(String(reason)) === "installable_gap";
+  return false;
+}
+
+/** SAF: `profile_resolve_null gap=<neden> covered=<n>` detayını sınıflandır. */
+export function classifyProfileNullDetail(detail: string): "not_applicable" | "installable_gap" {
+  const covered = /covered=(\d+)/.exec(detail)?.[1];
+  const hasGap = detail.includes("gap=");
+  // Gerekçe VAR ve en az bir tarayıcı kapsıyorsa nötr; aksi halde gerçek boşluk.
+  return hasGap && Number(covered ?? 0) > 0 ? "not_applicable" : "installable_gap";
 }
 
 // OE denetimi (YZLLM onayı 2026-07-29): DEĞİŞMEYEN skip mesajları chat'e aynı neden sürdükçe BİR kez
@@ -134,6 +148,23 @@ export function shellQuote(p: string): string {
 /** `{files}` placeholder'ını shell-safe scope yollarıyla genişlet. */
 export function expandFilesPlaceholder(template: string, files: string[]): string {
   return template.split("{files}").join(files.map(shellQuote).join(" "));
+}
+
+/** Profildeki `command_gaps` girdisini oku (komut null ise NEDEN + neyle kapsanıyor). null = gerekçe yok. */
+export async function resolveCommandGap(
+  stack: State["stack"] & string,
+  spec: MechanicalCommandSpec,
+): Promise<{ reason: string; covered_by?: string[] } | null> {
+  if (typeof spec === "string" || spec.type !== "profile_key") return null;
+  try {
+    const profile = (await loadProfile(stack)) as unknown as {
+      command_gaps?: Record<string, { reason?: string; covered_by?: string[] }>;
+    };
+    const g = profile?.command_gaps?.[spec.key];
+    return g?.reason ? { reason: g.reason, covered_by: g.covered_by } : null;
+  } catch {
+    return null; // profil okunamadı → gerekçe yok say (kuşkuda GERÇEK boşluk → görünür kalır)
+  }
 }
 
 export async function resolveMechanicalCmd(
@@ -314,11 +345,12 @@ export class MechanicalRunnerBase {
     // Ana scan loop'u (mevcut behavior) — sonuç pass/fail/skipped.
     const mainOutcome = await this.runMainScan(timeout);
 
-    // Extra scans (opsiyonel — Faz 13 semgrep, vs.) — main scan sonucu ne
-    // olursa olsun çalışır (skipped hariç; scan_cmd missing ise extra'ları da
-    // koşturmak anlamsız). Her extra'nın kendi audit event'i; final outcome
-    // main + extra'ların kombinasyonu.
-    if (mainOutcome.kind === "skipped") {
+    // Extra scans (opsiyonel — Faz 13 semgrep, vs.) — main scan sonucu ne olursa olsun çalışır.
+    // 2026-08-03 DÜZELTME: eskiden ana tarama atlanınca ek taramalar da atlanıyordu. Faz 13'te ana komut
+    // stack profilinden gelir ve dört stack'te (dart/deno/flutter/swift) BOŞ → o projelerde semgrep dahil
+    // TÜM güvenlik taramaları hiç koşmadı (sıfır güvenlik doğrulaması). Ek taramalar stack'ten BAĞIMSIZ
+    // olduğu için ana komutun yokluğu onları geçersiz kılmaz. Bayrak opt-in → diğer fazlarda davranış aynı.
+    if (mainOutcome.kind === "skipped" && !opts.mechanical.run_extras_when_main_skipped) {
       return mainOutcome;
     }
 
@@ -558,11 +590,17 @@ export class MechanicalRunnerBase {
       // mesaj. Stack tespit edilmediyse "proje stack'i tespit edilemedi",
       // tespit edildi ama profil/key yoksa "bu stack için komut tanımlı değil".
       const stackDetected = Boolean(opts.state.stack);
+      // 2026-08-03: profilde komut yoksa GEREKÇE var mı? (command_gaps) — gerekçeli ve başka bir tarayıcıyla
+      // kapsanan boşluk NÖTR sunulur; gerekçesiz boşluk GERÇEK eksiktir → otomatik "aracı kur" işi açılır.
+      const gap = stackDetected ? await resolveCommandGap(opts.state.stack!, opts.mechanical.scan_cmd) : null;
       const auditDetail = stackDetected
-        ? `profile_resolve_null stack="${opts.state.stack}"`
+        ? `profile_resolve_null stack="${opts.state.stack}"` +
+          (gap ? ` gap=${gap.reason} covered=${gap.covered_by?.length ?? 0}` : "")
         : `stack_not_detected`;
       const userMsg = stackDetected
-        ? `⏭ ${this.label} atlandı — bu proje türü için tanımlı komut yok.`
+        ? gap && (gap.covered_by?.length ?? 0) > 0
+          ? `➖ ${this.label}: bu proje türünde ayrı bir araç yok — bu boyut ${gap.covered_by!.join(", ")} tarafından kapsanıyor.`
+          : `⏭ ${this.label} atlandı — bu proje türü için tanımlı komut yok. Bu boyut DOĞRULANMADI.`
         : `⏭ ${this.label} atlandı — projenin teknoloji türü tespit edilemedi.`;
       await appendAudit(opts.state.project_root, {
         ts: Date.now(),

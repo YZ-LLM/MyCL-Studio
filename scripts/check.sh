@@ -69,7 +69,7 @@ fi
 step "7/7 setup.sh dış-araç kapsamı (eksik kalmasın)"
 req=$(grep -rhoE 'toolInstalled\("[a-z0-9_-]+"\)' orchestrator/src 2>/dev/null \
       | sed -E 's/.*"([a-z0-9_-]+)".*/\1/' | sort -u)
-req="$req semgrep gitleaks playwright cargo node"  # toolInstalled kullanmayan sabit baz araçlar
+req="$req semgrep gitleaks playwright cargo node osv-scanner"  # toolInstalled kullanmayan sabit baz araçlar
 miss=""
 for t in $req; do grep -qw "$t" setup.sh 2>/dev/null || miss="$miss $t"; done
 if [ -z "$miss" ]; then

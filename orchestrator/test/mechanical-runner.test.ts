@@ -11,6 +11,7 @@ import {
   shellQuote,
   isNotApplicableSkip,
   isToolInstallableSkip,
+  classifyProfileNullDetail,
   shouldAnnounceSkip,
   clearAnnouncedSkip,
 } from "../src/base/mechanical-runner.js";
@@ -627,10 +628,26 @@ describe("isToolInstallableSkip (araç kurulumuyla oto-çözülebilir skip)", ()
   it("MyCL'in kendi bug'ı / iptal / profil-null / N/A / boş → false (iş AÇILMAZ)", () => {
     expect(isToolInstallableSkip("mycl_tool_broken")).toBe(false); // MyCL paketleme bug'ı — proje işi değil
     expect(isToolInstallableSkip("aborted")).toBe(false); // kullanıcı iptali
-    expect(isToolInstallableSkip("profile_resolve_null")).toBe(false); // stack boyutu tanımlamıyor — profil işi
     expect(isToolInstallableSkip("ts_tool_js_project")).toBe(false); // N/A sınıfı
     expect(isToolInstallableSkip(undefined)).toBe(false);
     expect(isToolInstallableSkip("")).toBe(false);
+  });
+
+  // 2026-08-03: profilde komutun BOŞ olması iki ayrı şeydi ve ikisi de sessizce "iş açma" sayılıyordu.
+  // Artık gerekçe (command_gaps) ayırıyor: kapsanan boşluk nötr, gerekçesiz boşluk GERÇEK eksik.
+  it("profil boşluğu: gerekçesiz → iş AÇILIR, başka tarayıcı kapsıyorsa → açılmaz", () => {
+    // Gerekçe yok (profil eksik) → gerçek boşluk.
+    expect(isToolInstallableSkip('profile_resolve_null stack="python-pip"')).toBe(true);
+    // Gerekçe var ama hiçbir tarayıcı kapsamıyor → yine gerçek boşluk (dürüst sarı + iş).
+    expect(isToolInstallableSkip("profile_resolve_null gap=arac_yok covered=0")).toBe(true);
+    // Gerekçe var + başka tarayıcı kapsıyor (örn. bağımlılık zafiyeti osv-scanner'da) → nötr, iş yok.
+    expect(isToolInstallableSkip("profile_resolve_null gap=ekosistem_araci_yok covered=1")).toBe(false);
+  });
+
+  it("classifyProfileNullDetail: kapsama sayısı kararı belirler", () => {
+    expect(classifyProfileNullDetail("profile_resolve_null gap=x covered=2")).toBe("not_applicable");
+    expect(classifyProfileNullDetail("profile_resolve_null gap=x covered=0")).toBe("installable_gap");
+    expect(classifyProfileNullDetail('profile_resolve_null stack="go"')).toBe("installable_gap");
   });
 });
 

@@ -34,5 +34,21 @@
   "deps_dir": ".dart_tool",
   "missing_deps_signatures": [
     "Couldn't resolve the package\\s+['\"]"
-  ]
+  ],
+  "command_gaps": {
+    "security": {
+      "reason": "flutter_ekosisteminde_denetim_araci_yok",
+      "covered_by": [
+        "osv-scanner"
+      ]
+    },
+    "perf": {
+      "reason": "flutter_perf_gercek_cihaz_ister",
+      "covered_by": []
+    },
+    "simplify": {
+      "reason": "flutter_icin_olu_kod_araci_yok",
+      "covered_by": []
+    }
+  }
 }

@@ -31,5 +31,25 @@
   "manifest_files": [
     "Package.swift"
   ],
-  "missing_deps_signatures": []
+  "missing_deps_signatures": [],
+  "command_gaps": {
+    "security": {
+      "reason": "swift_ekosisteminde_denetim_araci_yok",
+      "covered_by": [
+        "osv-scanner"
+      ]
+    },
+    "perf": {
+      "reason": "swift_icin_standart_olcum_araci_yok",
+      "covered_by": []
+    },
+    "simplify": {
+      "reason": "swift_icin_olu_kod_araci_yok",
+      "covered_by": []
+    },
+    "outdated": {
+      "reason": "swift_package_outdated_yok",
+      "covered_by": []
+    }
+  }
 }

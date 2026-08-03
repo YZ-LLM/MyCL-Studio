@@ -337,6 +337,13 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
       scan_cmd: { type: "profile_key", key: "security" },
       max_rescans: 0,
       skip_unless: "always",
+      // 2026-08-03 KRİTİK DÜZELTME: ana komut (npm audit / pip-audit / cargo audit …) stack profilinden
+      // gelir ve dört stack'te (dart/deno/flutter/swift) BOŞ. Eskiden ana tarama atlanınca runner hemen
+      // dönüyordu → o projelerde semgrep, gizli anahtar taraması, güvenlik başlıkları, içerik güvenlik
+      // politikası dahil TÜM ek taramalar da hiç koşmuyordu: sıfır güvenlik doğrulaması. Ek taramalar
+      // stack'ten BAĞIMSIZ olduğu için ana komutun yokluğu onları geçersiz kılmaz → koşsunlar.
+      // Ana boyutun atlandığı doğrulama özetinde GÖRÜNÜR kalır (sahte "tarandı" yok).
+      run_extras_when_main_skipped: true,
       // SAST: semgrep ile kod-seviyesi güvenlik tarama. Stack-agnostic
       // (Python, JS, Go, Java, ...). Tool yoksa skip; security yine koşar.
       // v15.7 (2026-05-27): Batch A3 — custom security rules: `semgrep --config p/security-audit`
@@ -356,6 +363,17 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           // import eder. Eşik severity<=40 blocking ("MEDIUM da bloklasın" — 2026-06-04).
           name: "csp-evaluator",
           cmd: `node "${securityToolPath("csp-check.mjs")}"`,
+        },
+        {
+          // 2026-08-03: STACK BAĞIMSIZ bağımlılık zafiyeti taraması (osv.dev). Ana `security` komutu
+          // stack profilinden gelir ve dört stack'te (dart/deno/flutter/swift) TANIMSIZ → o projelerde
+          // bağımlılık zafiyeti hiç taranmıyordu. osv-scanner pubspec.lock / Package.resolved /
+          // composer.lock / go.mod / Cargo.lock / package-lock.json / requirements.txt … hepsini okur.
+          // Sarmalayıcı script: hiçbir kilit dosyası tanınmazsa "0 bulgu"yu TEMİZ SAYMAZ (exit 3 → atlama).
+          name: "osv-scanner",
+          cmd: `node "${securityToolPath("osv-scan.mjs")}" .`,
+          // exit 3 = taranacak kaynak yok → bulgu değil, atlama (sahte temiz koruması).
+          tool_error_codes: [3],
         },
         {
           // Güvenlik-baseline (Unit 3): secret-scan. Hard-coded API key/token/private-key.

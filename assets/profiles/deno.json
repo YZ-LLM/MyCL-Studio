@@ -31,5 +31,21 @@
     "deno.json",
     "deno.jsonc"
   ],
-  "missing_deps_signatures": []
+  "missing_deps_signatures": [],
+  "command_gaps": {
+    "security": {
+      "reason": "deno_ekosisteminde_denetim_araci_yok",
+      "covered_by": [
+        "osv-scanner"
+      ]
+    },
+    "perf": {
+      "reason": "deno_bench_projeye_ozel_kurulum_ister",
+      "covered_by": []
+    },
+    "simplify": {
+      "reason": "deno_icin_olu_kod_araci_yok",
+      "covered_by": []
+    }
+  }
 }

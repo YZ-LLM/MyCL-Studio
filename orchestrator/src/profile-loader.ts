@@ -108,6 +108,9 @@ const KNOWN_PROFILE_KEYS: ReadonlySet<string> = new Set([
   "build_tool",
   "deps_dir",
   "missing_deps_signatures",
+  // 2026-08-03: profilde komut NEDEN boş + boşluk neyle karşılanıyor (doğrulama özeti bunu okur;
+  // gerekçesiz boşluk = gerçek eksik → otomatik "aracı kur" işi, gerekçeli boşluk = nötr).
+  "command_gaps",
 ]);
 
 /**

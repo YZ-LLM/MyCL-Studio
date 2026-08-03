@@ -238,6 +238,19 @@ export interface MechanicalConfig {
    *  has_web_target: web VEYA API (HTTP sunan) proje — sızma testi UI gerektirmez. */
   skip_unless?: "has_ui" | "has_web_target" | "has_nfr" | "has_database" | "always";
   /**
+   * ANA TARAMA ATLANSA BİLE ek taramalar koşsun mu (2026-08-03).
+   *
+   * KÖK NEDEN: `run()` "ana tarama skipped → hemen dön" diyordu. Faz 13'te ana komut stack profilinden
+   * gelir ve dart/deno/flutter/swift profillerinde BOŞ → ana tarama atlanıyor → SEMGREP dahil TÜM ek
+   * güvenlik taramaları (gizli anahtar, veri temizliği, güvenlik başlıkları, içerik güvenlik politikası)
+   * hiç koşmuyordu. Yani o dört stack'te güvenlik doğrulaması SIFIRDI — kullanıcının "hiçbir katmanda
+   * açık olmasın" hedefinin tam tersi.
+   *
+   * Bayrak OPT-IN (varsayılan false = eski davranış birebir): yalnız ek taramaları stack'ten BAĞIMSIZ
+   * olan fazlar (Faz 13) açar. Ana taramanın atlandığı GÖRÜNÜR kalmaya devam eder.
+   */
+  run_extras_when_main_skipped?: boolean;
+  /**
    * Opsiyonel ek scan komutları — Faz 13'te npm audit'in yanında semgrep
    * (SAST) gibi araçları paralel çalıştırmak için. Her entry için ayrı
    * audit event'i (`{name}-pass` / `{name}-fail` / `{name}-skipped`),
