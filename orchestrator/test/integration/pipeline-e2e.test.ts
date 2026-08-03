@@ -343,12 +343,24 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     // olabilir) → token çizelgesinde Faz 10-17 de görünür ("Faz 9 sonrası yok" bug'ı fix).
     expect(costs.filter((c) => c.phase < 10).every((c) => c.input_tokens > 0)).toBe(true);
     expect(costs.some((c) => c.phase >= 10), "mekanik fazlar (10-17) da cost'ta yazılmalı").toBe(true);
-    // Headless harness verdict'i: tüm gate'ler yeşil (mock exec code 0) → PASS.
+    // Headless harness verdict'i: hiçbir gate DÜŞMEMELİ (mock exec code 0) ve pipeline TAMAMLANMALI.
     // Bu, harness-verdict'in GERÇEK pipeline audit'i üzerinde doğru çalıştığının kanıtı.
     const v = computeVerdict(events);
-    expect(v.verdict, JSON.stringify(v.gateFailures)).toBe("PASS");
+    expect(v.gateFailures, JSON.stringify(v.gateFailures)).toHaveLength(0);
     expect(v.completed).toBe(true);
-    expect(v.exitCode).toBe(0);
+    // 2026-08-03: hüküm ORTAMA bağlı olabilir — Faz 17 sızma testi artık gerçekten koşuyor; `nuclei`
+    // kurulu DEĞİLSE (CI makinesi) o boyut dürüstçe "DOĞRULANMADI" olur ve hüküm KISMİ'ye düşer.
+    // Bu doğru davranış; testin amacı "omurga 2→17 çalışıyor mu", "bu makinede güvenlik aracı var mı" DEĞİL.
+    // Bu yüzden KISMİ yalnız güvenlik aracı eksikliğinden geliyorsa kabul edilir.
+    const securityToolMissing = events.some(
+      (e) => e.phase === 17 && e.event === "phase-17-skipped" && String(e.detail ?? "").includes("missing_command"),
+    );
+    if (securityToolMissing) {
+      expect(v.verdict, "araç eksik → dürüstçe KISMİ").toBe("PARTIAL");
+    } else {
+      expect(v.verdict, JSON.stringify(v.gateFailures)).toBe("PASS");
+      expect(v.exitCode).toBe(0);
+    }
   }, 65_000);
 
   it("codegen-dahil: Faz 5 (UI) + Faz 8 (TDD) gerçekten koşar (Phase 5 fix doğrulanır)", async () => {
