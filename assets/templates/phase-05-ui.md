@@ -269,12 +269,14 @@ identifiers, routes and logs stay English.
 
 Every project MUST embed an **in-app usage guide** so the end user can ALWAYS learn
 how to use it (kullanıcı her zaman öğrenebilsin — NOT a PDF, NOT a separate file).
-MyCL produces the data at `.mycl/help-pages.json` (array of
-`{route, title_tr, title_en, body_tr, body_en, updated_at}` — **BILINGUAL**) + the
-manuals at `.mycl/user-guide.md` (Turkish) and `.mycl/user-guide.en.md` (English);
-screenshots are written **per language** to `public/docs/guide-shots/<lang>/<route>.png`
-where `<lang>` ∈ `tr`,`en`. **Read these and BUILD** (single source of truth — do NOT
-hardcode guide text). Everything below follows the **current UI language** (see Dil Sistemi):
+MyCL writes the guide data **into the project itself** at `<static>/docs/help-pages.json`
+(array of `{route, title_tr, title_en, body_tr, body_en, updated_at}` — **BILINGUAL**),
+the manuals at `docs/kullanim-kilavuzu.md` (Turkish) + `docs/user-guide.md` (English),
+and screenshots **per language** at `<static>/docs/guide-shots/<lang>/<route>.png`
+(`<lang>` ∈ `tr`,`en`). `<static>` is the project's static-asset dir (`public/` for most
+stacks, `static/` for SvelteKit). **Read these and BUILD** (single source of truth — do NOT
+hardcode guide text). MyCL also keeps working copies under `.mycl/`, but the app MUST use
+the in-project paths so the guide still works once the project is deployed. Everything below follows the **current UI language** (see Dil Sistemi):
 
 - **`/kilavuz` page** (or stack-equivalent). Nav link visible on every page. One
   section per `help-pages.json` task, **IN THIS ORDER (YZLLM 2026-06-20: ilgili resim konunun ÜSTÜNde):**
@@ -295,19 +297,19 @@ hardcode guide text). Everything below follows the **current UI language** (see 
   tab defaulting to the current UI language is pre-selected; the user may switch tabs.
   Footer **link to `/kilavuz#<task>`** (page → guide direction). If no entry matches the
   current route, the "?" may be hidden there.
-- **Single source + no duplication.** Drive everything from `.mycl/help-pages.json` +
-  `.mycl/user-guide.md`. One shared `HelpButton`/`GuidePopup` component wired into the
+- **Single source + no duplication.** Drive everything from `/docs/help-pages.json`
+  (fetched at runtime). One shared `HelpButton`/`GuidePopup` component wired into the
   global layout (every route gets the "?") + one `/kilavuz` page. Discovery-first /
   duplicate-file rule applies. TR kod-yorumları: yeni Kılavuz/Yardım bileşeni yorumları
   Türkçe.
-- **CLIENT/SERVER AYRIMI — `fs`'i client bundle'a SIZDIRMA (KRİTİK).** `.mycl/help-pages.json`'ı
-  okuyan `fs`/dosya-sistemi kodu (örn. `getHelpPages`) **SERVER-only** olmalı (server component /
-  route handler / server-only util). `"use client"` bileşenleri (HelpButton, "?" trigger) bu
-  fs-kodunu VEYA onunla **AYNI MODÜLÜ** import ETMEMELİ. Saf yardımcılar (rota-sanitize gibi,
-  fs YOK) **AYRI bir client-safe dosyada** olmalı; client bileşen oradan alsın. Aksi halde `fs`
-  client bundle'a girer → bundler `Module not found: Can't resolve 'fs'` → o bileşeni kullanan
-  **TÜM sayfalar 500** (CANLI BUG 2026-06-17: `getHelpPages`[fs] + `sanitizeRoute`[saf] aynı
-  `lib/help`'te, client HelpButton `sanitizeRoute` alınca her route çöktü).
+- **`fs` KULLANMA — kılavuz verisini `fetch` ile oku (KRİTİK).** Kılavuz JSON'u statik varlık olarak
+  servis edilir: `const pages = await fetch("/docs/help-pages.json").then(r => r.json())`. Dosya sistemi
+  (`fs`) kodu YAZMA — ne server ne client tarafında gerek var. Bu, hem üretimde çalışır (statik dosya
+  build çıktısıyla birlikte gider) hem de şu canlı hatanın kökünü tamamen kaldırır: CANLI BUG 2026-06-17 —
+  `getHelpPages`[fs] ile `sanitizeRoute`[saf] aynı modüldeydi; client `HelpButton` o modülden saf yardımcıyı
+  alınca `fs` client bundle'a girdi → `Module not found: Can't resolve 'fs'` → **TÜM sayfalar 500**.
+  Fetch yolunda böyle bir sızıntı mümkün değildir. (Fetch başarısız olursa "?" düğmesi zarifçe gizlenir
+  ya da kısa bir "kılavuz yüklenemedi" mesajı gösterir — sayfayı ÇÖKERTME.)
 
 ## Observability — logging (do NOT reinvent error tracking)
 

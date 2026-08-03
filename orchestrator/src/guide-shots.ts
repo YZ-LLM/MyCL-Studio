@@ -18,15 +18,18 @@ import { chromium, type Browser } from "playwright";
 import { appendAudit } from "./audit.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
+import { resolvePublicDir } from "./public-dir.js";
 import type { State } from "./types.js";
 
 // YZLLM 2026-06-14: app-içi kılavuzun ekran görüntüleri — hedef-app'in public'ine yazılır, <img> ile gömülür.
 const HELP_PAGES_REL = join(".mycl", "help-pages.json");
-const SHOTS_DIR_REL = join("public", "docs", "guide-shots");
+// 2026-08-03: statik klasör artık ÇÖZÜLÜYOR (public/ vs static/ — SvelteKit). Eski hardcode "public/"
+// stack bağımsızlık kuralının sessiz ihlaliydi: SvelteKit projesinde görüntüler yanlış yere yazılıyordu.
+const SHOTS_SUBPATH = join("docs", "guide-shots");
 const CANDIDATE_PORTS = [5173, 5174, 4173, 3000, 8080, 4321];
 // YZLLM 2026-06-19: PDF kullanım kılavuzu kuralı KALDIRILDI. Eski koşulardan kalan kullanim-kilavuzu.pdf
 // (eski generateGuidePdf üretmişti) diskte kalıp kafa karıştırıyor → her tazelemede BAYATI SİL.
-const STALE_PDF_REL = join("public", "docs", "kullanim-kilavuzu.pdf");
+const STALE_PDF_SUBPATH = join("docs", "kullanim-kilavuzu.pdf");
 
 /** SAF: route → güvenli png dosya adı ("/" kök → anasayfa). */
 export function sanitizeRouteForFile(route: string): string {
@@ -102,7 +105,9 @@ export async function generateGuideShots(state: State): Promise<void> {
   try {
     // Bayat PDF temizliği (YZLLM 2026-06-19): PDF kuralı kalktı; eski koşulardan kalan PDF'i sil
     // (yoksa no-op; UI'sız projede zaten yok). skip_ui kontrolünden ÖNCE — her durumda temizlensin.
-    await fs.rm(join(state.project_root, STALE_PDF_REL), { force: true }).catch(() => {});
+    const publicRel = (await resolvePublicDir(state)).rel;
+    const SHOTS_DIR_REL = join(publicRel, SHOTS_SUBPATH);
+    await fs.rm(join(state.project_root, publicRel, STALE_PDF_SUBPATH), { force: true }).catch(() => {});
     if (state.skip_ui_phases) return;
     let routes: string[];
     try {

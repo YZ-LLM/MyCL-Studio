@@ -132,6 +132,20 @@ describe("filterAgentAuthored", () => {
     expect(out).toEqual(["src/routes/login.ts", "views/profile.ejs"]);
   });
 
+  it("2026-08-03: projeye yazılan kılavuz çıktıları kanıt SAYILMAZ (sahte tamamlanma kilidi)", () => {
+    // Kılavuz artık docs/ + <statik>/docs/ altına da yazılıyor. Bunlar her tazelemede yenilendiği için
+    // kanıt sayılsalardı hiçbir iş yapılmayan tur bile "tamamlandı" damgası alırdı.
+    const out = filterAgentAuthored([
+      "docs/kullanim-kilavuzu.md",
+      "docs/user-guide.md",
+      "public/docs/help-pages.json",
+      "static/docs/help-pages.json", // SvelteKit
+      "static/docs/guide-shots/tr/anasayfa.png",
+      "src/app.ts",
+    ]);
+    expect(out).toEqual(["src/app.ts"]);
+  });
+
   it("Windows tarzı ters bölü yollarında da eler (çapraz platform)", () => {
     expect(filterAgentAuthored([".mycl\\audit.log", "src\\a.ts"])).toEqual(["src\\a.ts"]);
   });

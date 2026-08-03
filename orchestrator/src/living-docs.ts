@@ -10,7 +10,7 @@
 
 import { selectEffortForTask, resolveKnownModel } from "./model-catalog.js";
 import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { type AdrDecision, DECISIONS_DIR_REL, parseAdrDecisions, writeAdrs } from "./adr.js";
 import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
@@ -21,6 +21,7 @@ import { backendForRole, claudeKeyForRole, type MyclConfig } from "./config.js";
 import { emitChatMessage, emitClaudeStream, emitUserGuide, emitTechDoc, emitPhaseRunning, emitPhaseIdle, type ClaudeUsage } from "./ipc.js";
 import { log } from "./logger.js";
 import { templatePath } from "./phase-registry.js";
+import { resolvePublicDir } from "./public-dir.js";
 import { substitute } from "./template-engine.js";
 import type { State } from "./types.js";
 
@@ -31,6 +32,13 @@ const USER_GUIDE_EN_REL = join(".mycl", "user-guide.en.md");
 // YZLLM 2026-06-14: TR teknik döküman + app-içi kılavuz veri-temeli (help-pages.json). İlk-açılışta + her iterasyonda üretilir.
 const TECH_DOC_REL = join(".mycl", "tech-doc.md");
 const HELP_PAGES_REL = join(".mycl", "help-pages.json");
+// 2026-08-03 (YZLLM kararı): kılavuz PROJENİN İÇİNE de yazılır — depoyla birlikte gider, kullanıcı
+// deposunda görür, ve uygulama içi "?" penceresi yayına alınmış projede de çalışır. `.mycl` kopyaları
+// çalışma kaydı olarak KORUNUR (orkestratör grounding'i ve Full Test onları okur).
+const PROJECT_GUIDE_TR_REL = join("docs", "kullanim-kilavuzu.md");
+const PROJECT_GUIDE_EN_REL = join("docs", "user-guide.md");
+/** Uygulama içi "?" penceresinin veri temeli — statik klasöre yazılır → çalışma anında `fetch` ile okunur. */
+const PROJECT_HELP_PAGES_SUBPATH = join("docs", "help-pages.json");
 const SENTINEL_EMPTY = "(none yet)";
 
 /** Tek kullanım-kılavuzu sayfası: bir app-route'una eşlenen görev metni + güncelleme tarihi.
@@ -119,10 +127,27 @@ export function buildLivingDocsPrompt(opts: {
 /** Pure: ajan help_pages'ini doğrula + features'ta OLMAYAN route'a eşlenenleri ELE (yanlış "?" hedefini önle).
  *  features.md'de hiç route yoksa (greenfield ilk üretim) çapraz-kontrol ATLANIR. updated_at burada YOK —
  *  tarih updateLivingDocs'ta, yalnız içerik değişen sayfaya atanır. */
-export function parseHelpPages(raw: unknown, knownRoutes: string[]): Array<Omit<HelpPage, "updated_at">> {
-  if (!Array.isArray(raw)) return [];
+export function parseHelpPages(
+  raw: unknown,
+  knownRoutes: string[],
+): Array<Omit<HelpPage, "updated_at">> {
+  return parseHelpPagesDetailed(raw, knownRoutes).pages;
+}
+
+/**
+ * parseHelpPages + DÜRÜSTLÜK bilgisi (2026-08-03): eski/bozuk şema geldiğinde İngilizce alanlar Türkçe
+ * içerikle dolduruluyor (dayanıklılık). Bu sessiz kalırsa kullanıcı "İngilizce kılavuz" sanır ama içerik
+ * Türkçedir — kullanıcının şartı "TÜRKÇE VE İNGİLİZCE 2 TANE" olduğu için bu sessiz bir söz ihlali.
+ * Artık hangi sayfalarda düşüldüğü DÖNÜLÜR; çağıran görünür uyarı basar.
+ */
+export function parseHelpPagesDetailed(
+  raw: unknown,
+  knownRoutes: string[],
+): { pages: Array<Omit<HelpPage, "updated_at">>; enFellBack: string[] } {
+  if (!Array.isArray(raw)) return { pages: [], enFellBack: [] };
   const known = new Set(knownRoutes);
   const out: Array<Omit<HelpPage, "updated_at">> = [];
+  const enFellBack: string[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
@@ -136,9 +161,11 @@ export function parseHelpPages(raw: unknown, knownRoutes: string[]): Array<Omit<
     if (!title_tr || !body_tr) continue; // en az TR içerik şart
     const route = o.route.replace(/\/+$/, "") || "/";
     if (known.size > 0 && !known.has(route)) continue; // features'ta yok → uydurma route, ele
+    // İngilizce alan ÜRETİLMEDİ ve Türkçeye düşüldü mü?
+    if ((!str(o.title_en) && title_tr) || (!str(o.body_en) && body_tr)) enFellBack.push(route);
     out.push({ route, title_tr, title_en, body_tr, body_en });
   }
-  return out;
+  return { pages: out, enFellBack };
 }
 
 /** Pure: ajan çıktısından docs bloğunu parse + doğrula (features_md zorunlu; tech_doc_md/help_pages opsiyonel — fail-soft). */
@@ -148,6 +175,8 @@ export function parseLivingDocsBlock(text: string): {
   user_guide_en_md: string;
   tech_doc_md: string;
   help_pages: Array<Omit<HelpPage, "updated_at">>;
+  /** 2026-08-03: İngilizce metni üretilmeyip Türkçeye düşülen route'lar (görünür uyarı için). */
+  help_en_fell_back: string[];
   adr_decisions: AdrDecision[];
 } | null {
   const block = extractKindBlock(text, ["docs"]);
@@ -159,12 +188,14 @@ export function parseLivingDocsBlock(text: string): {
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
   // Çift dilli kılavuz; eski tek-alan (user_guide_md) gelirse TR'ye düşür (dayanıklılık).
   const user_guide_tr_md = str(b.user_guide_tr_md) || str(b.user_guide_md);
+  const helpDetailed = parseHelpPagesDetailed(b.help_pages, extractRoutesFromFeatures(features_md));
   return {
     features_md,
     user_guide_tr_md,
     user_guide_en_md: str(b.user_guide_en_md),
     tech_doc_md: str(b.tech_doc_md),
-    help_pages: parseHelpPages(b.help_pages, extractRoutesFromFeatures(features_md)),
+    help_pages: helpDetailed.pages,
+    help_en_fell_back: helpDetailed.enFellBack,
     adr_decisions: parseAdrDecisions(b.adr_decisions),
   };
 }
@@ -324,6 +355,25 @@ export function isNoAccessDoc(parsed: { features_md?: string; tech_doc_md?: stri
  * opts.attempts → LLM geçersiz blok döndürürse tekrar dene (aralıklı; onboarding 3×). opts.onboarding →
  * entegrasyon bağlamı: fail mesajı "ana akış etkilenmez" DEMEZ (YZLLM: "entegrasyon sırasında her şey önemli").
  */
+/**
+ * Kılavuz dosyasını hedef projenin İÇİNE yaz (depoyla gitsin). Görünür fail-soft: yazılamazsa uyarı
+ * (kılavuzun `.mycl` kopyası zaten yazıldığı için akış durmaz, ama sessiz kalmaz).
+ * `.gitignore` bu yolu dışlıyorsa BİR KEZ görünür not — MyCL `.gitignore`'a ASLA dokunmaz.
+ */
+async function writeProjectDoc(state: State, relPath: string, content: string): Promise<void> {
+  const abs = join(state.project_root, relPath);
+  try {
+    await fs.mkdir(dirname(abs), { recursive: true });
+    await fs.writeFile(abs, content, "utf-8");
+  } catch (e) {
+    emitChatMessage(
+      "system",
+      `⚠️ Kullanım kılavuzu projeye yazılamadı (${relPath}): ${String(e).slice(0, 120)}. ` +
+        `Kopyası .mycl klasöründe duruyor.`,
+    );
+  }
+}
+
 export async function updateLivingDocs(
   state: State,
   config: MyclConfig,
@@ -505,15 +555,14 @@ export async function updateLivingDocs(
     if (includeUserGuide && parsed.user_guide_tr_md.trim()) {
       const guide = withTrailingNewline(parsed.user_guide_tr_md);
       await fs.writeFile(join(state.project_root, USER_GUIDE_REL), guide, "utf-8");
+      await writeProjectDoc(state, PROJECT_GUIDE_TR_REL, guide);
       emitUserGuide(guide); // "Kılavuz" sekmesini güncelle (TR)
     }
     // YZLLM 2026-06-20: kullanım kılavuzunun İngilizce sürümü ayrı dosyaya.
     if (includeUserGuide && parsed.user_guide_en_md.trim()) {
-      await fs.writeFile(
-        join(state.project_root, USER_GUIDE_EN_REL),
-        withTrailingNewline(parsed.user_guide_en_md),
-        "utf-8",
-      );
+      const guideEn = withTrailingNewline(parsed.user_guide_en_md);
+      await fs.writeFile(join(state.project_root, USER_GUIDE_EN_REL), guideEn, "utf-8");
+      await writeProjectDoc(state, PROJECT_GUIDE_EN_REL, guideEn);
     }
     // YZLLM 2026-06-14: TR teknik döküman (.mycl/tech-doc.md) + app-içi kılavuz veri-temeli (.mycl/help-pages.json).
     // Tarih MyCL'de deterministik damgalanır (LLM'e ürettirilmez).
@@ -525,16 +574,32 @@ export async function updateLivingDocs(
     if (includeUserGuide) {
       // Ajan çıktısı KÜMÜLATİF current set → eksik sayfa düşer (artık-kullanılmayan kılavuz temizliği). Tarih yalnız
       // içerik değişen sayfada yenilenir (assignHelpPageDates). help_pages boşsa [] yazılır (stale temizliği).
+      // DÜRÜSTLÜK (KATI #4): İngilizce metin üretilemeyip Türkçeye düşüldüyse kullanıcı bunu BİLMELİ —
+      // aksi halde "İngilizce kılavuz var" sanır ama içerik Türkçedir (şart: TR + EN iki dosya).
+      if (parsed.help_en_fell_back.length > 0) {
+        const n = parsed.help_en_fell_back.length;
+        emitChatMessage(
+          "system",
+          `⚠️ Kullanım kılavuzunun İngilizce metni ${n} sayfada üretilemedi ` +
+            `(${parsed.help_en_fell_back.slice(0, 3).join(", ")}${n > 3 ? "…" : ""}) — o sayfalarda İngilizce ` +
+            `alan şimdilik Türkçe içerikle dolduruldu. Sonraki tazelemede yeniden denenecek.`,
+        );
+      }
       const dated = assignHelpPageDates(
         parsed.help_pages,
         await readExistingHelpPages(state.project_root),
         stampDate(),
       );
-      await fs.writeFile(
-        join(state.project_root, HELP_PAGES_REL),
-        JSON.stringify(dated, null, 2) + "\n",
-        "utf-8",
-      );
+      const helpJson = JSON.stringify(dated, null, 2) + "\n";
+      await fs.writeFile(join(state.project_root, HELP_PAGES_REL), helpJson, "utf-8");
+      // Uygulama içi "?" penceresi bunu ÇALIŞMA ANINDA `fetch("/docs/help-pages.json")` ile okur →
+      // sunucu tarafı dosya okuma yok, yayına alınca da çalışır (eskiden `.mycl` gitmezse kırılıyordu).
+      try {
+        const pub = await resolvePublicDir(state);
+        await writeProjectDoc(state, join(pub.rel, PROJECT_HELP_PAGES_SUBPATH), helpJson);
+      } catch (e) {
+        log.warn("living-docs", "uygulama içi kılavuz verisi projeye yazılamadı", { error: String(e) });
+      }
     }
     // ADR (mimari karar kayıtları): .mycl/decisions/ADR-NNNN-<slug>.md (MADR). Numara+tarih
     // korunur (içerik değişmediyse); kararlar TARİHSEL → silinmez. Relevance recall (source

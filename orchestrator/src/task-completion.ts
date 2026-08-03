@@ -154,7 +154,13 @@ export function filterAgentAuthored(files: readonly string[]): string[] {
     const p = f.replace(/\\/g, "/");
     if (p.startsWith(".mycl/") || p.includes("/.mycl/")) continue;
     if (p.startsWith("devs/") || p.includes("/devs/")) continue;
-    if (p.includes("public/docs/guide-shots/")) continue;
+    // 2026-08-03: kılavuz artık projenin İÇİNE de yazılıyor (docs/ + <statik>/docs/). Bunlar MyCL'in
+    // KENDİ pipeline sonu çıktısı — "ajan iş yaptı" kanıtı SAYILMAZ, yoksa hiçbir iş yapılmayan bir tur
+    // bile kılavuz tazelendiği için "tamamlandı" damgası alırdı (tam da kapattığımız sahte yeşil).
+    // .json uzantısı aşağıdaki uzantı filtresine takılmadığı için yol bazlı elemek ŞART.
+    if (p.includes("docs/guide-shots/")) continue;
+    if (p.includes("docs/help-pages.json")) continue;
+    if (p === "docs/kullanim-kilavuzu.md" || p === "docs/user-guide.md") continue;
     const lower = p.toLowerCase();
     if (lower.endsWith(".md") || lower.endsWith(".png") || lower.endsWith(".jpg")) continue;
     out.push(f);
