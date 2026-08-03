@@ -20,8 +20,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runClaudeCli } from "./cli-run.js";
 import { runReasoning } from "./llm-reasoning.js";
-import { runTurn, type ApiMessage } from "./claude-api.js";
-import { executeTool, TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js";
+import { runReadOnlySdkLoop } from "./sdk-read-loop.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
 import { modelForTier } from "./model-catalog.js";
 import { decideIntervention, type InterventionSignals, type InterventionDecision } from "./inspector-trigger.js";
@@ -48,10 +47,8 @@ export function inspectorClaudeEnv(config: MyclConfig): Record<string, string> |
   return key ? { ANTHROPIC_API_KEY: key } : undefined;
 }
 
-// Müfettiş SALT-OKUNUR araç seti (kanıt-toplama): Write/Edit YOK (müfettiş yargılar, değiştirmez).
-const INSPECTOR_TOOLS = TOOLS_CODEGEN.filter((t) =>
-  ["Read", "Grep", "Glob", "Bash"].includes((t as { name: string }).name),
-);
+/** Müfettiş SALT-OKUNUR araç seti (kanıt toplama): Write/Edit YOK — müfettiş yargılar, değiştirmez. */
+const INSPECTOR_TOOL_NAMES = ["Read", "Grep", "Glob", "Bash"] as const;
 const MAX_INSPECTOR_SDK_TURNS = 25; // araç-döngüsü tavanı (runaway-backstop; verdict birkaç turda gelir)
 const TOOL_RESULT_CAP = 12_000; // tool_result token-patlamasını önle (codegen deseni)
 
@@ -106,58 +103,17 @@ async function runInspectorSdkLoop(
   apiKey: string,
   opts: { systemPrompt: string; userMessage: string; projectRoot: string; modelId: string; effort?: string },
 ): Promise<{ ok: boolean; text: string; error?: string }> {
-  const ctx: ToolContext = { project_root: opts.projectRoot };
-  const messages: ApiMessage[] = [{ role: "user", content: opts.userMessage }];
-  let lastText = "";
-  for (let turn = 0; turn < MAX_INSPECTOR_SDK_TURNS; turn++) {
-    let r;
-    try {
-      r = await runTurn(
-        config,
-        apiKey,
-        {
-          messages,
-          system: opts.systemPrompt,
-          model: opts.modelId,
-          tools: INSPECTOR_TOOLS,
-          max_tokens: 8192,
-          // CLI tarafında --effort=max iletilir; API/SDK tarafında efor yalnız adaptive-thinking destekleyen
-          // modelde output_config'e yansır (Sonnet 4.6 thinkingConfigFor'da almıyorsa efektif no-op — dürüst not).
-          effortOverride: opts.effort,
-        },
-        () => {},
-      );
-    } catch (e) {
-      return { ok: false, text: lastText, error: String(e) };
-    }
-    messages.push({ role: "assistant", content: r.assistantContent });
-    const turnText = extractText(r.assistantContent);
-    if (turnText) lastText = turnText;
-    if (r.toolUses.length === 0) {
-      // Sonnet müfettiş düzeltmesi: max_tokens'da kesilirse verdict TRUNCATE olabilir → görünür kıl
-      // (parseVerdict yine null'da fail-closed escalate eder ama truncate sinyali log'da kaybolmasın).
-      if (r.stop_reason === "max_tokens") {
-        log.warn("inspector", "SDK turu max_tokens'da kesildi — verdict truncate olabilir (kısmi metin)", { turn });
-      }
-      return { ok: true, text: lastText }; // model durdu → verdict hazır
-    }
-    const toolResults: Anthropic.MessageParam["content"] = [];
-    for (const tu of r.toolUses) {
-      const result = await executeTool(tu.name, tu.input as Record<string, unknown>, ctx).catch((e) => ({
-        content: `tool error: ${String(e)}`,
-        is_error: true,
-      }));
-      toolResults.push({
-        type: "tool_result",
-        tool_use_id: tu.id,
-        content: String(result.content).slice(0, TOOL_RESULT_CAP),
-        is_error: result.is_error,
-      });
-    }
-    messages.push({ role: "user", content: toolResults });
-  }
-  log.warn("inspector", "SDK araç-döngüsü tavanı aştı", { turns: MAX_INSPECTOR_SDK_TURNS });
-  return { ok: !!lastText.trim(), text: lastText, error: lastText.trim() ? undefined : "müfettiş SDK döngüsü tavanı aştı (verdict yok)" };
+  // 2026-08-03: gövde ortak `sdk-read-loop` modülüne taşındı (yaşayan dökümantasyon da aynı döngüye
+  // ihtiyaç duyuyor — kopya yerine tek çekirdek). Davranış BİREBİR aynı: aynı salt-okunur araç seti,
+  // aynı tur tavanı, aynı tool_result kırpması, aynı dönüş şekli. Regresyon kilidi: sdk-read-loop testi.
+  return runReadOnlySdkLoop(config, apiKey, {
+    ...opts,
+    toolNames: INSPECTOR_TOOL_NAMES,
+    maxTurns: MAX_INSPECTOR_SDK_TURNS,
+    toolResultCap: TOOL_RESULT_CAP,
+    maxTokens: 8192,
+    tag: "inspector",
+  });
 }
 
 /** Müfettiş modeli: en iyi SONNET (çapraz-aile çeşitlilik). Orkestratör en iyi Opus'tur. */

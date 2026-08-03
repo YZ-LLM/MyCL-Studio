@@ -15,9 +15,10 @@ import { type AdrDecision, DECISIONS_DIR_REL, parseAdrDecisions, writeAdrs } fro
 import { appendAudit } from "./audit.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
+import { runReadOnlySdkLoop } from "./sdk-read-loop.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
-import { backendForRole, type MyclConfig } from "./config.js";
-import { emitChatMessage, emitClaudeStream, emitUserGuide, emitTechDoc, emitPhaseRunning, emitPhaseIdle } from "./ipc.js";
+import { backendForRole, claudeKeyForRole, type MyclConfig } from "./config.js";
+import { emitChatMessage, emitClaudeStream, emitUserGuide, emitTechDoc, emitPhaseRunning, emitPhaseIdle, type ClaudeUsage } from "./ipc.js";
 import { log } from "./logger.js";
 import { templatePath } from "./phase-registry.js";
 import { substitute } from "./template-engine.js";
@@ -267,15 +268,8 @@ export async function bootstrapLivingDocs(
     const { isExistingProject } = await import("./phase-1-codebase-probe.js");
     if (!(await isExistingProject(state.project_root))) return { ok: false, reason: "empty" }; // boş proje → pipeline üretir
     // v15.13: docs'u ORKESTRATÖR rolü yazar (ana ajan değil — kullanıcı kuralı).
-    if (backendForRole(config, "orchestrator") !== "cli") {
-      // KATI #4 (sessiz fallback yok — çapraz-aile mahkeme): API modunda orkestratör derin docs ÜRETMEZ →
-      // GÖRÜNÜR not (eski kod sessizce return ediyordu). Onboarding'de bu, raporda da yer alır.
-      emitChatMessage(
-        "system",
-        "ℹ️ Derin proje dökümantasyonu (features/tech-doc) CLI/abonelik modunda üretilir — API modunda atlandı.",
-      );
-      return { ok: false, reason: "provider-skip" };
-    }
+    // 2026-08-03: API modu artık ATLANMIYOR — updateLivingDocs iki arka ucu da destekliyor (salt-okunur
+    // SDK araç döngüsü). Yalnız anahtar yoksa üretilemez; o durumu updateLivingDocs görünür şekilde söyler.
     emitChatMessage(
       "system",
       "📚 İlk açılış: mevcut koddan proje dökümantasyonu + kullanma kılavuzu üretiliyor…",
@@ -343,10 +337,18 @@ export async function updateLivingDocs(
     // v15.13: Yaşayan dökümantasyonu ORKESTRATÖR rolü yazar — ana ajana (codegen) GİTMEZ
     // (kullanıcı kuralı). Orkestratör "her şeyi bilen" hafif rol → docs için doğru yer.
     // Abonelik/CLI modu birincil hedef. API modu sonraki tur — görünür not (sessiz değil).
-    if (backendForRole(config, "orchestrator") !== "cli") {
+    // 2026-08-03 (YZLLM şartı "kılavuz HER ZAMAN güncel, TR + EN"): API modunda bu adım eskiden TAMAMEN
+    // atlanıyordu → kullanıcı API modundaysa kılavuz HİÇ üretilmiyordu (sözün sessizce tutulmaması).
+    // Artık iki arka uç da destekleniyor: CLI/abonelik → `claude` binary; API → ortak salt-okunur SDK
+    // araç döngüsü (aynı Read/Grep/Glob seti, Bash YOK). Anahtar yoksa görünür hata (sessiz atlama yok).
+    const docsBackend = backendForRole(config, "orchestrator");
+    const docsApiKey =
+      docsBackend === "cli" ? undefined : claudeKeyForRole(config.api_keys, "orchestrator")?.trim();
+    if (docsBackend !== "cli" && !docsApiKey) {
       emitChatMessage(
         "system",
-        "ℹ️ Yaşayan dökümantasyon şu an CLI/abonelik modunda güncellenir (orkestratör rolü).",
+        "⚠️ Kullanım kılavuzu güncellenemedi — API modundasın ama orkestratör rolü için API anahtarı yok. " +
+          "Ayarlardan anahtarı gir ya da abonelik moduna geç.",
       );
       return "failed";
     }
@@ -396,28 +398,49 @@ export async function updateLivingDocs(
           `↻ Döküman bloğu geçersiz/eksik geldi — tekrar isteniyor (deneme ${attempt}/${maxAttempts})…`,
         );
       }
-      const res = await runClaudeCli({
-        systemPrompt: prompt,
-        userMessage:
+      const userMessage =
           (attempt === 1
             ? "Inspect the codebase and emit the updated documentation JSON block now."
             : 'Reminder: output ONLY the single {"kind":"docs", ...} JSON block — no prose before or after, no code fences. Emit it now.') +
-          ' IMPORTANT: If you CANNOT read the project files (Read/Grep/Glob fail due to permission or sandbox errors), do NOT apologize or invent documentation — instead emit exactly {"kind":"docs","features_md":"MYCL_NO_ACCESS"} and stop.',
-        modelId: docsModel,
-        cwd: state.project_root,
-        allowedTools: ["Read", "Grep", "Glob"],
-        // salt-okunur: ajan kodu Read/Grep/Glob ile gezip JSON döner, dosyaları MyCL'in kendi Node kodu yazar.
-        // Bash KALDIRILDI (çapraz-aile mahkeme): Bash açıkken salt-okunur niyete rağmen `cat > dosya << EOF`
-        // ile YABANCI projenin kaynağını ezebiliyordu (tool-policy.ts belgeli kaçış). Doküman-üretimi için
-        // Read/Grep/Glob yeterli — onboarding'in non-destructive garantisi buna dayanır.
-        disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // Write/Edit/alt-ajan yasak
-        effort: selectEffortForTask("verification", config.claude_code_flags.effort), // oto-efor: doküman güncelleme hafif iş
-        onText: (t) => emitClaudeStream({ sub: "text", text: t }),
-        observer: (tu) =>
-          emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),
-        timeoutMs: 300_000,
-      });
-      if (res.usage) emitClaudeStream({ sub: "token_usage", usage: res.usage });
+        ' IMPORTANT: If you CANNOT read the project files (Read/Grep/Glob fail due to permission or sandbox errors), do NOT apologize or invent documentation — instead emit exactly {"kind":"docs","features_md":"MYCL_NO_ACCESS"} and stop.';
+      const effort = selectEffortForTask("verification", config.claude_code_flags.effort); // hafif iş
+      const onText = (t: string): void => emitClaudeStream({ sub: "text", text: t });
+      const observer = (tu: { name: string; input: Record<string, unknown> }): void =>
+        emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input });
+      // salt-okunur: ajan kodu Read/Grep/Glob ile gezip JSON döner, dosyaları MyCL'in kendi Node kodu yazar.
+      // Bash KALDIRILDI (çapraz-aile mahkeme): Bash açıkken salt-okunur niyete rağmen `cat > dosya << EOF`
+      // ile YABANCI projenin kaynağını ezebiliyordu (tool-policy.ts belgeli kaçış). Doküman-üretimi için
+      // Read/Grep/Glob yeterli — onboarding'in non-destructive garantisi buna dayanır. İKİ arka uçta da AYNI.
+      const res = docsApiKey
+        ? await runReadOnlySdkLoop(config, docsApiKey, {
+            systemPrompt: prompt,
+            userMessage,
+            projectRoot: state.project_root,
+            modelId: docsModel,
+            effort,
+            toolNames: ["Read", "Grep", "Glob"],
+            maxTurns: 20,
+            toolResultCap: 12_000,
+            maxTokens: 16_384, // kılavuz + özellik listesi uzun olabilir (truncate riskini düşür)
+            onText,
+            observer,
+            tag: "living-docs",
+          })
+        : await runClaudeCli({
+            systemPrompt: prompt,
+            userMessage,
+            modelId: docsModel,
+            cwd: state.project_root,
+            allowedTools: ["Read", "Grep", "Glob"],
+            disallowedTools: READ_ONLY_DISALLOWED_TOOLS, // Write/Edit/alt-ajan yasak
+            effort,
+            onText,
+            observer,
+            timeoutMs: 300_000,
+          });
+      // Token telemetrisi yalnız CLI yolunda gelir (SDK döngüsü kendi muhasebesini runTurn içinde yapar).
+      const cliUsage = (res as { usage?: ClaudeUsage }).usage;
+      if (cliUsage) emitClaudeStream({ sub: "token_usage", usage: cliUsage });
       if (!res.ok) {
         lastDetail = String(res.error ?? "claude hatası (error alanı boş)");
         continue; // tekrar dene
