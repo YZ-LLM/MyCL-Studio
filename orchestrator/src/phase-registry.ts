@@ -336,6 +336,13 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           tool_error_codes: [3],
         },
         {
+          // 2026-08-03: VERİTABANI PERFORMANSI — "veritabanı performanslı tasarlanmış" şartının kapısı.
+          // Tartışmasız kural: yabancı anahtarda index yokluğu (birleştirme sorguları yavaşlar).
+          name: "db-schema-perf",
+          cmd: `node "${securityToolPath("db-schema-check.mjs")}" . performance`,
+          tool_error_codes: [3],
+        },
+        {
           // Sayfa performans skoru (Lighthouse): orkestratörün KENDİ tarayıcısı ve bağımlılığıyla
           // çalışan uygulamaya vurur — hedef projeye hiçbir şey kurulmaz (stack bağımsız).
           // Çalışan uygulama yoksa ölçemez → atlama (görünür sarı), asla "geçti".
@@ -382,6 +389,15 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           // import eder. Eşik severity<=40 blocking ("MEDIUM da bloklasın" — 2026-06-04).
           name: "csp-evaluator",
           cmd: `node "${securityToolPath("csp-check.mjs")}"`,
+        },
+        {
+          // 2026-08-03: VERİTABANI GÜVENLİĞİ — kullanıcının ürün amacı "veritabanı güvenli tasarlanmış"
+          // diyor ama üretilen şemayı doğrulayan tek bir kontrol yoktu (yalnız prompt tavsiyesi).
+          // Tartışmasız kurallar: düz metin parola, birincil anahtarsız tablo, geri alınamaz yıkıcı migration.
+          // Şema yoksa "temiz" DEMEZ → atlama (exit 3).
+          name: "db-schema-security",
+          cmd: `node "${securityToolPath("db-schema-check.mjs")}" . security`,
+          tool_error_codes: [3],
         },
         {
           // 2026-08-03: STACK BAĞIMSIZ bağımlılık zafiyeti taraması (osv.dev). Ana `security` komutu
