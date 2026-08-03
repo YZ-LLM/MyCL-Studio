@@ -22,6 +22,18 @@ import { emitChatMessage, emitClaudeStream, emitUserGuide, emitTechDoc, emitPhas
 import { log } from "./logger.js";
 import { templatePath } from "./phase-registry.js";
 import { resolvePublicDir } from "./public-dir.js";
+import {
+  DOCS_SCHEMA_VERSION,
+  decideDocsStale,
+  buildSourceDigest,
+  shortHash,
+  type DocsStamp,
+  type FreshnessInput,
+  type StaleReason,
+} from "./docs-freshness.js";
+import { enumerateSourceUnits } from "./edd/enumerate.js";
+import { safeSourceHash } from "./edd/source-hash.js";
+import { isGitRepo, getHeadSha, isWorkingTreeClean } from "./git.js";
 import { substitute } from "./template-engine.js";
 import type { State } from "./types.js";
 
@@ -39,6 +51,7 @@ const PROJECT_GUIDE_TR_REL = join("docs", "kullanim-kilavuzu.md");
 const PROJECT_GUIDE_EN_REL = join("docs", "user-guide.md");
 /** Uygulama içi "?" penceresinin veri temeli — statik klasöre yazılır → çalışma anında `fetch` ile okunur. */
 const PROJECT_HELP_PAGES_SUBPATH = join("docs", "help-pages.json");
+const DOCS_STAMP_REL = join(".mycl", "docs-stamp.json");
 const SENTINEL_EMPTY = "(none yet)";
 
 /** Tek kullanım-kılavuzu sayfası: bir app-route'una eşlenen görev metni + güncelleme tarihi.
@@ -631,4 +644,137 @@ export async function updateLivingDocs(
     // emitPhaseIdle, bekleyen AskQ'nun _askqPending'ini yanlışlıkla temizlemesin (çapraz-aile mahkeme).
     if (phaseStarted) emitPhaseIdle();
   }
+}
+
+// ───────────────────────── Tazelik (2026-08-03) ─────────────────────────
+// KULLANICI ŞARTI: "KULLANIM KILAVUZU HER ZAMAN GÜNCEL TUTMALI." Eskiden tazeleme YALNIZ pipeline sonunda
+// tetikleniyordu; üç manuel düğme (Full Test / Bakım Turu / Güvenlik Taraması) ve proje açılışı kılavuzu
+// hiç tazelemiyordu — bakım turu bağımlılıkları güncelleyip kodu değiştirse bile kılavuz eski kalıyordu.
+
+/** Kılavuz çıktılarının beklenen yolları (damgada ve bayatlık kontrolünde kullanılır). */
+async function expectedDocOutputs(state: State): Promise<string[]> {
+  const out = [FEATURES_REL, TECH_DOC_REL];
+  if (!(state.skip_ui_phases ?? false)) {
+    out.push(USER_GUIDE_REL, USER_GUIDE_EN_REL, HELP_PAGES_REL, PROJECT_GUIDE_TR_REL, PROJECT_GUIDE_EN_REL);
+    try {
+      const pub = await resolvePublicDir(state);
+      out.push(join(pub.rel, PROJECT_HELP_PAGES_SUBPATH));
+    } catch {
+      /* statik klasör çözülemedi — o çıktı beklenenler listesine girmez */
+    }
+  }
+  return out;
+}
+
+/** Şimdiki durumun parmak izini çıkar (git kısa yolu + kaynak özeti + çıktı özetleri). */
+async function computeDocsSignature(state: State): Promise<FreshnessInput["current"]> {
+  const root = state.project_root;
+  let head: string | undefined;
+  let dirty: boolean | undefined;
+  try {
+    if (await isGitRepo(root)) {
+      head = (await getHeadSha(root)) ?? undefined;
+      dirty = !(await isWorkingTreeClean(root));
+    }
+  } catch {
+    head = undefined; // git okunamadı → kaynak özeti yoluna düş
+  }
+  // Kaynak özeti: git temizse gereksiz (HEAD yeter) — pahalı taramayı atla.
+  let source_digest = "";
+  let unit_count = 0;
+  if (!head || dirty) {
+    try {
+      const units = await enumerateSourceUnits(root);
+      const hashed = await Promise.all(
+        units.map(async (u) => {
+          if (!u.analyzable) return { path: u.unit, skipped: true };
+          const r = await safeSourceHash(u.abs).catch(() => null);
+          return { path: u.unit, hash: r?.hash ?? null, skipped: !r };
+        }),
+      );
+      const built = buildSourceDigest(hashed);
+      source_digest = built.digest;
+      unit_count = built.count;
+    } catch {
+      source_digest = ""; // hesaplanamadı → damgayla eşleşmez → bayat say (kuşkuda tazele)
+    }
+  }
+  const outputs: Record<string, string | null> = {};
+  for (const rel of await expectedDocOutputs(state)) {
+    try {
+      outputs[rel] = shortHash(await fs.readFile(join(root, rel), "utf-8"));
+    } catch {
+      outputs[rel] = null; // yok/okunamıyor
+    }
+  }
+  return { head, dirty, source_digest, unit_count, outputs };
+}
+
+/** Damgayı oku (bozuksa null → bayat say). */
+async function readDocsStamp(root: string): Promise<DocsStamp | null> {
+  try {
+    return JSON.parse(await fs.readFile(join(root, DOCS_STAMP_REL), "utf-8")) as DocsStamp;
+  } catch {
+    return null;
+  }
+}
+
+/** Damgayı yaz — YALNIZ üretim BAŞARILI olduğunda (başarısızda damga yazılmaz → sonraki tetikte tekrar denenir). */
+async function writeDocsStamp(state: State): Promise<void> {
+  const cur = await computeDocsSignature(state);
+  const outputs: Record<string, string> = {};
+  for (const [k, v] of Object.entries(cur.outputs)) if (v) outputs[k] = v;
+  const stamp: DocsStamp = {
+    schema: DOCS_SCHEMA_VERSION,
+    ts: Date.now(),
+    head: cur.head,
+    dirty: cur.dirty,
+    source_digest: cur.source_digest,
+    unit_count: cur.unit_count,
+    outputs,
+  };
+  await fs
+    .writeFile(join(state.project_root, DOCS_STAMP_REL), JSON.stringify(stamp, null, 2) + "\n", "utf-8")
+    .catch((e) => log.warn("living-docs", "kılavuz damgası yazılamadı", { error: String(e) }));
+}
+
+/**
+ * TEK GİRİŞ NOKTASI: kılavuz bayatsa tazele, değilse HİÇBİR LLM çağrISI yapma (ucuz).
+ * Pipeline koşuyorsa ertelenir (pipeline sonunda zaten çalışacak → çift üretim yok).
+ */
+export async function refreshDocsIfStale(
+  state: State,
+  config: MyclConfig,
+  opts: { origin: "pipeline-end" | "open" | "full-test" | "maintenance" | "dast"; force?: boolean },
+): Promise<"refreshed" | "fresh" | "failed" | "deferred"> {
+  let verdict = { stale: true, reason: "no_stamp" as StaleReason, detail: "zorunlu tazeleme" };
+  if (!opts.force) {
+    try {
+      verdict = decideDocsStale({
+        stamp: await readDocsStamp(state.project_root),
+        current: await computeDocsSignature(state),
+        schema: DOCS_SCHEMA_VERSION,
+        maxUnits: 5000,
+      });
+    } catch (e) {
+      log.warn("living-docs", "bayatlık kontrolü yapılamadı → tazele (kuşkuda bayat)", { error: String(e) });
+    }
+    if (!verdict.stale) {
+      await appendAudit(state.project_root, {
+        ts: Date.now(),
+        phase: state.current_phase,
+        event: "living-docs-fresh",
+        caller: "mycl-orchestrator",
+        detail: `${opts.origin}: ${verdict.detail}`,
+      }).catch(() => {});
+      return "fresh"; // gürültü yok: taze olduğunu kullanıcıya söylemeye gerek yok
+    }
+  }
+  if (opts.origin !== "pipeline-end") {
+    emitChatMessage("system", `📚 Kullanım kılavuzu güncelleniyor (${verdict.detail})…`);
+  }
+  const r = await updateLivingDocs(state, config);
+  if (r !== "written") return "failed"; // damga YAZILMAZ → bir sonraki tetikte tekrar denenir
+  await writeDocsStamp(state);
+  return "refreshed";
 }

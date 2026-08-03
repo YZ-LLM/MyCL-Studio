@@ -451,6 +451,16 @@ export async function createCheckpoint(projectRoot: string): Promise<CheckpointR
   return { ok: true, ref: r.stdout.trim() };
 }
 
+/** Şimdiki HEAD commit'i (yoksa null). Kılavuz bayatlık damgası bunu ucuz karşılaştırma için kullanır. */
+export async function getHeadSha(projectRoot: string): Promise<string | null> {
+  try {
+    const r = await runGit(projectRoot, ["rev-parse", "HEAD"]);
+    return r.code === 0 ? r.stdout.trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Checkpoint'e geri al — fix'in değişikliklerini at, pre-fix temiz duruma dön.
  * Tracked değişiklikler `ref`'e döndürülür + fix'in oluşturduğu untracked

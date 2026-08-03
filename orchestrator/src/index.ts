@@ -232,7 +232,7 @@ import { setCacheTtl } from "./codegen/cli-backend.js";
 import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk, isAutonomouslyAnswerableAskq, isCourtFirstAskqId, matchAnswerToOption, stripDestructiveOptions, pickConservativeDefault, shouldStopAutoAnswer } from "./auto-answer.js";
 import { advisorStatusMessage } from "./advisor.js";
 import { runContextTrimDoctor } from "./context-trim-doctor.js";
-import { bootstrapLivingDocs, updateLivingDocs } from "./living-docs.js";
+import { bootstrapLivingDocs, refreshDocsIfStale } from "./living-docs.js";
 import { globalConfigDir } from "./paths.js";
 import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } from "./user-directives.js";
 import { pruneOldLogs } from "./log-retention.js";
@@ -2602,9 +2602,15 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
       // KATI #4 (sessiz-skip yok — mahkeme Mercek-C): config yüklenemediyse onboarding başlamaz → GÖRÜNÜR.
       emitChatMessage("system", "ℹ️ Onboarding başlatılamadı — yapılandırma yüklenemedi.");
     } else if (runtime.config && runtime.state && !midPipeline) {
-      void bootstrapLivingDocs(runtime.state, runtime.config).catch((e: unknown) =>
-        log.warn("orchestrator", "living-docs bootstrap failed (non-fatal)", e),
-      );
+      void bootstrapLivingDocs(runtime.state, runtime.config)
+        .then(async () => {
+          // 2026-08-03 ("kılavuz HER ZAMAN güncel"): bootstrap yalnız dosya YOKSA üretir. Mevcut projede
+          // kod bu arada değiştiyse kılavuz bayat kalıyordu → açılışta bayatlık kontrolü + otomatik tazeleme.
+          if (runtime.state && runtime.config) {
+            await refreshDocsIfStale(runtime.state, runtime.config, { origin: "open" });
+          }
+        })
+        .catch((e: unknown) => log.warn("orchestrator", "living-docs bootstrap failed (non-fatal)", e));
     }
 
     // EDD RESUME (mahkeme blocker fix): foreign-origin projede EDD one-time onboarding'e HAPSOLMASIN. Fresh
@@ -6002,7 +6008,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       await emitPipelineEndSummary(state);
       // v15.11: Yaşayan dökümantasyon + UI kılavuzu güncelle (projeye dokunuldu).
       // Non-blocking — fail görünür uyarı, pipeline'ı bloklamaz.
-      await updateLivingDocs(state, cfg).catch((e: unknown) =>
+      // 2026-08-03: bayatlık kontrolünden geçer — kaynak değişmediyse LLM çağrısı YOK (ucuz).
+      await refreshDocsIfStale(state, cfg, { origin: "pipeline-end" }).catch((e: unknown) =>
         log.warn("orchestrator", "living-docs update failed (non-fatal)", e),
       );
       // Faz 4 (devs/ yapısı, YZLLM 2026-06-16): iterasyon-sonu — _pending/<ts>/ artefaktlarını
@@ -7958,6 +7965,11 @@ export async function handleAskqAnswer(
           `sast:${label}`,
         );
       }
+      // 2026-08-03: tarama tek başına dosya değiştirmez (genelde "taze" döner, maliyeti ~0);
+      // ama tarama sonrası düzeltmeler koştuysa kılavuz da tazelenir.
+      if (runtime.state && runtime.config) {
+        await refreshDocsIfStale(runtime.state, runtime.config, { origin: "dast" }).catch(() => {});
+      }
     } catch (err) {
       emitChatMessage(
         "error",
@@ -8018,6 +8030,11 @@ export async function handleAskqAnswer(
           kind: "full-test-section",
           subject: t.id,
         });
+      }
+      // 2026-08-03: Full Test kod değiştirmiş olabilir (fix işleri) → kılavuz bayatsa tazele.
+      // Bayat değilse LLM çağrısı YOK (ucuz kontrol).
+      if (runtime.state && runtime.config) {
+        await refreshDocsIfStale(runtime.state, runtime.config, { origin: "full-test" }).catch(() => {});
       }
     } catch (err) {
       emitChatMessage("error", `Full Test başarısız: ${String(err).slice(0, 200)}`);
@@ -8154,6 +8171,11 @@ export async function handleAskqAnswer(
           kind: "full-test-section",
           subject: `maintenance:${t.id}`,
         });
+      }
+      // 2026-08-03: bakım turu bağımlılıkları günceller (kod GERÇEKTEN değişir) ama kılavuzu hiç
+      // tazelemiyordu → "her zaman güncel" sözü buradan sızıyordu.
+      if (runtime.state && runtime.config) {
+        await refreshDocsIfStale(runtime.state, runtime.config, { origin: "maintenance" }).catch(() => {});
       }
     } catch (err) {
       emitChatMessage("error", `Bakım turu başarısız: ${String(err).slice(0, 200)}`);
