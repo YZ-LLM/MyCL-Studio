@@ -53,7 +53,23 @@ function isSecuritySkip(e: AuditEvent): boolean {
   // semgrep) security-headers/data-sanitization/web-security'yi KAÇIRIYOR + "secret-scan" hiçbir
   // gerçek event'le eşleşmiyordu → güvenlik fazı atlansa bile PASS verilebiliyordu (false-green).
   // Phase'e bağlamak (mechanical-runner skip'leri phase=opts.phaseId yazar) drift-proof.
-  return e.phase === 13;
+  if (e.phase === 13) return true;
+  // 2026-08-03: Faz 17 (sizma testi) de bir GUVENLIK boyutudur. Eskiden kosulsuz "complete" yaziyordu
+  // (hic tarama yapmadan) ve hukme HIC yansimiyordu → sahte yesil.
+  // AMA hangi atlama hukmu dusurur, hangisi notr kalir — ayrimi onemli (yanlis alarm da yasak):
+  //  - ARAC EKSIK / TARAMA COKTU  → MyCL'in duzeltebilecegi gercek eksik → KISMI.
+  //  - Ortam/kapsam kaynakli (proje web hedefi sunmuyor, calisan uygulama yok, kaynak degismedi,
+  //    platform desteklenmiyor) → NOTR. Bunlar zaten dogrulama ozetinde "DOGRULANMADI" olarak GORUNUR;
+  //    ayrica hukmu dusurmek hem ikinci kez ayni seyi sayar (calisan uygulama yoklugunu gercek-app kapisi
+  //    ZATEN dusuruyor) hem de her kosuyu kalici KISMI yapip prototip kaydini olduruyordu.
+  if (e.phase === 17) {
+    const d = String(e.detail ?? "");
+    if (d.startsWith("skip_unless=")) return false;
+    if (d === "no_dev_server" || d === "unsupported_platform" || d === "unchanged_since_last_scan")
+      return false;
+    return true; // missing_command / scan_failed / bilinmeyen → gercek bosluk
+  }
+  return false;
 }
 
 /**

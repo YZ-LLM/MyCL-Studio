@@ -50,6 +50,61 @@ const MAX_SCAN_URLS = 250; // nuclei hedef tavanı: timeout + dev-server korumas
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const PROBE_TIMEOUT_MS = 2_500;
 
+/**
+ * TARAMA PROFİLİ (YZLLM kararı 2026-08-03): "uçtan uca endüstri seviyesi, hiçbir katmanda açık yok" hedefi
+ * için sızma testi OTOMATİK koşmalı — ama pipeline'da her tur tam tarama makineyi ısıtıyordu (2026-06-22'de
+ * bu yüzden kaldırılmıştı). Çözüm iki profil:
+ *   - "fast": Faz 17'nin otomatik koşumu. YALNIZ yüksek/kritik şablonlar, şablon güncelleme yok, ikinci
+ *     (autologin'siz) tur yok, dar tavan → toplam ~85 saniye duvar saati.
+ *   - "full": 🛡️ Güvenlik Taraması butonunun BUGÜNKÜ davranışı, birebir korunur (varsayılan).
+ * YIKICI ŞABLON DIŞLAMASI (intrusive/dos/fuzz) HER İKİ PROFİLDE PAZARLIKSIZ — profil hızı değiştirir,
+ * güvenliği DEĞİL.
+ */
+export type DastProfileId = "fast" | "full";
+
+export interface DastProfile {
+  id: DastProfileId;
+  katana: { enabled: boolean; depth: number; crawlDuration: string; rateLimit: number; timeoutMs: number };
+  nuclei: { severities: string; rateLimit: number; requestTimeoutSec: number; timeoutMs: number };
+  /** nuclei'ye verilecek URL tavanı. */
+  maxScanUrls: number;
+  /** nuclei şablonlarını güncelle (ağ + ~120 sn). */
+  updateTemplates: boolean;
+  /** Autologin'siz ikinci tur (giriş akışını gerçekten test eder). */
+  secondPassNoAutologin: boolean;
+}
+
+export const DAST_PROFILES: Readonly<Record<DastProfileId, DastProfile>> = {
+  fast: {
+    id: "fast",
+    // Crawl kısa: dev sunucu zaten ayakta, amaç en kritik yüzeyi hızla görmek.
+    katana: { enabled: true, depth: 2, crawlDuration: "20s", rateLimit: KATANA_RATE_LIMIT, timeoutMs: 25_000 },
+    nuclei: { severities: "high,critical", rateLimit: 10, requestTimeoutSec: 5, timeoutMs: 60_000 },
+    maxScanUrls: 40,
+    updateTemplates: false,
+    secondPassNoAutologin: false,
+  },
+  full: {
+    id: "full",
+    katana: {
+      enabled: true,
+      depth: KATANA_DEPTH,
+      crawlDuration: KATANA_CRAWL_DURATION,
+      rateLimit: KATANA_RATE_LIMIT,
+      timeoutMs: KATANA_TIMEOUT_MS,
+    },
+    nuclei: {
+      severities: "low,medium,high,critical",
+      rateLimit: 10,
+      requestTimeoutSec: 5,
+      timeoutMs: DAST_LIST_TIMEOUT_MS,
+    },
+    maxScanUrls: MAX_SCAN_URLS,
+    updateTemplates: false, // çağıran opts ile açar (bugünkü davranış)
+    secondPassNoAutologin: true,
+  },
+};
+
 export interface DastResult {
   ok: boolean;
   /** Kullanıcıya gösterilecek özet (TR). */
@@ -297,7 +352,8 @@ function formatSummary(
 // ---------------------------------------------------------------------------
 
 /** Bir aracın PATH'te olup olmadığı. POSIX `command -v` (mac+linux). Sessiz; hata → false. */
-function toolInstalled(bin: string): boolean {
+/** Arac PATH'te mi. Faz 17 karari da bunu kullanir (tek dogruluk kaynagi). */
+export function toolInstalled(bin: string): boolean {
   try {
     execFileSync("sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });
     return true;
@@ -440,30 +496,46 @@ function spawnCapped(
  * tüm-proje taraması). Muhafazakar + non-destructive: yıkıcı/DoS/fuzz template'leri
  * hariç; düşük rate-limit (dev server'ı boğma); per-request timeout; OOB (interactsh) kapalı.
  */
-function runNucleiCapped(
+/** SAF: nuclei argümanları (test edilebilir — yıkıcı dışlamanın her profilde durduğu kilitlenir). */
+export function buildNucleiArgs(
   input: { kind: "url"; url: string } | { kind: "list"; file: string },
-  cwd: string,
+  profile: DastProfile,
   headers: string[] = [],
-): Promise<SpawnCappedResult> {
-  const inputArgs =
-    input.kind === "url" ? ["-u", input.url] : ["-l", input.file];
-  const args = [
+): string[] {
+  const inputArgs = input.kind === "url" ? ["-u", input.url] : ["-l", input.file];
+  return [
     ...inputArgs,
     ...headers.flatMap((h) => ["-H", h]), // autologin bypass çerezi (login'i gerçekten test et)
     "-jsonl",
     "-silent",
     "-no-interactsh",
     "-timeout",
-    "5",
+    String(profile.nuclei.requestTimeoutSec),
     "-rate-limit",
-    "10",
+    String(profile.nuclei.rateLimit),
     "-severity",
-    "low,medium,high,critical",
+    profile.nuclei.severities,
+    // PAZARLIKSIZ (her iki profilde): yıkıcı/DoS/fuzz şablonları asla koşmaz.
     "-exclude-tags",
     "intrusive,dos,fuzz",
   ];
+}
+
+function runNucleiCapped(
+  input: { kind: "url"; url: string } | { kind: "list"; file: string },
+  cwd: string,
+  headers: string[] = [],
+  profile: DastProfile = DAST_PROFILES.full,
+): Promise<SpawnCappedResult> {
+  const args = buildNucleiArgs(input, profile, headers);
   // Çok-route taraması daha uzun sürer → daha uzun (ama yine sabit/bounded) timeout.
-  const timeout = input.kind === "list" ? DAST_LIST_TIMEOUT_MS : DAST_TIMEOUT_MS;
+  // Hızlı profil kendi dar tavanını dayatır (tek URL'de bile).
+  const timeout =
+    profile.id === "fast"
+      ? profile.nuclei.timeoutMs
+      : input.kind === "list"
+        ? DAST_LIST_TIMEOUT_MS
+        : DAST_TIMEOUT_MS;
   return spawnCapped("nuclei", args, cwd, timeout);
 }
 
@@ -477,22 +549,19 @@ function runNucleiCapped(
  * keşfedilen URL'ler parseKatanaUrls'te ayrıca isLocalhostTarget'tan geçer.
  * Plain çıktı (satır başına bir URL) — sürüm-bağımsız.
  */
-function runKatanaCapped(
-  url: string,
-  cwd: string,
-  headers: string[] = [],
-): Promise<SpawnCappedResult> {
-  const args = [
+/** SAF: katana argümanları (pasif + on-host olduğunun kilidi testte). */
+export function buildKatanaArgs(url: string, profile: DastProfile, headers: string[] = []): string[] {
+  return [
     ...headers.flatMap((h) => ["-H", h]), // örn. Cookie: mycl_no_autologin=1 (autologin bypass)
     "-u",
     url,
     "-silent",
     "-depth",
-    String(KATANA_DEPTH),
+    String(profile.katana.depth),
     "-crawl-duration",
-    KATANA_CRAWL_DURATION, // katana kendi crawl süresini sınırlar
+    profile.katana.crawlDuration, // katana kendi crawl süresini sınırlar
     "-rate-limit",
-    String(KATANA_RATE_LIMIT),
+    String(profile.katana.rateLimit),
     "-timeout",
     "5",
     "-concurrency",
@@ -502,7 +571,15 @@ function runKatanaCapped(
     DESTRUCTIVE_PATH_PATTERN,
     // headless (-hl) YOK, automatic-form-fill (-aff) YOK, no-scope (-ns) YOK → pasif + on-host.
   ];
-  return spawnCapped("katana", args, cwd, KATANA_TIMEOUT_MS);
+}
+
+function runKatanaCapped(
+  url: string,
+  cwd: string,
+  headers: string[] = [],
+  profile: DastProfile = DAST_PROFILES.full,
+): Promise<SpawnCappedResult> {
+  return spawnCapped("katana", buildKatanaArgs(url, profile, headers), cwd, profile.katana.timeoutMs);
 }
 
 /**
@@ -570,8 +647,11 @@ async function ensureNucleiTemplatesUpdated(cwd: string): Promise<boolean> {
 
 export async function runDast(
   state: State,
-  opts?: { updateTemplates?: boolean; noAutologin?: boolean },
+  opts?: { updateTemplates?: boolean; noAutologin?: boolean; profile?: DastProfileId },
 ): Promise<DastResult> {
+  // Profil VARSAYILANI "full" → 🛡️ butonunun bugünkü davranışı BİREBİR korunur (KATI #14).
+  // Faz 17'nin otomatik koşumu "fast" geçer. Açık `opts` alanları profili EZER (geriye uyum).
+  const profile = DAST_PROFILES[opts?.profile ?? "full"];
   // YZLLM 2026-06-20: login modülünü autologin BYPASS'lamadan test et — `mycl_no_autologin`
   // çerezi katana+nuclei'ye eklenir → app otomatik dev-oturumu açmaz, gerçek login akışı taranır.
   const headers = opts?.noAutologin ? ["Cookie: mycl_no_autologin=1"] : [];
@@ -625,12 +705,12 @@ export async function runDast(
   // Full Security (🛡️ buton): internette yayınlanan GÜNCEL açıkları/CVE'leri tara → önce
   // nuclei template'lerini son sürüme çek. Yalnız `updateTemplates` verildiğinde (hafif
   // koşumlar template çekmez).
-  if (opts?.updateTemplates) {
+  if (opts?.updateTemplates ?? profile.updateTemplates) {
     cov.templatesUpdated = await ensureNucleiTemplatesUpdated(state.project_root);
   }
-  if (toolInstalled("katana")) {
-    log.info("dast-runner", "crawling app with katana", { target });
-    const cr = await runKatanaCapped(target, state.project_root, headers);
+  if (profile.katana.enabled && toolInstalled("katana")) {
+    log.info("dast-runner", "crawling app with katana", { target, profile: profile.id });
+    const cr = await runKatanaCapped(target, state.project_root, headers, profile);
     if (cr.spawnError || cr.timedOut) {
       // crawl başarısız → kök taramaya düş (görünür: coverageLine "crawl başarısız" der).
       log.warn("dast-runner", "katana crawl failed (root-only scan)", {
@@ -639,10 +719,11 @@ export async function runDast(
       });
     } else {
       const parsed = parseKatanaUrls(cr.stdout, target);
-      scanUrls = parsed.urls;
+      // Profil tavanı (hızlı profil daha dar) — kapsam DÜRÜSTÇE capped olarak bildirilir.
+      scanUrls = parsed.urls.slice(0, profile.maxScanUrls);
       cov.crawled = true;
-      cov.capped = parsed.capped;
-      cov.urlCount = parsed.urls.length;
+      cov.capped = parsed.capped || parsed.urls.length > profile.maxScanUrls;
+      cov.urlCount = scanUrls.length;
     }
   } else {
     cov.katanaMissing = true;
@@ -659,7 +740,7 @@ export async function runDast(
   try {
     let result: SpawnCappedResult;
     if (scanUrls.length <= 1) {
-      result = await runNucleiCapped({ kind: "url", url: target }, state.project_root, headers);
+      result = await runNucleiCapped({ kind: "url", url: target }, state.project_root, headers, profile);
     } else {
       // I3(B) SAVUNMA: writeFileSync ENOSPC/EACCES atabilir → runDast "asla throw etmez"
       // sözleşmesini KORU (her çağıran için), throw etme — görünür hata DastResult'ı dön.
@@ -673,11 +754,16 @@ export async function runDast(
           error: "list_write_failed",
         };
       }
-      result = await runNucleiCapped({ kind: "list", file: listFile }, state.project_root, headers);
+      result = await runNucleiCapped({ kind: "list", file: listFile }, state.project_root, headers, profile);
     }
     const { stdout, timedOut, spawnError, stderr, exitCode } = result;
     if (timedOut) {
-      const limit = (scanUrls.length > 1 ? DAST_LIST_TIMEOUT_MS : DAST_TIMEOUT_MS) / 1000;
+      const limit =
+        (profile.id === "fast"
+          ? profile.nuclei.timeoutMs
+          : scanUrls.length > 1
+            ? DAST_LIST_TIMEOUT_MS
+            : DAST_TIMEOUT_MS) / 1000;
       return {
         ok: false,
         summary_tr: `⏱ Güvenlik taraması ${limit}s sınırında durduruldu (takılma koruması; ${cov.urlCount} route). Hedef: ${target}.`,

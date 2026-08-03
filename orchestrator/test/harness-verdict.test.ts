@@ -184,3 +184,36 @@ describe("harness-verdict · computeVerdict", () => {
     expect(computeVerdict(cleanRun()).verdict).toBe("PASS");
   });
 });
+
+// 2026-08-03: Faz 17 (sızma testi) de güvenlik boyutudur. Eskiden koşulsuz "complete" yazıp hükme hiç
+// yansımıyordu → hiç tarama yapılmadan PASS mümkündü.
+describe("computeVerdict · Faz 17 sızma testi atlaması", () => {
+  const base = (extra: AuditEvent[]): AuditEvent[] => [
+    { ts: 1, phase: 17, event: "phase-17-complete" },
+    ...extra,
+  ];
+  it("tarama aracı eksik / tarama çöktü → KISMİ (MyCL'in düzeltebileceği gerçek eksik)", () => {
+    for (const detail of ['missing_command cmd="nuclei"', "scan_failed timeout"]) {
+      const v = computeVerdict(base([{ ts: 2, phase: 17, event: "phase-17-skipped", detail }]), {
+        deliverableExists: true,
+      });
+      expect(v.verdict).not.toBe("PASS");
+    }
+  });
+  it("ortam/kapsam kaynaklı atlama → PASS korunur (çifte sayım ve kalıcı KISMİ yok)", () => {
+    // Bunlar doğrulama özetinde "DOĞRULANMADI" olarak zaten GÖRÜNÜR; hükmü de düşürmek hem aynı
+    // eksiği iki kez sayar (çalışan uygulama yokluğunu gerçek-app kapısı zaten düşürüyor) hem de
+    // her koşuyu kalıcı KISMİ yapıp prototip kaydını öldürürdü.
+    for (const detail of [
+      "skip_unless=has_web_target",
+      "no_dev_server",
+      "unsupported_platform",
+      "unchanged_since_last_scan",
+    ]) {
+      const v = computeVerdict(base([{ ts: 2, phase: 17, event: "phase-17-skipped", detail }]), {
+        deliverableExists: true,
+      });
+      expect(v.verdict, detail).toBe("PASS");
+    }
+  });
+});

@@ -68,8 +68,10 @@ import {
   findingToTaskText,
   severityToPriority,
   dedupeFindingsByTemplate,
+  toolInstalled,
   type DastSummary,
 } from "./dast-runner.js";
+import { decidePhase17 } from "./phase-17-decision.js";
 import { runDependencyAudit, dependencyAuditLine } from "./dependency-audit.js";
 import { runSemgrepScans, sastLine } from "./sast-scan.js";
 import { ensureSecurityTools } from "./tool-ensure.js";
@@ -7510,19 +7512,73 @@ async function enqueueSystemFixTask(
  * (handleRunDastRequest) — makine yükünü kullanıcı kontrol eder.
  */
 async function runPhase17Pentest(
-  _state: State,
+  state: State,
   _config: MyclConfig,
 ): Promise<{ status: PhaseStatus; partial: boolean }> {
-  // YZLLM 2026-06-22: pentest Faz 17'den ÇIKARILDI. Otomatik pipeline'da çok ağırdı (katana/nuclei +
-  // dev-server + headed Chromium = makine ısınması). Sızma testi artık YALNIZ "🛡️ Güvenlik Taraması"
-  // butonuyla MANUEL koşar (handleRunDastRequest — kullanıcı onaylı, yükü kullanıcı kontrol eder).
-  // DAST motoru + buton aynen korunur; yalnız OTOMATİK Faz-17 tetiği kalktı → Faz 17 no-op (pipeline
-  // temiz tamamlanır, ısınma yok).
+  // YZLLM kararı 2026-08-03 (urun amaci: "hicbir katmanda guvenlik acigi olmasin"): sizma testi OTOMATIK
+  // kosar — ama HIZLI profille. 2026-06-22'de makine yuku nedeniyle kaldirilmisti; geriye kosulsuz
+  // "phase-17-complete" yazan bir kabuk kalmisti ve dogrulama ozeti bunu "gecti" gosteriyordu (HICBIR tarama
+  // yapilmadan sahte yesil). Artik: kosar; kosamazsa GORUNUR atlama yazar (asla "gecti" demez).
+  // Tam kapsamli tarama 🛡️ Guvenlik Taramasi butonunda kalir (kullanici kontrollu, tum siddetler).
+  const plat = process.platform;
+  // ONDEN COZ (KATI #6): bu faz OTOMATIK kosuyor → icinde AGIR is baslatmaz.
+  //  - Arac KURULUMU denemez (brew/go install dakikalar surebilir + surpriz kurulum). Arac yoksa gorunur
+  //    atlama yazar; mevcut "araci kur + kapiyi gercekten kostur" isi zaten OTOMATIK acilir (missing_command).
+  //  - Dev sunucu AYAGA KALDIRMAZ: Faz 5 sonrasi uygulama zaten ayakta olmali (KATI #8). Ayakta degilse bu
+  //    fazin isi degil — gorunur atlama yazar (uygulamanin calismamasi kendi yolunda ele alinir).
+  // Bu sayede kosamadigi durumda faz saniyeler icinde ve DURUSTCE gecer.
+  const devAlive = state.dev_server_pid ? await isProcessAlive(state.dev_server_pid) : false;
+  const decision = decidePhase17({
+    platform: plat,
+    devServerAlive: devAlive,
+    nucleiInstalled: toolInstalled("nuclei"),
+    katanaInstalled: toolInstalled("katana"),
+  });
+  if (!decision.run) {
+    // DURUSTLUK: artik skip olayi YAZILIR → dogrulama ozeti bu boyutu "DOGRULANMADI" gosterir,
+    // "installable_gap" ise mevcut mekanizma "araci kur + kapiyi kostur" isini otomatik acar.
+    await appendAuditModule(state.project_root, {
+      ts: Date.now(),
+      phase: 17,
+      event: "phase-17-skipped",
+      caller: "mycl-orchestrator",
+      detail: decision.auditDetail,
+    }).catch(() => {});
+    emitChatMessage("system", decision.userMsg);
+    return { status: "complete", partial: false };
+  }
   emitChatMessage(
     "system",
-    "🔪 Faz 17 (Sızma Testi) otomatik koşmaz — pentest artık **🛡️ Güvenlik Taraması** butonuyla manuel " +
-      "çalışır (istediğinde; makine yükünü sen kontrol edersin).",
+    "🔪 Faz 17 — sizma testi kosuyor (hizli profil: yalniz yuksek/kritik acikler, ~1-2 dk). " +
+      "Tam kapsamli tarama icin 🛡️ Guvenlik Taramasi butonunu kullanabilirsin.",
   );
+  setPentestActive(true);
+  let res;
+  try {
+    res = await runDast(state, { profile: "fast" });
+  } finally {
+    setPentestActive(false);
+  }
+  if (!res.ok) {
+    // Tarama KOSAMADI (timeout / hedef yok / arac hatasi) → "gecti" DEME: gorunur atlama.
+    await appendAuditModule(state.project_root, {
+      ts: Date.now(),
+      phase: 17,
+      event: "phase-17-skipped",
+      caller: "mycl-orchestrator",
+      detail: `scan_failed ${res.error ?? ""}`.trim(),
+    }).catch(() => {});
+    emitChatMessage("system", `⚠️ Sizma testi tamamlanamadi — bu boyut DOGRULANMADI.\n${res.summary_tr}`);
+    return { status: "complete", partial: false };
+  }
+  const found = res.summary?.findings.length ?? res.findings_count ?? 0;
+  if (found > 0) {
+    emitChatMessage("system", res.summary_tr);
+    await enqueueSecurityFindings(state.project_root, res.summary, "Faz 17 (hizli sizma testi)");
+    // partial=true → "soft_complete_after_fail" → hukum KISMI (sahte yesil yok).
+    return { status: "complete", partial: true };
+  }
+  emitChatMessage("system", `✅ Sizma testi (hizli profil) temiz — yuksek/kritik acik bulunamadi.`);
   return { status: "complete", partial: false };
 }
 
