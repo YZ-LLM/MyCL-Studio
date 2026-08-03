@@ -11,7 +11,6 @@
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
-    "perf": "npm run build",
     "db:init": "NODE_OPTIONS=--experimental-sqlite node error_folder/init-errors-db.js",
     "test": "NODE_OPTIONS=--experimental-sqlite vitest run",
     "test:integration": "NODE_OPTIONS=--experimental-sqlite vitest run --dir tests/integration",

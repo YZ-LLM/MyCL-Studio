@@ -320,11 +320,30 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     name_i18n_key: "phase.12.name",
     required_audits: ["perf-pass", "perf-fail"],
     mechanical_config: {
-      // Performance: stack profilinde "perf" tanımlı projeler için çalışır.
-      // Yoksa skip — Faz 10 lint ile çakışmaz.
+      // Performance: stack profilindeki "perf" (go/rust bench gibi dilin kendi ölçüm aracı).
+      // 19 stack'in 13'ünde tanımsız → tek başına bu kapı ölçüm YAPMIYORDU.
       scan_cmd: { type: "profile_key", key: "perf" },
       max_rescans: 0,
       skip_unless: "always",
+      // 2026-08-03: ana komut yoksa da GERÇEK ölçüm koşsun (stack bağımsız iki ölçüm aşağıda).
+      run_extras_when_main_skipped: true,
+      extra_scans: [
+        {
+          // Paket boyutu bütçesi: build çıktısını ölçer, temele göre geniş büyümede düşer.
+          // Build çıktısı yoksa "temiz" DEMEZ → atlama (exit 3).
+          name: "bundle-budget",
+          cmd: `node "${securityToolPath("bundle-budget-check.mjs")}" .`,
+          tool_error_codes: [3],
+        },
+        {
+          // Sayfa performans skoru (Lighthouse): orkestratörün KENDİ tarayıcısı ve bağımlılığıyla
+          // çalışan uygulamaya vurur — hedef projeye hiçbir şey kurulmaz (stack bağımsız).
+          // Çalışan uygulama yoksa ölçemez → atlama (görünür sarı), asla "geçti".
+          name: "perf-web",
+          cmd: `node "${securityToolPath("perf-web-check.mjs")}" .`,
+          tool_error_codes: [3],
+        },
+      ],
     },
   },
   13: {

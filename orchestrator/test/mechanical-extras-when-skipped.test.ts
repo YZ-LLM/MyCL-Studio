@@ -99,8 +99,16 @@ describe("faz kaydı sözleşmesi", () => {
     expect(PHASE_SPECS[13]?.mechanical_config?.run_extras_when_main_skipped).toBe(true);
   });
 
-  it("REGRESYON KİLİDİ: diğer mekanik fazlar bayrağı AÇMAZ (davranışları değişmedi)", () => {
-    for (const id of [10, 11, 12, 14, 15, 16, 17]) {
+  it("Faz 12 bayrağı AÇIK (19 stack'in 13'ünde perf komutu yok — ölçüm yine de koşmalı)", () => {
+    // Stack bağımsız iki ölçüm (paket boyutu + sayfa skoru) profil komutundan BAĞIMSIZ çalışır.
+    expect(PHASE_SPECS[12]?.mechanical_config?.run_extras_when_main_skipped).toBe(true);
+    const names = (PHASE_SPECS[12]?.mechanical_config?.extra_scans ?? []).map((e) => e.name);
+    expect(names).toContain("bundle-budget");
+    expect(names).toContain("perf-web");
+  });
+
+  it("REGRESYON KİLİDİ: geri kalan mekanik fazlar bayrağı AÇMAZ (davranışları değişmedi)", () => {
+    for (const id of [10, 11, 14, 15, 16, 17]) {
       expect(PHASE_SPECS[id as 10]?.mechanical_config?.run_extras_when_main_skipped ?? false).toBe(false);
     }
   });

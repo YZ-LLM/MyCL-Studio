@@ -12,6 +12,7 @@ import {
   isNotApplicableSkip,
   isToolInstallableSkip,
   classifyProfileNullDetail,
+  isRedundantGateCommand,
   shouldAnnounceSkip,
   clearAnnouncedSkip,
 } from "../src/base/mechanical-runner.js";
@@ -676,5 +677,50 @@ describe("shouldAnnounceSkip / clearAnnouncedSkip (skip mesajı tekrar kesme)", 
     expect(shouldAnnounceSkip("/pB|12|main", "missing_command")).toBe(true);
     expect(shouldAnnounceSkip("/pA|14|main", "missing_command")).toBe(true);
     expect(shouldAnnounceSkip("/pA|12|extra:semgrep", "missing_command")).toBe(true);
+  });
+});
+
+// 2026-08-03: MyCL'in KENDİ şablonu codegen'e `"perf": "npm run build"` yazmayı zorunlu tutuyordu →
+// performans kapısı yalnız build'i tekrar çalıştırıyordu (ölçüm değil). isStubGateCommand bunu
+// yakalamıyordu (yalnız echo desenini biliyor).
+describe("isRedundantGateCommand (anlamsız eşitlik stub'ı)", () => {
+  it("CANLI VAKA: perf script'i build'i çağırıyorsa yakalanır", () => {
+    const r = isRedundantGateCommand({
+      resolved: "npm run perf",
+      siblings: { build: "npm run build", test: "npm test" },
+      manifestScripts: { perf: "npm run build", build: "vite build", test: "vitest run" },
+    });
+    expect(r).toEqual({ redundant: true, sameAs: "build" });
+  });
+
+  it("gerçek ölçüm aracı yakalanmaz (yanlış alarm yok)", () => {
+    expect(
+      isRedundantGateCommand({
+        resolved: "cargo bench",
+        siblings: { build: "cargo build --release", test: "cargo test" },
+      }).redundant,
+    ).toBe(false);
+  });
+
+  it("boşluk/paket yöneticisi farkı sonucu değiştirmez", () => {
+    const r = isRedundantGateCommand({
+      resolved: "pnpm  run   perf",
+      siblings: { build: "pnpm run build" },
+      manifestScripts: { perf: "vite  build", build: "vite build" },
+    });
+    expect(r.redundant).toBe(true);
+  });
+
+  it("manifest yoksa doğrudan komutlar karşılaştırılır", () => {
+    expect(
+      isRedundantGateCommand({ resolved: "go build ./...", siblings: { build: "go build ./..." } }).redundant,
+    ).toBe(true);
+    expect(
+      isRedundantGateCommand({ resolved: "go test -bench=.", siblings: { build: "go build ./..." } }).redundant,
+    ).toBe(false);
+  });
+
+  it("anlamsız komut otomatik 'gerçek ölçüm ekle' işi açar", () => {
+    expect(isToolInstallableSkip("redundant_gate_command sameAs=build")).toBe(true);
   });
 });

@@ -11,8 +11,7 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run --passWithNoTests",
     "test:integration": "vitest run --dir tests/integration --passWithNoTests",
-    "test:e2e": "playwright test",
-    "perf": "npm run build"
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -137,7 +137,9 @@ task as an **extension** of that work, not a green-field rewrite.
      // YENİ ZORUNLULAR
      "lint": "eslint . --max-warnings 0",          // Phase 10 Lint
      "lint:fix": "eslint . --fix",
-     "perf": "npm run build", // Phase 12 Perf — DRY: REUSE the build script, do NOT duplicate the bundler command/flags (prod build success = perf baseline ok). pnpm/yarn/bun: use that manager's run-build.
+     // NOTE: do NOT add a "perf" script. Phase 12 measures performance itself (page score + bundle
+     // budget) — a "perf" script that merely re-runs the build is NOT a measurement and MyCL now
+     // rejects such redundant gate commands (2026-08-03).
      "test:integration": "vitest run --dir tests/integration",  // Phase 15 Integration
      "test:e2e": "playwright test"     // Phase 16 E2E (varsa)
    }

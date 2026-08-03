@@ -91,7 +91,7 @@ export function isNotApplicableSkip(reason: string | undefined | null): boolean 
 export function isToolInstallableSkip(reason: string | undefined | null): boolean {
   if (!reason) return false;
   const first = String(reason).trim().split(/\s+/)[0];
-  if (first === "missing_command" || first === "stub_script") return true;
+  if (first === "missing_command" || first === "stub_script" || first === "redundant_gate_command") return true;
   // 2026-08-03: profilde komut BOŞ olması iki ayrı şey olabilir —
   //  (a) gerekçesi yazılmış ve başka bir tarayıcı kapsıyor  → nötr, iş açma (yanlış alarm olurdu)
   //  (b) gerekçesiz boşluk (profil eksik)                    → GERÇEK eksik → "aracı kur" işi aç
@@ -148,6 +148,44 @@ export function shellQuote(p: string): string {
 /** `{files}` placeholder'ını shell-safe scope yollarıyla genişlet. */
 export function expandFilesPlaceholder(template: string, files: string[]): string {
   return template.split("{files}").join(files.map(shellQuote).join(" "));
+}
+
+/**
+ * Bu kapının komutu, başka bir boyutun komutunun AYNISI mı? (paket yöneticisi script'leri açılarak)
+ * Karşılaştırılan boyutlar: build/test/lint — bir kapının bunlardan birini tekrar çalıştırması ölçüm değildir.
+ */
+async function checkRedundantAgainstSiblings(
+  state: State,
+  key: string,
+  resolved: string,
+): Promise<{ redundant: boolean; sameAs?: string }> {
+  if (!state.stack) return { redundant: false };
+  // Yalnız ölçüm/analiz kapıları için anlamlı (build'in kendisi build'e eşit olabilir).
+  if (!["perf", "simplify", "security", "integration"].includes(key)) return { redundant: false };
+  try {
+    const profile = await loadProfile(state.stack);
+    const siblings: Record<string, string | null> = {};
+    for (const k of ["build", "test", "lint"] as const) {
+      if (k === key) continue;
+      siblings[k] = resolveCommand(profile, k as ProfileCommandKey);
+    }
+    const scripts = await readManifestScripts(state.project_root);
+    return isRedundantGateCommand({ resolved, siblings, manifestScripts: scripts });
+  } catch {
+    return { redundant: false }; // profil/manifest okunamadı → kuşkuda ENGELLEME (yanlış alarm yasağı)
+  }
+}
+
+/** package.json scripts (yoksa boş) — "npm run X" gövdesini açmak için. */
+async function readManifestScripts(projectRoot: string): Promise<Record<string, string>> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const raw = await readFile(join(projectRoot, "package.json"), "utf-8");
+    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
+    return parsed.scripts ?? {};
+  } catch {
+    return {};
+  }
 }
 
 /** Profildeki `command_gaps` girdisini oku (komut null ise NEDEN + neyle kapsanıyor). null = gerekçe yok. */
@@ -283,6 +321,47 @@ export function isMyclToolBroken(result: { code: number; stdout: string; stderr:
  */
 export function isStubGateCommand(cmd: string): boolean {
   return /echo\s+['"][^'"]*(pass|passed|ok|success|check)[^'"]*['"]/i.test(cmd);
+}
+
+/**
+ * SAF (2026-08-03): "anlamsız eşitlik" stub'ı — bir kapının komutu BAŞKA bir kapının komutunun aynısı mı?
+ *
+ * CANLI KANIT: MyCL'in kendi Faz 5 şablonu codegen'e `"perf": "npm run build"` yazmayı ZORUNLU tutuyordu
+ * ("prod build başarılı = performans temeli tamam" varsayımı). Sonuç: performans kapısı yalnız build'i
+ * TEKRAR çalıştırıyordu — hiçbir performans ölçümü yok, ama kapı yeşil. `isStubGateCommand` yalnız
+ * `echo "passed"` desenini yakaladığı için bu sessizce geçiyordu.
+ *
+ * Paket yöneticisi `run <script>` biçimindeki komutlar manifest gövdesine açılır (npm/pnpm/yarn/bun);
+ * açılmış gövde başka bir boyutun gövdesiyle aynıysa bu kapı O boyutu ölçüyordur, kendi boyutunu DEĞİL.
+ */
+export function isRedundantGateCommand(inp: {
+  /** Bu kapının çözülmüş komutu (örn. "npm run perf"). */
+  resolved: string;
+  /** Diğer boyutların çözülmüş komutları (örn. { build: "npm run build", test: "npm test" }). */
+  siblings: Readonly<Record<string, string | null | undefined>>;
+  /** package.json scripts (varsa) — "npm run X" gövdesini açmak için. */
+  manifestScripts?: Readonly<Record<string, string>>;
+}): { redundant: boolean; sameAs?: string } {
+  // Script gövdesi başka bir script'i çağırabilir (canlı vaka: perf → "npm run build" → "vite build").
+  // Bu yüzden ÖZYİNELEMELİ açılım; döngüye karşı derinlik tavanı + görülen script kaydı.
+  const expand = (cmd: string, depth = 0, seen = new Set<string>()): string => {
+    const norm = cmd.trim().replace(/\s+/g, " ");
+    if (depth >= 5) return norm;
+    const m = /^(?:npm|pnpm|yarn|bun)(?: run)? ([\w:-]+)$/.exec(norm);
+    const scriptName = m?.[1];
+    if (!scriptName || seen.has(scriptName)) return norm;
+    const body = inp.manifestScripts?.[scriptName];
+    if (!body) return norm;
+    seen.add(scriptName);
+    return expand(body, depth + 1, seen);
+  };
+  const mine = expand(inp.resolved);
+  if (!mine) return { redundant: false };
+  for (const [key, sib] of Object.entries(inp.siblings)) {
+    if (!sib) continue;
+    if (expand(sib) === mine) return { redundant: true, sameAs: key };
+  }
+  return { redundant: false };
 }
 
 export function isTsToolNotApplicable(result: { code: number; stdout: string; stderr: string }): boolean {
@@ -612,6 +691,29 @@ export class MechanicalRunnerBase {
       if (shouldAnnounceSkip(skipKey, stackDetected ? "profile_resolve_null" : "stack_not_detected"))
         emitChatMessage("system", userMsg);
       return { kind: "skipped", reason: "profile_resolve_null" };
+    }
+    // 2026-08-03: ANLAMSIZ EŞİTLİK — bu kapının komutu başka bir boyutun komutuyla aynıysa (canlı örnek:
+    // `perf` = `npm run build`) bu kapı KENDİ boyutunu ölçmüyordur. Sahte yeşil yerine görünür atlama +
+    // otomatik iş ("bu boyutu gerçekten ölçen bir komut ekle").
+    if (typeof opts.mechanical.scan_cmd !== "string" && opts.mechanical.scan_cmd.type === "profile_key") {
+      const redundant = await checkRedundantAgainstSiblings(opts.state, opts.mechanical.scan_cmd.key, scanCmd);
+      if (redundant.redundant) {
+        const detail = `redundant_gate_command sameAs=${redundant.sameAs} cmd="${scanCmd}"`;
+        await appendAudit(opts.state.project_root, {
+          ts: Date.now(),
+          phase: opts.phaseId,
+          event: `phase-${opts.phaseId}-skipped`,
+          caller: "mycl-orchestrator",
+          detail,
+        });
+        if (shouldAnnounceSkip(skipKey, "redundant_gate_command"))
+          emitChatMessage(
+            "system",
+            `⚠️ ${this.label} atlandı — komutu "${redundant.sameAs}" boyutunun komutuyla AYNI (${scanCmd}). ` +
+              `Bu, o boyutu tekrar çalıştırmaktır; bu boyut DOĞRULANMADI. Gerçekten ölçen bir komut gerekiyor.`,
+          );
+        return { kind: "skipped", reason: detail };
+      }
     }
     // 2026-06-11 (YZLLM "1 saniyede geçti — normal mi?"): echo-stub script (gerçek kontrol değil) → bu boyut
     // DOĞRULANMAZ; sahte-yeşil yerine görünür skip.
