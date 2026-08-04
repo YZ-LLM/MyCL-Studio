@@ -3097,7 +3097,11 @@ async function handleSaveSelectedModels(
     // gerisi (translator/main/orchestrator/model_tiers) selected_models'e gider.
     const { effort, backends, design_workflow, agent_teams_optin, multi_agent_selection, cache_ttl, ...sel } =
       payload;
-    await persistSelectedModels(sel as SelectedModels);
+    // "Plan Modeli" seçicisinde "— varsayılan —" seçilirse boş string gelir. Alan-bazlı merge boş değeri
+    // "koru" saydığı için bu AÇIK temizleme olmadan alan bir kez set edildikten sonra geri alınamazdı —
+    // "boş bırakılırsa bugünkü davranış" sözü uygulanamaz kalırdı (YZLLM 2026-08-04).
+    const clear: Array<keyof SelectedModels> = payload.plan_model === "" ? ["plan_model"] : [];
+    await persistSelectedModels(sel as SelectedModels, { clear });
     // v15.8: Efor + v15.13: tasarım fan-out flag'leri — Modeller sekmesinde modellerle
     // birlikte kaydedilir. CLI backend aktifse efor `--effort` olarak kullanılır.
     const flagsPatch: Partial<ClaudeCodeFlags> = {};
@@ -3306,6 +3310,7 @@ async function handleReadSelectedModels(): Promise<void> {
       backends,
       // v15.13: auto-model katmanları + tasarım fan-out flag'leri — Settings seçicileri için.
       model_tiers: sel?.model_tiers,
+      plan_model: sel?.plan_model,
       design_workflow: flags.design_workflow ?? "off",
       agent_teams_optin: flags.agent_teams_optin ?? false,
       multi_agent_selection: flags.multi_agent_selection ?? false,

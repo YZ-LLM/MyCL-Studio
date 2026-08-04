@@ -7,6 +7,8 @@ import {
   hasUsableKeys,
   resolveAgentBackends,
   resolveProvider,
+  resolveSelectedModels,
+  type ConfigFile,
   type MyclConfig,
 } from "../src/config.js";
 
@@ -85,5 +87,37 @@ describe("resolveProvider — Claude-only hedef (z.ai söküm sonrası)", () => 
     expect(resolveProvider(cfg, "orchestrator").apiKey).toBe("sk-o");
     const noOrch = { ...cfg, api_keys: { translator: "sk-t", main: "sk-m" } } as unknown as MyclConfig;
     expect(resolveProvider(noOrch, "orchestrator").apiKey).toBe("sk-m");
+  });
+});
+
+// YZLLM 2026-08-04 (plan modeli): resolveSelectedModels bir AÇIK İZİN LİSTESİ — burada sayılmayan
+// alan diskte dursa bile runtime'a hiç ulaşmaz. En kolay unutulan adım bu; test onu kilitliyor.
+describe("resolveSelectedModels — opsiyonel alanlar runtime'a ULAŞIYOR mu", () => {
+  const base = { translator: "claude-haiku-4-5", main: "claude-opus-5" };
+
+  it("plan_model diskteyse runtime'a taşınır", () => {
+    const sel = resolveSelectedModels({
+      selected_models: { ...base, plan_model: "claude-fable-5" },
+    } as ConfigFile);
+    expect(sel.plan_model).toBe("claude-fable-5");
+  });
+
+  it("plan_model yoksa alan da yok (varsayılan davranış: plan-mode kendi çözümüne düşer)", () => {
+    const sel = resolveSelectedModels({ selected_models: base } as ConfigFile);
+    expect(sel.plan_model).toBeUndefined();
+  });
+
+  it("diğer opsiyonel alanlar da taşınmaya devam ediyor (regresyon yok)", () => {
+    const sel = resolveSelectedModels({
+      selected_models: {
+        ...base,
+        relevance: "claude-haiku-4-5",
+        orchestrator: "claude-opus-5",
+        model_tiers: { strong: "claude-opus-5" },
+      },
+    } as ConfigFile);
+    expect(sel.relevance).toBe("claude-haiku-4-5");
+    expect(sel.orchestrator).toBe("claude-opus-5");
+    expect(sel.model_tiers?.strong).toBe("claude-opus-5");
   });
 });

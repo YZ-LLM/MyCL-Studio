@@ -960,6 +960,8 @@ function App() {
   const [currentSelected, setCurrentSelected] = useState<{ translator?: string; main?: string } | null>(null);
   // v15.13 (auto-model + çok-ajanlı tasarım): Settings seçicileri için mevcut değerler.
   const [currentModelTiers, setCurrentModelTiers] = useState<ModelTiers | undefined>(undefined);
+  /** Plan modunda planı yazan model (boş string = varsayılan davranış). */
+  const [currentPlanModel, setCurrentPlanModel] = useState<string>("");
   const [currentDesignWorkflow, setCurrentDesignWorkflow] = useState<DesignWorkflowMode | undefined>(undefined);
   const [currentAgentTeamsOptIn, setCurrentAgentTeamsOptIn] = useState<boolean | undefined>(undefined);
   const [currentMultiAgentSelection, setCurrentMultiAgentSelection] = useState<boolean | undefined>(undefined);
@@ -1047,6 +1049,7 @@ function App() {
         if (ev.data.effort) setCurrentEffort(ev.data.effort);
         if (ev.data.backends) setCurrentBackends(ev.data.backends);
         if (ev.data.model_tiers) setCurrentModelTiers(ev.data.model_tiers);
+        setCurrentPlanModel(ev.data.plan_model ?? "");
         if (ev.data.design_workflow) setCurrentDesignWorkflow(ev.data.design_workflow);
         if (typeof ev.data.agent_teams_optin === "boolean")
           setCurrentAgentTeamsOptIn(ev.data.agent_teams_optin);
@@ -1137,8 +1140,12 @@ function App() {
     agentTeamsOptIn?: boolean,
     cacheTtl?: "5m" | "1h",
     multiAgentSelection?: boolean,
+    // Yeni alanlar buraya değil, bu nesnenin İÇİNE eklenir — konumsal liste 10'a dayandı, 11.'si
+    // sırası karışabilecek bir tuzak olurdu (YZLLM 2026-08-04).
+    opts?: { planModel?: string },
   ) => {
     setSavingModels(true);
+    if (typeof opts?.planModel === "string") setCurrentPlanModel(opts.planModel);
     if (effort) setCurrentEffort(effort);
     if (backends) setCurrentBackends(backends);
     if (modelTiers) setCurrentModelTiers(modelTiers);
@@ -1159,6 +1166,8 @@ function App() {
         ...(typeof agentTeamsOptIn === "boolean" ? { agent_teams_optin: agentTeamsOptIn } : {}),
         ...(typeof multiAgentSelection === "boolean" ? { multi_agent_selection: multiAgentSelection } : {}),
         ...(cacheTtl ? { cache_ttl: cacheTtl } : {}),
+        // Boş string BİLEREK gönderilir: "— varsayılan —" seçimi açık temizleme sinyalidir.
+        ...(typeof opts?.planModel === "string" ? { plan_model: opts.planModel } : {}),
       },
     });
     // config_status sonrası modal kapanır
@@ -1485,6 +1494,7 @@ function App() {
       currentSelected={currentSelected}
       currentBackends={currentBackends}
       currentModelTiers={currentModelTiers}
+      currentPlanModel={currentPlanModel}
       currentDesignWorkflow={currentDesignWorkflow}
       currentAgentTeamsOptIn={currentAgentTeamsOptIn}
       currentMultiAgentSelection={currentMultiAgentSelection}

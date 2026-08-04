@@ -123,6 +123,13 @@ export interface SelectedModels {
    */
   orchestrator?: string;
   /**
+   * Plan modu planını yazan model (YZLLM 2026-08-04: "plan moduna aldığımda planı Fable 5 yapsın").
+   * Opsiyonel — BOŞSA bugünkü davranış aynen sürer (orkestrasyon iş türü → dengeli katman). Doluysa
+   * plan üretimi/revizyonu bu modelle ve efor tavanı uygulanmadan koşar. Yalnız plan METNİNİ etkiler;
+   * onaylanan planı UYGULAYAN fazlar her zamanki gibi kendi iş türlerinin katmanını kullanır.
+   */
+  plan_model?: string;
+  /**
    * v15.13: Fan-out alt-ajan (subagent) rolleri için model id'leri. Her biri
    * opsiyonel — yoksa main model fallback (subagentModelId helper). Settings'te
    * kullanıcı seçer (örn. architect→Opus, ux/security/data→Sonnet). İş seviyesine
@@ -363,7 +370,7 @@ function secretsPath(): string {
   return join(configDir(), "secrets.json");
 }
 
-interface ConfigFile {
+export interface ConfigFile {
   selected_models?: Partial<SelectedModels>;
   claude_code_flags?: ClaudeCodeFlags;
   agent_backends?: Partial<AgentBackends>;
@@ -514,7 +521,12 @@ export function subagentModelId(models: SelectedModels, role: SubagentRole): str
   return modelForTier(ROLE_TIER[role], models.model_tiers).id;
 }
 
-function resolveSelectedModels(file: ConfigFile): SelectedModels {
+/**
+ * Diskteki `selected_models`'ı runtime tipine çevirir. DİKKAT: bu bir AÇIK İZİN LİSTESİ — burada
+ * sayılmayan alan diskte dursa bile runtime'a HİÇ ulaşmaz. Yeni bir opsiyonel model alanı eklerken
+ * buraya da eklenmezse sessizce yok sayılır (test bunu kilitler). Export: saf, test edilebilir.
+ */
+export function resolveSelectedModels(file: ConfigFile): SelectedModels {
   const sel = file.selected_models;
   if (!sel || !sel.translator || !sel.main) {
     throw new ModelSelectionMissingError(
@@ -528,6 +540,7 @@ function resolveSelectedModels(file: ConfigFile): SelectedModels {
     main: sel.main,
     ...(sel.relevance ? { relevance: sel.relevance } : {}),
     ...(sel.orchestrator ? { orchestrator: sel.orchestrator } : {}),
+    ...(sel.plan_model ? { plan_model: sel.plan_model } : {}),
     ...(sel.subagent_models ? { subagent_models: sel.subagent_models } : {}),
     ...(sel.model_tiers ? { model_tiers: sel.model_tiers } : {}),
   };
@@ -699,18 +712,24 @@ export async function hasUsableKeysAfterMerge(patch: Partial<ApiKeys>): Promise<
  * Seçili modelleri config.json'a yazar. Mevcut config'i merge'ler (claude_code_flags,
  * timeouts korunur).
  */
-export async function persistSelectedModels(sel: SelectedModels): Promise<void> {
+export async function persistSelectedModels(
+  sel: SelectedModels,
+  opts?: { clear?: Array<keyof SelectedModels> },
+): Promise<void> {
   await fs.mkdir(configDir(), { recursive: true, mode: 0o700 });
   const existing = await loadConfigFile();
-  const next: ConfigFile = {
-    ...existing,
-    // MERGE (kod-analiz 2026-06-07): selected_models'ı tam-replace etme — UI payload relevance/
-    // subagent_models taşımadığında bu alanlar sessizce silinip main'e düşüyordu. Alan-bazlı merge.
-    selected_models: mergeDefinedFields(
-      existing.selected_models as Record<string, unknown> | undefined,
-      sel as unknown as Record<string, unknown>,
-    ) as Partial<SelectedModels>,
-  };
+  // MERGE (kod-analiz 2026-06-07): selected_models'ı tam-replace etme — UI payload relevance/
+  // subagent_models taşımadığında bu alanlar sessizce silinip main'e düşüyordu. Alan-bazlı merge.
+  const merged = mergeDefinedFields(
+    existing.selected_models as Record<string, unknown> | undefined,
+    sel as unknown as Record<string, unknown>,
+  ) as Partial<SelectedModels>;
+  // AÇIK TEMİZLEME (YZLLM 2026-08-04): merge boş değeri "koru" saydığı için opsiyonel bir alan bir kez
+  // set edildikten sonra arayüzden GERİ ALINAMIYORDU. Plan modeli "boş bırakılırsa bugünkü davranış"
+  // sözü bunu zorunlu kılıyor. Silme yalnız çağıranın AÇIKÇA istediği alanlarda olur — eksik payload
+  // hâlâ hiçbir şeyi silmez (o korumanın kendisi bozulmuyor).
+  for (const k of opts?.clear ?? []) delete merged[k];
+  const next: ConfigFile = { ...existing, selected_models: merged };
   const raw = JSON.stringify(next, null, 2) + "\n";
   await fs.writeFile(configPath(), raw, { encoding: "utf-8", mode: 0o600 });
 }

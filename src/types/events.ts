@@ -250,6 +250,8 @@ export interface SelectedModelsEvent {
   data: {
     selected: { translator?: string; main?: string; orchestrator?: string } | null;
     effort?: string;
+    /** Plan modunda planı yazan model (boş → varsayılan davranış). */
+    plan_model?: string;
     /** v15.8: rol-backend'leri — Modeller sekmesindeki seçiciler için. */
     backends?: AgentBackends;
     /** v15.13 (auto-model): iş-seviyesi model katmanları — fan-out rolleri için. */
@@ -588,6 +590,8 @@ export type OrchestratorCommand =
         main: string;
         orchestrator?: string;
         effort?: string;
+        /** Plan modunda planı yazan model. Boş string → AÇIK temizleme (varsayılana dön). */
+        plan_model?: string;
         /** v15.8: rol başına backend (api/cli) — modellerle birlikte kaydedilir. */
         backends?: Partial<AgentBackends>;
         /** v15.13 (auto-model): iş-seviyesi model katmanları — fan-out rolleri için. */

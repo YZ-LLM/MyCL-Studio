@@ -18,10 +18,43 @@ import { resolveLlmClient } from "./claude-api.js";
 import { extractKindBlock } from "./cli-json.js";
 import { runClaudeCli } from "./cli-run.js";
 import { backendForRole, type MyclConfig } from "./config.js";
-import { emitClaudeStream, withClaudeStreamBanner } from "./ipc.js";
+import { emitChatMessage, emitClaudeStream, withClaudeStreamBanner } from "./ipc.js";
 import { log } from "./logger.js";
-import { selectEffortForTask, selectModelForTask } from "./model-catalog.js";
+import {
+  describeModel,
+  modelChoiceLineIfChanged,
+  selectEffortForTask,
+  selectModelForTask,
+} from "./model-catalog.js";
 import { READ_ONLY_DISALLOWED_TOOLS } from "./tool-policy.js";
+
+/**
+ * SAF: planı YAZACAK model + efor. YZLLM 2026-08-04: "plan moduna aldığımda planı Fable 5 yapsın."
+ *
+ * `selected_models.plan_model` BOŞSA bugünkü davranış birebir korunur (orkestrasyon iş türü → dengeli
+ * katman + o iş türünün efor tavanı). Doluysa kullanıcı planı bilinçli olarak belirli bir modele
+ * vermiştir; o niyetle "hafif iş" efor tavanı çelişeceği için efor `design` iş türünden çözülür
+ * (config eforu tavan uygulanmadan geçer).
+ *
+ * Kapsam yalnız plan METNİ: onaylanan planı UYGULAYAN fazlar değişmez, her zamanki gibi kendi iş
+ * türlerinin katmanını (codegen/spec/review → güçlü katman) kullanır.
+ */
+export function resolvePlanModel(config: MyclConfig): {
+  modelId: string;
+  effort: string;
+  source: "settings" | "auto";
+} {
+  const chosen = config.selected_models.plan_model;
+  const configEffort = config.claude_code_flags.effort;
+  if (chosen) {
+    return { modelId: chosen, effort: selectEffortForTask("design", configEffort), source: "settings" };
+  }
+  return {
+    modelId: selectModelForTask("orchestration", config.selected_models.model_tiers).modelId,
+    effort: selectEffortForTask("orchestration", configEffort),
+    source: "auto",
+  };
+}
 
 // ── Mod singleton'ı (never-ask deseni: frontend localStorage'dan boot'ta yeniden gönderir) ──
 let _planMode = false;
@@ -111,9 +144,22 @@ export async function generatePlan(
   userText: string,
   revision?: { previous: PlanProposal; feedback: string },
 ): Promise<PlanProposal | null> {
-  // Plan kalitesi belirleyici → STRONG tier (intake'in classification'ından bilinçli fark).
-  const model = selectModelForTask("orchestration", config.selected_models.model_tiers).modelId;
+  // Model: Ayarlar → "Plan Modeli" seçildiyse O kullanılır (efor tavanı uygulanmaz). Boşsa bugünkü
+  // davranış: orkestrasyon iş türü → dengeli katman + o türün efor tavanı. (Eski yorum burada "STRONG
+  // tier" diyordu ama kod her zaman balanced çağırıyordu — yorum koda göre düzeltildi, davranış değil.)
+  // Revizyon (✏️ Düzenle) aynı fonksiyondan geçer → plan ve revizyonu HEP aynı modelle yazılır.
+  const { modelId: model, effort, source } = resolvePlanModel(config);
   const useCli = backendForRole(config, "orchestrator") === "cli";
+  // Planı hangi modelin yazdığı görünür olsun (yalnız DEĞİŞİNCE — aynı satır tekrar tekrar basılmaz).
+  {
+    const line = modelChoiceLineIfChanged(
+      "plan-mode",
+      source === "settings"
+        ? `🗺️ Planı **${describeModel(model).label}** yazıyor (Ayarlar → Plan Modeli).`
+        : `🗺️ Planı **${describeModel(model).label}** yazıyor (varsayılan; Ayarlar → Plan Modeli'nden değiştirebilirsin).`,
+    );
+    if (line) emitChatMessage("system", line);
+  }
   let text: string;
   try {
     if (useCli) {
@@ -127,7 +173,7 @@ export async function generatePlan(
             cwd: projectRoot,
             // Salt planlama — yazma/alt-ajan yasak (Read/Grep açık: proje bağlamına bakabilir).
             disallowedTools: READ_ONLY_DISALLOWED_TOOLS,
-            effort: selectEffortForTask("orchestration", config.claude_code_flags.effort),
+            effort,
             onText: (t) => emitClaudeStream({ sub: "text", text: t }),
             timeoutMs: 180_000,
           }),

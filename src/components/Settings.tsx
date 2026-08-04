@@ -63,6 +63,7 @@ interface Props {
     agentTeamsOptIn?: boolean,
     cacheTtl?: "5m" | "1h",
     multiAgentSelection?: boolean,
+    opts?: { planModel?: string },
   ) => void;
   /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
   currentBackends?: AgentBackends;
@@ -94,6 +95,8 @@ interface Props {
   effort?: string;
   /** v15.13 (auto-model): mevcut iş-seviyesi model katmanları (seçiciler için). */
   currentModelTiers?: ModelTiers;
+  /** Plan modunda planı yazan model (boş = varsayılan). */
+  currentPlanModel?: string;
   /** v15.13: mevcut çok-ajanlı tasarım fan-out kapsamı. */
   currentDesignWorkflow?: DesignWorkflowMode;
   /** v15.13: mevcut Agent Teams müzakere opt-in. */
@@ -194,6 +197,7 @@ export function Settings({
   onRunContextTrim,
   effort,
   currentModelTiers,
+  currentPlanModel,
   currentBackends,
   currentDesignWorkflow,
   currentAgentTeamsOptIn,
@@ -224,6 +228,7 @@ export function Settings({
     setBackends((prev) => ({ ...prev, [role]: v }));
   // v15.13 (auto-model + çok-ajanlı tasarım): iş-seviyesi model katmanları + tasarım flag'leri.
   const [modelTiersSel, setModelTiersSel] = useState<ModelTiers>(currentModelTiers ?? {});
+  const [planModelSel, setPlanModelSel] = useState<string>(currentPlanModel ?? "");
   const setTier = (tier: keyof ModelTiers, v: string) =>
     setModelTiersSel((prev) => ({ ...prev, [tier]: v || undefined }));
   // SABİT (YZLLM 2026-06-22): bu 3 ayar kullanıcı-değiştirilemez (config read-force ezer). Setter YOK +
@@ -523,6 +528,37 @@ export function Settings({
                     margin: "8px 0 4px",
                   }}
                 >
+                  Plan modeli
+                </p>
+                <select
+                  value={planModelSel}
+                  onChange={(e) => setPlanModelSel(e.target.value)}
+                  style={{ width: "100%" }}
+                  data-testid="settings-plan-model"
+                >
+                  <option value="">— varsayılan —</option>
+                  <optgroup label="Claude (Anthropic)">
+                    {modelsMain.models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.display_name || m.id}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+                <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "4px 0 0" }}>
+                  🗺️ Plan modunda planı bu model yazar. Boş bırakırsan bugünkü davranış sürer (dengeli
+                  katman). Onaylanan planı UYGULAYAN fazlar bundan etkilenmez — onlar her zamanki gibi
+                  iş türlerinin katmanını kullanır.
+                </p>
+                <p
+                  style={{
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    color: "var(--fg-dim)",
+                    margin: "8px 0 4px",
+                  }}
+                >
                   Prompt cache ömrü
                 </p>
                 <select
@@ -553,6 +589,7 @@ export function Settings({
                     agentTeamsOptInSel,
                     cacheTtlSel,
                     multiAgentSelectionSel,
+                    { planModel: planModelSel },
                   )
                 }
               >

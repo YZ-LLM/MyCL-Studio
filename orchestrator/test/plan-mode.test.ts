@@ -9,9 +9,12 @@ import {
   isPlanMode,
   parsePlanBlock,
   persistPlan,
+  resolvePlanModel,
   setPlanMode,
   type PlanProposal,
 } from "../src/plan-mode.js";
+import type { MyclConfig } from "../src/config.js";
+import { selectModelForTask } from "../src/model-catalog.js";
 
 const VALID_RAW = [
   "İşte plan:",
@@ -99,5 +102,43 @@ describe("plan modu singleton", () => {
     expect(isPlanMode()).toBe(true);
     setPlanMode(false);
     expect(isPlanMode()).toBe(false);
+  });
+});
+
+// YZLLM 2026-08-04: "plan moduna aldığımda planı Fable 5 yapsın."
+describe("resolvePlanModel — planı hangi model yazar", () => {
+  const cfg = (planModel?: string, tiers?: Record<string, string>): MyclConfig =>
+    ({
+      selected_models: {
+        translator: "claude-haiku-4-5",
+        main: "claude-opus-5",
+        ...(planModel ? { plan_model: planModel } : {}),
+        ...(tiers ? { model_tiers: tiers } : {}),
+      },
+      claude_code_flags: { effort: "max" },
+    }) as unknown as MyclConfig;
+
+  it("plan_model BOŞSA bugünkü davranış birebir korunur (dengeli katman + orkestrasyon eforu)", () => {
+    const r = resolvePlanModel(cfg(undefined, { balanced: "claude-sonnet-5", strong: "claude-opus-5" }));
+    expect(r.modelId).toBe("claude-sonnet-5"); // orchestration → balanced
+    expect(r.effort).toBe("high"); // orkestrasyonun efor tavanı (max → high)
+    expect(r.source).toBe("auto");
+  });
+
+  it("plan_model doluysa O model kullanılır + efor tavanı uygulanmaz", () => {
+    const r = resolvePlanModel(cfg("claude-fable-5", { balanced: "claude-sonnet-5" }));
+    expect(r.modelId).toBe("claude-fable-5");
+    expect(r.effort).toBe("max"); // tasarım işi → config eforu aynen geçer
+    expect(r.source).toBe("settings");
+  });
+
+  it("revizyon aynı modelle yazılır (✏️ Düzenle ile ilk üretim ayrışmasın)", () => {
+    const c = cfg("claude-fable-5");
+    expect(resolvePlanModel(c)).toEqual(resolvePlanModel(c));
+  });
+
+  it("plan modeli, planı UYGULAYAN fazları etkilemez (kod yazan fazlar güçlü katmanda kalır)", () => {
+    const c = cfg("claude-fable-5", { strong: "claude-opus-5" });
+    expect(selectModelForTask("codegen", c.selected_models.model_tiers).modelId).toBe("claude-opus-5");
   });
 });
