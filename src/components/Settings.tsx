@@ -271,6 +271,23 @@ export function Settings({
   useEffect(() => {
     if (effort) setEffortSel(effort);
   }, [effort]);
+  /**
+   * Katman + plan modeli prop'ları geldiğinde form state'ini senkronize et (YZLLM 2026-08-04).
+   *
+   * Bu bileşen KOŞULSUZ render ediliyor (App.tsx `settingsView`), yani `useState` başlangıç değerleri
+   * uygulama açılırken — `config_status` → `read_selected_models` → `selected_models` olayı GELMEDEN —
+   * bir kez çalışıyor. Senkronizasyon olmadan seçiciler boş kalıyor ve kullanıcı Ayarlar'da başka bir
+   * şeyi değiştirip kaydettiğinde bu alanlar BOŞ gönderiliyordu:
+   *   · plan modeli → boş string = açık temizleme → kullanıcının seçtiği model SESSİZCE siliniyordu,
+   *   · katmanlar  → boş nesne, merge'de "tanımlı" sayıldığı için mevcut katmanları EZİYORDU.
+   * İkisi de sessiz veri kaybı. Mevcut `currentSelected` senkronizasyonunun aynı deseni.
+   */
+  useEffect(() => {
+    if (currentModelTiers) setModelTiersSel(currentModelTiers);
+  }, [currentModelTiers]);
+  useEffect(() => {
+    setPlanModelSel(currentPlanModel ?? "");
+  }, [currentPlanModel]);
 
   const modelsValid = translatorSel && mainSel;
   // Kayıt bir PATCH (merge): en az bir alan doluysa kaydet aktif (kısmi güncelleme mümkün).
