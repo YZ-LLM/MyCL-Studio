@@ -71,9 +71,16 @@ describe("selectModelForTask", () => {
   // VERMEDEN Opus 4.8'e çeviriyordu — yani ayar hiç uygulanmıyordu. Artık kullanıcının modeli aynen
   // kullanılır; "katalogda yok" bilgisi fromCatalog ile taşınır ve görünür uyarıya dönüşür (KATI #4).
   it("config'te KATALOG DIŞI model → sessizce DEĞİŞTİRİLMEZ, aynen kullanılır", () => {
-    const c = selectModelForTask("codegen", { strong: "claude-opus-5" });
-    expect(c.modelId).toBe("claude-opus-5");
+    const c = selectModelForTask("codegen", { strong: "claude-gelecek-9" });
+    expect(c.modelId).toBe("claude-gelecek-9");
     expect(c.tier).toBe("strong");
+  });
+
+  it("YZLLM'in gerçek ayarı: strong=claude-opus-5 → kod yazan fazlar Opus 5 koşar", () => {
+    // Canlı arıza buydu: bu ayar sessizce claude-opus-4-8'e çevriliyordu.
+    for (const k of ["codegen", "spec", "review", "debug", "design"] as const) {
+      expect(selectModelForTask(k, { strong: "claude-opus-5" }).modelId, k).toBe("claude-opus-5");
+    }
   });
 
   it("katalog dışı model fromCatalog=false ile işaretlenir (uyarı bu bayrağa dayanır)", () => {
@@ -82,8 +89,8 @@ describe("selectModelForTask", () => {
   });
 
   it("modelForTier de aynı kuralı uygular (iki çözücü ayrışmasın)", () => {
-    expect(modelForTier("strong", { strong: "claude-opus-5" }).id).toBe("claude-opus-5");
-    expect(modelForTier("strong", { strong: "claude-opus-5" }).fromCatalog).toBe(false);
+    expect(modelForTier("strong", { strong: "claude-gelecek-9" }).id).toBe("claude-gelecek-9");
+    expect(modelForTier("strong", { strong: "claude-gelecek-9" }).fromCatalog).toBe(false);
     expect(modelForTier("strong", undefined).fromCatalog).toBe(true);
   });
   it("KRİTİK: hiçbir iş 'cheap'(haiku) değil — kaliteyi riske atma (kaliteli hız)", () => {
@@ -136,6 +143,47 @@ describe("TRANSLATOR_MODEL (YZLLM: sabit hızlı çeviri modeli — değiştiril
   it("cheap (hızlı/ucuz) tier'dan geçerli bir model", () => {
     expect(TRANSLATOR_MODEL).toBeTruthy();
     expect(findModel(TRANSLATOR_MODEL)?.tier).toBe("cheap");
+  });
+  // Eskiden defaultModelForTier("cheap") ile türetiliyordu → katalog sırasına kırılgan bağ.
+  it("açık sabit: katalog sırası değişse bile çevirmen kendiliğinden değişmez", () => {
+    expect(TRANSLATOR_MODEL).toBe("claude-haiku-4-5");
+  });
+});
+
+// Katalog SIRASI = "hiç ayar yapmamış kullanıcının varsayılanı". Bilinçli değişimde tek düzeltme noktası burası.
+describe("katalog sırası (ayarsız kullanıcının varsayılanı)", () => {
+  const firstOf = (tier: "cheap" | "balanced" | "strong") =>
+    MODEL_CATALOG.find((m) => m.tier === tier)?.id;
+
+  it("strong → Opus 5, balanced → Sonnet 5, cheap → Haiku 4.5", () => {
+    expect(firstOf("strong")).toBe("claude-opus-5");
+    expect(firstOf("balanced")).toBe("claude-sonnet-5");
+    expect(firstOf("cheap")).toBe("claude-haiku-4-5");
+  });
+
+  it("Fable 5 katalogda VAR ama strong varsayılanı DEĞİL (maliyet: bilinçli seçimle gelir)", () => {
+    expect(findModel("claude-fable-5")?.tier).toBe("strong");
+    expect(firstOf("strong")).not.toBe("claude-fable-5");
+    expect(selectModelForTask("codegen", undefined).modelId).not.toBe("claude-fable-5");
+  });
+
+  it("canlı keşif Fable'ı kendiliğinden strong yapamaz — 'fable' bilinen aile değil", () => {
+    // Listenin BAŞINDA (en yetenekli) olsa bile deterministik tier ataması onu atlar; strong opus'a gider.
+    const t = computeTiersFromModels([
+      { id: "claude-fable-5", display_name: "Fable 5" },
+      { id: "claude-opus-5", display_name: "Opus 5" },
+    ]);
+    expect(t.strong).toBe("claude-opus-5");
+  });
+
+  it("keşif Fable'a tier ATARSA bu yalnız ÖNERİDİR — yeni aile olarak işaretlenir, otomatik uygulanmaz", () => {
+    const t = computeTiersFromModels([
+      { id: "claude-fable-5", display_name: "Fable 5", tier: "strong" }, // LLM'in dökümandan attığı tier
+    ]);
+    expect(t.strong).toBe("claude-fable-5");
+    expect(t.newFamilies).toContain("claude-fable-5"); // → kullanıcıya SORULUR (askq + verifyModelCallable)
+    // Kritik olan: öneri config'i EZMEZ. Ayarı olan kullanıcı etkilenmez.
+    expect(selectModelForTask("codegen", { strong: "claude-opus-5" }).modelId).toBe("claude-opus-5");
   });
 });
 
@@ -209,15 +257,17 @@ describe("resolveKnownModel — katalog-dışı model → görünür fallback", 
     expect(resolveKnownModel("claude-opus-4-8", "claude-opus-4-8", "x")).toEqual({ model: "claude-opus-4-8" });
     expect(resolveKnownModel("claude-sonnet-4-6", "claude-opus-4-8", "x").note).toBeUndefined();
   });
-  it("katalog-dışı (claude-fable-5) + bilinen main → main'e düşer + note", () => {
-    const r = resolveKnownModel("claude-fable-5", "claude-opus-4-8", "dökümantasyon");
+  // NOT: bu testler eskiden katalog-dışı örnek olarak `claude-fable-5` kullanıyordu; Fable 5
+  // 2026-08-04'te kataloğa girdiği için örnek gerçekten tanınmayan bir id ile değiştirildi.
+  it("katalog-dışı model + bilinen main → main'e düşer + note", () => {
+    const r = resolveKnownModel("claude-gelecek-9", "claude-opus-4-8", "dökümantasyon");
     expect(r.model).toBe("claude-opus-4-8");
-    expect(r.note).toContain("claude-fable-5");
+    expect(r.note).toContain("claude-gelecek-9");
     expect(r.note).toContain("dökümantasyon");
   });
   it("katalog-dışı + main de katalog-dışı → modeli DEĞİŞTİRME (sağlayıcı-karışıklığı önle), yalnız uyar", () => {
-    const r = resolveKnownModel("claude-fable-5", "claude-mythos-9", "x");
-    expect(r.model).toBe("claude-fable-5"); // değişmedi
+    const r = resolveKnownModel("claude-gelecek-9", "claude-bilinmeyen-9", "x");
+    expect(r.model).toBe("claude-gelecek-9"); // değişmedi
     expect(r.note).toBeTruthy();
   });
   it("GLM modeli artık TANINMAZ (z.ai kaldırıldı 2026-07-16) → bilinen main'e görünür fallback", () => {

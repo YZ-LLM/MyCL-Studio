@@ -20,8 +20,21 @@ export interface ModelInfo {
   blurb: string;
 }
 
-/** Bilinen Claude modelleri (2026-06-09). Yeni model → buraya ekle. */
+/**
+ * Bilinen Claude modelleri (2026-08-04). Yeni model → buraya ekle.
+ *
+ * SIRA ANLAMLIDIR: `defaultModelForTier` bir tier'ın İLK modelini döner, yani sıra "ayar yapmamış
+ * kullanıcının varsayılanı" demektir. Bu yüzden her tier'ın başında o tier'ın önerilen modeli durur.
+ */
 export const MODEL_CATALOG: ModelInfo[] = [
+  {
+    id: "claude-opus-5",
+    label: "Opus 5",
+    tier: "strong",
+    contextTokens: 1_000_000,
+    isOpus: true,
+    blurb: "En güçlü varsayılan — codegen/spec/tasarım/inceleme/debug, karmaşık akıl yürütme",
+  },
   {
     id: "claude-opus-4-8",
     label: "Opus 4.8",
@@ -47,12 +60,32 @@ export const MODEL_CATALOG: ModelInfo[] = [
     blurb: "Güçlü (önceki Opus)",
   },
   {
+    // Fable 5 en yetenekli model ama strong LİSTESİNİN SONUNDA duruyor: `defaultModelForTier` ilk
+    // elemanı döndürdüğü için başa konsaydı hiç ayar yapmamış her kullanıcı en pahalı modele geçerdi.
+    // Bilinçli seçimle (Ayarlar → Plan Modeli / güçlü katman) gelir. `knownFamilyTier` de "fable"ı
+    // TANIMAZ → canlı keşif bunu otomatik strong'a terfi ettiremez.
+    id: "claude-fable-5",
+    label: "Fable 5",
+    tier: "strong",
+    contextTokens: 1_000_000,
+    isOpus: false,
+    blurb: "En yetenekli (Mythos sınıfı) — plan/mimari gibi kalite belirleyici işler; maliyeti yüksek",
+  },
+  {
+    id: "claude-sonnet-5",
+    label: "Sonnet 5",
+    tier: "balanced",
+    contextTokens: 1_000_000,
+    isOpus: false,
+    blurb: "Dengeli varsayılan — orkestrasyon/çeviri/niyet/doğrulama; hızlı + yetkin",
+  },
+  {
     id: "claude-sonnet-4-6",
     label: "Sonnet 4.6",
     tier: "balanced",
     contextTokens: 1_000_000,
     isOpus: false,
-    blurb: "Dengeli — orkestrasyon/çeviri/niyet/doğrulama; hızlı + yetkin",
+    blurb: "Dengeli (önceki Sonnet)",
   },
   {
     id: "claude-haiku-4-5",
@@ -230,7 +263,11 @@ function defaultModelForTier(tier: ModelTier): ModelInfo {
  * yap, değiştirilemesin"). Çeviri mekanik bir iş (akıl yürütme değil) → hızlı/ucuz tier yeter; teknik token'lar
  * zaten verbatim geçer. config.selected_models.translator YOK SAYILIR; her zaman bu kullanılır.
  */
-export const TRANSLATOR_MODEL: string = defaultModelForTier("cheap").id;
+// AÇIK SABİT (YZLLM 2026-08-04): eskiden `defaultModelForTier("cheap").id` ile türetiliyordu, yani
+// katalog SIRASINA kırılgan biçimde bağlıydı — cheap tier'ın başına bir gün yeni bir model eklenirse
+// çevirmen kimsenin haberi olmadan değişirdi. Çevirmen "sabit, kullanıcı değiştiremez" olduğuna göre
+// kaynağı da sabit olmalı. Değişmezlik testi katalogda var olduğunu + tier'ını doğrular.
+export const TRANSLATOR_MODEL = "claude-haiku-4-5";
 
 // ───────── CANLI keşif (YZLLM: "açılışta güncel modelleri çek + otomatik tier'la; yeni sürümü 1-2 yukarı taşı") ─────────
 // Anthropic Models API'sinden (API key ile) gelen GÜNCEL modeller → en yeni opus=strong, sonnet=balanced, haiku=cheap.

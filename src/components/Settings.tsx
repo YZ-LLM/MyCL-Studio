@@ -470,7 +470,7 @@ export function Settings({
                 <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "4px 0 0" }}>
                   Sadece Main backend "Claude Code Aboneliği" seçiliyken etkili.
                   Yüksek efor = daha derin akıl yürütme, daha çok token.
-                  <strong> ultracode</strong> = xhigh + dinamik iş akışları; yalnızca Opus 4.7/4.8.
+                  <strong> ultracode</strong> = xhigh + dinamik iş akışları; Opus 4.7/4.8 ve Claude 5 ailesi.
                 </p>
               </div>
               {/* Çok-ajanlı tasarım ayarları SABİTLENDİ (YZLLM 2026-06-22) — UI'dan kaldırıldı. Bu div
