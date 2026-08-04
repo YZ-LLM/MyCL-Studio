@@ -35,9 +35,9 @@ export function escalatedModelEffort(
   _state: State,
   config: MyclConfig,
   domain: string,
-): { modelId: string; modelLabel: string; effort: string } {
+): { modelId: string; modelLabel: string; effort: string; fromCatalog: boolean } {
   const task: TaskKind = DOMAIN_TO_TASK[domain] ?? "codegen";
   const m = selectModelForTask(task, config.selected_models.model_tiers);
   const effort = selectEffortForTask(task, config.claude_code_flags.effort);
-  return { modelId: m.modelId, modelLabel: m.label, effort };
+  return { modelId: m.modelId, modelLabel: m.label, effort, fromCatalog: m.fromCatalog };
 }

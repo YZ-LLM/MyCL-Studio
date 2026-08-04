@@ -20,7 +20,7 @@ import {
   type AgentRole,
   type MyclConfig,
 } from "./config.js";
-import { findModel, modelForTier, MODEL_CATALOG, type ModelTier } from "./model-catalog.js";
+import { describeModel, modelForTier, MODEL_CATALOG, type ModelTier } from "./model-catalog.js";
 import { log } from "./logger.js";
 
 /** `--advisor` bayrağının gerektirdiği asgari `claude` sürümü. */
@@ -123,7 +123,9 @@ export function resolveAdvisorModel(
   role: AgentRole,
 ): string | null {
   const strongModelId = claudeStrongModelId(config.selected_models.model_tiers?.strong); // daima Claude (GLM'i --advisor'a geçirme)
-  const executorTier: ModelTier = findModel(executorModelId)?.tier ?? "balanced";
+  // YZLLM 2026-08-04: `findModel(...)?.tier ?? "balanced"` katalog DIŞI güçlü modeli (ör. claude-opus-5)
+  // "dengeli" sayıyordu → "güçlü executor'a danışman takma" kuralı atlanıp gereksiz --advisor ekleniyordu.
+  const executorTier: ModelTier = describeModel(executorModelId).tier;
   return decideAdvisorModel({
     enabled: !!config.features.advisor_enabled,
     backend: backendForRole(config, role),

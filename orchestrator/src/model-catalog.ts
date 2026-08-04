@@ -71,6 +71,82 @@ export function findModel(id: string): ModelInfo | undefined {
   return MODEL_CATALOG.find((m) => m.id === id);
 }
 
+/**
+ * Model id'sinden okunabilir etiket türetir (SAF): `claude-opus-5` → "Opus 5", `claude-haiku-4-5` →
+ * "Haiku 4.5". `claude-` öneki ve tarih son eki (`-20251001`) atılır; sürüm parçaları noktayla birleşir.
+ */
+export function prettyModelLabel(id: string): string {
+  const core = (id ?? "").replace(/^claude-/i, "").replace(/-\d{8}$/, "");
+  const parts = core.split("-").filter(Boolean);
+  if (parts.length === 0) return id ?? "";
+  const family = parts[0]!;
+  const version = parts.slice(1).join(".");
+  const name = family.charAt(0).toUpperCase() + family.slice(1);
+  return version ? `${name} ${version}` : name;
+}
+
+/**
+ * Bir model id'sini ModelInfo'ya çözer — KATALOGDA OLMASA BİLE (YZLLM 2026-08-04, KATI #4).
+ *
+ * ESKİ DAVRANIŞ VE NEDEN DEĞİŞTİ: `selectModelForTask`/`modelForTier` katalogda bulamadığı config
+ * modelini SESSİZCE katalog varsayılanıyla değiştiriyordu. Kullanıcının `model_tiers.strong` =
+ * `claude-opus-5` ayarı bu yüzden hiç uygulanmıyordu; tüm fazlar haber verilmeden Opus 4.8 koşuyordu.
+ * Katalog bayatladığı ANDA (yeni model ailesi çıkınca) kullanıcının ayarını yok sayan bu sessiz ikame,
+ * "sessiz fallback yok" kuralının ihlaliydi. Artık kullanıcının modeli AYNEN kullanılır; katalogda
+ * olmadığı `fromCatalog:false` ile veri olarak taşınır ve çağıran GÖRÜNÜR uyarıya çevirir.
+ *
+ * `tierHint`: modelin okunduğu slot. Kullanıcı modeli `model_tiers.strong`'a yazdıysa tier'ı zaten
+ * beyan etmiştir — tahmin etmekten iyidir. Yoksa bilinen aile, o da yoksa `strong` (kaliteyi düşüren
+ * yönde varsayma).
+ */
+export function describeModel(id: string, tierHint?: ModelTier): ModelInfo {
+  const known = findModel(id);
+  if (known) return known;
+  return {
+    id,
+    label: prettyModelLabel(id),
+    tier: tierHint ?? knownFamilyTier(id) ?? "strong",
+    // contextTokens/isOpus'un katalog dışında tüketicisi yok (2026-08-04 grep) — muhafazakâr değer.
+    contextTokens: 200_000,
+    isOpus: /opus/i.test(id),
+    blurb: "MyCL kataloğunda yok — Ayarlar'dan seçildi, olduğu gibi kullanılıyor.",
+  };
+}
+
+/** Katalog dışı bir config modeli (hangi ayar alanı, hangi id). */
+export interface UnknownConfiguredModel {
+  /** Kullanıcıya gösterilecek alan adı (Türkçe), ör. "güçlü katman". */
+  role: string;
+  id: string;
+}
+
+/**
+ * SAF: config'teki model ayarlarını gezip katalog DIŞI olanları döner. Boş dizi = hepsi tanınıyor.
+ * Çağıran bunu tek bir görünür uyarı satırına çevirir (KATI #4: sessiz ikame yerine haber ver).
+ */
+export function auditConfiguredModels(sel: {
+  main?: string;
+  orchestrator?: string;
+  plan_model?: string;
+  model_tiers?: Partial<Record<ModelTier, string>>;
+}): UnknownConfiguredModel[] {
+  const slots: Array<{ role: string; id?: string }> = [
+    { role: "ana model", id: sel.main },
+    { role: "orkestratör", id: sel.orchestrator },
+    { role: "plan modeli", id: sel.plan_model },
+    { role: "güçlü katman", id: sel.model_tiers?.strong },
+    { role: "dengeli katman", id: sel.model_tiers?.balanced },
+    { role: "ucuz katman", id: sel.model_tiers?.cheap },
+  ];
+  const out: UnknownConfiguredModel[] = [];
+  for (const s of slots) {
+    if (!s.id || findModel(s.id)) continue;
+    if (out.some((o) => o.id === s.id)) continue; // aynı model birden çok slotta → tek satır
+    out.push({ role: s.role, id: s.id });
+  }
+  return out;
+}
+
 export interface ResolvedModel {
   /** Kullanılacak model id. */
   model: string;
@@ -208,6 +284,8 @@ export interface ModelChoice {
   label: string;
   tier: ModelTier;
   reason: string;
+  /** false → model MyCL kataloğunda yok (kullanıcı ayarı aynen kullanılıyor). Çağıran uyarabilir. */
+  fromCatalog: boolean;
 }
 
 /**
@@ -222,14 +300,16 @@ export function selectModelForTask(
   // Öncelik: KULLANICI config tier'ı > statik katalog varsayılanı. (YZLLM 2026-06-11: "ayarlar dikkate alınmıyor;
   // otomatik keşiften sonra bozuldu." Canlı keşif ARTIK otomatik EZMEZ — yalnız yeni model ÖNERİR (askq); kabul
   // edilince config.selected_models'e yazılır → buradan okunur. Kullanıcı ayarı tek doğruluk kaynağı.)
+  // YZLLM 2026-08-04: katalogda BULUNAMAYAN config modeli artık varsayılana DÜŞMEZ (bkz. describeModel) —
+  // sessiz ikame kullanıcının Opus 5 ayarını yok sayıyordu. Uyarı `fromCatalog` ile çağırana taşınır.
   const fromConfig = tierModels?.[rel.tier];
-  const resolved =
-    fromConfig && findModel(fromConfig) ? findModel(fromConfig)! : defaultModelForTier(rel.tier);
+  const resolved = fromConfig ? describeModel(fromConfig, rel.tier) : defaultModelForTier(rel.tier);
   return {
     modelId: resolved.id,
     label: resolved.label,
     tier: rel.tier,
     reason: rel.reason,
+    fromCatalog: !!findModel(resolved.id),
   };
 }
 
@@ -240,10 +320,11 @@ export function selectModelForTask(
 export function modelForTier(
   tier: ModelTier,
   tierModels?: Partial<Record<ModelTier, string>>,
-): { id: string; label: string } {
+): { id: string; label: string; tier: ModelTier; fromCatalog: boolean } {
   const fromConfig = tierModels?.[tier];
-  const resolved = fromConfig && findModel(fromConfig) ? findModel(fromConfig)! : defaultModelForTier(tier);
-  return { id: resolved.id, label: resolved.label };
+  // selectModelForTask ile AYNI kural: katalog dışı config modeli sessizce değiştirilmez (YZLLM 2026-08-04).
+  const resolved = fromConfig ? describeModel(fromConfig, tier) : defaultModelForTier(tier);
+  return { id: resolved.id, label: resolved.label, tier, fromCatalog: !!findModel(resolved.id) };
 }
 
 /** Seçilen modeli chat'te göstermek için (Türkçe). */

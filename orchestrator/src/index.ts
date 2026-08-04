@@ -157,7 +157,12 @@ import {
   type AnswerMemoryRecord,
 } from "./answer-memory.js";
 import { listModels } from "./models.js";
-import { computeTiersFromModels, resetModelChoiceCache } from "./model-catalog.js";
+import {
+  auditConfiguredModels,
+  computeTiersFromModels,
+  modelChoiceLineIfChanged,
+  resetModelChoiceCache,
+} from "./model-catalog.js";
 import { predictPipelineCost } from "./cost-forecast.js";
 import { getLastTechDebtFindings, acceptedFindingKey, resetLastTechDebtFindings } from "./tech-debt-scanner.js";
 import { sumSecurityFindings, stepSecurityConvergence } from "./security-convergence.js";
@@ -2127,6 +2132,23 @@ function applyConfigDerivedSettings(config: MyclConfig): void {
   });
 }
 
+/**
+ * Katalog DIŞI model ayarlarını GÖRÜNÜR yapar (YZLLM 2026-08-04, KATI #4).
+ *
+ * Eskiden bu modeller sessizce katalog varsayılanıyla değiştiriliyordu — kullanıcının `claude-opus-5`
+ * ayarı hiç uygulanmıyor, hiçbir yerde de söylenmiyordu. Artık ayar aynen uygulanıyor; kullanıcı
+ * MyCL'in o modeli tanımadığını bir kez görür (katalog bayatladıysa çözüm katalogu güncellemek).
+ * `modelChoiceLineIfChanged` süzgeci sayesinde satır proje başına bir kez basılır, faz başına değil.
+ */
+function emitUnknownModelWarning(sel: SelectedModels): void {
+  const unknown = auditConfiguredModels(sel);
+  if (unknown.length === 0) return;
+  const list = unknown.map((u) => `**${u.id}** (${u.role})`).join(", ");
+  const line = `ℹ️ ${list} MyCL kataloğunda yok — ayarın olduğu gibi kullanılıyor, değiştirilmiyor. Model geçersizse çağrı görünür hatayla düşer.`;
+  const once = modelChoiceLineIfChanged("unknown-model-audit", line);
+  if (once) emitChatMessage("system", once);
+}
+
 /** Config'i yüklemeyi dener, durumu UI'a yollar. */
 async function emitConfigStatus(): Promise<boolean> {
   try {
@@ -2135,6 +2157,7 @@ async function emitConfigStatus(): Promise<boolean> {
     log.info("config", "loaded", {
       selected_models: runtime.config.selected_models,
     });
+    emitUnknownModelWarning(runtime.config.selected_models);
     emit("config_status", { ready: true });
     return true;
   } catch (err) {
@@ -3130,6 +3153,21 @@ async function handleSaveSelectedModels(
           `• Model → main: ${fresh.selected_models.main}` +
           `${flagsPatch.effort ? ` · efor: ${flagsPatch.effort}` : ""}`,
       );
+      // Katalog DIŞI model seçildiyse GERÇEKTEN çağrılabilir mi dene (YZLLM 2026-08-04). Ayar ne olursa
+      // olsun KAYDEDİLDİ (kullanıcı ayarı kral) — bu yalnız erken uyarı: model yanlış yazıldıysa kullanıcı
+      // ilk faz düşene kadar beklemesin. Doğrulama kararı DEĞİŞTİRMEZ; model yükseltme askq'sindeki
+      // "doğrulanmazsa geçme" davranışının tersi, çünkü orada öneren MyCL, burada seçen kullanıcı.
+      const unknown = auditConfiguredModels(fresh.selected_models).slice(0, 2);
+      for (const u of unknown) {
+        const root = runtime.state?.project_root ?? process.cwd();
+        const callable = await verifyModelCallable(fresh, u.id, root).catch(() => false);
+        emitChatMessage(
+          "system",
+          callable
+            ? `✅ **${u.id}** (${u.role}) MyCL kataloğunda yok ama çağrı denemesi başarılı — olduğu gibi kullanılacak.`
+            : `⚠️ **${u.id}** (${u.role}) çağrılamadı (model adı yanlış olabilir). Ayarın DEĞİŞTİRİLMEDİ, olduğu gibi kaydedildi — bu modelle koşan fazlar görünür hatayla düşebilir.`,
+        );
+      }
     }
   } catch (err) {
     log.error("orchestrator", "save_selected_models failed", err);

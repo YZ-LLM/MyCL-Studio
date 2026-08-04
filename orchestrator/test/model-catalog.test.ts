@@ -10,6 +10,10 @@ import {
   modelChoiceLineIfChanged,
   resetModelChoiceCache,
   resolveKnownModel,
+  auditConfiguredModels,
+  describeModel,
+  modelForTier,
+  prettyModelLabel,
   type TaskKind,
 } from "../src/model-catalog.js";
 
@@ -61,10 +65,26 @@ describe("selectModelForTask", () => {
     const c = selectModelForTask("codegen", undefined);
     expect(findModel(c.modelId)?.tier).toBe("strong");
   });
-  it("config'te GEÇERSİZ model → katalog varsayılanına düşer (sistem bozulmaz)", () => {
-    const c = selectModelForTask("codegen", { strong: "uydurma-model-xyz" });
-    expect(findModel(c.modelId)).toBeDefined(); // geçerli modele düştü
-    expect(findModel(c.modelId)?.tier).toBe("strong");
+  // YZLLM 2026-08-04 — BİLİNÇLİ DAVRANIŞ DEĞİŞİKLİĞİ. Eski test "katalogda olmayan model katalog
+  // varsayılanına DÜŞER" davranışını kilitliyordu. Canlıda bunun bedeli şuydu: kullanıcı Ayarlar'dan
+  // (canlı Anthropic listesinden) claude-opus-5 seçmişti, katalog 4.x'te kalmıştı, ve MyCL bunu HABER
+  // VERMEDEN Opus 4.8'e çeviriyordu — yani ayar hiç uygulanmıyordu. Artık kullanıcının modeli aynen
+  // kullanılır; "katalogda yok" bilgisi fromCatalog ile taşınır ve görünür uyarıya dönüşür (KATI #4).
+  it("config'te KATALOG DIŞI model → sessizce DEĞİŞTİRİLMEZ, aynen kullanılır", () => {
+    const c = selectModelForTask("codegen", { strong: "claude-opus-5" });
+    expect(c.modelId).toBe("claude-opus-5");
+    expect(c.tier).toBe("strong");
+  });
+
+  it("katalog dışı model fromCatalog=false ile işaretlenir (uyarı bu bayrağa dayanır)", () => {
+    expect(selectModelForTask("codegen", { strong: "uydurma-model-xyz" }).fromCatalog).toBe(false);
+    expect(selectModelForTask("codegen", undefined).fromCatalog).toBe(true);
+  });
+
+  it("modelForTier de aynı kuralı uygular (iki çözücü ayrışmasın)", () => {
+    expect(modelForTier("strong", { strong: "claude-opus-5" }).id).toBe("claude-opus-5");
+    expect(modelForTier("strong", { strong: "claude-opus-5" }).fromCatalog).toBe(false);
+    expect(modelForTier("strong", undefined).fromCatalog).toBe(true);
   });
   it("KRİTİK: hiçbir iş 'cheap'(haiku) değil — kaliteyi riske atma (kaliteli hız)", () => {
     for (const k of [
@@ -204,5 +224,58 @@ describe("resolveKnownModel — katalog-dışı model → görünür fallback", 
     const r = resolveKnownModel("glm-5.2", "claude-opus-4-8", "x");
     expect(r.model).toBe("claude-opus-4-8");
     expect(r.note).toBeTruthy();
+  });
+});
+
+// YZLLM 2026-08-04: katalog bayatladığında kullanıcı ayarının SESSİZCE yok sayılmasını bitiren katman.
+describe("describeModel — katalog dışı model de tam bir kayda çözülür", () => {
+  it("katalogdaki model → katalog kaydının kendisi", () => {
+    expect(describeModel("claude-opus-4-8")).toEqual(findModel("claude-opus-4-8"));
+  });
+
+  it("katalog dışı model → tier kullanıcının koyduğu slottan gelir", () => {
+    expect(describeModel("bilinmeyen-model-x", "cheap").tier).toBe("cheap");
+    expect(describeModel("bilinmeyen-model-x", "balanced").tier).toBe("balanced");
+  });
+
+  it("tier ipucu yoksa bilinen aileden, o da yoksa strong (kaliteyi düşüren yönde varsayma)", () => {
+    expect(describeModel("claude-sonnet-9").tier).toBe("balanced");
+    expect(describeModel("claude-haiku-9").tier).toBe("cheap");
+    expect(describeModel("tamamen-bilinmeyen").tier).toBe("strong");
+  });
+
+  it("etiket id'den türetilir", () => {
+    expect(prettyModelLabel("claude-opus-5")).toBe("Opus 5");
+    expect(prettyModelLabel("claude-haiku-4-5")).toBe("Haiku 4.5");
+    expect(prettyModelLabel("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
+  });
+});
+
+describe("auditConfiguredModels — katalog dışı ayarları yüzeye çıkarır", () => {
+  it("hepsi tanınıyorsa boş", () => {
+    expect(
+      auditConfiguredModels({
+        main: "claude-opus-4-8",
+        model_tiers: { strong: "claude-opus-4-8", balanced: "claude-sonnet-4-6" },
+      }),
+    ).toEqual([]);
+  });
+
+  it("katalog dışı olanları rol adıyla döner", () => {
+    const out = auditConfiguredModels({
+      main: "claude-opus-4-8",
+      model_tiers: { strong: "sahte-model-1", cheap: "sahte-model-2" },
+    });
+    expect(out.map((o) => o.id).sort()).toEqual(["sahte-model-1", "sahte-model-2"]);
+    expect(out.find((o) => o.id === "sahte-model-1")?.role).toBe("güçlü katman");
+  });
+
+  it("aynı model birden çok slotta → tek satır (uyarı tekrarlanmasın)", () => {
+    const out = auditConfiguredModels({
+      main: "sahte-model-1",
+      orchestrator: "sahte-model-1",
+      model_tiers: { strong: "sahte-model-1" },
+    });
+    expect(out).toHaveLength(1);
   });
 });
