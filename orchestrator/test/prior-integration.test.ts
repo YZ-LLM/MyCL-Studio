@@ -17,6 +17,7 @@ import {
   copyPathForGeneration,
   copyProjectToAccessible,
   isUnderMyclProjeler,
+  myclProjelerDir,
   parseCopyDirName,
   plannedCopyPath,
 } from "../src/onboarding/copy-to-accessible.js";
@@ -84,7 +85,10 @@ describe("saf ad matematiği", () => {
   });
 
   it("isUnderMyclProjeler yeni -rN adlarında da çalışır", () => {
-    expect(isUnderMyclProjeler(join("/Users/Shared/MyCL Projeler", "app-abcdef12-r2"))).toBe(true);
+    // Kök dizin PLATFORMA göre değişir (macOS /Users/Shared, Linux /var/tmp) → sabit yol yazma:
+    // yerelde geçen, CI'da düşen bir test olur (2026-08-04'te tam bunu yaşadı).
+    expect(isUnderMyclProjeler(join(myclProjelerDir(), "app-abcdef12-r2"))).toBe(true);
+    expect(isUnderMyclProjeler(join(myclProjelerDir(), "app-abcdef12"))).toBe(true);
   });
 });
 
