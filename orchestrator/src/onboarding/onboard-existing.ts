@@ -220,6 +220,11 @@ export async function runOnboarding(
     kickQueue?: () => Promise<void>;
     /** Okunamayan proje erişilebilir konuma kopyalandı → frontend o kopyayı açsın (open_project_request). */
     requestReopen?: (path: string, integrate: boolean) => Promise<void>;
+    /**
+     * Kullanıcı "sıfırdan yeni kopya" dedi (YZLLM 2026-08-04) → mevcut kopya YENİDEN KULLANILMAZ, yeni
+     * kuşak açılır. Verilmezse bugünkü davranış: hedef varsa re-copy yok, mevcut kopya döner.
+     */
+    freshCopy?: boolean;
   },
 ): Promise<void> {
   const root = state.project_root;
@@ -329,7 +334,7 @@ export async function runOnboarding(
         "system",
         `⚠️ **MyCL bu projeyi sandbox izni yüzünden OKUYAMADI** (\`${root}\`). Erişilebilir bir **KOPYA** oluşturup oradan devam ediyorum — **orijinaline DOKUNULMAZ** (yedek kalır)…`,
       );
-      const dest = await copyProjectToAccessible(root);
+      const dest = await copyProjectToAccessible(root, { fresh: deps.freshCopy === true });
       emitChatMessage("system", `📁 Erişilebilir kopya hazır: \`${dest}\` — açıp orada okuyup geliştireceğim.`);
       await deps.requestReopen(dest, true);
     } catch (e) {

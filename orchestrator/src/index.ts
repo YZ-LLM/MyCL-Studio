@@ -243,6 +243,15 @@ import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } 
 import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
+import { copyProjectToAccessible } from "./onboarding/copy-to-accessible.js";
+import {
+  decideIntegrationRestart,
+  findPriorIntegrations,
+  RESTART_FRESH,
+  RESTART_RESUME,
+  restartQuestion,
+  type PriorIntegration,
+} from "./onboarding/prior-integration.js";
 import { maybeRunEdd } from "./edd/engine.js";
 import { readEddProgress, summarizeProgress } from "./edd/progress.js";
 import { composeOpenStatus, formatOpenStatus, type OpenStatusInput } from "./open-status.js";
@@ -2184,7 +2193,94 @@ async function emitConfigStatus(): Promise<boolean> {
 // ÇELİŞKİLİ mesaj basıyordu — "niyet bekliyorum" + "devam ediyorum"). Her açılış başında sıfırlanır.
 let _openStatusHandledInline = false;
 
+/**
+ * SIFIRDAN ENTEGRASYON KAPISI (YZLLM 2026-08-04).
+ *
+ * Yol başına tek atışlık karar. `handleOpenProjectInner` `runtime.pending*` alanlarını temizlediği için
+ * karar orada TUTULAMAZ → modül seviyesi (aynı desen: _pendingModelUpgrade).
+ */
+const _integrationRestartDecision = new Map<string, "resume" | "fresh">();
+let _pendingIntegrationRestart: { askqId: string; path: string } | null = null;
+/** Bu açılışta kopya SIFIRDAN alınacak yollar (handleOpenProjectInner en başta tüketir). */
+const _freshIntegrationPaths = new Set<string>();
+
+/** Onboarding kopyayı açtırmadan önce çağırır → kopyanın açılışı asla soru sormaz. */
+function markIntegrationResume(path: string): void {
+  _integrationRestartDecision.set(path.replace(/\/+$/, ""), "resume");
+}
+
+/** Bu açılış "sıfırdan" mı? Tek atışlık — okunduğunda tüketilir. */
+function consumeRestartDecision(path: string): "resume" | "fresh" | undefined {
+  const key = path.replace(/\/+$/, "");
+  const d = _integrationRestartDecision.get(key);
+  if (d) _integrationRestartDecision.delete(key);
+  return d;
+}
+
+/**
+ * Açılış AKIŞINDAN ÖNCE çalışır. `true` dönerse açılış ASKIYA alınmıştır (cevap bekleniyor).
+ *
+ * Neden burada: `loadOrInit`'ten önce (cevap beklerken orijinale `.mycl/state.json` yazılmaz),
+ * `emitInitialTaskQueue`/`kickWorkQueue`'dan önce (eski kuyruk ne gösterilir ne sürülür — kullanıcının
+ * asıl şikâyeti buydu) ve `runOnboarding`'den çok önce (pahalı iş boşuna başlamaz).
+ */
+async function maybeAskIntegrationRestart(path: string, integrate: boolean): Promise<boolean> {
+  // BAYAT KARAR: soru açıkken kullanıcı BAŞKA bir proje açtıysa bekleyen soru artık geçersiz — cevabı
+  // yanlış projeye uygulamak yerine düşür (aynı gerekçe handleOpenProjectInner'daki pending temizliğinde).
+  if (_pendingIntegrationRestart && _pendingIntegrationRestart.path !== path) {
+    _pendingIntegrationRestart = null;
+  }
+  const decided = consumeRestartDecision(path);
+  if (decided === "fresh") {
+    _freshIntegrationPaths.add(path.replace(/\/+$/, ""));
+    return false;
+  }
+  if (decided === "resume" || !integrate) return false;
+
+  let prior: PriorIntegration;
+  let onboardedInPlace = false;
+  try {
+    [prior, onboardedInPlace] = await Promise.all([
+      findPriorIntegrations(path),
+      onboardingSucceeded(path),
+    ]);
+  } catch (e) {
+    // Tespit başarısızsa AKIŞI DURDURMA — bugünkü davranışa düş (fail-soft; kapı bir kolaylık, kilit değil).
+    log.warn("orchestrator", "önceki entegrasyon taranamadı (bugünkü akışla devam)", { error: String(e) });
+    return false;
+  }
+
+  const decision = decideIntegrationRestart({
+    integrate,
+    prior,
+    alreadyOnboardedInPlace: onboardedInPlace,
+    neverAsk: isNeverAsk(),
+  });
+  if (decision === "proceed") {
+    // "hiçbir şey sorma" modunda soru sorulmaz ama SESSİZ de kalınmaz — ne yapıldığı ve sıfırdan
+    // başlamak için ne gerektiği söylenir (KATI #4).
+    if (isNeverAsk() && (prior.copies.length > 0 || onboardedInPlace)) {
+      emitChatMessage(
+        "system",
+        `ℹ️ Bu projenin erişilebilir bir kopyası zaten var — oradan devam ediyorum. Sıfırdan yeni bir kopya istiyorsan "hiçbir şey sorma" modunu kapatıp tekrar **Proje Aç** de.`,
+      );
+    }
+    return false;
+  }
+
+  const askqId = `integration_restart_${Date.now().toString(36)}`;
+  _pendingIntegrationRestart = { askqId, path };
+  emitAskq({
+    id: askqId,
+    question: restartQuestion(prior, path),
+    options: [RESTART_RESUME, RESTART_FRESH],
+    protected: true, // kullanıcıya ait bir karar — otonom cevaplayıcı bunu çözmesin
+  });
+  return true;
+}
+
 async function handleOpenProject(path: string, integrate = false): Promise<void> {
+  if (await maybeAskIntegrationRestart(path, integrate)) return; // cevap bekleniyor — açılış askıda
   await handleOpenProjectInner(path, integrate);
   // "HER ZAMAN durum özeti" (YZLLM 2026-07-19): tüm açılış/resume/kuyruk dallarından SONRA, kullanıcı
   // ne durumda olduğunu + ne yapması gerektiğini TEK bakışta görsün. Deterministik, fail-soft. Resume dalı
@@ -2244,6 +2340,9 @@ async function emitOpenStatusSummary(): Promise<void> {
 
 async function handleOpenProjectInner(path: string, integrate = false): Promise<void> {
   log.info("orchestrator", "open_project", { path, integrate });
+  // Kullanıcı bu açılışta "sıfırdan yeni kopya" dedi mi? EN BAŞTA tüketilir: aşağıdaki erken çıkışlardan
+  // biri devreye girerse bayrak takılı kalıp SONRAKİ bir açılışta beklenmedik kopya açmasın.
+  const wantFreshCopy = _freshIntegrationPaths.delete(path.replace(/\/+$/, ""));
   _openStatusHandledInline = false; // her açılışta taze; inline resume dalları set eder
   // Yeni proje → güvenlik yakınsama-kırıcı durumunu sıfırla (eski projenin sayacı taşınmasın).
   _securityFindingsPrev = null;
@@ -2600,6 +2699,29 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
     const wantOnboard =
       integrate && (folderClass === "foreign" || runtime.state.origin === "foreign") && !onboardedOk;
 
+    // SIFIRDAN ENTEGRASYON, kopya gerekmeyen yol (YZLLM 2026-08-04): proje YERİNDE entegre edilmişse (ya da
+    // kullanıcı doğrudan bir kopyayı seçtiyse) onboarding'in no-access kopyalama dalı hiç çalışmaz — yeni
+    // kopyayı burada açmak gerekir. Kaynak, kopyanın `copied-from.json`'undaki ORİJİNAL yoldur (kopyanın
+    // kopyası alınmaz). Hiçbir şey SİLİNMEZ: eski kopya/işaret yerinde durur, yalnız yeni kimlik açılır.
+    if (wantFreshCopy && integrate && !wantOnboard) {
+      try {
+        const prior = await findPriorIntegrations(path);
+        const dest = await copyProjectToAccessible(prior.source, { fresh: true });
+        emitChatMessage(
+          "system",
+          `🆕 Sıfırdan yeni kopya hazır: \`${dest}\` — boş iş listesiyle burada devam ediyorum. Eski kopya silinmedi.`,
+        );
+        emit("open_project_request", { path: dest, integrate: true });
+        return;
+      } catch (e) {
+        log.warn("orchestrator", "sıfırdan kopya oluşturulamadı", { error: String(e) });
+        emitChatMessage(
+          "system",
+          `⚠️ Sıfırdan yeni kopya oluşturulamadı (${String(e)}) — mevcut kopyayla devam ediyorum.`,
+        );
+      }
+    }
+
     if (integrate && !wantOnboard) {
       // "Proje Aç" tıklandı ama onboarding koşulları sağlanmadı → SESSİZ kalma (KATI #4): nedeni söyle.
       const why =
@@ -2624,8 +2746,11 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
         },
         // Okunamayan proje erişilebilir konuma kopyalandı → frontend kopyayı açsın (open_project_request).
         requestReopen: async (copyPath, integrate) => {
+          // Kopyanın açılışı kapıya TAKILMASIN: bu yol zaten kullanıcının kararının sonucu (tek atışlık).
+          markIntegrationResume(copyPath);
           emit("open_project_request", { path: copyPath, integrate });
         },
+        freshCopy: wantFreshCopy,
       }).catch((e: unknown) => log.warn("orchestrator", "onboarding başarısız (non-fatal)", e));
     } else if (wantOnboard && !runtime.config) {
       // KATI #4 (sessiz-skip yok — mahkeme Mercek-C): config yüklenemediyse onboarding başlamaz → GÖRÜNÜR.
@@ -7808,6 +7933,24 @@ export async function handleAskqAnswer(
   // öneki (foreign_write_consent_*) → kapının bellekteki çözücüsünü tetikler; diğer dallara DÜŞMEZ.
   if (isForeignWriteConsentAskqId(id)) {
     resolveForeignWriteConsent(id, selectedText);
+    return;
+  }
+
+  // ── SIFIRDAN ENTEGRASYON (YZLLM 2026-08-04): "kaldığın yerden devam" mı "yeni kopya" mı. Kararı yaz +
+  // açılışı YENİDEN başlat; kapı bu kez tek atışlık kararı tüketip geçer. Kendi id öneki → diğer dallara düşmez.
+  if (_pendingIntegrationRestart && _pendingIntegrationRestart.askqId === id) {
+    const { path } = _pendingIntegrationRestart;
+    _pendingIntegrationRestart = null;
+    const fresh = selectedText.includes(RESTART_FRESH) || /sıfırdan|yeni kopya/i.test(selectedText);
+    // Tanınmayan cevap → GÜVENLİ taraf: devam (bugünkü davranış). Yeni kopya yalnız AÇIK istekle açılır.
+    _integrationRestartDecision.set(path.replace(/\/+$/, ""), fresh ? "fresh" : "resume");
+    emitChatMessage(
+      "system",
+      fresh
+        ? "🆕 Sıfırdan başlıyorum — yeni kimlikli bir kopya açılacak, iş listesi boş başlayacak. Eski kopya silinmiyor."
+        : "▶️ Kaldığın yerden devam ediyorum.",
+    );
+    await handleOpenProject(path, true);
     return;
   }
 
