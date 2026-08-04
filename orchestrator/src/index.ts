@@ -58,6 +58,7 @@ import { computeVerdict, eventsSince, type HarnessVerdict } from "./harness-verd
 import { classifyOpenedFolder, hasDeliverable, buildCodebaseSnapshot } from "./phase-1-codebase-probe.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import {
+  computeMidPipeline,
   detectInterruptedPhase2To9Pure,
   decideBootQueueAction,
 } from "./resume-detection.js";
@@ -2672,12 +2673,15 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
     // sonrası) → resume kuyruk-bekleyen-iş yüzünden ATLANIYOR + buradaki doc-gen guard'sız çalışıp
     // pipeline'ı PARK ediyordu. current_phase>1 / kuyrukta-iş / yarıda-kalmış-faz / bekleyen-tweak/diag
     // → mid-pipeline → ilk-açış işlerini ATLA (queue-drain veya resume kendi yolunda sürer).
-    const midPipeline =
-      (runtime.state.current_phase ?? 1) > 1 ||
-      hasPendingQueueWork ||
-      !!interrupted29 ||
-      !!runtime.state.pending_ui_tweak ||
-      !!runtime.state.pending_diagnostic;
+    // 2026-08-04 (cave): hesap saf fonksiyona taşındı — eski `current_phase > 1` TAMAMLANMIŞ pipeline'ı
+    // da "ortada" sayıyordu → kılavuz bayatlık kontrolü ve EDD devamı bitmiş projede hiç koşmuyordu.
+    const midPipeline = computeMidPipeline({
+      currentPhase: runtime.state.current_phase,
+      interruptedPhase: interrupted29,
+      hasPendingQueueWork,
+      pendingUiTweak: !!runtime.state.pending_ui_tweak,
+      pendingDiagnostic: !!runtime.state.pending_diagnostic,
+    });
     // Onboarding kararı (yabancı projeyi MyCL'e entegre et — "Proje Aç"). classify loadOrInit'ten ÖNCE yapıldı.
     // İlk-açışta yabancı projeyi origin="foreign" diye İŞARETLE (integrate olmasa bile) → vite-injector
     // non-destructive guard'ı bu projede devreye girer (kaynağı onaysız ezmez).

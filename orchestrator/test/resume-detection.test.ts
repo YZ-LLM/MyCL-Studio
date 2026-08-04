@@ -2,7 +2,7 @@
 // iteration-N-start'ı kaçırsa bile resume scope'u state'ten doğru hesaplanmalı.
 
 import { describe, expect, it } from "vitest";
-import { detectInterruptedPhase2To9Pure, decideBootQueueAction } from "../src/resume-detection.js";
+import { computeMidPipeline, detectInterruptedPhase2To9Pure, decideBootQueueAction } from "../src/resume-detection.js";
 import type { AuditEvent, State } from "../src/types.js";
 
 function ev(ts: number, event: string): AuditEvent {
@@ -154,5 +154,64 @@ describe("resume-detection · decideBootQueueAction (kesinti-resume)", () => {
   it("(f) hiç iş yok → none", () => {
     expect(decideBootQueueAction(base, [], []).kind).toBe("none");
     expect(decideBootQueueAction(base, [task("done")], []).kind).toBe("none");
+  });
+});
+
+// KÖK NEDEN (YZLLM 2026-08-04, cave): eski `current_phase > 1` hesabı TAMAMLANMIŞ pipeline'ı da
+// "ortada" sayıyordu → kılavuz bayatlık kontrolü ve EDD devamı bitmiş projede hiç koşmuyordu.
+describe("computeMidPipeline — bitmiş pipeline 'ortada' sayılmaz", () => {
+  const base = {
+    hasPendingQueueWork: false,
+    pendingUiTweak: false,
+    pendingDiagnostic: false,
+  };
+
+  it("CAVE DURUMU: Faz 17 bitmiş + kuyruk boş → pipeline ortasında DEĞİL (açılış tetikleyicileri koşar)", () => {
+    // Kopyanın gerçek durumu: current_phase=17, yarıda kalmış faz yok, bekleyen iş yok.
+    expect(computeMidPipeline({ ...base, currentPhase: 17, interruptedPhase: null })).toBe(false);
+  });
+
+  it("Faz 17 YARIDA (bu iterasyonda complete/skipped yok) → hâlâ ortada", () => {
+    expect(computeMidPipeline({ ...base, currentPhase: 17, interruptedPhase: { phaseId: 17 } })).toBe(true);
+  });
+
+  it("bitmiş ama kuyrukta iş var → ortada (ağır açılış işi kuyrukla eşzamanlı başlamaz)", () => {
+    expect(
+      computeMidPipeline({ ...base, currentPhase: 17, interruptedPhase: null, hasPendingQueueWork: true }),
+    ).toBe(true);
+  });
+
+  it("bitmiş ama kullanıcı seçimi bekleniyor (tweak/diagnostic) → ortada", () => {
+    expect(computeMidPipeline({ ...base, currentPhase: 17, interruptedPhase: null, pendingUiTweak: true })).toBe(true);
+    expect(
+      computeMidPipeline({ ...base, currentPhase: 17, interruptedPhase: null, pendingDiagnostic: true }),
+    ).toBe(true);
+  });
+
+  it("ESKİ DAVRANIŞ KORUNUR: gerçekten ortadaki fazlar (2..16) ortada sayılır", () => {
+    for (const cp of [2, 5, 9, 13, 16]) {
+      expect(computeMidPipeline({ ...base, currentPhase: cp, interruptedPhase: null }), `faz ${cp}`).toBe(true);
+      expect(
+        computeMidPipeline({ ...base, currentPhase: cp, interruptedPhase: { phaseId: cp as never } }),
+        `faz ${cp} yarıda`,
+      ).toBe(true);
+    }
+  });
+
+  it("ESKİ DAVRANIŞ KORUNUR: taze/ilk açılış (faz ≤1) ortada değil", () => {
+    expect(computeMidPipeline({ ...base, currentPhase: 1, interruptedPhase: null })).toBe(false);
+    expect(computeMidPipeline({ ...base, currentPhase: undefined, interruptedPhase: null })).toBe(false);
+  });
+
+  it("Faz 17'nin 'ele alınmış' tespiti detectInterruptedPhase2To9Pure ile tutarlı (uçtan uca)", () => {
+    const st = { current_phase: 17, iteration_count: 1 } as unknown as State;
+    // Faz 17 complete → interrupted null → bitmiş → ortada değil.
+    const done = detectInterruptedPhase2To9Pure(st, [ev(10, "phase-17-complete")]);
+    expect(done).toBeNull();
+    expect(computeMidPipeline({ ...base, currentPhase: 17, interruptedPhase: done })).toBe(false);
+    // Faz 17 hiç koşmamış → interrupted {17} → ortada.
+    const mid = detectInterruptedPhase2To9Pure(st, []);
+    expect(mid).toEqual({ phaseId: 17 });
+    expect(computeMidPipeline({ ...base, currentPhase: 17, interruptedPhase: mid })).toBe(true);
   });
 });

@@ -54,6 +54,38 @@ export function detectInterruptedPhase2To9Pure(
 }
 
 /**
+ * SAF: açılışta "pipeline ortasında mı?" kararı — açılış tetikleyicilerinin (ilk açılış dökümantasyonu,
+ * kılavuz bayatlık kontrolü, EDD devamı) kapısı.
+ *
+ * KÖK NEDEN (YZLLM 2026-08-04, cave kopyası): eski hesap `current_phase > 1` idi — bu, YARIDA kalmış
+ * pipeline ile TAMAMLANMIŞ pipeline'ı ayırt etmiyordu. Faz 17'si bitmiş, kuyruğu boş bir proje her
+ * açılışta "ortada" sayılıyor ve açılış tetikleyicileri atlanıyordu → "kılavuz her zaman güncel" sözü
+ * tamamlanmış her entegre projede ÖLÜYDÜ (cave: docs/ hiç üretilmemiş, damga yok, dökümantasyon bayat).
+ *
+ * Bitmiş pipeline tanımı: son fazda (17) VE yarıda kalmış faz yok (`detectInterruptedPhase2To9Pure`
+ * null — yani Faz 17 bu iterasyonda complete/skipped ile ele alınmış). Eski koruma amaçları korunur:
+ * kuyrukta iş varken / faz yarıdayken / kullanıcı seçimi beklenirken ağır açılış işleri yine başlamaz.
+ */
+export function computeMidPipeline(input: {
+  currentPhase: number | undefined;
+  /** detectInterruptedPhase2To9Pure sonucu — null ise yarıda kalmış faz yok. */
+  interruptedPhase: { phaseId: PhaseId } | null;
+  hasPendingQueueWork: boolean;
+  pendingUiTweak: boolean;
+  pendingDiagnostic: boolean;
+}): boolean {
+  const cp = input.currentPhase ?? 1;
+  const finished = cp === 17 && input.interruptedPhase === null;
+  return (
+    (cp > 1 && !finished) ||
+    input.hasPendingQueueWork ||
+    input.interruptedPhase !== null ||
+    input.pendingUiTweak ||
+    input.pendingDiagnostic
+  );
+}
+
+/**
  * boot-resume bloğunun ÖZEL-DÖNÜŞ bayrakları — bu durumlarda kuyruk-resume DEVREYE GİRMEZ (index.ts boot bloğu
  * kendi özel yolunu işler: Faz 0 debug re-emit `pending_diagnostic`; deferred UI tweak Faz≤9; foreign Faz 6 unpark).
  * decideBootQueueAction bunları dışlar → çift-işlem/çakışma olmaz.
