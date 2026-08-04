@@ -342,17 +342,29 @@ export interface ThinkingPlan {
 }
 
 /**
- * Model adaptive-thinking + output_config.effort destekliyor mu (Opus 4.7+).
- * Opus 4.8 (MyCL varsayılanı) `thinking:{type:"enabled",budget_tokens}`'i 400 ile REDDEDER →
- * adaptive ZORUNLU. Eski modeller (opus 4.6/4.5/.., sonnet, haiku) budget_tokens'ı kabul eder →
- * legacy yol (mevcut davranış korunur). İleriye-dönük: opus-4-(7+) regex + mythos preview.
+ * Model adaptive-thinking + output_config.effort destekliyor mu (Opus 4.7+ ve TÜM Claude 5 nesli).
+ * Opus 4.8 `thinking:{type:"enabled",budget_tokens}`'i 400 ile REDDEDER → adaptive ZORUNLU. Eski
+ * modeller (opus 4.6/4.5/.., sonnet 4.6, haiku 4.5) budget_tokens'ı kabul eder → legacy yol.
+ *
+ * YZLLM 2026-08-04: burası `opus-4-(\d+)` kalıbına bakıyordu → `claude-opus-5` / `claude-sonnet-5` /
+ * `claude-fable-5` UYMUYORDU, yani Claude 5 nesli sessizce legacy yola düşüyordu. Sonucu iki yönlü
+ * bozuktu: ultracode'da artık var olmayan `budget_tokens` gönderilip çağrı 400 ile ölürdü; diğer
+ * eforlarda `output_config.effort` hiç gönderilmediği için efor ayarı SESSİZCE kaybolurdu. Model
+ * kataloğu Claude 5'i tanımadığı sürece gizli kalan bir arızaydı (katalog opus-5'i opus-4-8'e
+ * çeviriyordu); katalog düzeltilmeden ÖNCE bu düzeltilmeli.
+ *
+ * Kural nesle bağlı, aileye değil: ana sürüm ≥ 5 → adaptive (Claude 5'te budget_tokens kaldırıldı).
+ * `claude-haiku-4-5` gibi "-5 ile biten" eski id'ler ana sürüm 4 olduğu için legacy kalır.
  */
 export function modelSupportsAdaptive(model: string): boolean {
   const m = (model ?? "").toLowerCase();
   if (m.includes("mythos")) return true;
-  const opus = m.match(/opus-4-(\d+)/);
-  if (opus) return Number(opus[1]) >= 7;
-  return false;
+  const v = /(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/.exec(m);
+  if (!v) return false;
+  const [, family, majorStr, minorStr] = v;
+  const major = Number(majorStr);
+  if (major >= 5) return true;
+  return family === "opus" && major === 4 && Number(minorStr ?? "0") >= 7;
 }
 
 /**

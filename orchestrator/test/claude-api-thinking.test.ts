@@ -28,6 +28,19 @@ describe("modelSupportsAdaptive", () => {
       expect(modelSupportsAdaptive(m)).toBe(false);
     }
   });
+
+  // YZLLM 2026-08-04: Claude 5 nesli eski kalıba (`opus-4-N`) uymuyordu → sessizce legacy yola
+  // düşüyordu (ultracode'da 400, diğer eforlarda efor kaybı). Bu testler o regresyonu kilitler.
+  it("Claude 5 nesli (opus/sonnet/fable/mythos 5) → adaptive", () => {
+    for (const m of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"]) {
+      expect(modelSupportsAdaptive(m), m).toBe(true);
+    }
+  });
+
+  it("TUZAK: '-5' ile biten eski id'ler (haiku-4-5) hâlâ legacy — ana sürüm 4", () => {
+    expect(modelSupportsAdaptive("claude-haiku-4-5")).toBe(false);
+    expect(modelSupportsAdaptive("claude-haiku-4-5-20251001")).toBe(false);
+  });
 });
 
 describe("thinkingConfigFor · ADAPTIVE yol (Opus 4.7+)", () => {
