@@ -35,9 +35,12 @@ export function escalatedModelEffort(
   _state: State,
   config: MyclConfig,
   domain: string,
-): { modelId: string; modelLabel: string; effort: string; fromCatalog: boolean } {
+): { modelId: string; modelLabel: string; effort: string } {
   const task: TaskKind = DOMAIN_TO_TASK[domain] ?? "codegen";
   const m = selectModelForTask(task, config.selected_models.model_tiers);
   const effort = selectEffortForTask(task, config.claude_code_flags.effort);
-  return { modelId: m.modelId, modelLabel: m.label, effort, fromCatalog: m.fromCatalog };
+  // NOT: `m.fromCatalog` BİLEREK taşınmıyor. Katalog dışı model uyarısı config yüklenirken ve ayar
+  // kaydedilirken TEK yerden basılıyor (emitUnknownModelWarning); buradan da taşımak, hiçbir fazın
+  // okumadığı ölü bir alan olurdu (mahkeme: yarım bağlanmış boru). Gerekirse tek satırla geri gelir.
+  return { modelId: m.modelId, modelLabel: m.label, effort };
 }

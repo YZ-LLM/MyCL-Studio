@@ -2398,6 +2398,11 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
       // geçmez ve `load_messages` boot effect'i tetiklenmez → history boş kalır.
       // Idempotent re-emit: backend loadConfig çağırmadan event yollanır.
       emit("config_status", { ready: true });
+      // Katalog dışı model uyarısı BURADA da basılmalı: config zaten yüklüyse emitConfigStatus hiç
+      // çağrılmıyor → uygulamayı kapatmadan proje değiştiren kullanıcı uyarıyı bir daha görmüyordu
+      // (mahkeme bulgusu; yorumdaki "proje başına bir kez" iddiası bu dal olmadan doğru değildi).
+      // resetModelChoiceCache her açılışta temizlendiği için satır proje başına en fazla bir kez çıkar.
+      if (runtime.config) emitUnknownModelWarning(runtime.config.selected_models);
     }
     // Onboarding (yabancı projeyi entegre et — "Proje Aç"): klasörü loadOrInit'ten ÖNCE sınıflandır.
     // loadOrInit `.mycl/state.json` yazınca sınıf "mycl"e döner → foreign tespiti kaçardı (mahkeme Mercek-A/B/C).
@@ -2711,6 +2716,11 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
           "system",
           `🆕 Sıfırdan yeni kopya hazır: \`${dest}\` — boş iş listesiyle burada devam ediyorum. Eski kopya silinmedi.`,
         );
+        // Kapıya TAKILMASIN: yeni kopyanın açılışı zaten kullanıcının verdiği kararın sonucu. Bu satır
+        // olmadan kopyanın kendi açılışında kapı yeniden çalışıp AYNI soruyu tekrar sorardı (kopya,
+        // kaynağın önceki kuşaklarını "önceki entegrasyon" olarak görür). Kardeş yoldaki (requestReopen)
+        // korumanın aynısı — mahkeme bu dalda eksik olduğunu yakaladı.
+        markIntegrationResume(dest);
         emit("open_project_request", { path: dest, integrate: true });
         return;
       } catch (e) {

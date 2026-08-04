@@ -38,7 +38,7 @@ export function isUnderHome(root: string): boolean {
   return root === home || root.startsWith(`${home}/`);
 }
 
-/** Kaynak yolunun kopya-kimliği (klasör adının sonundaki 8 karakterlik parça). SAF. */
+/** Kaynak yolunun kopya kimliği (klasör adının sonundaki 8 karakterlik parça). SAF. */
 export function copyHashFor(srcRoot: string): string {
   return createHash("sha1").update(srcRoot.replace(/\/+$/, "")).digest("hex").slice(0, 8);
 }

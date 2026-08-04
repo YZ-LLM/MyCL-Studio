@@ -270,3 +270,40 @@ describe("decideIntegrationRestart (saf karar tablosu)", () => {
     expect(decideIntegrationRestart({ ...base, decided: "resume" })).toBe("proceed");
   });
 });
+
+// MAHKEME BULGUSU (2026-08-04, iki müfettiş): "sıfırdan yeni kopya" cevabından sonra açılan YENİ kopya,
+// kapıda tekrar "önceki entegrasyon var" görünüp AYNI soruyu bir kez daha sorduruyordu. Kopya, kaynağın
+// önceki kuşaklarını kendi "önceki entegrasyonu" olarak görüyor — yani bu durum yapısal, kaçınılmaz.
+// Çözüm kopyayı açarken tek atışlık "devam" kararı yazmak (markIntegrationResume). Bu test o durumun
+// gerçekten oluştuğunu kilitler: karar yazılmazsa kapı SORAR.
+describe("mahkeme: yeni kopyanın kendi açılışı", () => {
+  it("yeni kopya, kaynağın önceki kuşaklarını 'önceki entegrasyon' olarak GÖRÜR → karar yazılmazsa sorulur", async () => {
+    await makeCopy(src, 1, { onboarded: true });
+    const fresh = await copyProjectToAccessible(src, { baseDir, fresh: true });
+
+    const prior = await findPriorIntegrations(fresh, baseDir);
+    expect(prior.selectedIsCopy).toBe(true);
+    expect(prior.copies.length).toBeGreaterThan(0); // önceki kuşak görünüyor
+
+    // Karar YAZILMAZSA: kapı sorar (mahkemenin yakaladığı hata).
+    expect(
+      decideIntegrationRestart({
+        integrate: true,
+        prior,
+        alreadyOnboardedInPlace: false,
+        neverAsk: false,
+      }),
+    ).toBe("ask");
+
+    // Karar YAZILIRSA (markIntegrationResume): soru sorulmaz, doğrudan devam.
+    expect(
+      decideIntegrationRestart({
+        integrate: true,
+        prior,
+        alreadyOnboardedInPlace: false,
+        neverAsk: false,
+        decided: "resume",
+      }),
+    ).toBe("proceed");
+  });
+});
