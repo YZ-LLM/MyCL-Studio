@@ -2257,15 +2257,19 @@ async function maybeAskIntegrationRestart(path: string, integrate: boolean): Pro
     alreadyOnboardedInPlace: onboardedInPlace,
     neverAsk: isNeverAsk(),
   });
-  if (decision === "proceed") {
-    // "hiçbir şey sorma" modunda soru sorulmaz ama SESSİZ de kalınmaz — ne yapıldığı ve sıfırdan
-    // başlamak için ne gerektiği söylenir (KATI #4).
-    if (isNeverAsk() && (prior.copies.length > 0 || onboardedInPlace)) {
-      emitChatMessage(
-        "system",
-        `ℹ️ Bu projenin erişilebilir bir kopyası zaten var — oradan devam ediyorum. Sıfırdan yeni bir kopya istiyorsan "hiçbir şey sorma" modunu kapatıp tekrar **Proje Aç** de.`,
-      );
-    }
+  // "proceed" bu noktada yalnız "önceki entegrasyon yok" demektir (decided/resume ve integrate=false
+  // yukarıda erken döndü) → bilgi mesajı gerekmez, bugünkü akış aynen sürer.
+  if (decision === "proceed") return false;
+  if (decision === "fresh") {
+    // "Hiçbir şey sorma" modu (YZLLM 2026-08-04 canlı düzeltmesi: "yeni kopya yapmadı"): Proje Aç
+    // düğmesine basmak zaten açık bir sıfırdan entegrasyon isteği → sormadan YENİ kopya açılır.
+    // İlk sürüm burada eski kopyaya devam ediyordu; kullanıcının niyetiyle ters düştü. Sessiz de
+    // kalınmaz (KATI #4): ne yapıldığı ve devam etmenin yolu söylenir.
+    _freshIntegrationPaths.add(path.replace(/\/+$/, ""));
+    emitChatMessage(
+      "system",
+      `🆕 Bu proje daha önce entegre edilmiş; "hiçbir şey sorma" açık olduğu için sormadan SIFIRDAN yeni bir kopya açıyorum — iş listesi boş başlar, eski kopya silinmez. Kaldığın yerden devam etmek istersen projeyi son projeler listesinden aç.`,
+    );
     return false;
   }
 

@@ -253,12 +253,25 @@ describe("decideIntegrationRestart (saf karar tablosu)", () => {
     ).toBe("ask");
   });
 
-  it("'hiçbir şey sorma' modunda sorulmaz → devam (yeni kimlik+disk otomatik yaratılmaz)", () => {
+  // YZLLM canlı düzeltmesi (2026-08-04, "yeni kopya yapmadı"): ilk sürüm bu modda "devam" seçiyordu;
+  // kullanıcı Proje Aç'a basmışken eski kopyaya dönmek niyete tersti. Düğmeye basmak = açık sıfırdan isteği.
+  it("'hiçbir şey sorma' modunda sorulmaz → SIFIRDAN yeni kopya (Proje Aç = açık istek)", () => {
     expect(
       decideIntegrationRestart({
         integrate: true,
         prior: some,
         alreadyOnboardedInPlace: true,
+        neverAsk: true,
+      }),
+    ).toBe("fresh");
+  });
+
+  it("'hiçbir şey sorma' + önceki entegrasyon YOK → normal akış (gereksiz kopya açılmaz)", () => {
+    expect(
+      decideIntegrationRestart({
+        integrate: true,
+        prior: none,
+        alreadyOnboardedInPlace: false,
         neverAsk: true,
       }),
     ).toBe("proceed");

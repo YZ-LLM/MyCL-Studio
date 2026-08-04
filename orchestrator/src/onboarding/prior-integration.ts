@@ -134,9 +134,11 @@ export type IntegrationRestartDecision =
  * projenin daha önce bir entegrasyonu var. Son projeler listesinden açmak `integrate` taşımadığı için
  * (Splash.tsx) normal yeniden açmada asla soru sorulmaz.
  *
- * `neverAsk` ("hiçbir şey sorma") modunda SORULMAZ ve "devam" seçilir: yeni kopya yeni kimlik + disk +
- * yeni kuyruk demektir, bu "kararları sen ver" izninin kapsamı değil (model yükseltme askq'sinin aynı
- * ilkesi: kalıcı kullanıcı tercihini otomatik değiştirme). Soruyu asılı bırakmak seçenek değil.
+ * `neverAsk` ("hiçbir şey sorma") modunda SORULMAZ ve SIFIRDAN yeni kopya açılır. İlk sürüm burada
+ * "devam" seçiyordu ("yeni kimlik + disk otomatik yaratılmaz" gerekçesiyle) — YZLLM canlıda düzeltti
+ * (2026-08-04, "yeni kopya yapmadı"): Proje Aç düğmesine basmak ZATEN açık bir sıfırdan entegrasyon
+ * isteğidir, otonom bir karar değil. Kaldığı yerden devam etmenin yolu son projeler listesi.
+ * Eski kopya hiçbir durumda silinmez; ne yapıldığı görünür mesajla söylenir.
  */
 export function decideIntegrationRestart(input: {
   integrate: boolean;
@@ -151,7 +153,7 @@ export function decideIntegrationRestart(input: {
   if (!input.integrate) return "proceed";
   const hasPrior = input.prior.copies.length > 0 || input.alreadyOnboardedInPlace;
   if (!hasPrior) return "proceed";
-  return input.neverAsk ? "proceed" : "ask";
+  return input.neverAsk ? "fresh" : "ask";
 }
 
 /** Soru metni + seçenekler (SAF) — kullanıcı neyin arasında seçtiğini somut görsün. */

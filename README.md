@@ -100,9 +100,10 @@ gördüğü — var olan bir projeyi MyCL'e taşır:
 - **Aynı projeyi yeniden entegre edersen sorar:** "kaldığın yerden devam" mı,
   "sıfırdan yeni kopya" mı. Sıfırdan seçersen yeni kimlikli bir kopya açılır ve
   iş listesi boş başlar — önceki kopyanın işleri gelmez. Eski kopya silinmez,
-  yerinde durur. ("hiçbir şey sorma" modunda soru sorulmaz, kaldığın yerden devam
-  edilir; sıfırdan başlamak için o modu bir açılışlığına kapat.) Son projeler
-  listesinden açmak bu soruyu tetiklemez.
+  yerinde durur. ("hiçbir şey sorma" modunda soru sorulmaz — Proje Aç'a basmak
+  açık bir sıfırdan isteği sayılır ve doğrudan yeni kopya açılır; kaldığın yerden
+  devam etmek için projeyi son projeler listesinden aç.) Son projeler listesinden
+  açmak bu soruyu tetiklemez.
 - **Eksikler iş-listesine OTOMATİK eklenir + sırayla yapılır:** test / responsive /
   güvenlik / parmak-izi gibi kaynak-değiştiren MyCL standartları GAP-raporu olur, her biri
   iş-listesine eklenip **onay beklemeden** normal gate'li iterasyonda sırayla işlenir.
