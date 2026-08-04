@@ -97,6 +97,12 @@ gördüğü — var olan bir projeyi MyCL'e taşır:
   (`git init` + temel `.gitignore` girişleri + başlangıç commit'i) ve bunu görünür şekilde
   bildirir. Uzak sunucuya bağlanmaz, global git ayarlarına dokunmaz; istemezsen `.git`
   klasörünü silebilirsin.
+- **Aynı projeyi yeniden entegre edersen sorar:** "kaldığın yerden devam" mı,
+  "sıfırdan yeni kopya" mı. Sıfırdan seçersen yeni kimlikli bir kopya açılır ve
+  iş listesi boş başlar — önceki kopyanın işleri gelmez. Eski kopya silinmez,
+  yerinde durur. ("hiçbir şey sorma" modunda soru sorulmaz, kaldığın yerden devam
+  edilir; sıfırdan başlamak için o modu bir açılışlığına kapat.) Son projeler
+  listesinden açmak bu soruyu tetiklemez.
 - **Eksikler iş-listesine OTOMATİK eklenir + sırayla yapılır:** test / responsive /
   güvenlik / parmak-izi gibi kaynak-değiştiren MyCL standartları GAP-raporu olur, her biri
   iş-listesine eklenip **onay beklemeden** normal gate'li iterasyonda sırayla işlenir.
@@ -276,6 +282,10 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   sorma" modunda bile), onaydan sonra her adım iş kuyruğuna eklenir ve sırayla
   uygulanır. "Düzenle" ile planı geri bildirimle revize edebilirsin; onaylanan
   plan `.mycl/plans/` altında kalıcı iz bırakır.
+  **Planı yazan modeli ayrı seçebilirsin:** Ayarlar → Modeller → **Plan Modeli**.
+  Boş bırakılırsa varsayılan davranış sürer. Bu seçim yalnız plan metnini yazan
+  modeli belirler; onaylanan planı uygulayan fazlar her zamanki gibi kendi iş
+  türlerinin model katmanını kullanır.
 - **⚡ Paralel iş kümeleme** — Ayarlar → Özellikler'den açılır (varsayılan
   **kapalı**). Kuyrukta birbirinden bağımsız 2-3 iş beklerken kod yazma kısımları
   izole çalışma kopyalarında aynı anda yapılır; birleştirme sonrası kalite
