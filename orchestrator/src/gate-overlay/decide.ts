@@ -12,7 +12,8 @@
 // fazla kurala takılıyorsa modele DÖNEN mesaj hep aynı olsun; aksi halde "hangi kural beni durdurdu"
 // sorusunun cevabı yola/koşuma göre değişirdi.
 
-import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DEPENDENCY_MANIFEST_FILES, type CompiledOverlay } from "./compile.js";
 
 /**
@@ -38,22 +39,48 @@ export type WriteDecision =
 const ALLOW: WriteDecision = { allow: true };
 
 /**
- * SAF: bir yazma aracının hedef yoluna bu iterasyonda izin var mı.
+ * Dosya yoksa VAR OLAN en yakın atasının realpath'i + kalan parçalar. Sembolik bağlantı üzerinden
+ * içeri yazma (`ln -s src kisayol` → kisayol/yeni.ts) böyle yakalanır: ata çözülünce yol src/ altına iner.
+ */
+function canonicalizePath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = dirname(p);
+    if (parent === p) return p; // kök — daha yukarısı yok
+    return join(canonicalizePath(parent), basename(p));
+  }
+}
+
+/** macOS/Windows dosya sistemleri varsayılan büyük küçük harf DUYARSIZ; Linux duyarlı (katlama yanlış engel olurdu). */
+const CASE_FOLD_DEFAULT = process.platform === "darwin" || process.platform === "win32";
+
+/** NFC normalizasyonu + (duyarsız platformda) küçük harfe katlama — karşılaştırma anahtarı. */
+function canonKey(s: string, caseFold: boolean): string {
+  const n = s.normalize("NFC");
+  return caseFold ? n.toLowerCase() : n;
+}
+
+/**
+ * Bir yazma aracının hedef yoluna bu iterasyonda izin var mı. (Artık SAF DEĞİL — bilinçli:
+ * mahkeme KRİTİK bulgusu 2026-08-11.)
  *
- * `targetPath` aracın verdiği HAM yoldur (göreli ya da mutlak) — normalize etmek bu
- * fonksiyonun işidir; `sub/../x` gibi dolambaçlar `resolve` ile düzleşir, yani dondurulmuş
- * dosyaya dolaylı yoldan yazmak engeli aşamaz.
- * `fileExists` yalnız forbid_new_files için gerekir (var olanı düzenlemek serbest, yenisini
- * yaratmak yasak); çağıran diskten okur (muhafız `existsSync`, API yolu `fs.stat`).
+ * ESKİ HAL yalnız `resolve()` METNİNİ karşılaştırıyordu; sembolik bağlantı, macOS'un büyük
+ * küçük harf duyarsız dosya sistemi ve Unicode NFD yazımı aynı FİZİKSEL dosyaya farklı metinle
+ * ulaşıp kilidi PoC ile geçti. Karşılaştırma artık dosyanın KİMLİĞİNE iner: proje kökü ve hedef
+ * realpath ile çözülür (dosya yoksa var olan en yakın ata), iki taraf NFC normalize edilir,
+ * duyarsız platformda küçük harfe katlanır. Var olma kontrolü de kanonik yol üzerinden İÇERİDE
+ * yapılır (çağıranın ham yola bakması sembolik bağlantıda yanılırdı).
  *
- * HATA = ENGEL: kural kümesi ya da yol anlaşılmıyorsa "izin" en yanlış cevaptır (muhafızın
- * fail-closed duruşuyla birebir; mesajlar da birebir — model iki yolda AYNI geri bildirimi alır).
+ * overlay-guard.mjs İKİZİYLE birebir — parite tablosu senkron kilididir.
+ * HATA = ENGEL: kural kümesi ya da yol anlaşılmıyorsa "izin" en yanlış cevaptır.
  */
 export function decideWrite(
   rules: GuardRules,
   targetPath: string,
-  fileExists: boolean,
+  opts?: { caseFold?: boolean },
 ): WriteDecision {
+  const caseFold = opts?.caseFold ?? CASE_FOLD_DEFAULT;
   if (!rules.project_root || !isAbsolute(rules.project_root)) {
     return {
       allow: false,
@@ -69,33 +96,46 @@ export function decideWrite(
     };
   }
 
-  const resolved = resolve(rules.project_root, targetPath);
-  const rel = relative(rules.project_root, resolved).split(sep).join("/");
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(rules.project_root);
+  } catch {
+    return {
+      allow: false,
+      gate_id: "invalid_rules",
+      message: "gate-overlay guard: project_root unresolvable — failing closed.",
+    };
+  }
+  const resolved = canonicalizePath(resolve(realRoot, targetPath));
+  const relRaw = relative(realRoot, resolved).split(sep).join("/");
   // Proje DIŞI yol: overlay'in yetki alanı projedir; dışarıyı kum havuzu yönetir.
-  if (rel.startsWith("..") || rel === "") return ALLOW;
+  if (relRaw.startsWith("..") || relRaw === "") return ALLOW;
+  const rel = canonKey(relRaw, caseFold);
 
   for (const frozen of rules.immutable) {
-    if (rel === frozen) {
+    if (rel === canonKey(frozen, caseFold)) {
       return {
         allow: false,
         gate_id: "file_immutable",
-        message: `gate-overlay: "${rel}" is frozen for this iteration (file_immutable). Do not modify it; solve the task another way.`,
+        message: `gate-overlay: "${relRaw}" is frozen for this iteration (file_immutable). Do not modify it; solve the task another way.`,
       };
     }
   }
 
-  if (rules.dependency_file_names.includes(basename(rel))) {
+  if (rules.dependency_file_names.some((n) => canonKey(n, caseFold) === canonKey(basename(relRaw), caseFold))) {
     return {
       allow: false,
       gate_id: "forbid_dependency_change",
-      message: `gate-overlay: dependency files may not change this iteration (forbid_dependency_change). "${rel}" is a dependency file.`,
+      message: `gate-overlay: dependency files may not change this iteration (forbid_dependency_change). "${relRaw}" is a dependency file.`,
     };
   }
 
+  const exists = existsSync(resolved);
   for (const dir of rules.no_new_files) {
     // "." = proje kökü = TÜM proje. overlay-guard.mjs İKİZİYLE birebir aynı kural (parite testi kilitler).
-    const inDir = dir === "." || rel === dir || rel.startsWith(`${dir}/`);
-    if (inDir && !fileExists) {
+    const d = canonKey(dir, caseFold);
+    const inDir = dir === "." || rel === d || rel.startsWith(`${d}/`);
+    if (inDir && !exists) {
       return {
         allow: false,
         gate_id: "forbid_new_files",

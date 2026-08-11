@@ -15,11 +15,14 @@ import { loadGatePool } from "../src/gate-overlay/pool.js";
 import type { GatePool } from "../src/gate-overlay/pool.js";
 import type { OverlayContext } from "../src/gate-overlay/select.js";
 import {
+  archiveActiveOverlay,
   buildOverlayInventory,
   buildOverlayPrompt,
   compileOverlayFromProposal,
   computeBaselines,
+  computeDirBaselines,
   getActiveOverlay,
+  loadVerifiedOverlayFromDisk,
   overlayArchiveDir,
   overlayCurrentPath,
   persistOverlay,
@@ -363,5 +366,101 @@ describe("denetim olay adları (isim kilidi)", () => {
       expect(ev.endsWith("-fail"), ev).toBe(false);
       expect(ev.endsWith("-skipped"), ev).toBe(false);
     }
+  });
+});
+
+// MAHKEME DÜZELTMELERİ (2026-08-11): bütünlük kaydı + doğrulanmış geri yükleme + arşiv kilidi.
+describe("mahkeme: bütünlük kaydı ve doğrulanmış geri yükleme", () => {
+  let home = "";
+  let prevHome: string | undefined;
+  let proot = "";
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "mycl-home-"));
+    prevHome = process.env.MYCL_HOME;
+    process.env.MYCL_HOME = home; // kayıt GERÇEK ~/.mycl'e değil geçici eve yazılsın
+    proot = await mkdtemp(join(tmpdir(), "mycl-ov-int-"));
+  });
+
+  afterEach(async () => {
+    if (prevHome === undefined) delete process.env.MYCL_HOME;
+    else process.env.MYCL_HOME = prevHome;
+    await rm(home, { recursive: true, force: true });
+    await rm(proot, { recursive: true, force: true });
+  });
+
+  const ov = (key: string) =>
+    ({
+      overlay_version: 1,
+      pool_version: 1,
+      iteration_key: key,
+      compiled_at: 1,
+      selections: [{ gate_id: "file_immutable", params: { path: "a.ts" } }],
+      baselines: { "a.ts": null },
+    }) as const;
+
+  it("persistOverlay kaydı yazar → doğrulanmış yükleme OK döner", async () => {
+    await persistOverlay(proot, ov("iter1-100") as never);
+    const r = await loadVerifiedOverlayFromDisk(proot, "iter1-100");
+    expect(r.status).toBe("ok");
+  });
+
+  it("KURCALAMA: dosya sonradan değiştirilirse yükleme INVALID (ajan .mycl'e yazabilir — kayda güvenilir)", async () => {
+    await persistOverlay(proot, ov("iter1-100") as never);
+    const cur = overlayCurrentPath(proot);
+    const body = JSON.parse(await readFile(cur, "utf-8"));
+    body.selections = []; // kilitleri boşaltma denemesi
+    await writeFile(cur, JSON.stringify(body, null, 2) + "\n", "utf-8");
+    const r = await loadVerifiedOverlayFromDisk(proot, "iter1-100");
+    expect(r.status).toBe("invalid");
+  });
+
+  it("KAYITSIZ dosya (sıfırdan yaratılmış) fail-closed INVALID — bütünlük kaydı yoksa güven yok", async () => {
+    await persistOverlay(proot, ov("iter1-100") as never);
+    await rm(join(home, "overlay-integrity.json"), { force: true });
+    const r = await loadVerifiedOverlayFromDisk(proot, "iter1-100");
+    expect(r.status).toBe("invalid");
+  });
+
+  it("ESKİ iterasyonun kaydı STALE — eski kilit yeni işe uygulanmaz (yanlış engel de yanlıştır)", async () => {
+    await persistOverlay(proot, ov("iter1-100") as never);
+    const r = await loadVerifiedOverlayFromDisk(proot, "iter2-200");
+    expect(r.status).toBe("stale");
+  });
+
+  it("dosya yoksa ABSENT (özellik öncesi iterasyon — görünür notla statik devam kararı çağıranın)", async () => {
+    const r = await loadVerifiedOverlayFromDisk(proot, "iter1-100");
+    expect(r.status).toBe("absent");
+  });
+
+  it("AD-4 kilidi: archiveActiveOverlay current'ı arşive taşır, bellek tutucusunu temizler", async () => {
+    await persistOverlay(proot, ov("iter1-100") as never);
+    await archiveActiveOverlay(proot);
+    await expect(readFile(overlayCurrentPath(proot), "utf-8")).rejects.toThrow();
+    const archived = await readdir(overlayArchiveDir(proot));
+    expect(archived.length).toBe(1);
+    expect(getActiveOverlay()).toBeNull();
+  });
+});
+
+describe("mahkeme: computeDirBaselines", () => {
+  it("yalnız forbid_new_files seçimleri için, dizin altı sıralı liste üretir", () => {
+    const files = new Set(["src/a.ts", "src/b.ts", "docs/x.md"]);
+    const out = computeDirBaselines(
+      [
+        { gate_id: "forbid_new_files", params: { dir: "src" } },
+        { gate_id: "file_immutable", params: { path: "src/a.ts" } },
+      ],
+      files,
+    );
+    expect(out).toEqual({ src: ["src/a.ts", "src/b.ts"] });
+  });
+
+  it('kök (".") tüm envanteri kapsar; seçim yoksa undefined (overlay dosyası şişmez)', () => {
+    const files = new Set(["a.ts", "docs/x.md"]);
+    expect(computeDirBaselines([{ gate_id: "forbid_new_files", params: { dir: "." } }], files)).toEqual({
+      ".": ["a.ts", "docs/x.md"],
+    });
+    expect(computeDirBaselines([{ gate_id: "file_immutable", params: { path: "a.ts" } }], files)).toBeUndefined();
   });
 });

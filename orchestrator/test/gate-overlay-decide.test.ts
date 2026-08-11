@@ -89,8 +89,7 @@ describe("decideWrite ↔ overlay-guard.mjs PARİTESİ", () => {
         ]),
       );
       const target = writeToolTargetPath(input);
-      const fileExists = target.trim() !== "" && existsSync(resolve(root, target));
-      const ts = decideWrite(rules, target, fileExists);
+      const ts = decideWrite(rules, target);
       const guard = runGuard(input);
 
       expect(ts.allow).toBe(!fx.expectBlocked);
@@ -104,13 +103,13 @@ describe("decideWrite ↔ overlay-guard.mjs PARİTESİ", () => {
 describe("decideWrite — kural sırası", () => {
   it("hem dondurulmus hem bagimlilik ise ONCE file_immutable bildirilir (muhafızla aynı sıra)", () => {
     const both: GuardRules = { ...rules, immutable: ["package.json"] };
-    const d = decideWrite(both, "package.json", true);
+    const d = decideWrite(both, "package.json");
     expect(d.allow).toBe(false);
     if (!d.allow) expect(d.gate_id).toBe("file_immutable");
   });
 
   it("gecersiz project_root → fail-closed", () => {
-    const d = decideWrite({ ...rules, project_root: "goreli/yol" }, "src/app.ts", true);
+    const d = decideWrite({ ...rules, project_root: "goreli/yol" }, "src/app.ts");
     expect(d.allow).toBe(false);
   });
 });
@@ -192,12 +191,85 @@ describe('forbid_new_files kök seçimi (".") — iki tarafta da tüm projeyi ka
   for (const fx of CASES) {
     it(`aynı karar: ${fx.name}`, () => {
       const target = writeToolTargetPath(fx.input);
-      const fileExists = target.trim() !== "" && existsSync(resolve(root, target));
-      const ts = decideWrite(rules, target, fileExists);
+      const ts = decideWrite(rules, target);
       const guard = runGuard(fx.input);
       expect(ts.allow).toBe(!fx.expectBlocked);
       expect(guard.blocked).toBe(fx.expectBlocked);
       if (!ts.allow) expect(guard.stderr).toContain(ts.message);
     });
   }
+});
+
+// MAHKEME KRİTİK BULGUSU (güvenlik müfettişi, PoC'li, 2026-08-11): eski karşılaştırma yalnız yol
+// METNİNE bakıyordu — aynı fiziksel dosyaya farklı metinle ulaşan dört yol kilidi geçti: sembolik
+// bağlantı, dizin bağlantısı, macOS büyük küçük harf duyarsızlığı, Unicode NFD. Karşılaştırma artık
+// dosyanın KİMLİĞİNE iner (realpath + NFC + duyarsız platformda katlama). Bu tablo dört atlatmayı
+// İKİ tarafta birden kilitler.
+describe("mahkeme: kanonik yol — takma adla atlatma kapalı", () => {
+  it("dosya sembolik bağlantısı: serbest görünen ada yazmak dondurulmuşu değiştiremez", async () => {
+    await fs.symlink(join(root, "src", "config.ts"), join(root, "serbest-gorunen.ts"));
+    const ts = decideWrite(rules, "serbest-gorunen.ts");
+    const guard = runGuard({ file_path: "serbest-gorunen.ts" });
+    expect(ts.allow).toBe(false);
+    expect(guard.blocked).toBe(true);
+    if (!ts.allow) {
+      expect(ts.gate_id).toBe("file_immutable");
+      expect(guard.stderr).toContain(ts.message);
+    }
+  });
+
+  it("dizin sembolik bağlantısı: kısayoldan içeri YENİ dosya yazmak yasağı aşamaz", async () => {
+    await fs.symlink(join(root, "src"), join(root, "kisayol"));
+    const ts = decideWrite(rules, "kisayol/gizlice-yeni.ts");
+    const guard = runGuard({ file_path: "kisayol/gizlice-yeni.ts" });
+    expect(ts.allow).toBe(false);
+    expect(guard.blocked).toBe(true);
+    if (!ts.allow) expect(ts.gate_id).toBe("forbid_new_files");
+  });
+
+  it("bağımlılık dosyası takma adı: package.json bağlantısına yazmak engellenir", async () => {
+    await fs.symlink(join(root, "package.json"), join(root, "pkg-takma.json"));
+    const ts = decideWrite(rules, "pkg-takma.json");
+    const guard = runGuard({ file_path: "pkg-takma.json" });
+    expect(ts.allow).toBe(false);
+    expect(guard.blocked).toBe(true);
+    if (!ts.allow) expect(ts.gate_id).toBe("forbid_dependency_change");
+  });
+
+  it("Unicode NFD yazımı NFC kilidini aşamaz (her platformda — NFC normalizasyonu iki tarafta)", async () => {
+    const nfc = "a\u00e7.ts"; // "aç.ts" tek kod noktası (NFC)
+    // Bilinçli kaçış dizisi: iki sabit kaynak dosyada aynı bayta düşmesin, test gerçekten iki
+    // FARKLI yazımı karşılaştırsın (ilk sürümde ikisi aynı bayttı → test boşuna geçiyordu).
+    const nfd = "a\u0063\u0327.ts".normalize("NFD"); // ayrık aksan
+    expect(nfc).not.toBe(nfd);
+    expect(nfc.normalize("NFC")).toBe(nfd.normalize("NFC"));
+    await fs.writeFile(join(root, nfc), "x\n");
+    const r: GuardRules = { ...rules, immutable: [nfc], no_new_files: [] };
+    const ts = decideWrite(r, nfd);
+    const res = spawnSync("node", [GUARD, "--rules", encodeGuardRules(r)], {
+      input: JSON.stringify({ tool_name: "Write", tool_input: { file_path: nfd } }),
+      encoding: "utf-8",
+    });
+    expect(ts.allow).toBe(false);
+    expect(res.status).toBe(2);
+  });
+
+  it("büyük küçük harf: duyarsız platformda (macOS/Windows) farklı büyüklük kilidi aşamaz", () => {
+    const expectBlocked = process.platform === "darwin" || process.platform === "win32";
+    const ts = decideWrite(rules, "SRC/Config.ts");
+    const res = spawnSync("node", [GUARD, "--rules", encodeGuardRules(rules)], {
+      input: JSON.stringify({ tool_name: "Write", tool_input: { file_path: "SRC/Config.ts" } }),
+      encoding: "utf-8",
+    });
+    // Linux'ta katlama YOK (farklı büyüklük gerçekten farklı dosyadır — engellemek yanlış alarm olurdu).
+    expect(ts.allow).toBe(!expectBlocked);
+    expect(res.status === 2).toBe(expectBlocked);
+  });
+
+  it("kök bağlantılı proje kökü (macOS /var → /private/var) engeli düşürmez", () => {
+    // tmpdir macOS'ta sembolik kökten geçer; kural kökü realpath'lenmemiş halde verilse bile karar aynı.
+    const viaTmp = { ...rules, project_root: root.replace(/^\/private\/var\//, "/var/") };
+    const ts = decideWrite(viaTmp, "src/config.ts");
+    expect(ts.allow).toBe(false);
+  });
 });

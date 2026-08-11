@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { runSuiteProcess } from "../behavior-baseline.js";
 import { isMissingCommand, isSpawnEnvFailure, resolveMechanicalCmd } from "../base/mechanical-runner.js";
 import type { State } from "../types.js";
-import { DEPENDENCY_MANIFEST_FILES, type CompiledOverlay } from "./compile.js";
+import { buildOverlayInventory, DEPENDENCY_MANIFEST_FILES, type CompiledOverlay } from "./compile.js";
 
 /** Tek bir phase_end gate'inin sonucu. */
 export interface OverlayCheckOutcome {
@@ -227,9 +227,11 @@ export function validateAgainstSchema(
 
 // ───────────────────────── Denetim koşucusu (impure) ─────────────────────────
 
-/** Test paketini koşan bağımlılık — testlerde gerçek süreç yerine sahte verilebilir. */
+/** Dış dünyaya dokunan bağımlılıklar — testlerde gerçek süreç/tarama yerine sahte verilebilir. */
 export interface OverlayCheckDeps {
   runTestSuite: (state: State) => Promise<{ ok: boolean; detail: string }>;
+  /** Güncel proje dosyaları (göreli, normalize) — forbid_new_files dedektifinin "şimdi" tarafı. */
+  listProjectFiles: (projectRoot: string) => Promise<ReadonlySet<string>>;
 }
 
 /**
@@ -256,7 +258,12 @@ async function runProfileTestSuite(state: State): Promise<{ ok: boolean; detail:
     : { ok: false, detail: `suite red (exit=${res.code}): ${cmd}` };
 }
 
-export const defaultOverlayCheckDeps: OverlayCheckDeps = { runTestSuite: runProfileTestSuite };
+export const defaultOverlayCheckDeps: OverlayCheckDeps = {
+  runTestSuite: runProfileTestSuite,
+  // Derleme tarafıyla AYNI gezici (aynı hariç listesi, aynı sınırlar) — iki taraf farklı
+  // "dosya" tanımı kullanırsa dedektif hayalet fark üretirdi.
+  listProjectFiles: async (projectRoot) => (await buildOverlayInventory(projectRoot)).ctx.projectFiles,
+};
 
 function outcome(
   gate_id: string,
@@ -372,10 +379,65 @@ export async function runOverlayChecks(
       continue;
     }
 
-    // forbid_new_files: yalnız tool_deny kanadı var (dedektif karşılığı için iterasyon-başı
-    // TAM dosya envanteri saklamak gerekirdi — bu iterasyonun taban çizgisi onu tutmuyor).
+    if (sel.gate_id === "forbid_new_files") {
+      // DEDEKTİF KANADI (mahkeme KRİTİK bulgusu 2026-08-11): kanca yalnız yazma araçlarını görür —
+      // ajan Bash ile (ya da eski sürümde dizin bağlantısıyla) yasak dizine dosya ekleyebiliyordu ve
+      // HİÇBİR kontrol yakalamıyordu; ihlal kalıcı olarak sessizdi. Derleme anındaki dizin listesi
+      // (dir_baselines) ile güncel liste karşılaştırılır; fazladan çıkan dosya = ihlal. Silinen
+      // dosya ihlal DEĞİLDİR (gate'in konusu yeni dosya — yanlış alarm yasağı).
+      const dir = sel.params.dir ?? "";
+      const baseline = overlay.dir_baselines?.[dir];
+      if (!baseline) {
+        // Gate seçilmiş ama taban çizgisi yok (eski sürümle derlenmiş overlay): doğrulanamıyor →
+        // fail-closed. "-skipped" değil — seçilmiş bir gate için "ölçemedim" geçer not olamaz.
+        results.push(
+          outcome(
+            sel.gate_id,
+            false,
+            `${dir}: taban çizgisi yok (eski derleme) — doğrulanamadı`,
+            `❌ Gate: "${dir}" için yeni dosya denetimi yapılamadı (taban çizgisi yok).`,
+          ),
+        );
+        continue;
+      }
+      const current = await deps.listProjectFiles(root);
+      const d = decideNoNewFiles(dir, baseline, current);
+      results.push(
+        outcome(
+          sel.gate_id,
+          d.passed,
+          `${dir}: ${d.reason}`,
+          d.passed
+            ? `✅ Gate: "${dir}" altına yeni dosya eklenmedi.`
+            : `❌ Gate: "${dir}" altına izinsiz yeni dosya eklendi (${d.reason}).`,
+        ),
+      );
+      continue;
+    }
   }
   return results;
+}
+
+/**
+ * SAF: yasak dizinde iterasyon başından beri ORTAYA ÇIKAN dosya var mı? Kararlı sıra:
+ * ihlal listesi alfabetik ilk beşle raporlanır (aynı durum → aynı rapor).
+ */
+export function decideNoNewFiles(
+  dir: string,
+  baseline: readonly string[],
+  currentFiles: ReadonlySet<string>,
+): { passed: boolean; reason: string } {
+  const base = new Set(baseline);
+  const added = [...currentFiles]
+    .filter((f) => dir === "." || f === dir || f.startsWith(`${dir}/`))
+    .filter((f) => !base.has(f))
+    .sort();
+  if (added.length === 0) return { passed: true, reason: "yeni dosya yok" };
+  const shown = added.slice(0, 5).join(", ");
+  return {
+    passed: false,
+    reason: `${added.length} yeni dosya: ${shown}${added.length > 5 ? ", …" : ""}`,
+  };
 }
 
 async function checkSchemaGate(

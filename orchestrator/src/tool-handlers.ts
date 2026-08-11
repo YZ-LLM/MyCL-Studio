@@ -615,15 +615,10 @@ async function overlayWriteGate(
   if (!rules) return null; // bu iterasyonda tool_deny gate'i yok → davranış birebir eski
 
   const target = writeToolTargetPath(input);
-  let fileExists = false;
-  if (target) {
-    const abs = isAbsolute(target) ? target : resolvePath(ctx.project_root, target);
-    fileExists = await fs
-      .stat(abs)
-      .then(() => true)
-      .catch(() => false);
-  }
-  const decision = decideWrite(rules, target, fileExists);
+  // Var olma kontrolü decideWrite'ın İÇİNDE ve KANONİK yol üzerinden yapılır (mahkeme 2026-08-11:
+  // ham yola bakmak sembolik bağlantıda yanılıyordu — dizin bağlantısından içeri "yeni" dosya
+  // yazımı var sanılıp serbest kalıyordu).
+  const decision = decideWrite(rules, target);
   if (decision.allow) return null;
 
   log.warn("tool-handlers", "overlay gate engelledi", { tool: name, gate: decision.gate_id });

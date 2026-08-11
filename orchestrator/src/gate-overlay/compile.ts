@@ -20,6 +20,8 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import { globalConfigDir } from "../paths.js";
+import { log } from "../logger.js";
 import { extractKindBlock, schemaToSkeleton } from "../cli-json.js";
 import type { GatePool } from "./pool.js";
 import {
@@ -65,6 +67,14 @@ export interface CompiledOverlay {
    * (proje-göreli yol → sha256, dosya yoksa null).
    */
   baselines: Record<string, string | null>;
+  /**
+   * forbid_new_files'ın DEDEKTİF kanadı (mahkeme KRİTİK bulgusu 2026-08-11): korunan her dizin
+   * için iterasyon BAŞINDAKİ dosya listesi (proje-göreli, sıralı). Kanca yalnız yazma araçlarını
+   * görür — ajan Bash ile yasak dizine dosya ekleyebilirdi ve bunu HİÇBİR kontrol yakalamıyordu.
+   * Pipeline sonunda güncel liste bununla karşılaştırılır; fazladan çıkan dosya = ihlal.
+   * (Silinen dosya ihlal DEĞİLDİR — gate'in konusu "yeni dosya"; yanlış alarm yasağı.)
+   */
+  dir_baselines?: Record<string, string[]>;
 }
 
 export interface CompileResult {
@@ -457,6 +467,28 @@ export async function computeBaselines(
   return out;
 }
 
+/**
+ * SAF: forbid_new_files seçimleri için dizin taban çizgileri — derleme ANINDAKİ envanterden,
+ * korunan dizin altındaki dosyaların sıralı listesi. Envanter zaten bağlam doğrulaması için
+ * üretiliyor (buildOverlayInventory); burada yalnız süzülüp saklanır — ek disk taraması yok.
+ */
+export function computeDirBaselines(
+  accepted: readonly AcceptedSelection[],
+  projectFiles: ReadonlySet<string>,
+): Record<string, string[]> | undefined {
+  const dirs = accepted
+    .filter((s) => s.gate_id === "forbid_new_files" && s.params.dir)
+    .map((s) => s.params.dir as string);
+  if (dirs.length === 0) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const dir of [...new Set(dirs)].sort()) {
+    out[dir] = [...projectFiles]
+      .filter((f) => dir === "." || f === dir || f.startsWith(`${dir}/`))
+      .sort();
+  }
+  return out;
+}
+
 // ───────────────────────── Kalıcılaştırma ─────────────────────────
 
 const OVERLAY_DIR = join(".mycl", "overlays");
@@ -519,7 +551,104 @@ export async function persistOverlay(
   const tmp = `${current}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(tmp, raw, "utf-8");
   await fs.rename(tmp, current);
-  return createHash("sha256").update(raw).digest("hex");
+  const hash = createHash("sha256").update(raw).digest("hex");
+  // BÜTÜNLÜK KAYDI (mahkeme bulgusu 2026-08-11): current.json projenin .mycl'inde durur ve API
+  // yolunda ajan Bash ile oraya yazabilir (önceden var olan sınır). Hash, ajanın ERİŞEMEDİĞİ
+  // ~/.mycl tarafına da yazılır; kesintiden dönüşte diskteki dosya bu kayda karşı doğrulanır.
+  // Kayıt yazılamazsa görünür log (restore o durumda zaten güvenmez — fail-closed orada).
+  await recordOverlayIntegrity(projectRoot, overlay.iteration_key, hash).catch((e) =>
+    log.warn("gate-overlay", "bütünlük kaydı yazılamadı", { error: String(e) }),
+  );
+  return hash;
+}
+
+// ── Bütünlük kaydı: proje kökü + iterasyon anahtarı → overlay içerik hash'i (~/.mycl tarafında) ──
+
+const INTEGRITY_FILE = "overlay-integrity.json";
+const INTEGRITY_KEEP = 40;
+
+function integrityPath(): string {
+  return join(globalConfigDir(), INTEGRITY_FILE);
+}
+
+async function readIntegrityMap(): Promise<Record<string, string>> {
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(integrityPath(), "utf-8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed as Record<string, unknown>).filter(([, v]) => typeof v === "string"),
+      ) as Record<string, string>;
+    }
+  } catch {
+    // yok/bozuk → boş harita (kayıt bir güvence katmanı; yokluğu restore tarafında fail-closed ele alınır)
+  }
+  return {};
+}
+
+async function recordOverlayIntegrity(
+  projectRoot: string,
+  iterationKey: string,
+  hash: string,
+): Promise<void> {
+  const map = await readIntegrityMap();
+  map[`${projectRoot}|${iterationKey}`] = hash;
+  // Sınırsız büyümesin: eklenme sırasına göre son N giriş kalır (Object anahtar sırası korunur).
+  const entries = Object.entries(map).slice(-INTEGRITY_KEEP);
+  const target = integrityPath();
+  await fs.mkdir(globalConfigDir(), { recursive: true });
+  const tmp = `${target}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(Object.fromEntries(entries), null, 2) + "\n", "utf-8");
+  await fs.rename(tmp, target);
+}
+
+export type OverlayDiskStatus =
+  | { status: "ok"; overlay: CompiledOverlay }
+  | { status: "absent" }
+  | { status: "stale"; foundKey: string }
+  | { status: "invalid"; reason: string };
+
+/**
+ * Kesintiden dönüşte diskteki overlay'i DOĞRULAYARAK yükler (mahkeme bulguları 2026-08-11):
+ * (a) içerik hash'i ~/.mycl bütünlük kaydıyla eşleşmeli — proje .mycl'ine yazabilen bir ajanın
+ *     kurcaladığı/yarattığı dosyaya güvenilmez (kayıt yoksa da güvenilmez: fail-closed);
+ * (b) iterasyon anahtarı BU iterasyona ait olmalı — eski bir iterasyonun kilidi yeni işe
+ *     uygulanmaz (yanlış engel de yanlıştır, yanlış izin kadar).
+ */
+export async function loadVerifiedOverlayFromDisk(
+  projectRoot: string,
+  expectedKey: string,
+): Promise<OverlayDiskStatus> {
+  const current = overlayCurrentPath(projectRoot);
+  let raw: string;
+  try {
+    raw = await fs.readFile(current, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { status: "absent" };
+    return { status: "invalid", reason: `okunamadı: ${String(err)}` };
+  }
+  let overlay: CompiledOverlay;
+  try {
+    const maybe = await readActiveOverlay(projectRoot);
+    if (maybe === null) return { status: "absent" };
+    overlay = maybe;
+  } catch (err) {
+    return { status: "invalid", reason: String(err) };
+  }
+  if (overlay.iteration_key !== expectedKey) {
+    return { status: "stale", foundKey: overlay.iteration_key };
+  }
+  const hash = createHash("sha256").update(raw).digest("hex");
+  const recorded = (await readIntegrityMap())[`${projectRoot}|${overlay.iteration_key}`];
+  if (recorded !== hash) {
+    return {
+      status: "invalid",
+      reason:
+        recorded === undefined
+          ? "bütünlük kaydı yok — dosya doğrulanamıyor (fail-closed)"
+          : "içerik hash'i bütünlük kaydıyla eşleşmiyor — dosya değiştirilmiş olabilir",
+    };
+  }
+  return { status: "ok", overlay };
 }
 
 /**

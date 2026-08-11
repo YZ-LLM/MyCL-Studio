@@ -235,9 +235,10 @@ import {
   buildOverlayInventory,
   compileOverlayFromProposal,
   computeBaselines,
+  computeDirBaselines,
   getActiveOverlay,
   persistOverlay,
-  readActiveOverlay,
+  loadVerifiedOverlayFromDisk,
   setActiveOverlay,
   type CompiledOverlay,
   type CompileResult,
@@ -3133,6 +3134,9 @@ async function resumeInterruptedPhase(
   opts?: { taskId?: string; message?: string },
 ): Promise<void> {
   if (!runtime.state) return;
+  // MAHKEME KRİTİK (2026-08-11): boot devam yolu overlay'i geri yüklemeden faza giriyordu —
+  // araç anı kilitleri ve pipeline sonu denetimleri yeniden başlatmada sessizce kayboluyordu.
+  if (!(await ensureOverlayForBootResume())) return; // doğrulanamayan kayıt: görünür mesaj basıldı, devam yok
   if (opts?.taskId) {
     runtime.currentTaskId = opts.taskId;
     _drainTaskId = opts.taskId; // yeşil-son 'done' kurtarması
@@ -4904,6 +4908,11 @@ async function compileIterationOverlay(taskTexts: string[], reason: string): Pro
       selections: compiled.accepted,
       baselines: await computeBaselines(compiled.accepted, root),
     };
+    // forbid_new_files dedektif taban çizgisi (mahkeme 2026-08-11): kanca yalnız yazma araçlarını
+    // görür; Bash ile eklenen dosya ancak iterasyon başı/sonu liste farkıyla yakalanır. Envanter
+    // zaten elimizde — ek tarama maliyeti yok.
+    const dirBaselines = computeDirBaselines(compiled.accepted, inventory.ctx.projectFiles);
+    if (dirBaselines) overlay.dir_baselines = dirBaselines;
     hash = await persistOverlay(root, overlay);
   } catch (err) {
     // Yazılamayan overlay = uygulanamayan overlay. Bellekte tutup "kısıt var" gibi davranmak,
@@ -4975,35 +4984,91 @@ async function compileIterationOverlay(taskTexts: string[], reason: string): Pro
  * aynı iş için farklı bir kısıt kümesi, yarısı eski kuralla yazılmış bir iterasyon demek olurdu).
  * Dosya yoksa (çökme derlemeden önceyse) normal derleme koşar. Bozuksa iterasyon sürmez (AD-8).
  */
+/** Bu iterasyonun beklenen overlay anahtarı (derleme ile aynı formül — tek doğruluk kaynağı state). */
+function expectedOverlayKey(): string {
+  return `iter${runtime.state?.iteration_count ?? 1}-${runtime.state?.iteration_started_at ?? 0}`;
+}
+
 async function restoreOverlayForResume(taskText: string): Promise<boolean> {
   if (!runtime.state) return false;
   const root = runtime.state.project_root;
-  let existing: CompiledOverlay | null;
-  try {
-    existing = await readActiveOverlay(root);
-  } catch (err) {
-    log.error("orchestrator", "aktif overlay okunamadı", err);
-    emitError("Aktif gate overlay okunamadı", String(err));
-    emitChatMessage(
-      "system",
-      `⛔ Bu iterasyonun gate kaydı bozuk — devam etmiyorum. Neden: ${String(err).slice(0, 200)}`,
-    );
-    _drainActive = false;
-    return false;
+  // MAHKEME (2026-08-11): diskteki dosyaya KÖRÜ KÖRÜNE güvenilmez — içerik hash'i ~/.mycl bütünlük
+  // kaydıyla, anahtarı BU iterasyonla doğrulanır. Proje .mycl'ine yazabilen bir ajanın kurcaladığı
+  // (ya da sıfırdan yarattığı) dosya fail-closed reddedilir; eski iterasyonun kilidi yeni işe uygulanmaz.
+  const disk = await loadVerifiedOverlayFromDisk(root, expectedOverlayKey());
+  switch (disk.status) {
+    case "ok":
+      setActiveOverlay(disk.overlay);
+      log.info("orchestrator", "overlay resume ile geri yüklendi (doğrulandı)", {
+        key: disk.overlay.iteration_key,
+        selections: disk.overlay.selections.length,
+      });
+      return true;
+    case "absent":
+      emitChatMessage(
+        "system",
+        "ℹ️ Kesintiden dönerken bu iterasyonun gate kaydını bulamadım — gate'leri yeniden derliyorum.",
+      );
+      return compileIterationOverlay([taskText], "resume-recompile");
+    case "stale":
+      // Eski iterasyondan kalmış — bu işe uygulanmaz (yanlış engel de yanlıştır). Yeniden derle;
+      // derleme zaten eskisini arşive süpürerek başlar.
+      emitChatMessage(
+        "system",
+        "ℹ️ Diskteki gate kaydı başka bir iterasyona aitti — bu iş için gate'leri yeniden derliyorum.",
+      );
+      return compileIterationOverlay([taskText], "resume-stale-recompile");
+    case "invalid":
+      log.error("orchestrator", "aktif overlay doğrulanamadı", { reason: disk.reason });
+      emitError("Aktif gate overlay doğrulanamadı", disk.reason);
+      emitChatMessage(
+        "system",
+        `⛔ Bu iterasyonun gate kaydı doğrulanamadı — devam etmiyorum. Neden: ${disk.reason.slice(0, 200)}`,
+      );
+      _drainActive = false;
+      return false;
   }
-  if (!existing) {
-    emitChatMessage(
-      "system",
-      "ℹ️ Kesintiden dönerken bu iterasyonun gate kaydını bulamadım — gate'leri yeniden derliyorum.",
-    );
-    return compileIterationOverlay([taskText], "resume-recompile");
+  return false; // erişilmez (switch tam) — TS dönüş garantisi
+}
+
+/**
+ * MAHKEME KRİTİK (regresyon müfettişi, 2026-08-11): uygulama kapatılıp açıldığında yarıda kalan
+ * iterasyonu süren yol (`resumeInterruptedPhase`) overlay'i HİÇ geri yüklemiyordu — araç anı
+ * kilitleri enjekte edilmiyor, pipeline sonu denetimleri overlay'i null görüp atlanıyordu; tüm
+ * güvence yeniden başlatmada sessizce buharlaşıyordu (KATI #4). Bu yardımcı boot devam yolunda
+ * çağrılır: bellekte overlay varsa dokunmaz; diskte doğrulanmış kayıt varsa yükler; kayıt hiç
+ * yoksa (özellik öncesi başlamış iterasyon) TEK satır görünür not düşer — statik kapılar sürer;
+ * doğrulanamayan kayıtta devam ETMEZ (fail-closed).
+ */
+async function ensureOverlayForBootResume(): Promise<boolean> {
+  if (!runtime.state) return false;
+  if (getActiveOverlay() !== null) return true;
+  const disk = await loadVerifiedOverlayFromDisk(runtime.state.project_root, expectedOverlayKey());
+  switch (disk.status) {
+    case "ok":
+      setActiveOverlay(disk.overlay);
+      emitChatMessage(
+        "system",
+        `🛡️ Kesintiden dönüş: bu iterasyonun gate'leri geri yüklendi (${disk.overlay.selections.length} seçim).`,
+      );
+      return true;
+    case "absent":
+    case "stale":
+      // Yarıda kalmış faza overlay'siz devam: iterasyon overlay derlenmeden (özellik öncesi /
+      // eski anahtar) başlamış. Yeni kısıt uydurmak AD-3'e aykırı; statik kapılar zaten koşuyor.
+      emitChatMessage(
+        "system",
+        "ℹ️ Bu iterasyon gate overlay'i olmadan başlamıştı — statik kapılarla devam ediyorum.",
+      );
+      return true;
+    case "invalid":
+      emitError("Gate overlay doğrulanamadı", disk.reason);
+      emitChatMessage(
+        "system",
+        `⛔ Yarıda kalan iterasyonun gate kaydı doğrulanamadı — otomatik devam durdu. "Tekrar Dene" ile temiz bir iterasyon başlatabilirsin. Neden: ${disk.reason.slice(0, 160)}`,
+      );
+      return false;
   }
-  setActiveOverlay(existing);
-  log.info("orchestrator", "overlay resume ile geri yüklendi", {
-    key: existing.iteration_key,
-    selections: existing.selections.length,
-  });
-  return true;
 }
 
 /**
@@ -5806,9 +5871,12 @@ async function runOverlayGateAtPipelineEnd(state: State): Promise<void> {
   const taskId = runtime.currentTaskId ?? _drainTaskId;
   runtime.currentTaskId = null;
   _drainTaskId = null;
+  // Mahkeme (düşük): aynı turda GERÇEK uygulama kapısı da kırmızıysa işi o düşürmüş olur (taskId
+  // burada null gelir) — "kuyruğa geri kondu"yu İKİNCİ kez söyleme; yalnız gate bulgularını söyle.
   emitChatMessage(
     "system",
-    `${failed.map((f) => f.message).join("\n")}\n\nİş 'Tamamlandı' DAMGALANMADI; kuyruğa geri kondu.`,
+    failed.map((f) => f.message).join("\n") +
+      (taskId ? "\n\nİş 'Tamamlandı' DAMGALANMADI; kuyruğa geri kondu." : ""),
   );
   if (taskId) {
     await returnTaskToPending(

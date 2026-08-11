@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CompiledOverlay } from "../src/gate-overlay/compile.js";
 import {
+  decideNoNewFiles,
   overlayGateEvent,
   runOverlayChecks,
   schemaSubsetProblem,
@@ -52,14 +53,18 @@ function overlay(
 }
 
 /** Testte gerçek test paketi koşulmaz — komut çözümü/süreç ayrı ayrı kanıtlanmış makinedir. */
+const emptyFiles = async () => new Set<string>() as ReadonlySet<string>;
 const greenSuite: OverlayCheckDeps = {
   runTestSuite: async () => ({ ok: true, detail: "suite green: npm test" }),
+  listProjectFiles: emptyFiles,
 };
 const redSuite: OverlayCheckDeps = {
   runTestSuite: async () => ({ ok: false, detail: "suite red (exit=1): npm test" }),
+  listProjectFiles: emptyFiles,
 };
 const noCmdSuite: OverlayCheckDeps = {
   runTestSuite: async () => ({ ok: false, detail: "no test command in stack profile (cannot verify)" }),
+  listProjectFiles: emptyFiles,
 };
 
 describe("olay adları", () => {
@@ -348,12 +353,15 @@ describe("SAF şema yardımcıları", () => {
 });
 
 describe("kapsam + tekrarlanabilirlik", () => {
-  it("yalnız araç-anı gate'i seçilmişse iterasyon-sonu kontrolü ÜRETİLMEZ", async () => {
+  // GÜNCELLEME (mahkeme 2026-08-11): forbid_new_files'ın dedektif kanadı YOKTU — Bash ile eklenen
+  // dosya kalıcı olarak sessiz kalıyordu. Artık phase_end kontrolü ÜRETİR; eski önerme bilinçli terk.
+  it("forbid_new_files artık iterasyon sonunda da denetlenir (dedektif kanadı)", async () => {
     const r = await runOverlayChecks(
       overlay([{ gate_id: "forbid_new_files", params: { dir: "src" } }], {}),
       state(),
     );
-    expect(r).toEqual([]);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.gate_id).toBe("forbid_new_files");
   });
 
   it("aynı overlay + aynı dosya durumu → BAYT AYNI sonuç (AD-5)", async () => {
@@ -372,5 +380,61 @@ describe("kapsam + tekrarlanabilirlik", () => {
     const second = await runOverlayChecks(ov, state());
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
     expect(first.every((x) => x.passed)).toBe(true);
+  });
+});
+
+// MAHKEME KRİTİK BULGUSU (2026-08-11): forbid_new_files'ın dedektif kanadı YOKTU — ajan Bash ile
+// yasak dizine dosya ekleyebiliyordu ve bunu hiçbir kontrol yakalamıyordu (kalıcı sessiz ihlal).
+// Artık derleme anındaki dizin listesi (dir_baselines) pipeline sonunda güncel listeyle karşılaştırılır.
+describe("mahkeme: forbid_new_files dedektif kanadı", () => {
+  it("iterasyon başından beri ORTAYA ÇIKAN dosya ihlaldir (nasıl eklendiğinden bağımsız)", () => {
+    const d = decideNoNewFiles("src", ["src/app.ts"], new Set(["src/app.ts", "src/gizlice.ts"]));
+    expect(d.passed).toBe(false);
+    expect(d.reason).toContain("src/gizlice.ts");
+  });
+
+  it("yeni dosya yoksa geçer; dizin DIŞINDAKİ yeni dosya ihlal değildir", () => {
+    expect(decideNoNewFiles("src", ["src/app.ts"], new Set(["src/app.ts", "docs/y.md"])).passed).toBe(true);
+  });
+
+  it("SİLİNEN dosya ihlal değildir (gate'in konusu yeni dosya — yanlış alarm yasağı)", () => {
+    expect(decideNoNewFiles("src", ["src/app.ts", "src/eski.ts"], new Set(["src/app.ts"])).passed).toBe(true);
+  });
+
+  it('kök seçimi (".") tüm projeyi kapsar', () => {
+    const d = decideNoNewFiles(".", ["a.ts"], new Set(["a.ts", "yeni.md"]));
+    expect(d.passed).toBe(false);
+  });
+
+  it("determinizm: ihlal listesi alfabetik ve kararlı", () => {
+    const cur = new Set(["src/z.ts", "src/a.ts"]);
+    const r1 = decideNoNewFiles("src", [], cur);
+    const r2 = decideNoNewFiles("src", [], cur);
+    expect(r1).toEqual(r2);
+    expect(r1.reason.indexOf("src/a.ts")).toBeLessThan(r1.reason.indexOf("src/z.ts"));
+  });
+
+  it("runOverlayChecks: taban çizgisi olmayan eski derleme fail-closed düşer", async () => {
+    const ov = overlay([{ gate_id: "forbid_new_files", params: { dir: "src" } }], {});
+    const out = await runOverlayChecks(ov, state(), greenSuite);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.passed).toBe(false);
+    expect(out[0]!.event).toBe("overlay-forbid-new-files-fail");
+  });
+
+  it("runOverlayChecks: dir_baselines + güncel liste ile uçtan uca (ihlal ve temiz)", async () => {
+    const ov = overlay([{ gate_id: "forbid_new_files", params: { dir: "src" } }], {});
+    ov.dir_baselines = { src: ["src/app.ts"] };
+    const dirty: OverlayCheckDeps = {
+      ...greenSuite,
+      listProjectFiles: async () => new Set(["src/app.ts", "src/bash-ile-eklendi.ts"]),
+    };
+    const clean: OverlayCheckDeps = { ...greenSuite, listProjectFiles: async () => new Set(["src/app.ts"]) };
+    const bad = await runOverlayChecks(ov, state(), dirty);
+    expect(bad[0]!.passed).toBe(false);
+    expect(bad[0]!.detail).toContain("bash-ile-eklendi");
+    const ok = await runOverlayChecks(ov, state(), clean);
+    expect(ok[0]!.passed).toBe(true);
+    expect(ok[0]!.event).toBe("overlay-forbid-new-files-pass");
   });
 });

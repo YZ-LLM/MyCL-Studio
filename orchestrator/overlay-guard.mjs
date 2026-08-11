@@ -25,8 +25,8 @@
 // Kural şeması (MyCL üretir): { project_root: string, immutable: string[],
 //   no_new_files: string[], dependency_file_names: string[] }  — yollar proje köküne göre, "/" ayraçlı.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 function readStdin() {
   return new Promise((resolveP) => {
@@ -106,34 +106,64 @@ if (typeof targetRaw !== "string" || targetRaw.trim() === "") {
   block("gate-overlay guard: write tool without a file path — failing closed.");
 }
 
-// Yolu proje köküne göre çöz ve normalize et. `sub/../x` gibi dolambaçlar resolve ile düzleşir —
-// dondurulmuş dosyaya dolaylı yoldan yazmak engeli aşamaz.
-const resolved = resolve(projectRoot, targetRaw);
-const rel = relative(projectRoot, resolved).split(sep).join("/");
-if (rel.startsWith("..") || rel === "") {
+// ── KANONİK YOL (mahkeme KRİTİK bulgusu, 2026-08-11): eski kural yalnız resolve() METNİNE
+// bakıyordu — sembolik bağlantı (`ln -s frozen.ts serbest.ts`), macOS'un büyük küçük harf
+// duyarsız dosya sistemi (`SRC/Config.ts`) ve Unicode NFD yazımı aynı FİZİKSEL dosyaya farklı
+// metinle ulaşıp kilidi PoC ile geçti. Karşılaştırma dosyanın kimliğine iner:
+//   1) proje kökü realpath (macOS'ta /var → /private/var gibi kök bağlantıları da düzleşsin),
+//   2) hedef realpath; dosya henüz yoksa VAR OLAN en yakın atasının realpath'i + kalan parçalar
+//      (dizin bağlantısından içeri yazma — `ln -s src kisayol` → kisayol/yeni.ts — böyle yakalanır),
+//   3) NFC normalizasyonu iki tarafta,
+//   4) macOS/Windows'ta küçük harfe katlayarak karşılaştırma (Linux'ta katlama YOK — orada
+//      farklı büyüklük GERÇEKTEN farklı dosyadır, katlamak yanlış engel üretirdi).
+// decide.ts İKİZİYLE birlikte değişti; parite tablosu senkron kilididir.
+function canonicalize(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = dirname(p);
+    if (parent === p) return p; // kök — daha yukarısı yok
+    return join(canonicalize(parent), basename(p));
+  }
+}
+
+let realRoot;
+try {
+  realRoot = realpathSync(projectRoot);
+} catch {
+  block("gate-overlay guard: project_root unresolvable — failing closed.");
+}
+const resolved = canonicalize(resolve(realRoot, targetRaw));
+const CASE_FOLD = process.platform === "darwin" || process.platform === "win32";
+const canon = (s) => {
+  const n = s.normalize("NFC");
+  return CASE_FOLD ? n.toLowerCase() : n;
+};
+const relRaw = relative(realRoot, resolved).split(sep).join("/");
+if (relRaw.startsWith("..") || relRaw === "") {
   // Proje DIŞI yol: overlay'in yetki alanı proje; dışarıyı zaten kum havuzu yönetiyor.
   process.exit(0);
 }
+const rel = canon(relRaw);
 
 for (const frozen of immutable) {
-  if (rel === frozen) {
+  if (rel === canon(frozen)) {
     block(
-      `gate-overlay: "${rel}" is frozen for this iteration (file_immutable). Do not modify it; solve the task another way.`,
+      `gate-overlay: "${relRaw}" is frozen for this iteration (file_immutable). Do not modify it; solve the task another way.`,
     );
   }
 }
 
-if (depNames.includes(basename(rel))) {
+if (depNames.some((n) => canon(n) === canon(basename(relRaw)))) {
   block(
-    `gate-overlay: dependency files may not change this iteration (forbid_dependency_change). "${rel}" is a dependency file.`,
+    `gate-overlay: dependency files may not change this iteration (forbid_dependency_change). "${relRaw}" is a dependency file.`,
   );
 }
 
 for (const dir of noNewFiles) {
-  // "." = proje kökü = TÜM proje (envanter kökü dizin olarak sunar, model seçebilir). Bu satır
-  // olmadan kök seçimi hiçbir şeyi engellemiyordu — kullanıcı korunduğunu sanırken korunmazdı
-  // (mahkeme öncesi gözden geçirme bulgusu, 2026-08-11). decide.ts İKİZİYLE birlikte değişti.
-  const inDir = dir === "." || rel === dir || rel.startsWith(`${dir}/`);
+  // "." = proje kökü = TÜM proje (envanter kökü dizin olarak sunar, model seçebilir).
+  const d = canon(dir);
+  const inDir = dir === "." || rel === d || rel.startsWith(`${d}/`);
   if (inDir && !existsSync(resolved)) {
     block(
       `gate-overlay: creating new files under "${dir}" is forbidden this iteration (forbid_new_files). Edit existing files instead.`,
