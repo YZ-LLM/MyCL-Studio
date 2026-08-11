@@ -51,6 +51,7 @@
       "../assets/schemas/**/*",
       "../assets/security-rules/**/*",
       "../assets/quality-rules/**/*",
+      "../assets/gate-pool.json",
       "../assets/mycl-schema.md",
       "../müfettiş.md",
       "../prototypes/**/*"

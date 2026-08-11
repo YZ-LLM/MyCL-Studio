@@ -1,0 +1,88 @@
+{
+  "pool_version": 1,
+  "gates": [
+    {
+      "gate_id": "file_immutable",
+      "version": 1,
+      "description": "Belirtilen dosya bu iterasyon boyunca değiştirilemez.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      },
+      "executor": "tool_deny"
+    },
+    {
+      "gate_id": "file_must_change",
+      "version": 1,
+      "description": "Belirtilen dosya değişmeden iterasyon tamamlanamaz.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      },
+      "executor": "phase_end"
+    },
+    {
+      "gate_id": "schema_check",
+      "version": 1,
+      "description": "Belirtilen dosya, verilen şema referansına uygun olmalıdır.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string" },
+          "schema_ref": { "type": "string" }
+        },
+        "required": ["target", "schema_ref"],
+        "additionalProperties": false
+      },
+      "executor": "phase_end"
+    },
+    {
+      "gate_id": "forbid_new_files",
+      "version": 1,
+      "description": "Belirtilen dizin altına yeni dosya eklenemez.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "dir": { "type": "string" }
+        },
+        "required": ["dir"],
+        "additionalProperties": false
+      },
+      "executor": "tool_deny"
+    },
+    {
+      "gate_id": "forbid_dependency_change",
+      "version": 1,
+      "description": "Bağımlılık listesi değiştirilemez; yeni paket eklenemez.",
+      "params_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "executor": "tool_deny"
+    },
+    {
+      "gate_id": "test_must_pass",
+      "version": 1,
+      "description": "Belirtilen test geçmeden iterasyon tamamlanamaz.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "test_ref": { "type": "string" }
+        },
+        "required": ["test_ref"],
+        "additionalProperties": false
+      },
+      "executor": "phase_end"
+    }
+  ]
+}
