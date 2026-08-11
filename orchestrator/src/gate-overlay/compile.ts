@@ -522,6 +522,35 @@ export async function persistOverlay(
   return createHash("sha256").update(raw).digest("hex");
 }
 
+/**
+ * AD-4 (ARŞİV): iterasyon KAPANIRKEN aktif overlay'i arşive taşır — bir sonraki iterasyon
+ * "kısıt var" sanmasın. `persistOverlay` zaten her derlemede eskisini süpürdüğü için bu
+ * çağrı yapısal garantinin TEKRARI değil TAMAMLAYICISIDIR: normal kapanışta dosya hemen
+ * gider, çökme/iptal yollarında (bu kod hiç çalışmaz) süpürme devreye girer.
+ *
+ * Dosya yoksa no-op. Hata fırlatmaz — arşivleme başarısızlığı iterasyonun sonucunu değiştirmez.
+ */
+export async function archiveActiveOverlay(projectRoot: string): Promise<boolean> {
+  const current = overlayCurrentPath(projectRoot);
+  let raw: string;
+  try {
+    raw = await fs.readFile(current, "utf-8");
+  } catch {
+    setActiveOverlay(null);
+    return false;
+  }
+  try {
+    const archive = overlayArchiveDir(projectRoot);
+    await fs.mkdir(archive, { recursive: true });
+    await fs.rename(current, join(archive, archiveName(raw)));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    setActiveOverlay(null);
+  }
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }

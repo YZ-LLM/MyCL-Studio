@@ -8,6 +8,13 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { guardSandboxOrWarn, sandboxSettingsArgs, type SandboxCaps } from "./agent-sandbox.js";
+import {
+  overlaySettingsFor,
+  sandboxOverlayArg,
+  verifyOverlayCanary,
+  type OverlayInjection,
+} from "./gate-overlay/enforce.js";
+import type { PhaseId } from "./types.js";
 import { waitIfPaused } from "./pause.js";
 import {
   noteRateLimitEvent,
@@ -66,6 +73,16 @@ export interface CliRunOpts {
   /** Kum havuzu EK yetenekleri (2026-07-30): yalnız gerçekten sunucu açması gereken roller (müfettiş
    *  repro'su, Faz 0 hata ayıklama) verir. Verilmezse hiçbir ek yetenek yok — ayar eski haliyle aynı. */
   sandboxCaps?: SandboxCaps;
+  /**
+   * İTERASYON GATE ZORLAMASI (Faz C). Verilirse bu çağrıya overlay kancaları enjekte edilir ve
+   * dönüşte kanarya denetlenir; değeri denetim kaydının fazıdır.
+   *
+   * YALNIZ iterasyon içinde koşan YAZMA YETENEKLİ çağrılar verir (Faz 5 görsel tasarım ajanı,
+   * Faz 8 düşman testi). Salt-okunur roller (çevirmen, müfettiş, plan modu, keşif, sınıflandırıcı)
+   * VERMEZ: yazma araçları zaten deny-list'te olduğu için kanca hiç tetiklenmez, ama argv değişir
+   * ve gereksiz bir başarısızlık yolu (kanarya) açılırdı — davranış regresyonu (KATI #14).
+   */
+  gateOverlayPhase?: PhaseId;
 }
 
 export interface CliRunResult {
@@ -87,7 +104,7 @@ const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öld
 // idle-timer "sürekli akıtan ama bitmeyen" runaway'i kaçırıyordu (Faz 5 rung'ları 133 dk). 30 dk tavan.
 const WALL_CLOCK_MAX_MS = 1_800_000; // 30 dk
 
-function buildArgs(opts: CliRunOpts): string[] {
+function buildArgs(opts: CliRunOpts, overlay: OverlayInjection | null): string[] {
   const args: string[] = [
     "-p",
     opts.userMessage,
@@ -129,7 +146,15 @@ function buildArgs(opts: CliRunOpts): string[] {
   }
   // v15.11 GÜVENLİK: --settings ile sandbox (+ ultracode) — ajanı opts.cwd'ye hapset.
   // sandboxCaps verilmezse (rollerin çoğu) üretilen ayar eski davranışla BİREBİR aynı.
-  args.push(...sandboxSettingsArgs(opts.cwd, opts.effort === "ultracode", opts.sandboxCaps));
+  // overlay null (salt-okunur roller) → `hooks` anahtarı da yazılmaz, argv birebir eski.
+  args.push(
+    ...sandboxSettingsArgs(
+      opts.cwd,
+      opts.effort === "ultracode",
+      opts.sandboxCaps,
+      sandboxOverlayArg(overlay),
+    ),
+  );
   if (opts.effort && opts.effort !== "ultracode") {
     args.push("--effort", opts.effort);
   }
@@ -152,10 +177,15 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       error: "sandbox kurulamadı (policy=enforce) — ajan çalıştırılmadı",
     });
   }
-  const args = buildArgs(opts);
+  // İterasyon gate kancaları: yalnız açıkça isteyen (yazma yetenekli) çağrılar için.
+  const overlay =
+    opts.gateOverlayPhase !== undefined
+      ? await overlaySettingsFor({ projectRoot: opts.cwd, phase: opts.gateOverlayPhase })
+      : null;
+  const args = buildArgs(opts, overlay);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  return new Promise<CliRunResult>((resolve) => {
+  const result = await new Promise<CliRunResult>((resolve) => {
     let settled = false;
     const texts: string[] = [];
     const toolUses: CliRunResult["toolUses"] = [];
@@ -312,4 +342,18 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       });
     });
   });
+
+  // KANARYA: kanca enjekte edildiyse SessionStart işareti gelmiş olmalı. Gelmediyse bu koşu
+  // gate'siz koşmuştur → sonucu başarısız say (sahte yeşil yasak). Kanca yoksa kontrol de yok.
+  if (overlay) {
+    const canaryError = await verifyOverlayCanary(overlay);
+    if (canaryError) {
+      return {
+        ...result,
+        ok: false,
+        error: result.error ? `${result.error} :: ${canaryError}` : canaryError,
+      };
+    }
+  }
+  return result;
 }

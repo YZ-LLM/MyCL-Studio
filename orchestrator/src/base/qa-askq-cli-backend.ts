@@ -251,6 +251,9 @@ export class CliQaAskqBackend implements QaAskqBackend {
         allowedTools: ["Read", "Grep", "Glob"],
         disallowedTools: PURE_REASONING_DISALLOWED_TOOLS,
         effort,
+        // İTERASYON GATE'LERİ (Faz C): bkz. production-schema-cli-backend — kanca sözleşmesi
+        // faz ayrımı yapmaz; erken bağlanması kancaların yüklenmediğini kod yazılmadan yakalar.
+        gateOverlayPhase: opts.state.current_phase,
         onText: (text) => emitClaudeStream({ sub: "text", text }),
         // tool_use'ları yüzeye çıkar: review-yoğun fazlar (Faz 9) onlarca
         // Read/Grep/Bash çağrısı yapar; bunlar görünmezse UI/izleyici "asılı"

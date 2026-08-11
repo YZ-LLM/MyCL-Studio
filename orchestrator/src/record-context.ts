@@ -49,6 +49,15 @@ export function setRecordContext(update: Partial<ContextState>): void {
 }
 
 /**
+ * Süreç genelindeki güncel faz. Kayıt zenginleştirmesiyle AYNI kaynağı okur — denetim olayı
+ * yazması gereken ama faz bilgisini parametre olarak taşımayan yerler (API araç yürütücüsü)
+ * için. Bilinmiyorsa undefined; çağıran kendi güvenli varsayılanını seçer.
+ */
+export function getRecordPhase(): number | undefined {
+  return ctx.phase;
+}
+
+/**
  * NDJSON satırına metadata enjekte eder. Mevcut alanları üzerine yazmaz (eğer
  * caller `_schema_v` set etmek isterse override eder). Domain field'larıyla
  * çakışma yok (underscore prefix).

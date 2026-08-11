@@ -14,6 +14,13 @@ import { createInterface } from "node:readline";
 import { MAIN_AGENT_LANGUAGE_REMINDER } from "./agent-language.js";
 import { guardSandboxOrWarn, sandboxSettingsArgs } from "./agent-sandbox.js";
 import {
+  overlaySettingsFor,
+  sandboxOverlayArg,
+  verifyOverlayCanary,
+  type OverlayInjection,
+} from "./gate-overlay/enforce.js";
+import type { PhaseId } from "./types.js";
+import {
   noteRateLimitEvent,
   noteCliRateLimitError,
   finalizeCliRateLimit,
@@ -54,6 +61,14 @@ export interface CliSessionTurnOpts {
   /** claudeSpawnEnv ÜSTÜNE eklenecek ekstra env (cli-run.ts ile aynı) — genel altyapı;
    *  fallback'inde ANTHROPIC_BASE_URL/AUTH_TOKEN enjekte etmek için. claudeSpawnEnv ANTHROPIC_* döndürmez → temiz override. */
   extraEnv?: Record<string, string>;
+  /**
+   * İTERASYON GATE ZORLAMASI (Faz C) — oturum fazları (2/3/4/7, qa-askq) için. Değeri denetim
+   * kaydının fazıdır. Kanca HER turda enjekte edilir (gerçek engel PreToolUse'ta), KANARYA ise
+   * yalnız İLK turda denetlenir: `--resume` turunda SessionStart kancasının yeniden çalışıp
+   * çalışmadığı doğrulanmış bir davranış DEĞİL; doğrulanmamış bir varsayım üzerine faz
+   * başarısızlığı üretmek yanlış alarm olurdu (engelin kendisi her turda geçerli kalır).
+   */
+  gateOverlayPhase?: PhaseId;
 }
 
 // TokenUsage tanımı cli-json.ts'e taşındı (extractTokenUsage ile tek kaynak); mevcut importçular için re-export.
@@ -79,7 +94,7 @@ const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öld
 // 30 dk: meşru uzun codegen'e (Faz 8) cömert, ama 79/133-dk pataolojiyi bounded yapar.
 const WALL_CLOCK_MAX_MS = 1_800_000; // 30 dk
 
-function buildArgs(opts: CliSessionTurnOpts): string[] {
+function buildArgs(opts: CliSessionTurnOpts, overlay: OverlayInjection | null): string[] {
   // v15.12: her main-ajan user mesajına İngilizce-çıktı hatırlatması (ilk + resume
   // + nudge). Recency: resume turlarında sistem prompt'u yeniden gönderilmez → tek
   // garanti bu. Çevirmen runClaudeCli kullanır (bunu DEĞİL) → yalnız main-ajan etkilenir.
@@ -122,7 +137,15 @@ function buildArgs(opts: CliSessionTurnOpts): string[] {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }
   // v15.11 GÜVENLİK: --settings ile sandbox (+ ultracode) — ajanı opts.cwd'ye hapset.
-  args.push(...sandboxSettingsArgs(opts.cwd, opts.effort === "ultracode"));
+  // overlay null → `hooks` anahtarı yazılmaz, argv birebir eski (SandboxCaps deseni).
+  args.push(
+    ...sandboxSettingsArgs(
+      opts.cwd,
+      opts.effort === "ultracode",
+      undefined,
+      sandboxOverlayArg(overlay),
+    ),
+  );
   if (opts.effort && opts.effort !== "ultracode") {
     args.push("--effort", opts.effort);
   }
@@ -133,18 +156,24 @@ function buildArgs(opts: CliSessionTurnOpts): string[] {
  * Tek oturum-turu çalıştır (ilk veya resume). Tüm assistant metnini + tool_use'ları
  * toplar. Hata/timeout → { ok:false, error }.
  */
-export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessionResult> {
+export async function runClaudeCliSession(
+  opts: CliSessionTurnOpts,
+): Promise<CliSessionResult> {
   // v15.11 GÜVENLİK: spawn-öncesi sandbox kapısı (enforce + sandbox yok → çalıştırma).
   if (!guardSandboxOrWarn()) {
-    return Promise.resolve({
+    return {
       ok: false,
       text: "",
       toolUses: [],
       turns: 0,
       error: "sandbox kurulamadı (policy=enforce) — ajan çalıştırılmadı",
-    });
+    };
   }
-  const args = buildArgs(opts);
+  const overlay =
+    opts.gateOverlayPhase !== undefined
+      ? await overlaySettingsFor({ projectRoot: opts.cwd, phase: opts.gateOverlayPhase })
+      : null;
+  const args = buildArgs(opts, overlay);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const claudeBin = resolveClaudePath() ?? "claude";
   // YZLLM 2026-06-12 (TCC penceresi kökü): cli-session ATLANMIŞTI — folder-guard yalnız cli-run +
@@ -155,7 +184,7 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
     ? wrapReadOnlyClaude(claudeBin, args)
     : { cmd: claudeBin, args };
 
-  return new Promise<CliSessionResult>((resolve) => {
+  const result = await new Promise<CliSessionResult>((resolve) => {
     let settled = false;
     const texts: string[] = [];
     const toolUses: CliSessionResult["toolUses"] = [];
@@ -329,4 +358,18 @@ export function runClaudeCliSession(opts: CliSessionTurnOpts): Promise<CliSessio
       });
     });
   });
+
+  // KANARYA: yalnız İLK turda (SessionStart oturum kurulurken kesin çalışır). Resume turunda
+  // işaret aramak, doğrulanmamış bir varsayıma dayalı yanlış alarm üretirdi.
+  if (overlay && !opts.resume) {
+    const canaryError = await verifyOverlayCanary(overlay);
+    if (canaryError) {
+      return {
+        ...result,
+        ok: false,
+        error: result.error ? `${result.error} :: ${canaryError}` : canaryError,
+      };
+    }
+  }
+  return result;
 }

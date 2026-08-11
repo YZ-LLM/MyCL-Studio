@@ -224,6 +224,44 @@ export function needsLocalBinding(tag: string): boolean {
 }
 
 /**
+ * İterasyon gate overlay'inin ARAÇ ANI kancaları (Faz C). Verilmezse ayara HİÇBİR anahtar
+ * eklenmez — SandboxCaps ile aynı desen, üretilen argv bugünküyle bayt bayt aynı kalır.
+ */
+export interface OverlayHooks {
+  /** `orchestrator/overlay-guard.mjs` mutlak yolu. */
+  guardPath: string;
+  /** Muhafıza argv ile geçen DONUK kural kümesi (base64 JSON — ajan değiştiremez). */
+  rulesB64: string;
+  /** SessionStart kancasının yazacağı kanarya işareti (bu spawn'a özel). */
+  ackPath: string;
+}
+
+/** Kancanın uygulandığı araçlar — muhafız yalnız YAZMA araçlarını görür (patlama yarıçapı dar). */
+const OVERLAY_HOOK_MATCHER = "Write|Edit|MultiEdit|NotebookEdit";
+
+/**
+ * SAF: Claude Code `hooks` bloğu. Yollar çift tırnaklı (boşluklu dizinler); base64 kurallar
+ * yalnız [A-Za-z0-9+/=] içerdiği için tırnaksız güvenli.
+ *
+ * SessionStart = kanarya (blok yutulduysa hiç çalışmaz → MyCL koşuyu kapısız sayar),
+ * PreToolUse = gerçek engel (exit 2 → yazma reddedilir, stderr modele döner).
+ */
+export function buildOverlayHookBlock(overlay: OverlayHooks): Record<string, unknown> {
+  const node = (args: string): string => `node "${overlay.guardPath}" ${args}`;
+  return {
+    SessionStart: [
+      { hooks: [{ type: "command", command: node(`--ack "${overlay.ackPath}"`) }] },
+    ],
+    PreToolUse: [
+      {
+        matcher: OVERLAY_HOOK_MATCHER,
+        hooks: [{ type: "command", command: node(`--rules ${overlay.rulesB64}`) }],
+      },
+    ],
+  };
+}
+
+/**
  * SAF: home top-level girdilerinden (runtime + proje HARİÇ) denyRead + Claude Code
  * `--settings` nesnesi üret. platform enjekte edilir (test edilebilir).
  *   - off → yalnız ultracode (sandbox yok).
@@ -239,9 +277,21 @@ export function buildAgentSandboxSettings(params: {
   home: string;
   /** Ek yetenekler (yerel port). Verilmezse hiçbir ek yetenek yok — üretilen ayar eski davranışla birebir. */
   caps?: SandboxCaps;
+  /**
+   * İterasyon gate kancaları. Verilmezse `hooks` anahtarı HİÇ yazılmaz (regresyon testi:
+   * overlay'siz çıktı JSON'u bugünkiyle birebir aynı).
+   */
+  overlay?: OverlayHooks;
 }): SandboxBuildResult {
-  const { projectRoot, ultracode, policy, platform, home, caps } = params;
-  const base: Record<string, unknown> = ultracode ? { ultracode: true } : {};
+  const { projectRoot, ultracode, policy, platform, home, caps, overlay } = params;
+  // Overlay KUM HAVUZUNDAN BAĞIMSIZ bir sözleşmedir: sandbox politikası "off" olsa bile
+  // iterasyon gate'leri uygulanır (kullanıcı sandbox'ı kapatmakla gate'leri kapatmış olmaz).
+  const hooksBlock: Record<string, unknown> = overlay
+    ? { hooks: buildOverlayHookBlock(overlay) }
+    : {};
+  const base: Record<string, unknown> = ultracode
+    ? { ultracode: true, ...hooksBlock }
+    : { ...hooksBlock };
   if (policy === "off") return { settings: base, denyCount: 0 };
 
   const failIfUnavailable = policy === "enforce";
@@ -348,9 +398,22 @@ export function sandboxSettingsArgs(
   projectRoot: string,
   ultracode: boolean,
   caps?: SandboxCaps,
+  overlay?: OverlayHooks,
 ): string[] {
   if (_policy === "off") {
-    return ultracode ? ["--settings", JSON.stringify({ ultracode: true })] : [];
+    // Sandbox kapalı olsa DA overlay kancaları eklenir (ayrı sözleşme). İkisi de yoksa
+    // bugünkü davranış birebir: hiç `--settings` bayrağı yazılmaz.
+    if (!ultracode && !overlay) return [];
+    const { settings } = buildAgentSandboxSettings({
+      projectRoot,
+      ultracode,
+      policy: "off",
+      platform: process.platform,
+      home: homedir(),
+      caps,
+      overlay,
+    });
+    return ["--settings", JSON.stringify(settings)];
   }
   const platform = process.platform;
   const home = homedir();
@@ -364,6 +427,7 @@ export function sandboxSettingsArgs(
     platform,
     home,
     caps,
+    overlay,
   });
   return ["--settings", JSON.stringify(settings)];
 }

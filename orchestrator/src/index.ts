@@ -231,9 +231,11 @@ import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } 
 import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting, type OutageResumeResult } from "./llm-outage.js";
 import { loadGatePool, type GatePool } from "./gate-overlay/pool.js";
 import {
+  archiveActiveOverlay,
   buildOverlayInventory,
   compileOverlayFromProposal,
   computeBaselines,
+  getActiveOverlay,
   persistOverlay,
   readActiveOverlay,
   setActiveOverlay,
@@ -241,6 +243,7 @@ import {
   type CompileResult,
   type OverlayInventory,
 } from "./gate-overlay/compile.js";
+import { runOverlayChecks, type OverlayCheckOutcome } from "./gate-overlay/checks.js";
 import { runOverlaySelection } from "./gate-overlay/llm.js";
 import { translate } from "./translator.js";
 import { runChatSummary } from "./chat-summary.js";
@@ -5743,6 +5746,81 @@ async function projectHasUiFiles(root: string): Promise<boolean> {
 }
 
 /**
+ * İTERASYON GATE OVERLAY KAPISI (Faz C) — pipeline sonunda, gerçek-app doğrulama kapısının
+ * KARDEŞİ olarak, emitVerificationSummary/onTaskMaybeComplete ÖNCESİNDE çağrılır.
+ *
+ * Burada iki iş yapılır: (1) phase_end gate'leri (file_must_change / test_must_pass /
+ * schema_check) denetlenir; (2) tool_deny gate'lerinin DEDEKTİF kanadı (file_immutable /
+ * forbid_dependency_change) taban çizgisiyle karşılaştırılır — kanca yalnız yazma araçlarını
+ * görür, Bash ile yan yoldan yapılan değişikliği ancak bu yakalar.
+ *
+ * Başarısızlık davranışı kardeş kapıyla AYNI (Engelin ağırlığı): kanıt taşıyan bir kapı
+ * kırmızıyken iş "Tamamlandı" DAMGALANMAZ — currentTaskId düşürülür (onTaskMaybeComplete
+ * no-op olur) ve iş kuyruğa geri konur. Overlay boş / seçim yoksa: SIFIR davranış değişikliği.
+ */
+async function runOverlayGateAtPipelineEnd(state: State): Promise<void> {
+  const overlay = getActiveOverlay();
+  if (!overlay || overlay.selections.length === 0) return;
+
+  let results: OverlayCheckOutcome[];
+  try {
+    results = await runOverlayChecks(overlay, state);
+  } catch (err) {
+    // Denetim KOŞULAMADI: "geçti" diyemeyiz (kanıt yok). Tek bir başarısızlık olarak raporla —
+    // kapı seçilmişti, doğrulanamadı (fail-closed; `-skipped` YAZMA, o güvenlik atlaması demek).
+    log.error("gate-overlay", "iterasyon gate denetimi hata verdi", err);
+    results = [
+      {
+        gate_id: "overlay_checks",
+        passed: false,
+        event: "overlay-checks-fail",
+        detail: `checks threw: ${String(err).slice(0, 160)}`,
+        message: "❌ İterasyon gate denetimi beklenmedik bir hatayla kesildi — geçti sayılmadı.",
+      },
+    ];
+  }
+  if (results.length === 0) return; // yalnız forbid_new_files gibi araç-anı gate'leri seçilmiş
+
+  const nowTs = Date.now();
+  for (const r of results) {
+    await appendAuditModule(state.project_root, {
+      ts: nowTs,
+      phase: 16 as PhaseId,
+      event: r.event,
+      caller: "mycl-orchestrator",
+      detail: r.detail.slice(0, 200),
+    }).catch((e) => log.warn("gate-overlay", "gate denetim kaydi yazilamadi (non-fatal)", e));
+  }
+
+  const failed = results.filter((r) => !r.passed);
+  if (failed.length === 0) {
+    emitChatMessage(
+      "system",
+      `🛡️ İterasyon gate'leri doğrulandı: ${results.length} kapının hepsi geçti.`,
+    );
+    return;
+  }
+
+  // Kardeş kapının başarısızlık yolu: done ENGELLENİR + iş kuyruğa geri döner (farklı yaklaşımla
+  // otomatik yeniden denenir). Sessiz "tamamlandı" damgası YASAK.
+  const taskId = runtime.currentTaskId ?? _drainTaskId;
+  runtime.currentTaskId = null;
+  _drainTaskId = null;
+  emitChatMessage(
+    "system",
+    `${failed.map((f) => f.message).join("\n")}\n\nİş 'Tamamlandı' DAMGALANMADI; kuyruğa geri kondu.`,
+  );
+  if (taskId) {
+    await returnTaskToPending(
+      state.project_root,
+      taskId,
+      `iterasyon gate'i: ${failed.map((f) => f.gate_id).join(", ")} — ${failed[0].detail.slice(0, 120)}`,
+    );
+    await emitQueueChangedFor(state.project_root);
+  }
+}
+
+/**
  * GERÇEK-APP DOĞRULAMA KAPISI (YZLLM 2026-07-21) — pipeline sonunda, emitVerificationSummary/
  * onTaskMaybeComplete ÖNCESİNDE çağrılır. Canlı kök: cave /profile "boş sonuç" fix'i Faz 8'i
  * "complete score=100" damgaladı ama bug SÜRDÜ — çünkü yalnız BİRİM-suite yeşili doğrulandı, gerçek
@@ -6572,6 +6650,36 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         }
       }
       state = runtime.state ?? state; // gate marker'ı tüketti + statePatch uygulamış olabilir → yerel state tazele
+      // İTERASYON GATE OVERLAY KAPISI (Faz C) — gerçek-app kapısının KARDEŞİ; aynı yerde, aynı
+      // fail-closed sarmalayıcıyla. Kapı gövdesindeki çıplak await'ler (audit/task-queue) pipeline'ı
+      // çökertmesin AMA sessizce "tamamlandı"ya da düşmesin: istisna → done ENGELLENİR + görünür uyarı.
+      try {
+        await runOverlayGateAtPipelineEnd(state);
+      } catch (err) {
+        log.error("orchestrator", "runOverlayGateAtPipelineEnd beklenmedik istisna — fail-closed", err);
+        const ovErrTaskId = runtime.currentTaskId ?? _drainTaskId;
+        runtime.currentTaskId = null;
+        _drainTaskId = null;
+        emitChatMessage(
+          "system",
+          "⚠️ İterasyon gate denetimi beklenmedik bir hatayla kesildi — iş 'Tamamlandı' damgalanmadı; \"Tekrar Dene\" ile yeniden başlatabilirsin.",
+        );
+        await appendAuditModule(state.project_root, {
+          ts: Date.now(),
+          phase: 16 as PhaseId,
+          event: "overlay-checks-fail",
+          caller: "mycl-orchestrator",
+          detail: "gate-error",
+        }).catch(() => {});
+        if (ovErrTaskId) {
+          await patchTask(state.project_root, ovErrTaskId, {
+            status: "pending",
+            attempts: MAX_TASK_AUTO_RETRIES,
+            last_fail: "iterasyon gate denetimi beklenmedik hata",
+          }).catch(() => {});
+          await emitQueueChangedFor(state.project_root).catch(() => {});
+        }
+      }
       // #1 deliği (YZLLM 2026-06-11): sessiz gate-atlama şeffaflığı. Pipeline bitince hangi kalite boyutunun
       // GERÇEKTEN doğrulandığını, hangisinin ATLANDIĞINI (araç yok / uygulanamaz) açıkça göster — atlanan gate
       // "geçti" gibi görünmesin. Kullanıcı neyin doğrulanmadığını bilerek kabul etsin.
@@ -6582,6 +6690,13 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       await onTaskMaybeComplete(state.project_root);
       // ⚡ Paralel küme işlerini damgala (2026-07-16) — currentBatch yoksa no-op.
       await onBatchMaybeComplete(state.project_root);
+      // AD-4 ARŞİV: iterasyon kapandı → aktif overlay arşive, bellek tutucusu temizlenir. Denetim
+      // VE tamamlanma kararından SONRA (ikisi de current.json'a bakabilir). Terminal hata/abort
+      // yollarında buraya hiç gelinmeyebilir — o boşluğu bir sonraki derlemenin süpürmesi kapatır
+      // (persistOverlay eskisini arşive taşımadan yenisini yazmaz), bu yüzden hata non-fatal.
+      await archiveActiveOverlay(state.project_root).catch((e: unknown) =>
+        log.warn("orchestrator", "overlay arsivlenemedi (non-fatal)", e),
+      );
       // v15.7 (2026-05-25) BUG FIX: Akış son fazda (örn. Faz 17) bittiğinde
       // son emitPhaseChanged hâlâ "running" idi → sidebar mavi (running)
       // kalıyordu. Loop break öncesi son fazı "complete" işaretle.

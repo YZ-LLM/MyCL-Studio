@@ -103,6 +103,11 @@ export class ProductionSchemaCliBackend extends ProductionSchemaSharedCore imple
         allowedTools: ["Read", "Grep", "Glob", "Bash"],
         disallowedTools: ["Write", "Edit", "NotebookEdit"],
         effort,
+        // İTERASYON GATE'LERİ (Faz C): onay fazları (3/4/7) bugün yazma aracı almıyor, ama kanca
+        // sözleşmesi faz ayrımı yapmaz — burada erken bağlanması iki işe yarar: ileride bir onay
+        // fazına yazma açılırsa gate KENDİLİĞİNDEN geçerli olur, ve kancalar bu claude sürümünde
+        // hiç yüklenmiyorsa bunu Faz 5/8 kod yazmadan ÖNCE görürüz (kanarya erken uyarı).
+        gateOverlayPhase: opts.state.current_phase,
         onText: (text) => emitClaudeStream({ sub: "text", text }),
         observer: (tu) =>
           emitClaudeStream({ sub: "tool_use", tool_name: tu.name, tool_input: tu.input }),

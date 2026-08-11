@@ -30,6 +30,13 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { MAIN_AGENT_LANGUAGE_REMINDER } from "../agent-language.js";
 import { guardSandboxOrWarn, sandboxSettingsArgs, needsLocalBinding } from "../agent-sandbox.js";
+import { isWriteTool } from "../gate-overlay/decide.js";
+import {
+  overlaySettingsFor,
+  sandboxOverlayArg,
+  verifyOverlayCanary,
+  type OverlayInjection,
+} from "../gate-overlay/enforce.js";
 import {
   noteRateLimitEvent,
   noteCliRateLimitError,
@@ -242,12 +249,96 @@ export function applyMcpServerArgs(
   };
 }
 
+/**
+ * SAF: `result` olayındaki `permission_denials` listesini okur. Claude Code kanca ile
+ * ENGELLENEN araç çağrılarını burada bildirir; MyCL bugüne kadar bu alanı hiç okumuyordu.
+ * Bozuk/eksik girdiler sessizce atlanır — kanıt DÜŞÜRME kararı yalnız TAM okunabilen
+ * kayıtlara dayanmalı (uydurma bir tool_use_id ile yanlış kanıt düşürmek daha kötü).
+ */
+export function parsePermissionDenials(
+  ev: Record<string, unknown>,
+): Array<{ tool_name: string; tool_use_id: string; target: string }> {
+  const raw = ev.permission_denials;
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ tool_name: string; tool_use_id: string; target: string }> = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const d = item as Record<string, unknown>;
+    const id = typeof d.tool_use_id === "string" ? d.tool_use_id : "";
+    const name = typeof d.tool_name === "string" ? d.tool_name : "";
+    if (!id && !name) continue;
+    const input = (d.tool_input as Record<string, unknown> | undefined) ?? {};
+    const target =
+      typeof input.file_path === "string"
+        ? input.file_path
+        : typeof input.notebook_path === "string"
+          ? input.notebook_path
+          : "";
+    out.push({ tool_name: name, tool_use_id: id, target });
+  }
+  return out;
+}
+
+/**
+ * SAF: kuyruğa alınmış yazma kanıtlarından ENGELLENENLERİ düşürür.
+ *
+ * NEDEN (TUZAK 2 — sahte yeşil): stream-json tool_result taşımadığı için gözlemci her
+ * tool_use'u BAŞARILI sayıyordu; kancayla reddedilen bir Write de "ui-file-write" kanıtı
+ * üretiyordu → engellenmiş iterasyon tamamlanmış görünüyordu. Engel bilgisi ancak `result`
+ * olayında geldiği için yazma kanıtları o ana kadar KUYRUKTA bekletilir, sonra süzülür.
+ */
+export function filterDeniedWriteEvidence<T extends { id: string }>(
+  queued: readonly T[],
+  deniedIds: ReadonlySet<string>,
+): T[] {
+  return queued.filter((q) => !(q.id !== "" && deniedIds.has(q.id)));
+}
+
 export class CliCodegenBackend implements CodegenBackend {
   private child: ChildProcess | null = null;
   private aborted = false;
   private lastTextTail = ""; // 529 imzası assistant-text'te (stderr'de değil); run-başı sıfırlanır, fail-reason'da kullanılır
+  /** Overlay kancası enjekte edildiyse dolu — yazma kanıtı kuyruğu YALNIZ o zaman devreye girer. */
+  private overlayActive = false;
+  /** Engel bilgisi gelene kadar bekletilen yazma kanıtları (bkz. filterDeniedWriteEvidence). */
+  private pendingWriteEvidence: Array<{
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+  }> = [];
+  private deniedToolUseIds = new Set<string>();
+  private evidenceFlushed = false;
+  /**
+   * Boşaltma İŞİ (dolu ise beklenir). NEDEN: kanıt olayları normalde stream anında yazılıyordu,
+   * yani fazın audit okumasından çok önce diske iniyordu. Kuyruğa alınca bu pay kayboluyor —
+   * `finish` bu sözü BEKLER, yoksa Faz 5 "hiç ui-file-write yok" diye YANLIŞ kırmızıya düşebilirdi.
+   * Overlay kapalıyken kuyruk hiç dolmaz → bu alan null kalır → çözümleme bugünkü gibi SENKRON.
+   */
+  private evidenceFlushPromise: Promise<void> | null = null;
 
   constructor(private readonly opts: CodegenRunOpts) {}
+
+  /**
+   * Kuyruktaki yazma kanıtlarını (engellenmeyenleri) gözlemciye verir. `result` geldiğinde
+   * çağrılır; tavan/abort gibi `result`'ın HİÇ gelmediği yollarda `finish` içinde çağrılır ki
+   * kanıt kaybolmasın (o yolda engel bilgisi de yoktur → bugünkü davranış: hepsi kanıt). Tek atış.
+   */
+  private flushWriteEvidence(): void {
+    if (this.evidenceFlushed) return;
+    this.evidenceFlushed = true;
+    const observer = this.opts.observer;
+    const items = filterDeniedWriteEvidence(this.pendingWriteEvidence, this.deniedToolUseIds);
+    this.pendingWriteEvidence = [];
+    if (!observer || items.length === 0) return;
+    this.evidenceFlushPromise = Promise.all(
+      items.map((q) =>
+        observer({
+          tool_use: { name: q.name, input: q.input },
+          result: { is_error: false },
+        }).catch((err) => log.warn("cli-backend", "observer threw", err)),
+      ),
+    ).then(() => undefined);
+  }
 
   abort(): void {
     this.aborted = true;
@@ -269,7 +360,16 @@ export class CliCodegenBackend implements CodegenBackend {
       return { kind: "failed", reason: "sandbox kurulamadı (policy=enforce) — codegen çalıştırılmadı" };
     }
     const effort = opts.effortOverride ?? opts.config.claude_code_flags.effort ?? "max";
-    const args = this.buildArgs(effort);
+    // İterasyon gate kancaları: TÜM codegen etiketleri alır (hepsi yazma yetenekli).
+    const overlay = await overlaySettingsFor({
+      projectRoot: opts.state.project_root,
+      phase: opts.state.current_phase,
+    });
+    this.overlayActive = overlay !== null;
+    this.pendingWriteEvidence = [];
+    this.deniedToolUseIds = new Set();
+    this.evidenceFlushed = false;
+    const args = this.buildArgs(effort, overlay);
 
     const skillsDir = resolveSkillsDir();
     if (skillsDir) {
@@ -299,7 +399,7 @@ export class CliCodegenBackend implements CodegenBackend {
       `🤖 Claude Code CLI çalıştırılıyor (model: ${opts.modelId}, efor: ${effort})…`,
     );
 
-    return new Promise<CodegenOutcome>((resolve) => {
+    const outcome = await new Promise<CodegenOutcome>((resolve) => {
       // Mutlak yol — minimal PATH'te bare "claude" ENOENT verir (paketlenmiş .app).
       const claudeBin = resolveClaudePath() ?? "claude";
       const child = spawn(claudeBin, args, {
@@ -332,6 +432,9 @@ export class CliCodegenBackend implements CodegenBackend {
         settled = true;
         clearTimeout(idleTimer);
         if (wallTimer) clearTimeout(wallTimer);
+        // Kuyrukta bekleyen yazma kanıtları: `result` gelmeden bittiysek (tavan/abort/spawn hatası)
+        // engel bilgisi de yoktur → hepsi kanıt sayılır (bugünkü davranışın aynısı; kanıt kaybolmaz).
+        this.flushWriteEvidence();
         // STRAY-CLEANUP: claude grup-lideri → -pid grubu (orphan grandchild dev-server dahil) öldürür.
         if (child.pid) {
           try {
@@ -345,7 +448,13 @@ export class CliCodegenBackend implements CodegenBackend {
         // ABORT HER ZAMAN KAZANIR (mahkeme bulgusu): timer (onCap→done) ile abort() dar yarışında — abort() bu
         // sürüde settled/timer'a dokunmaz — kullanıcı abort'u yanlışlıkla {kind:"done"}'a düşmesin (rollback+
         // "phase-8-aborted" yolu korunur). this.aborted senkron set edildiğinden burada güvenle kontrol edilir.
-        resolve(this.aborted && outcome.kind !== "aborted" ? { kind: "aborted", turns: numTurns } : outcome);
+        const final =
+          this.aborted && outcome.kind !== "aborted" ? { kind: "aborted" as const, turns: numTurns } : outcome;
+        // Kuyruğa alınmış kanıt varsa (yalnız overlay açıkken olur) diske inmesini BEKLE; yoksa
+        // çözümleme bugünkü gibi tam senkron kalır (davranış regresyonu yok).
+        const pendingEvidence = this.evidenceFlushPromise;
+        if (pendingEvidence) void pendingEvidence.then(() => resolve(final), () => resolve(final));
+        else resolve(final);
       };
 
       // Bütçe tavanı → GÖRÜNÜR sonuçlandır (sessiz kesme YOK, KATI #4). {kind:"done"} → fazın kendi doğrulaması
@@ -445,6 +554,15 @@ export class CliCodegenBackend implements CodegenBackend {
         }
       });
     });
+
+    // KANARYA: kanca enjekte edildiyse SessionStart işareti gelmiş olmalı. Yoksa bu codegen
+    // koşusu gate'siz koşmuştur → fazın MEVCUT hata yolu (kind:"failed") ile başarısız say.
+    // Kullanıcı iptali her zaman kazanır (abort'u hataya çevirme).
+    if (overlay && outcome.kind !== "aborted") {
+      const canaryError = await verifyOverlayCanary(overlay);
+      if (canaryError) return { kind: "failed", reason: canaryError };
+    }
+    return outcome;
   }
 
   /** stream-json olayını emitClaudeStream + observer'a köprüle. */
@@ -482,15 +600,43 @@ export class CliCodegenBackend implements CodegenBackend {
           // Observer köprüsü — Phase 5 "ui-file-write" audit'i bu sayede çalışır.
           // stream-json tool_result'ı ayrı vermediği için is_error=false varsayılır.
           if (this.opts.observer) {
-            void this.opts
-              .observer({ tool_use: { name, input }, result: { is_error: false } })
-              .catch((err) => log.warn("cli-backend", "observer threw", err));
+            if (this.overlayActive && isWriteTool(name)) {
+              // Overlay açıkken YAZMA kanıtı hemen üretilmez: bu çağrının kanca tarafından
+              // engellenip engellenmediği ancak `result` olayında (permission_denials) belli
+              // olur. Kuyruğa al, engel kümesi bilindikten sonra süz (sahte yeşil fix).
+              this.pendingWriteEvidence.push({ id: String(b.id ?? ""), name, input });
+            } else {
+              void this.opts
+                .observer({ tool_use: { name, input }, result: { is_error: false } })
+                .catch((err) => log.warn("cli-backend", "observer threw", err));
+            }
           }
         }
       }
       return;
     }
     if (type === "result") {
+      // ENGELLENEN ARAÇ ÇAĞRILARI: Claude Code kanca engellerini burada bildirir. MyCL bu alanı
+      // hiç okumuyordu → engellenen yazma hem denetimde görünmüyor hem de "yazdı" kanıtı sayılıyordu.
+      const denials = parsePermissionDenials(ev);
+      for (const d of denials) {
+        if (d.tool_use_id) this.deniedToolUseIds.add(d.tool_use_id);
+        void appendAudit(this.opts.state.project_root, {
+          ts: Date.now(),
+          phase: this.opts.state.current_phase,
+          event: "overlay_gate_triggered",
+          caller: "mycl-orchestrator",
+          detail: `${d.tool_name || "?"} ${d.target.slice(-80)}`.trim(),
+        }).catch((e) => log.warn("cli-backend", "overlay engel kaydi yazilamadi", e));
+      }
+      if (denials.length > 0) {
+        emitChatMessage(
+          "system",
+          `🛡️ İterasyon gate'i ${denials.length} yazma girişimini engelledi — ajan farklı bir yol denemek zorunda kaldı.`,
+        );
+      }
+      // Engel kümesi artık kesin → bekleyen yazma kanıtlarını süzüp gözlemciye ver.
+      this.flushWriteEvidence();
       const isError = ev.is_error === true || ev.subtype === "error";
       const turns = typeof ev.num_turns === "number" ? ev.num_turns : undefined;
       const cost = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
@@ -508,7 +654,7 @@ export class CliCodegenBackend implements CodegenBackend {
     }
   }
 
-  private buildArgs(effort: string): string[] {
+  private buildArgs(effort: string, overlay: OverlayInjection | null): string[] {
     const { opts } = this;
     // MCP server'ları (opt-in): codebase-memory (yapısal) + cognee (kalıcı hafıza). Hint'ler TEK --append-system-prompt'a,
     // config'ler TEK --mcp-config'e birleştirilir — çift-bayrak son-kazanır tuzağı YOK (mahkeme CRITICAL 2026-07-13).
@@ -573,9 +719,14 @@ export class CliCodegenBackend implements CodegenBackend {
     // YEREL PORT (2026-07-30): yalnız gerçekten sunucu/tarayıcı testi koşan codegen fazlarına
     // (needsLocalBinding açık listesi) — diğer etiketlerde ayar eski haliyle birebir aynı.
     args.push(
-      ...sandboxSettingsArgs(opts.state.project_root, effort === "ultracode", {
-        localBinding: needsLocalBinding(opts.tag),
-      }),
+      ...sandboxSettingsArgs(
+        opts.state.project_root,
+        effort === "ultracode",
+        { localBinding: needsLocalBinding(opts.tag) },
+        // GATE OVERLAY (Faz C): kancalar yalnız bu iterasyonda tool_deny seçimi VARSA eklenir;
+        // yoksa `hooks` anahtarı hiç yazılmaz → argv birebir eski.
+        sandboxOverlayArg(overlay),
+      ),
     );
     if (effort && effort !== "ultracode") {
       args.push("--effort", effort);

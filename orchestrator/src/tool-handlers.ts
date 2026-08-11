@@ -13,9 +13,14 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
+import { appendAudit } from "./audit.js";
 import { inspectBashCommand } from "./bash-guard.js";
+import { getActiveOverlay } from "./gate-overlay/compile.js";
+import { buildGuardRules, decideWrite, isWriteTool, writeToolTargetPath } from "./gate-overlay/decide.js";
 import { log } from "./logger.js";
+import { getRecordPhase } from "./record-context.js";
 import { safeEnv } from "./safe-env.js";
+import type { PhaseId } from "./types.js";
 
 export interface ToolContext {
   project_root: string;
@@ -589,6 +594,50 @@ export const TOOLS_CODEGEN = [
 ] as const;
 
 /* ============================================================
+ * İterasyon gate overlay'i — API/SDK yolu paritesi (Faz C)
+ * ============================================================
+ * CLI yolunda kancalar (overlay-guard.mjs) yazma araçlarını araç ANINDA engelliyor; API/SDK
+ * yolunda kanca YOK — engel burada uygulanmazsa aynı iterasyon arka uca göre farklı kurallara
+ * tabi olurdu (sessiz asimetri). Karar tek kaynaktan (`decideWrite`) gelir ve mesaj birebir
+ * aynıdır: model iki yolda da AYNI geri bildirimi alır.
+ *
+ * NEDEN extra_denied_patterns YETMEDİ: forbid_new_files "var olanı düzenlemek serbest, YENİSİNİ
+ * yaratmak yasak" ayrımı yapar; desen eşleşmesi dosyanın VARLIĞINI bilmez. Bu yüzden desen
+ * mekanizmasına yeni bir dal eklemek yerine karar fonksiyonu doğrudan çağrılır.
+ */
+async function overlayWriteGate(
+  name: string,
+  input: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<ToolResult | null> {
+  if (!isWriteTool(name)) return null;
+  const rules = buildGuardRules(getActiveOverlay(), ctx.project_root);
+  if (!rules) return null; // bu iterasyonda tool_deny gate'i yok → davranış birebir eski
+
+  const target = writeToolTargetPath(input);
+  let fileExists = false;
+  if (target) {
+    const abs = isAbsolute(target) ? target : resolvePath(ctx.project_root, target);
+    fileExists = await fs
+      .stat(abs)
+      .then(() => true)
+      .catch(() => false);
+  }
+  const decision = decideWrite(rules, target, fileExists);
+  if (decision.allow) return null;
+
+  log.warn("tool-handlers", "overlay gate engelledi", { tool: name, gate: decision.gate_id });
+  await appendAudit(ctx.project_root, {
+    ts: Date.now(),
+    phase: (getRecordPhase() ?? 0) as PhaseId,
+    event: "overlay_gate_triggered",
+    caller: "mycl-orchestrator",
+    detail: `${name} ${target.slice(-80)} (${decision.gate_id})`,
+  }).catch((e) => log.warn("tool-handlers", "overlay engel kaydi yazilamadi", e));
+  return { content: decision.message, is_error: true };
+}
+
+/* ============================================================
  * Dispatcher
  * ============================================================ */
 export async function executeTool(
@@ -597,6 +646,8 @@ export async function executeTool(
   ctx: ToolContext,
 ): Promise<ToolResult> {
   log.info("tool-handlers", "execute", { tool: name });
+  const gated = await overlayWriteGate(name, input, ctx);
+  if (gated) return gated;
   switch (name) {
     case "Read":
       return handleRead(input, ctx);

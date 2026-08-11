@@ -130,7 +130,11 @@ if (depNames.includes(basename(rel))) {
 }
 
 for (const dir of noNewFiles) {
-  if ((rel === dir || rel.startsWith(`${dir}/`)) && !existsSync(resolved)) {
+  // "." = proje kökü = TÜM proje (envanter kökü dizin olarak sunar, model seçebilir). Bu satır
+  // olmadan kök seçimi hiçbir şeyi engellemiyordu — kullanıcı korunduğunu sanırken korunmazdı
+  // (mahkeme öncesi gözden geçirme bulgusu, 2026-08-11). decide.ts İKİZİYLE birlikte değişti.
+  const inDir = dir === "." || rel === dir || rel.startsWith(`${dir}/`);
+  if (inDir && !existsSync(resolved)) {
     block(
       `gate-overlay: creating new files under "${dir}" is forbidden this iteration (forbid_new_files). Edit existing files instead.`,
     );

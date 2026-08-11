@@ -167,6 +167,9 @@ export async function runVisualDesignAgent(
     disallowedTools: ["Bash", "Agent", "Task"],
     effort,
     timeoutMs: 600_000,
+    // İTERASYON GATE'LERİ (Faz C): bu ajan gerçekten dosya YAZAR (Edit/Write) ve iterasyonun
+    // içinde koşar → dondurulmuş dosya / yeni dosya yasağı burada da geçerli olmalı.
+    gateOverlayPhase: 5,
     observer: (t) => log.info("visual-design", "tool", { name: t.name }),
   }).catch((err) => {
     log.warn("visual-design", "runClaudeCli error (non-blocking)", err);

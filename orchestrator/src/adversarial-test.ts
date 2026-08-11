@@ -88,6 +88,9 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
       // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): 15dk wall-clock (default 30dk yerine). Düşman-test HER Faz 8 yeşilinde
       // koşan 2. TAM ajan → tavanı yarıya indir (güven-sağlamlaştırma korunur, kuyruğu kısaltır). Bayrakla kapatılabilir.
       wallClockMs: 900_000,
+      // İTERASYON GATE'LERİ (Faz C): düşman-test ajanı projeye test DOSYASI yazar ve iterasyon
+      // içinde koşar → dondurulmuş dosya / yeni dosya / bağımlılık yasakları burada da geçerli.
+      gateOverlayPhase: 8,
     });
   } catch (e) {
     log.warn("adversarial-test", "çağrı başarısız", e);
