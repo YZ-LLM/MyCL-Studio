@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { GATE_POOL_PATH, loadGatePool, validateGatePool } from "../src/gate-overlay/pool.js";
 
 // Kapalı gate sözlüğünün bekçisi. İki iş yapar:
@@ -188,5 +188,31 @@ describe("bozuk havuz reddedilir ve hatalı girişi işaret eder", () => {
     const result = validateGatePool(poolWith(broken));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// Kabul kriteri (AD-6): missing_gate kaydı havuza OTOMATİK hiçbir ekleme yapmaz. Havuz yalnız git
+// üzerinden, insan eliyle değişir. Bu test kaynak ağacında gate-pool.json'a YAZAN kod olmadığını kilitler.
+describe("AD-6: havuz yalnız insan eliyle değişir", () => {
+  it("kaynakta gate-pool.json'a yazan hiçbir kod yok", async () => {
+    const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src");
+    const offenders: string[] = [];
+    async function walk(dir: string): Promise<void> {
+      for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) await walk(full);
+        else if (e.name.endsWith(".ts")) {
+          const body = await fs.readFile(full, "utf-8");
+          // Yazma niyeti: writeFile/appendFile çağrısıyla AYNI satırda gate-pool geçiyorsa şüpheli.
+          for (const line of body.split("\n")) {
+            if (line.includes("gate-pool") && /writeFile|appendFile|createWriteStream/.test(line)) {
+              offenders.push(`${full}: ${line.trim().slice(0, 120)}`);
+            }
+          }
+        }
+      }
+    }
+    await walk(srcRoot);
+    expect(offenders).toEqual([]);
   });
 });

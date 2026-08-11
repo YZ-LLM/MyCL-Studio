@@ -287,6 +287,16 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   Boş bırakılırsa varsayılan davranış sürer. Bu seçim yalnız plan metnini yazan
   modeli belirler; onaylanan planı uygulayan fazlar her zamanki gibi kendi iş
   türlerinin model katmanını kullanır.
+- **🛡️ İterasyon gate'leri (gate overlay)** — her iş başlarken MyCL, o işe özel
+  riskleri kapalı bir gate sözlüğünden seçip iterasyona özel kilitler derler:
+  örneğin "şu dosya bu iterasyonda değiştirilemez", "bağımlılık dosyalarına
+  dokunulamaz", "şu dosya değişmeden iş tamamlanamaz". Model yalnız sözlükten
+  SEÇER; kural yazamaz, mevcut bir kapıyı kaldıramaz ya da gevşetemez. Kilitler
+  iş başlamadan donar, iş boyunca değişmez; ihlal denemesi anında engellenir ve
+  iş sonunda dedektif kontrolleri (dosya özeti karşılaştırması) yan yolları da
+  yakalar. Sözlükte karşılığı olmayan risk yalnız kayda düşer — sözlüğü
+  genişletmek insana aittir (git üzerinden). Derleme başarısız olursa iş
+  gate'siz BAŞLAMAZ; neden görünür şekilde söylenir.
 - **⚡ Paralel iş kümeleme** — Ayarlar → Özellikler'den açılır (varsayılan
   **kapalı**). Kuyrukta birbirinden bağımsız 2-3 iş beklerken kod yazma kısımları
   izole çalışma kopyalarında aynı anda yapılır; birleştirme sonrası kalite
