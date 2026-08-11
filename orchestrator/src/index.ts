@@ -229,6 +229,19 @@ import { detectStack, handleCommandIntent } from "./intent-router/handlers/comma
 import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
 import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting, type OutageResumeResult } from "./llm-outage.js";
+import { loadGatePool, type GatePool } from "./gate-overlay/pool.js";
+import {
+  buildOverlayInventory,
+  compileOverlayFromProposal,
+  computeBaselines,
+  persistOverlay,
+  readActiveOverlay,
+  setActiveOverlay,
+  type CompiledOverlay,
+  type CompileResult,
+  type OverlayInventory,
+} from "./gate-overlay/compile.js";
+import { runOverlaySelection } from "./gate-overlay/llm.js";
 import { translate } from "./translator.js";
 import { runChatSummary } from "./chat-summary.js";
 import { shouldKickQueue, startLivenessWatchdog } from "./liveness-watchdog.js";
@@ -2366,6 +2379,7 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
   timeoutRetried.clear();
   gateFailStreak.clear(); // faz-seviyesi döngü sayacı da sıfır (yeni proje → eski sayaç taşınmasın).
   _batchFailedIds.clear(); // ⚡ paralel küme tek-atış seti de sıfır (proje değişti; eski id'ler anlamsız).
+  setActiveOverlay(null); // eski projenin iterasyon gate'leri yeni projeye TAŞINMAZ (dosya kaynağı proje-içi).
   // MAHKEME HIGH (2026-07-16): bayat askq + kullanıcı-tetikli pending'ler proje-BAĞIMSIZ global durumda
   // yaşıyordu → proje A'nın plan/full-test/bakım onayı proje B'de yanlışlıkla cevaplanabilirdi
   // (answer_askq top-of-stack'i proje kontrolsüz yönlendirir; pendingPlan onayı AKTİF projenin kuyruğuna
@@ -4740,6 +4754,255 @@ async function executeDispatchedIntent(
   await driveWorkQueue(text);
 }
 
+// ===== Gate Overlay — iterasyon başı kısıt derlemesi ==================
+//
+// Her iterasyon KENDİ kısıtlarıyla başlar: kapalı sözlükten (assets/gate-pool.json) seçilen,
+// şema + bağlam doğrulamasından geçmiş gate'ler `.mycl/overlays/current.json` dosyasına yazılır.
+// Derleme iterasyonun İLK adımıdır — kod yazıldıktan sonra öğrenilen bir kısıt engelleyemez,
+// yalnız şikâyet edebilirdi (KATI #6 önden çöz).
+//
+// SESSİZ "gate'siz devam" YASAK (KATI #4): havuz bozuksa ya da model iki denemede de okunabilir
+// bir öneri üretemediyse iterasyon BAŞLAMAZ. İş kaybolmaz — çağıran erken döner, reconcileAndDrainTasks
+// işi kuyruğa geri koyar ve kullanıcı nedenini görür. Kesinti (limit/kredi) ise bekle-ve-devam
+// makinesine bağlanır: erişim açılınca kuyruk yeniden sürülür ve overlay YENİDEN derlenir.
+
+/**
+ * Kesinti sonrası devam: overlay derlemesi iterasyonun İLK adımıdır → yarım kalmış bir faz yoktur,
+ * sürdürülecek şey KUYRUKTUR. Bilerek `makePhaseOutageResume` kullanılmaz: o, kuyruk boşsa kesilen
+ * fazı doğrudan yeniden koşar — burada bu, overlay hiç derlenmeden faza girmek (gate'siz devam) olurdu.
+ */
+function makeOverlayOutageResume(): () => Promise<OutageResumeResult> {
+  let skipNoticeShown = false;
+  return async () => {
+    if (_handlingUserMessage || _pipelineDepth > 0 || runtime.controller !== null || getActiveAskq() !== null) {
+      if (!skipNoticeShown) {
+        skipNoticeShown = true;
+        emitChatMessage(
+          "system",
+          "ℹ️ Otomatik devam şimdilik atlandı — sistem meşgul. Beklemeye devam ediyorum; meşguliyet çözülünce yeniden deneyeceğim.",
+        );
+      }
+      return "skipped";
+    }
+    if (!runtime.state) {
+      emitChatMessage("system", "ℹ️ Otomatik devam sonlandı — proje bu arada değişmiş.");
+      return "resumed";
+    }
+    const hasPending = nextPendingTask(await readTasks(runtime.state.project_root).catch(() => []));
+    if (!runtime.currentTaskId && hasPending) {
+      emitChatMessage(
+        "system",
+        "🔄 LLM erişimini yeniden deniyorum — açıldıysa iterasyon gate'lerini derleyip devam edeceğim.",
+      );
+      _drainActive = true;
+      await reconcileAndDrainTasks();
+      return "resumed";
+    }
+    emitChatMessage(
+      "system",
+      "ℹ️ Otomatik devam sonlandı — sürdürülecek bekleyen iş yok; yeni bir mesaj ya da 'Çalıştır' ile yeniden başlatabilirsin.",
+    );
+    return "resumed";
+  };
+}
+
+/**
+ * Bu iterasyonun overlay'ini derler + kalıcılaştırır. Başarıda true; false dönerse ÇAĞIRAN
+ * iterasyonu BAŞLATMADAN dönmelidir (kısıtsız koşmak sessiz bir kalite düşüşü olurdu).
+ *
+ * `taskTexts`: bu iterasyonda uygulanacak iş metni/metinleri (paralel kümede birden fazla).
+ * `reason`: hangi giriş yolundan çağrıldığı (yalnız log).
+ */
+async function compileIterationOverlay(taskTexts: string[], reason: string): Promise<boolean> {
+  if (!runtime.state || !runtime.config) {
+    emitError("Gate overlay derlenemedi: çalışma ortamı hazır değil", null);
+    return false;
+  }
+  const config = runtime.config;
+  const root = runtime.state.project_root;
+  const iterationKey = `iter${runtime.state.iteration_count ?? 1}-${runtime.state.iteration_started_at ?? Date.now()}`;
+  const taskText = taskTexts
+    .map((t) => t.trim())
+    .filter((t) => t !== "")
+    .join("\n\n---\n\n");
+  if (taskText === "") {
+    emitError("Gate overlay derlenemedi: iş metni boş", null);
+    return false;
+  }
+
+  let pool: GatePool;
+  let inventory: OverlayInventory;
+  try {
+    pool = await loadGatePool();
+    inventory = await buildOverlayInventory(root);
+  } catch (err) {
+    log.error("orchestrator", "gate havuzu/envanteri hazırlanamadı", err);
+    emitError("Gate sözlüğü okunamadı", String(err));
+    emitChatMessage(
+      "system",
+      `⛔ Gate sözlüğü okunamadığı için iterasyon başlatılmadı. Neden: ${String(err).slice(0, 200)}`,
+    );
+    _drainActive = false; // sıradaki işler aynı bozuk sözlükle denemelerini yakmasın
+    return false;
+  }
+
+  // İKİ deneme: ilk turda eksik/bozuk JSON yaygın bir model hatası ve tekrarı ucuz. İkincisi de
+  // okunamazsa TAHMİN ETMEYİZ — yarım anlaşılmış bir öneriden kısıt üretmek yanlış engelleme demektir.
+  let compiled: CompileResult | null = null;
+  let lastError = "";
+  for (let attempt = 1; attempt <= 2 && compiled === null; attempt++) {
+    const res = await runOverlaySelection(
+      config,
+      root,
+      pool,
+      taskText,
+      inventory.summary,
+      attempt > 1 ? lastError : undefined,
+    );
+    if (!res.ok) {
+      lastError = res.error;
+      log.warn("orchestrator", "gate seçimi başarısız", { attempt, error: res.error });
+      continue;
+    }
+    const candidate = compileOverlayFromProposal(res.text, pool, inventory.ctx);
+    if (candidate.parseError) {
+      lastError = candidate.parseError;
+      log.warn("orchestrator", "gate önerisi okunamadı", { attempt, error: candidate.parseError });
+      continue;
+    }
+    compiled = candidate;
+  }
+  if (compiled === null) {
+    _drainActive = false;
+    if (isApiAccountError(lastError) || isCliUsageLimitError(lastError)) {
+      emitChatMessage(
+        "system",
+        "⛔ Claude erişimi kapalı olduğu için iterasyon gate'leri derlenemedi — iterasyon başlatılmadı. Erişim açılınca kaldığım yerden otomatik devam edeceğim.",
+      );
+      armLlmOutageWait("gate overlay derlemesi — Claude erişimi kapalı", makeOverlayOutageResume());
+      return false;
+    }
+    emitError("Gate overlay derlenemedi", lastError);
+    emitChatMessage(
+      "system",
+      `⛔ İterasyon gate'leri iki denemede de derlenemedi — iterasyonu gate'siz başlatmıyorum. Neden: ${lastError.slice(0, 200)}`,
+    );
+    return false;
+  }
+
+  let hash: string;
+  let overlay: CompiledOverlay;
+  try {
+    overlay = {
+      overlay_version: 1,
+      pool_version: pool.pool_version,
+      iteration_key: iterationKey,
+      compiled_at: Date.now(),
+      selections: compiled.accepted,
+      baselines: await computeBaselines(compiled.accepted, root),
+    };
+    hash = await persistOverlay(root, overlay);
+  } catch (err) {
+    // Yazılamayan overlay = uygulanamayan overlay. Bellekte tutup "kısıt var" gibi davranmak,
+    // süreç yeniden başladığında sessizce kısıtsız devam etmek olurdu.
+    log.error("orchestrator", "overlay yazılamadı", err);
+    emitError("Gate overlay yazılamadı", String(err));
+    emitChatMessage(
+      "system",
+      `⛔ İterasyon gate'leri kaydedilemedi — iterasyon başlatılmadı. Neden: ${String(err).slice(0, 200)}`,
+    );
+    _drainActive = false;
+    return false;
+  }
+  setActiveOverlay(overlay);
+  log.info("orchestrator", "gate overlay derlendi", {
+    reason,
+    key: iterationKey,
+    accepted: compiled.accepted.length,
+    rejected: compiled.rejected.length,
+    missing: compiled.missing.length,
+    inventoryTruncated: inventory.truncated,
+  });
+
+  const auditFail = (e: unknown): void =>
+    log.warn("orchestrator", "overlay denetim kaydı yazılamadı (non-fatal)", e);
+  await appendAuditModule(root, {
+    ts: Date.now(),
+    phase: 1,
+    event: "overlay_compiled",
+    caller: "mycl-orchestrator",
+    detail: `hash=${hash.slice(0, 12)} selections=${compiled.accepted.length} missing=${compiled.missing.length} key=${iterationKey}`,
+  }).catch(auditFail);
+  for (const rej of compiled.rejected) {
+    await appendAuditModule(root, {
+      ts: Date.now(),
+      phase: 1,
+      event: "overlay_selection_rejected",
+      caller: "mycl-orchestrator",
+      detail: `${rej.sel.gate_id} ${rej.code}: ${rej.reason.slice(0, 160)}`,
+    }).catch(auditFail);
+  }
+  // Sözlükte karşılığı olmayan risk: model kendi kuralını YAZAMAZ (kapalı sözlük), yalnız bildirir.
+  // Denetim izine düşer ki sözlüğü büyütecek insan hangi boşluğun tekrarladığını görsün.
+  for (const gap of compiled.missing) {
+    await appendAuditModule(root, {
+      ts: Date.now(),
+      phase: 1,
+      event: "missing_gate",
+      caller: "mycl-orchestrator",
+      detail: `${gap.risk_description.slice(0, 160)}${gap.suggested_name ? ` (öneri: ${gap.suggested_name})` : ""}`,
+    }).catch(auditFail);
+  }
+
+  const extras: string[] = [];
+  if (compiled.rejected.length > 0) extras.push(`${compiled.rejected.length} reddedildi`);
+  if (compiled.missing.length > 0) extras.push(`${compiled.missing.length} eksik bildirimi`);
+  const tail = extras.length > 0 ? `, ${extras.join(", ")}` : "";
+  emitChatMessage(
+    "system",
+    compiled.accepted.length > 0
+      ? `🛡️ İterasyon gate'leri derlendi: ${compiled.accepted.length} seçim${tail}.`
+      : `🛡️ Bu iş için ek gate gerekmedi (statik kapılar geçerli)${tail}.`,
+  );
+  return true;
+}
+
+/**
+ * Kesintiden dönen (aynı) iterasyonun overlay'ini geri yükler (AD-3: resume YENİDEN DERLEMEZ —
+ * aynı iş için farklı bir kısıt kümesi, yarısı eski kuralla yazılmış bir iterasyon demek olurdu).
+ * Dosya yoksa (çökme derlemeden önceyse) normal derleme koşar. Bozuksa iterasyon sürmez (AD-8).
+ */
+async function restoreOverlayForResume(taskText: string): Promise<boolean> {
+  if (!runtime.state) return false;
+  const root = runtime.state.project_root;
+  let existing: CompiledOverlay | null;
+  try {
+    existing = await readActiveOverlay(root);
+  } catch (err) {
+    log.error("orchestrator", "aktif overlay okunamadı", err);
+    emitError("Aktif gate overlay okunamadı", String(err));
+    emitChatMessage(
+      "system",
+      `⛔ Bu iterasyonun gate kaydı bozuk — devam etmiyorum. Neden: ${String(err).slice(0, 200)}`,
+    );
+    _drainActive = false;
+    return false;
+  }
+  if (!existing) {
+    emitChatMessage(
+      "system",
+      "ℹ️ Kesintiden dönerken bu iterasyonun gate kaydını bulamadım — gate'leri yeniden derliyorum.",
+    );
+    return compileIterationOverlay([taskText], "resume-recompile");
+  }
+  setActiveOverlay(existing);
+  log.info("orchestrator", "overlay resume ile geri yüklendi", {
+    key: existing.iteration_key,
+    selections: existing.selections.length,
+  });
+  return true;
+}
+
 /**
  * Tek bir develop iterasyonunu (Faz 1 → pipeline sonu) çalıştırır. İş-kuyruğu
  * sürücüsü (`startNextPendingTask`) her bekleyen iş için bunu çağırır. Pipeline
@@ -4783,6 +5046,8 @@ async function runDevelopIteration(
       caller: "mycl-orchestrator",
       detail: `kesinti sonrası kaldığı fazdan devam (Faz ${opts.startPhase})`,
     }).catch(() => {});
+    // AYNI iterasyon sürüyor → gate overlay'i yeniden derleme, diskteki kaydı belleğe geri yükle.
+    if (!(await restoreOverlayForResume(text))) return;
     await advanceToNextPhase((opts.startPhase - 1) as PhaseId);
     return;
   }
@@ -4881,6 +5146,8 @@ async function runDevelopIteration(
       "system",
       `🛡️ Güvenlik sistem işi Faz ${opts.startPhase}'ten ele alınıyor (niyet bulgudan türetildi; Faz 1/2 atlandı).`,
     );
+    // Faz 1/2 atlanıyor ama iterasyon YENİ → gate overlay'i burada derle (kod Faz 5'te yazılacak).
+    if (!(await compileIterationOverlay([opts.seedIntent], "seed-iteration"))) return;
     await advanceToNextPhase((opts.startPhase - 1) as PhaseId);
     return;
   }
@@ -4913,6 +5180,11 @@ async function runDevelopIteration(
   await ensurePendingIterationDir(runtime.state.project_root, iterTs).catch((e) =>
     log.warn("devs", "_pending iterasyon dizini açılamadı (non-fatal)", e),
   );
+
+  // Gate overlay: iterasyon damgaları KESİNLEŞTİKTEN sonra, Faz 1 başlamadan önce. Bu tek nokta
+  // hem yeni iterasyon (yukarıdaki reset dalı) hem ilk-ever iterasyon yolunu kapsar — ikisi de
+  // buraya düşer. Derlenemezse iterasyon başlamaz (iş kuyruğa geri konur, neden görünür).
+  if (!(await compileIterationOverlay([text], "develop-iteration"))) return;
 
   const p1 = new Phase1Controller({
     state: runtime.state,
@@ -5119,6 +5391,14 @@ async function tryStartTaskBatch(): Promise<boolean> {
   });
   if (!candidates) {
     batchSkipNotice("bekleyen işler bağımsız/ayrık bulunamadı — işler sıralı işleniyor (güvenli taraf)");
+    return false;
+  }
+  // Gate overlay: bu yol runDevelopIteration'dan GEÇMEZ (kod doğrudan worktree'lerde yazılır) →
+  // derleme burada, işler "running" damgalanmadan ÖNCE. Kümedeki işlerin metinleri TEK overlay'de
+  // birleşir: birleştirilmiş sonuç tek bir kalite akışından (Faz 9-17) geçtiği için kısıt da tektir.
+  // Derlenemezse hiçbir işe dokunulmamış olur; compileIterationOverlay drain'i kapattığı için
+  // çağıran sıralı yola da düşmez (aynı hata iki kez anlatılmaz).
+  if (!(await compileIterationOverlay(candidates.map((c) => c.task.text), "parallel-batch"))) {
     return false;
   }
   const now = Date.now();
@@ -5792,7 +6072,10 @@ async function reconcileAndDrainTasks(): Promise<void> {
       let ran = false;
       try {
         // ⚡ Önce paralel küme dene (bayrak + ≥2 bağımsız iş + git temiz); olmuyorsa sıralı tek iş.
-        ran = (await tryStartTaskBatch()) || (await startNextPendingTask());
+        // `_drainActive` ara kontrolü: küme denemesi SİSTEMİK bir engelle (gate overlay derlenemedi)
+        // drain'i kapattıysa sıralı yol aynı engele girip kullanıcıya aynı hatayı ikinci kez anlatmasın.
+        // Mevcut yollar _drainActive'e dokunmaz → eski davranış birebir korunur.
+        ran = (await tryStartTaskBatch()) || (_drainActive && (await startNextPendingTask()));
       } finally {
         _handlingUserMessage = false;
       }
