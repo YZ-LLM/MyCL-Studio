@@ -217,3 +217,33 @@ describe("computeVerdict · Faz 17 sızma testi atlaması", () => {
     }
   });
 });
+
+// ADLİ ÖZ DENETİM (2026-09-10): hüküm canlı ölçümlerden değil, diskten GERİ OKUNAN denetim
+// satırlarından hesaplanıyor. Mahkeme geçici dizinde kanıtladı: yedi satır değiştirilince
+// (`-fail` → `-complete`) hüküm KISMİ'den GEÇTİ'ye döndü — kapıyı geçmek değil, kapının KAYDINI
+// geçmek yetiyordu. Kayıt kurcalanmışsa buradaki hiçbir hesap anlamlı değil.
+describe("kayıt bütünlüğü — kurcalanmış kayıt asla yeşil olamaz", () => {
+  const yesilKosu = [
+    { ts: 1, phase: 13, event: "phase-13-complete", caller: "mycl-orchestrator" },
+    { ts: 2, phase: 17, event: "phase-17-complete", caller: "mycl-orchestrator" },
+  ] as never[];
+
+  it("kurcalanmışsa en yüksek öncelikli FAIL (gate'ler temiz görünse bile)", () => {
+    const v = computeVerdict(yesilKosu, { deliverableExists: true, auditTampered: true });
+    expect(v.verdict).toBe("FAIL");
+    expect(v.exitCode).toBe(1);
+    expect(v.summary).toContain("bütünlüğü");
+  });
+
+  it("GERİYE UYUM: bayrak verilmezse eski davranış birebir (çapası olmayan projeler kırmızıya dönmez)", () => {
+    const eski = computeVerdict(yesilKosu, { deliverableExists: true });
+    const acikFalse = computeVerdict(yesilKosu, { deliverableExists: true, auditTampered: false });
+    expect(eski.verdict).toBe(acikFalse.verdict);
+    expect(eski.verdict).not.toBe("FAIL");
+  });
+
+  it("bütünlük, boş build kontrolünden ÖNCE gelir (kayda güvenilmiyorsa gerisi konuşulmaz)", () => {
+    const v = computeVerdict(yesilKosu, { deliverableExists: false, auditTampered: true });
+    expect(v.summary).toContain("bütünlüğü");
+  });
+});

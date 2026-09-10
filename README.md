@@ -287,6 +287,13 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   Boş bırakılırsa varsayılan davranış sürer. Bu seçim yalnız plan metnini yazan
   modeli belirler; onaylanan planı uygulayan fazlar her zamanki gibi kendi iş
   türlerinin model katmanını kullanır.
+- **🔒 Çalışma kaydı bütünlüğü** — MyCL'in "tamamlandı / doğrulandı" hükmü, kendi
+  tuttuğu çalışma kaydından üretiliyor. Bu kayıt projenin içinde durduğu için,
+  her iterasyonun başında kaydın o anki hâli **projenin dışına**, MyCL'in kendi
+  ayar klasörüne çapalanır. İş bitiminde kayıt bu çapaya karşı doğrulanır:
+  geçmiş kayıtlar sonradan değiştirilmiş ya da silinmişse koşu **yeşil sayılmaz**
+  ve neden yeşil sayılmadığı açıkça söylenir. Sonradan eklenen satırlar normal
+  akıştır, çapayı bozmaz. Bulguları kalıcı olarak susturan kayıt da aynı korumada.
 - **🛡️ İterasyon gate'leri (gate overlay)** — her iş başlarken MyCL, o işe özel
   riskleri kapalı bir gate sözlüğünden seçip iterasyona özel kilitler derler:
   örneğin "şu dosya bu iterasyonda değiştirilemez", "bağımlılık dosyalarına

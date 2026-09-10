@@ -102,9 +102,28 @@ export function eventsSince(events: AuditEvent[], iterStart: number): AuditEvent
  */
 export function computeVerdict(
   events: AuditEvent[],
-  opts?: { deliverableExists?: boolean },
+  opts?: { deliverableExists?: boolean; auditTampered?: boolean },
 ): HarnessVerdict {
   const completed = events.some((e) => COMPLETE_EVENTS.has(e.event));
+
+  // KAYIT BÜTÜNLÜĞÜ (adli öz denetim, 2026-09-10): bu fonksiyon canlı ölçümlere değil, diskten GERİ
+  // OKUNAN denetim satırlarına bakıyor. Mahkeme geçici bir dizinde kanıtladı: yedi satır
+  // değiştirilince (`-fail` → `-complete`) hüküm KISMİ'den GEÇTİ'ye döndü — kapıyı geçmek değil,
+  // kapının KAYDINI geçmek yetiyordu. Kayıt kurcalanmışsa buradaki hiçbir hesap anlamlı değildir:
+  // en yüksek öncelikli FAIL. (undefined → çağıran doğrulama yapmadı → ESKİ DAVRANIŞ; çapası
+  // olmayan projeler bu yüzden bir gecede kırmızıya dönmez — geriye uyum, KATI #14.)
+  if (opts?.auditTampered === true) {
+    return {
+      verdict: "FAIL",
+      completed,
+      gateFailures: [],
+      securitySkipped: [],
+      realAppSkipped: [],
+      exitCode: 1,
+      summary:
+        "Çalışma kaydının bütünlüğü DOĞRULANAMADI — kayıt üretildikten sonra değiştirilmiş görünüyor. Hüküm bu kayıttan üretildiği için bu koşu yeşil sayılamaz.",
+    };
+  }
 
   // BOŞ-BUILD SAHTE-YEŞİL KORUMASI (2026-06-24, canlı kanıt): pipeline tamamlandı AMA hiçbir deliverable
   // üretilmedi (caller hasDeliverable=false geçti — örn. Faz 5 yanlış atlanıp app HİÇ kurulmadı). Gate'ler

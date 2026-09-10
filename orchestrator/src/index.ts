@@ -261,6 +261,7 @@ import { appendUserDirective, buildDirectiveEvalPrompt, parseDirectiveVerdict } 
 import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
+import { refreshAuditAnchor, verifyAuditAnchor } from "./audit-anchor.js";
 import { copyProjectToAccessible } from "./onboarding/copy-to-accessible.js";
 import {
   decideIntegrationRestart,
@@ -4927,6 +4928,9 @@ async function compileIterationOverlay(taskTexts: string[], reason: string): Pro
     return false;
   }
   setActiveOverlay(overlay);
+  // Yeni iterasyonun kanıt penceresi burada açılıyor → defterin O ANKİ hâli çapalanır. Bundan
+  // sonraki satırlar öneği değiştirmez; geçmişe dokunan her değişiklik pipeline sonunda yakalanır.
+  await refreshAuditAnchor(root);
   log.info("orchestrator", "gate overlay derlendi", {
     reason,
     key: iterationKey,
@@ -10291,7 +10295,19 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
       // BOŞ-BUILD KORUMASI (2026-06-24): deliverable üretilmediyse (Faz 5 yanlış atlandı vb.) hüküm FAIL —
       // gate'ler yoklukta sahte-geçip "yeşil" demesin.
       const deliverableExists = await hasDeliverable(state.project_root);
-      verdict = computeVerdict(eventsSince(allEvents, state.iteration_started_at ?? 0), { deliverableExists });
+      // KAYIT BÜTÜNLÜĞÜ (2026-09-10): hüküm bu kayıttan üretiliyor → önce kaydın kendisi doğrulanır.
+      // "çapa yok" KURCALAMA DEĞİLDİR (bu özellikten önce başlamış projeler) → eski davranış sürer.
+      const anchor = await verifyAuditAnchor(state.project_root);
+      if (anchor.status === "tampered") {
+        emitChatMessage(
+          "system",
+          `⛔ Çalışma kaydının bütünlüğü doğrulanamadı (${anchor.file}): ${anchor.reason}. Bu koşu yeşil sayılamaz.`,
+        );
+      }
+      verdict = computeVerdict(eventsSince(allEvents, state.iteration_started_at ?? 0), {
+        deliverableExists,
+        ...(anchor.status === "tampered" ? { auditTampered: true } : {}),
+      });
     } catch (err) {
       // Pipeline-sonu hüküm (sessiz-fallback denetimi): audit okunamazsa verdict null kalır → özet hükümsüz.
       // log.warn→log.error + GÖRÜNÜR (kullanıcı gate sonuçlarını elle kontrol etsin).
