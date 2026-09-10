@@ -52,19 +52,22 @@ interface LayerDef {
 const LAYER_INVENTORY: LayerDef[] = [
   // ── Faz 8: güven-sağlamlaştırma ─────────────────────────────────────────────
   {
-    // FINDING-ONLY: yalnız `tdd-tests-weak` (mutasyon YAKALANMADI = testler zayıf). Temiz-güçlü koşuda İZ YOK →
-    // rapor bu katmanı yalnız bir zayıflık BULUNCA gösterir (temiz koşuda "koşmadı" görünür; kabul edilen sınır —
-    // Faz-8 gate `lastEvent` tdd-green olmalı, oraya tanı-event'i eklemek YEŞİL koşuyu kırıyordu → eklenmedi).
-    // `tdd-unverified` KASITLI hariç — mutasyon probu DEĞİL, ayrı Faz-8 sinyali (phase-8.ts:1011/1035/1055).
+    // 2026-09-10: ARTIK FINDING-ONLY DEĞİL. Eski sınır ("temiz koşuda iz yok → rapor 'koşmadı' der")
+    // kabul edilebilir sanılıyordu; adli denetim bunun 3 aylık bir körlüğü örttüğünü gösterdi —
+    // mekanizma gerçekten ÖLÜYKEN de rapor aynı "koşmadı"yı yazıyordu, yani sinyal ayırt edici değildi.
+    // Kısıtın kökü Faz 8 kapısının "son OLAY" kontrolüydü; kapı "son TEST SONUCU"na çevrilince tanı
+    // olayı yazmak serbest kaldı. `tdd-unverified` KASITLI hariç — ayrı bir Faz 8 sinyali.
     id: "mutation-probe", name: "Mutasyon/test geçerliği probu", phase: 8, kind: "llm",
-    events: ["tdd-tests-weak"], findingEvents: ["tdd-tests-weak"],
+    events: ["tdd-tests-weak", "mutation-probe-caught", "mutation-probe-not-run"],
+    findingEvents: ["tdd-tests-weak"],
     purpose: "yeşil testler gerçekten kırılmayı yakalıyor mu (mutasyon hayatta kalırsa testler zayıf)",
   },
   {
-    // FINDING-ONLY: yalnız `adversarial-test-fail` (bir AC ihlali bulundu). Temiz koşuda İZ YOK (aynı
-    // gate-lastEvent gerekçesi) → rapor yalnız bir kırılma BULUNCA gösterir.
+    // 2026-09-10: kardeş katmanla aynı düzeltme — koştuğunda da iz bırakıyor, böylece "temiz koştu"
+    // ile "hiç koşmadı" raporda ayrışıyor (bu ikisi 3 ay boyunca aynı görünüyordu).
     id: "adversarial-test", name: "Bağımsız düşman testi", phase: 8, kind: "llm",
-    events: ["adversarial-test-fail"], findingEvents: ["adversarial-test-fail"],
+    events: ["adversarial-test-fail", "adversarial-test-ran", "adversarial-test-not-run"],
+    findingEvents: ["adversarial-test-fail"],
     purpose: "kodu kırmaya çalışan ayrı ajan (sahte-yeşil panzehiri)",
   },
   {

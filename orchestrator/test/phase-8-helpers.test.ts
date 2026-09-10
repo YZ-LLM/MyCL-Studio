@@ -395,3 +395,43 @@ describe("decideMutationProbe (sahte yeşil panzehirinin sessizce ölmesini enge
     if (g.run) expect(g.candidates).toEqual(["src/a.ts"]);
   });
 });
+
+// ADLİ DENETİM DÜZELTMESİ (2026-09-10) — Faz 8 kapısı "son OLAY" yerine "son TEST SONUCU"na bakıyor.
+// Eski hâli güven katmanını sakat bırakıyordu: mutasyon probu ya da düşman testi anchor'dan sonra bir
+// tanı olayı yazsaydı kapı yanlışlıkla düşerdi, bu yüzden ikisi de bilerek hiç iz bırakmıyordu — ve
+// "temiz koştu" ile "hiç koşmadı" ayırt edilemez hâle geliyordu.
+describe("Faz 8 kapısı: son test sonucu (tanı olayları kapıyı düşürmemeli)", () => {
+  const RESULT_EVENTS = new Set(["tdd-green", "tdd-red", "tdd-unverified"]);
+  /** phase-8.ts'teki hesabın birebir ikizi — sözleşmeyi kilitler. */
+  const sonSonuc = (events: string[]): string | null => {
+    const r = events.filter((e) => RESULT_EVENTS.has(e));
+    return r.length > 0 ? r[r.length - 1]! : null;
+  };
+
+  it("anchor yeşilinden SONRA gelen tanı olayı sonucu değiştirmez", () => {
+    expect(sonSonuc(["tdd-green", "mutation-probe-caught"])).toBe("tdd-green");
+    expect(sonSonuc(["tdd-green", "mutation-probe-not-run", "adversarial-test-ran"])).toBe("tdd-green");
+  });
+
+  it("KRİTİK: test paketi KOŞAMADIYSA ajanın önceki yeşil beyanı sonuç sayılmaz", () => {
+    // Bu tam da 'iddia, ölçümün yerine geçemez' kuralı. tdd-unverified sonuç ailesinde OLMASAYDI
+    // buradaki son sonuç 'tdd-green' çıkardı ve ölçülemeyen bir koşu yeşil geçerdi.
+    expect(sonSonuc(["tdd-green", "tdd-unverified"])).toBe("tdd-unverified");
+    expect(sonSonuc(["tdd-green", "tdd-unverified", "mutation-probe-not-run"])).toBe("tdd-unverified");
+  });
+
+  it("kırmızı sonuç tanı olaylarının arkasında kaybolmaz", () => {
+    expect(sonSonuc(["tdd-green", "tdd-red", "adversarial-test-ran"])).toBe("tdd-red");
+  });
+
+  it("hiç test sonucu yoksa null (eski davranışla aynı)", () => {
+    expect(sonSonuc(["code-edit", "tdd-test-write"])).toBeNull();
+  });
+
+  it("GEÇMİŞ DAVRANIŞ KORUNUR: tanı olayı yokken sonuç eskisiyle birebir aynı", () => {
+    // Canlı kayıttaki gerçek sıra (cave iterasyon 7): anchor yeşili son olaydı.
+    const canli = ["tdd-test-write", "code-edit", "tdd-tech-debt-clean", "tdd-green", "tdd-green", "tdd-green"];
+    expect(sonSonuc(canli)).toBe("tdd-green");
+    expect(sonSonuc(canli)).toBe(canli[canli.length - 1]);
+  });
+});

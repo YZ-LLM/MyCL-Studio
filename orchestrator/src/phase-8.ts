@@ -676,7 +676,19 @@ export class Phase8Controller {
     const p9 = p9All.filter((e) => e.ts >= iterStartTs);
     const greens = p9.filter((e) => e.event === "tdd-green").length;
     const reds = p9.filter((e) => e.event === "tdd-red").length;
-    const lastEvent = p9.length > 0 ? p9[p9.length - 1].event : null;
+    // ADLİ DENETİM DÜZELTMESİ (2026-09-10): burası "Faz 8'in SON OLAYI" idi. Gerçek niyet ise
+    // "SON TEST SONUCU". Fark, güven katmanını sakat bırakıyordu: mutasyon probu ya da düşman testi
+    // anchor'dan sonra bir TANI olayı yazsaydı `lastEvent` o olay olur ve kapı yanlışlıkla düşerdi —
+    // bu yüzden ikisi de BİLEREK hiç iz bırakmıyordu (layer-cost-report:54-58 bu sınırı belgeliyor).
+    // Sonuç: "temiz koştu" ile "hiç koşmadı" ayırt edilemiyordu ve mekanizmanın 3 ay ölü kalması
+    // hiçbir yerden görünmedi. Kırılganlık probda değil TÜKETİCİDEYDİ; niyet burada kesinleşiyor.
+    //
+    // `tdd-unverified` BİLEREK sonuç ailesinde: test paketi KOŞAMADIĞINDA anchor onu yazar ve o an
+    // "son sonuç" odur — aksi halde ajanın daha ÖNCE beyan ettiği yeşil son sonuç sayılır ve
+    // ölçülemeyen bir koşu yeşil geçerdi (iddia, ölçümün yerine geçemez).
+    const RESULT_EVENTS = new Set(["tdd-green", "tdd-red", "tdd-unverified"]);
+    const results = p9.filter((e) => RESULT_EVENTS.has(e.event));
+    const lastEvent = results.length > 0 ? results[results.length - 1].event : null;
 
     // Tech debt counting: her dosya için en son scan event'i kazanır.
     // (tdd-tech-debt-detected veya tdd-tech-debt-clean per path).
@@ -1234,6 +1246,7 @@ export class Phase8Controller {
       // bunu hiçbir yerden göremedi. Fonksiyonun geri kalanı her atlama yolunda görünür mesaj
       // basıyor; eksik olan tek yer burasıydı (KATI #4). Artık "koşmama" kararı TİPTE gerekçe
       // taşıyor → sessizce yutulamaz.
+      await this.recordProbeTrace("mutation-probe-not-run", gate.reason);
       emitChatMessage(
         "system",
         `ℹ️ Test geçerliliği probu KOŞMADI (${gate.reason}) — testlerin bozulan davranışı GERÇEKTEN yakaladığı bu koşuda doğrulanmadı.`,
@@ -1263,6 +1276,10 @@ export class Phase8Controller {
           "gerçekten sınamıyor olabilir (sahte yeşil riski). Faz 9 risk incelemesi bunu ele alır.",
       );
     } else if (r.checked && r.caught) {
+      // POZİTİF İZ (2026-09-10): eskiden temiz koşu hiç kayıt bırakmıyordu → "koştu ve temiz" ile
+      // "hiç koşmadı" ayırt edilemiyordu. Katman raporu da bu yüzden ölü katmanı "koşmadı" diye
+      // gösterip 3 ay boyunca kimseyi uyandırmadı.
+      await this.recordProbeTrace("mutation-probe-caught", `${r.file}: mutasyon yakalandi`);
       emitChatMessage("system", `✅ Test geçerliliği: testler bozulan davranışı yakaladı (${r.file}) — koruma gerçek.`);
     } else {
       // !checked: prob KOŞAMADI (mutate-edilebilir dosya yok / okunamadı / geçerli mutasyon üretilemedi / prob hatası).
@@ -1270,6 +1287,7 @@ export class Phase8Controller {
       // NOT: audit event YAZILMAZ — bu blok tdd-green SONRASI koşuyor (runIntegrityAnchor:1124); phase-8 audit'ine
       // tanı-event'i eklemek gate'in `lastEvent==="tdd-green"` kontrolünü kırar (layer-cost-report:55-58 aynı kararı
       // belgeliyor). Görünürlük yalnız chat mesajıyla (kullanıcı görür; gate akışı temiz kalır).
+      await this.recordProbeTrace("mutation-probe-not-run", r.note);
       emitChatMessage(
         "system",
         `ℹ️ Test geçerliliği probu KOŞMADI (${r.note}) — testlerin bozulan davranışı GERÇEKTEN yakaladığı bu koşuda doğrulanmadı.`,
@@ -1286,6 +1304,21 @@ export class Phase8Controller {
    * sessizce dönmesi bu mekanizmayı da öldürüyordu — oysa düşman testinin değişen dosya listesiyle
    * hiçbir ilgisi yok. Adli denetim, ikisinin de aylardır hiç koşmadığını kanıtladı.
    */
+  /**
+   * Güven katmanının denetim izi. AD: `-fail`/`-skipped` sonekiyle BİTMEZ — o sonekler hüküm
+   * makinesinde anlam taşıyor (gate başarısızlığı / güvenlik atlaması) ve buradaki tanı olayları
+   * hükmü etkilememeli. Kapı artık "son TEST SONUCU"na baktığı için bu olaylar onu düşürmez.
+   */
+  private async recordProbeTrace(event: string, detail: string): Promise<void> {
+    await appendAudit(this.state.project_root, {
+      ts: Date.now(),
+      phase: 8,
+      event,
+      caller: "mycl-orchestrator",
+      detail: detail.slice(0, 200),
+    }).catch((e: unknown) => log.warn("phase-8", "guven katmani izi yazilamadi", e));
+  }
+
   private async runIndependentAdversarialTest(): Promise<void> {
     if (this.config.features.adversarial_tester !== false) {
       // Sonuç TÜKETİLİR (sessiz-fallback denetimi): eskiden dönüş atılıyor, yalnız fırlatılan hata log'a düşüyordu →
@@ -1295,6 +1328,10 @@ export class Phase8Controller {
         log.warn("phase-8", "adversarial tester failed", e);
         return { ran: false, note: `hata: ${String(e).slice(0, 120)}` };
       });
+      await this.recordProbeTrace(
+        adv.ran ? "adversarial-test-ran" : "adversarial-test-not-run",
+        adv.ran ? "bagimsiz dusman testi kostu" : adv.note,
+      );
       if (!adv.ran) {
         // audit event YAZILMAZ (yukarıdaki !checked ile aynı gerekçe: tdd-green sonrası phase-8 tanı-event'i gate'i kırar).
         // Görünürlük chat mesajıyla (KATI#4). API-modda adversarial CLI gerektirir → ran:false yaygın; sessiz kalmasın.
@@ -1304,6 +1341,7 @@ export class Phase8Controller {
         );
       }
     } else {
+      await this.recordProbeTrace("adversarial-test-not-run", "kullanici bayragi kapali (hizli mod)");
       emitChatMessage("system", "⏭️ Düşman testi kapalı (hızlı mod) — atlandı (anchor + mutasyon-probu yine koşuyor).");
     }
   }
