@@ -166,3 +166,44 @@ describe("inspectBashCommand — write-escape (proje dışı hassas yazma, YZLLM
     expect(inspectBashCommand("echo '{}' > package.json").blocked).toBe(false);
   });
 });
+
+// ADLİ DENETİM DÜZELTMESİ (2026-09-10): MyCL'in hükmü `.mycl/audit.log`'dan geri okunuyor. Yazma
+// araçları (Write/Edit) `.mycl`'i zaten reddediyordu ama API arka ucunda `Bash` hiçbir yol
+// denetiminden geçmiyordu — mahkeme geçici dizinde kanıtladı: 7 satır değişince hüküm KISMİ'den
+// GEÇTİ'ye döndü. Bu kurallar açık girişimi kaynağında keser.
+//
+// DÜRÜST SINIR: düzenli ifade listesi güvenlik sınırı DEĞİL; `cd .mycl && ...` gibi dolaylı yollar
+// aşabilir. Gerçek sınır işletim sistemi hapsi + kayıt bütünlüğü doğrulaması. Bu bir katman.
+describe("kanıt defteri (.mycl / .git) yazma girişimleri", () => {
+  const engellenir = [
+    'echo "{}" >> .mycl/audit.log',
+    "printf x > .mycl/audit.log",
+    "cat sahte.jsonl > .mycl/audit.log",
+    "sed -i '' 's/lint-fail/lint-done/' .mycl/audit.log",
+    "tee .mycl/audit.log < yeni.jsonl",
+    "truncate -s 0 .mycl/audit.log",
+    "cp /tmp/sahte.log .mycl/audit.log",
+    "mv /tmp/sahte.log .mycl/accepted-findings.jsonl",
+    "echo x >> .git/config",
+  ];
+  for (const cmd of engellenir) {
+    it(`ENGEL: ${cmd.slice(0, 46)}`, () => {
+      expect(inspectBashCommand(cmd).blocked).toBe(true);
+    });
+  }
+
+  const serbest = [
+    "cat .mycl/audit.log",                    // OKUMA serbest
+    "grep phase-8 .mycl/audit.log",           // okuma
+    "wc -l .mycl/audit.log",                  // okuma
+    "npm test",                               // alakasız
+    "echo x > build/output.txt",              // başka klasöre yazma
+    "sed -i '' 's/a/b/' src/app.js",          // proje kaynağını düzenleme (meşru)
+    "cp src/a.js src/b.js",                   // proje içi kopya
+  ];
+  for (const cmd of serbest) {
+    it(`SERBEST: ${cmd.slice(0, 46)}`, () => {
+      expect(inspectBashCommand(cmd).blocked).toBe(false);
+    });
+  }
+});

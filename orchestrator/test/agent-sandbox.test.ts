@@ -293,18 +293,30 @@ describe("agent-sandbox · ultracode merge + policy modları", () => {
     expect((e.settings.sandbox as { allowUnsandboxedCommands: boolean }).allowUnsandboxedCommands).toBe(false);
   });
 
-  it("off → sandbox YOK; ultracode korunur / boş", () => {
+  it("off → sandbox YOK; ultracode korunur", () => {
     const off = buildAgentSandboxSettings({
       projectRoot: "/tmp/x", ultracode: true, policy: "off", platform: "darwin", home: HOME,
     });
     expect(off.denyCount).toBe(0);
     expect("sandbox" in off.settings).toBe(false);
     expect(off.settings.ultracode).toBe(true);
+  });
 
-    const offNoUltra = buildAgentSandboxSettings({
+  // ADLİ DENETİM DÜZELTMESİ (2026-09-10): "off" eskiden HİÇBİR koruma bırakmadan dönüyordu — kum
+  // havuzunu kapatmak, MyCL'in kendi KANIT DEFTERİNİ de ajanın yazmasına açıyordu. Bunlar iki ayrı
+  // karar: kullanıcı işletim sistemi hapsini kapatabilir, ama "hükmün üretildiği kaydı da yaz"
+  // demiş olmaz. Hüküm .mycl/audit.log'dan geri okunuyor; oraya yazabilen kapıyı geçmeden kapının
+  // KAYDINI geçebilir (mahkeme geçici dizinde kanıtladı).
+  it("off olsa BİLE kanıt defteri (.mycl) ve .git yazmaya kapalı kalır", () => {
+    const off = buildAgentSandboxSettings({
       projectRoot: "/tmp/x", ultracode: false, policy: "off", platform: "darwin", home: HOME,
     });
-    expect(offNoUltra.settings).toEqual({});
+    const deny = (off.settings.permissions as { deny: string[] } | undefined)?.deny ?? [];
+    expect(deny).toContain("Edit(/tmp/x/.mycl/**)");
+    expect(deny).toContain("Edit(/tmp/x/.git/**)");
+    // Kum havuzu YİNE yok — yalnız kanıt koruması eklendi (politikanın anlamı korunuyor).
+    expect("sandbox" in off.settings).toBe(false);
+    expect(off.denyCount).toBe(0);
   });
 });
 

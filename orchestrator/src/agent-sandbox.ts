@@ -292,7 +292,23 @@ export function buildAgentSandboxSettings(params: {
   const base: Record<string, unknown> = ultracode
     ? { ultracode: true, ...hooksBlock }
     : { ...hooksBlock };
-  if (policy === "off") return { settings: base, denyCount: 0 };
+  // ADLİ DENETİM DÜZELTMESİ (2026-09-10): eskiden burada HİÇBİR koruma kalmadan dönülüyordu —
+  // kum havuzunu kapatmak, MyCL'in kendi KANIT DEFTERİNİ (.mycl) de ajanın yazmasına açıyordu.
+  // Bunlar iki ayrı karar: kullanıcı "işletim sistemi hapsini kapat" diyebilir, ama "hüküm hangi
+  // kayıttan üretiliyorsa onu yazmaya da izin ver" demiş olmaz. Hüküm `.mycl/audit.log`'dan geri
+  // okunuyor; oraya yazabilen, kapıyı geçmeden kapının KAYDINI geçebilir (mahkeme bunu geçici
+  // dizinde kanıtladı: 7 satır değişince hüküm KISMİ'den GEÇTİ'ye döndü).
+  // Bu yüzden `.git` + `.mycl` yazma reddi politikadan BAĞIMSIZ, her zaman yazılıyor.
+  if (policy === "off") {
+    const evidenceDirs = [pathPosix.join(projectRoot, ".git"), pathPosix.join(projectRoot, ".mycl")];
+    return {
+      settings: {
+        ...base,
+        permissions: { deny: evidenceDirs.map((d) => `Edit(${d}/**)`) },
+      },
+      denyCount: 0,
+    };
+  }
 
   const failIfUnavailable = policy === "enforce";
   // Yalnız istendiğinde yazılır → istenmeyen rollerde `network` anahtarı HİÇ oluşmaz (argv birebir eski).

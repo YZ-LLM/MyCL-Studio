@@ -97,7 +97,42 @@ const DENY_RULES: DenyRule[] = [
  * dolaşabilir. Birinci savunma hattı = template + güvenli env (safe-env.ts);
  * bu liste defense-in-depth.
  */
+/**
+ * KANIT DEFTERİ YAZMA DESENLERİ (adli denetim, 2026-09-10). MyCL'in hükmü `.mycl/audit.log`'dan
+ * geri okunuyor; oraya yazabilen, kapıyı geçmeden kapının KAYDINI geçebilir (mahkeme geçici dizinde
+ * kanıtladı: 7 satır değişince hüküm KISMİ'den GEÇTİ'ye döndü). Yazma araçları (`Write`/`Edit`)
+ * `.mycl`'i zaten reddediyor; API arka ucunda `Bash` hiçbir yol denetiminden geçmiyordu — açık
+ * buradaydı.
+ *
+ * DÜRÜST SINIR: bu bir düzenli ifade listesi, güvenlik sınırı DEĞİL (dosyanın kendi felsefesi de
+ * bunu söylüyor). `cd .mycl && ...`, değişken dolaylaması ya da base64 ile etrafından dolaşılabilir.
+ * Gerçek sınır işletim sistemi hapsi (abonelik yolunda var) ve kayıt bütünlüğü doğrulaması. Bu
+ * kurallar açık girişimi kaynağında keser ve niyeti kayda düşürür — savunma katmanlarından biri.
+ */
+const EVIDENCE_DIR_RE = /\.(mycl|git)\b/i;
+const EVIDENCE_WRITE_RULES: DenyRule[] = [
+  {
+    // yönlendirme: `echo x > .mycl/audit.log`, `... >> .mycl/...`
+    re: /(^|[\s;&|])[^|;&]*>{1,2}\s*[^\s;&|]*\.(mycl|git)\//i,
+    reason: "evidence log write (redirect into .mycl/.git) not allowed",
+  },
+  {
+    // yerinde düzenleme / kopyalama / taşıma / kesme araçları hedefte kanıt klasörü ile
+    re: /\b(tee|sed\s+-i|perl\s+-i|truncate|shred|dd\b[^\n]*\bof=)\b[^\n]*\.(mycl|git)\//i,
+    reason: "evidence log rewrite (in-place edit of .mycl/.git) not allowed",
+  },
+  {
+    re: /\b(cp|mv|rsync|install)\b[^\n]*\s[^\s;&|]*\.(mycl|git)\/[^\s;&|]*\s*($|[;&|])/i,
+    reason: "evidence log overwrite (copy/move into .mycl/.git) not allowed",
+  },
+];
+
 export function inspectBashCommand(cmd: string): BashGuardResult {
+  if (EVIDENCE_DIR_RE.test(cmd)) {
+    for (const rule of EVIDENCE_WRITE_RULES) {
+      if (rule.re.test(cmd)) return { blocked: true, reason: rule.reason };
+    }
+  }
   for (const rule of DENY_RULES) {
     if (rule.re.test(cmd)) {
       return { blocked: true, reason: rule.reason };
