@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   countAcceptanceCriteria,
+  decideMutationProbe,
   hasReproRedThenGreen,
   isBuildConfigFile,
   isCosmeticFile,
@@ -339,5 +340,58 @@ describe("filesInUnifiedDiff — diff dosya başlıkları parse (MAHKEME FIX A3)
   });
   it("boş diff → boş küme", () => {
     expect(filesInUnifiedDiff("").size).toBe(0);
+  });
+});
+
+// ADLİ DENETİM BULGUSU (2026-09-10): sahte yeşil panzehiri (mutasyon probu) ve ondan bağımsız
+// düşman test yazarı AYLARDIR hiç çalışmıyordu. Kök neden: prob, başka bir kararla (kapsam
+// daraltmanın kapatılması) artık hiç doldurulmayan `changed_scope` alanına bağımlıydı ve alan
+// boşsa ÇIPLAK bir `return;` ile dönüyordu. Ne kullanıcıya mesaj, ne denetim kaydı — 13 MB'lık
+// canlı geçmişte probun kendi mesajı SIFIR kez geçiyor. Düşman testi de aynı fonksiyonun içinde,
+// o dönüşün arkasında kaldığı için birlikte ölmüştü.
+//
+// Kararın "koşmuyorum" dalı artık tipte ZORUNLU gerekçe taşıyor; sessiz atlama yazmak için tipi
+// bilerek delmek gerekir.
+describe("decideMutationProbe (sahte yeşil panzehirinin sessizce ölmesini engelleyen karar)", () => {
+  it("durumdaki kapsam doluysa onunla koşar", () => {
+    const g = decideMutationProbe(["src/a.ts", "src/b.ts"], null);
+    expect(g.run).toBe(true);
+    if (g.run) expect(g.candidates).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("durum boş ama kapsam hesaplandıysa onunla koşar (asıl düzeltme: bağımlılık kırıldı)", () => {
+    const g = decideMutationProbe([], ["src/c.ts"]);
+    expect(g.run).toBe(true);
+    if (g.run) expect(g.candidates).toEqual(["src/c.ts"]);
+  });
+
+  it("KOŞMAMA kararı HER ZAMAN gerekçe taşır — sessiz atlama tipçe imkânsız", () => {
+    const hesaplanamadi = decideMutationProbe([], null);
+    const degisiklikYok = decideMutationProbe([], []);
+    for (const g of [hesaplanamadi, degisiklikYok]) {
+      expect(g.run).toBe(false);
+      if (!g.run) expect(g.reason.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("iki farklı 'koşmadı' nedeni AYRI anlatılır (hesaplanamadı ≠ değişiklik yok)", () => {
+    const a = decideMutationProbe([], null);
+    const b = decideMutationProbe([], []);
+    expect(a.run).toBe(false);
+    expect(b.run).toBe(false);
+    if (!a.run && !b.run) expect(a.reason).not.toBe(b.reason);
+  });
+
+  it("CANLI DURUM: cave koşusunda changed_scope hep boştu → eski kod sessizce dönüyordu", () => {
+    // Bu, 94 iterasyon boyunca gerçekleşen durumun birebir kendisi. Artık gerekçeli duruyor.
+    const g = decideMutationProbe([], []);
+    expect(g.run).toBe(false);
+  });
+
+  it("girdi dizileri KOPYALANIR (çağıran listeyi sonradan değiştirirse karar bozulmasın)", () => {
+    const src = ["src/a.ts"];
+    const g = decideMutationProbe(src, null);
+    src.push("src/sonradan.ts");
+    if (g.run) expect(g.candidates).toEqual(["src/a.ts"]);
   });
 });

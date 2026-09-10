@@ -52,6 +52,7 @@ import {
   type TechDebtFinding,
 } from "./tech-debt-scanner.js";
 import { TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js";
+import { computeChangedScope } from "./fix/scope.js";
 import type { PhaseDeps } from "./phase-deps.js";
 import type { PhaseSpec, State } from "./types.js";
 
@@ -223,6 +224,41 @@ const TEST_CMD_PATTERNS: RegExp[] = [
   /\bbun\s+test\b/,
   /\bdeno\s+test\b/,
 ];
+
+/**
+ * Mutasyon probu koşsun mu — ve koşmayacaksa NEDEN? (SAF)
+ *
+ * NEDEN AYRI BİR TİP: bu kararın "koşmuyorum" dalı 2026-06-22'den 2026-09-10'a kadar kodda çıplak
+ * bir `return;` idi. `changed_scope` başka bir kararla (SCOPED_GATES_DISABLED) doldurulmaz olunca
+ * prob HER koşuda sessizce atlandı; sahte yeşil panzehiri aylarca ölü kaldı ve hiçbir yerde iz
+ * bırakmadı. Adli denetim bunu ancak "olması gereken mesaj 13 MB geçmişte sıfır kez geçiyor"
+ * diyerek yakalayabildi.
+ *
+ * Çözüm kaynağında: "koşmama" artık ZORUNLU bir gerekçe taşıyor. Çağıran gerekçeyi görmezden
+ * gelemez — sessiz atlama yazmak için tipi bilerek delmek gerekir (KATI #4 + KATI #6).
+ */
+export type ProbeGate =
+  | { run: true; candidates: string[] }
+  | { run: false; reason: string };
+
+/**
+ * SAF: durumdaki kapsam boşsa hesaplanan kapsama düşer; ikisi de boşsa GEREKÇELİ olarak koşmaz.
+ * `computed === null` = kapsam hesaplanamadı (hata/git yok); boş dizi = hesaplandı ama değişiklik yok.
+ * İki durum kullanıcıya FARKLI şey anlatır, o yüzden gerekçeleri de farklı.
+ */
+export function decideMutationProbe(
+  fromState: readonly string[],
+  computed: readonly string[] | null,
+): ProbeGate {
+  if (fromState.length > 0) return { run: true, candidates: [...fromState] };
+  if (computed === null) {
+    return { run: false, reason: "değişen dosya kapsamı hesaplanamadı" };
+  }
+  if (computed.length === 0) {
+    return { run: false, reason: "bu iterasyonda değişen kaynak dosya belirlenemedi" };
+  }
+  return { run: true, candidates: [...computed] };
+}
 
 export function isTestCommand(cmd: string): boolean {
   return TEST_CMD_PATTERNS.some((re) => re.test(cmd));
@@ -1156,7 +1192,34 @@ export class Phase8Controller {
     // değişen bir dosyayı küçük boz, test KIRMIZIYA dönmeli; dönmüyorsa testler sahte-yeşil. Görünür uyarı + audit.
     // Mutasyon prob'u YALNIZ gerçek-yeşil suite'te anlamlı (mutasyon yeşili kırmızıya döndürmeli). Suite mutlak
     // kırmızıyken (regresyon-yok ile pass=true olsa bile) mutasyon→hâlâ-kırmızı hiçbir şey söylemez → atla.
-    if (res.code === 0) await this.runMutationProbe(cmd);
+    // ADLİ DENETİM DÜZELTMESİ (2026-09-10): bu iki mekanizma BİRBİRİNDEN BAĞIMSIZ ama tek bir
+    // fonksiyonun içindeydi — mutasyon probunun sessiz erken dönüşü düşman testini de öldürüyordu.
+    // Artık ayrı çağrılıyorlar: birinin koşamaması ötekini susturmuyor.
+    if (res.code === 0) {
+      await this.runMutationProbe(cmd);
+      await this.runIndependentAdversarialTest();
+    }
+  }
+
+  /**
+   * Mutasyon probu için aday dosyaları toplar. `changed_scope` ARTIK HİÇ DOLDURULMUYOR (index.ts'teki
+   * `SCOPED_GATES_DISABLED` kararı onu koşulsuz temizliyor) — prob bu alana bağımlı olduğu için
+   * sessizce ölmüştü. Bağımlılık kaldırıldı: alan doluysa kullanılır, boşsa aday listesi BURADA
+   * hesaplanır (git diff; git yoksa denetim kaydındaki yazma olaylarından — `computeChangedScope`
+   * ikisini de yapıyor, yalnız çağıranı kalmamıştı).
+   */
+  private async mutationCandidates(): Promise<ProbeGate> {
+    const fromState = this.state.changed_scope?.files ?? [];
+    if (fromState.length > 0) return decideMutationProbe(fromState, null);
+    const sc = await computeChangedScope(
+      this.state.project_root,
+      this.state.fix_checkpoint_ref,
+      this.state.iteration_started_at,
+    ).catch((e: unknown) => {
+      log.warn("phase-8", "mutasyon adayları hesaplanamadı", e);
+      return null;
+    });
+    return decideMutationProbe(fromState, sc?.files ?? null);
   }
 
   /**
@@ -1164,8 +1227,20 @@ export class Phase8Controller {
    * Yakalayamazsa testler zayıf → `tdd-tests-weak` audit + görünür uyarı (Faz 9 düşman-gözü de ele alır). Hata-güvenli.
    */
   private async runMutationProbe(testCmd: string): Promise<void> {
-    const changed = this.state.changed_scope?.files ?? [];
-    if (changed.length === 0) return; // değişen dosya bilinmiyor → prob atla
+    const gate = await this.mutationCandidates();
+    if (!gate.run) {
+      // ESKİDEN BURASI SESSİZCE DÖNÜYORDU (return;) — ve `changed_scope` hiç dolmadığı için HER
+      // koşuda buraya düşülüyordu: sahte yeşil panzehiri aylarca hiç çalışmadı, kullanıcı da
+      // bunu hiçbir yerden göremedi. Fonksiyonun geri kalanı her atlama yolunda görünür mesaj
+      // basıyor; eksik olan tek yer burasıydı (KATI #4). Artık "koşmama" kararı TİPTE gerekçe
+      // taşıyor → sessizce yutulamaz.
+      emitChatMessage(
+        "system",
+        `ℹ️ Test geçerliliği probu KOŞMADI (${gate.reason}) — testlerin bozulan davranışı GERÇEKTEN yakaladığı bu koşuda doğrulanmadı.`,
+      );
+      return;
+    }
+    const changed = gate.candidates;
     emitChatMessage("system", "🧬 Test geçerliliği probu — kodu küçük bozup testlerin gerçekten yakaladığını doğruluyorum…");
     const r = await probeTestValidity({
       config: this.config,
@@ -1200,9 +1275,18 @@ export class Phase8Controller {
         `ℹ️ Test geçerliliği probu KOŞMADI (${r.note}) — testlerin bozulan davranışı GERÇEKTEN yakaladığı bu koşuda doğrulanmadı.`,
       );
     }
-    // Bağımsız düşman-test yazarı (Özellik #2): kodu yazandan AYRI ajan kodu kırmaya çalışır (taraflı-test riski).
-    // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): bayrakla kapatılabilir (default AÇIK). Kapalı = "hızlı mod" — 2. tam
-    // ajan koşmaz (kuyruğu kısaltır; güven-sağlamlaştırma güvencesi düşer). Anchor + mutation-probe yine korunur.
+  }
+
+  /**
+   * Bağımsız düşman-test yazarı (Özellik #2): kodu yazandan AYRI ajan kodu kırmaya çalışır (taraflı-test riski).
+   * ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): bayrakla kapatılabilir (default AÇIK). Kapalı = "hızlı mod" — 2. tam
+   * ajan koşmaz (kuyruğu kısaltır; güven-sağlamlaştırma güvencesi düşer). Anchor + mutation-probe yine korunur.
+   *
+   * 2026-09-10: mutasyon probunun İÇİNDEN çıkarıldı. Orada olduğu için, probun aday dosya bulamayıp
+   * sessizce dönmesi bu mekanizmayı da öldürüyordu — oysa düşman testinin değişen dosya listesiyle
+   * hiçbir ilgisi yok. Adli denetim, ikisinin de aylardır hiç koşmadığını kanıtladı.
+   */
+  private async runIndependentAdversarialTest(): Promise<void> {
     if (this.config.features.adversarial_tester !== false) {
       // Sonuç TÜKETİLİR (sessiz-fallback denetimi): eskiden dönüş atılıyor, yalnız fırlatılan hata log'a düşüyordu →
       // ajan koşup verdict üretemezse (ran:false) "başlıyor" mesajından sonra SESSİZLİK → güven katmanı sessizce çöker,
