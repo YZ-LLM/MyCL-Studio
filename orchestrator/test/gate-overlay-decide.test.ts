@@ -172,6 +172,23 @@ describe("isWriteTool", () => {
     expect(isWriteTool("Read")).toBe(false);
     expect(isWriteTool("Bash")).toBe(false);
   });
+
+  /**
+   * ADLİ DENETİM BULGUSU (2026-09-10): codegen arka ucu, Claude Code'un bildirdiği HER izin
+   * engelini `overlay_gate_triggered` diye kaydediyordu. Overlay kancasının matcher'ı yalnız bu
+   * dört aracı kapsadığı için `Bash` engelini overlay üretmiş OLAMAZ — MyCL kendi delil defterinde
+   * başka bir mekanizmanın işini kendine mal ediyordu. Canlı kanıt (cave-r3): 14 kaydın 10'u Bash.
+   * Atıf artık bu yükleme göre ayrılıyor; bu test o ayrımın tek doğruluk kaynağını kilitler.
+   */
+  it("canlı kayıttaki karışım doğru ayrılır: 4 yazma engeli overlay'e, 10 Bash engeli BAŞKASINA ait", () => {
+    const canliKayit = [
+      "Bash", "Bash", "Bash", "Edit", "Edit", "Edit", "Bash",
+      "Bash", "Bash", "Bash", "Bash", "Bash", "Edit", "Bash",
+    ];
+    const overlayaAit = canliKayit.filter((t) => isWriteTool(t));
+    expect(overlayaAit).toHaveLength(4);
+    expect(canliKayit.length - overlayaAit.length).toBe(10);
+  });
 });
 
 // Kök seçimi ("dir": ".") — mahkeme öncesi gözden geçirme bulgusu (2026-08-11): envanter kökü dizin

@@ -618,21 +618,33 @@ export class CliCodegenBackend implements CodegenBackend {
     if (type === "result") {
       // ENGELLENEN ARAÇ ÇAĞRILARI: Claude Code kanca engellerini burada bildirir. MyCL bu alanı
       // hiç okumuyordu → engellenen yazma hem denetimde görünmüyor hem de "yazdı" kanıtı sayılıyordu.
+      //
+      // ADLİ DENETİM DÜZELTMESİ (2026-09-10): burada gelen HER engel `overlay_gate_triggered` diye
+      // yazılıyordu. Oysa overlay kancasının matcher'ı YALNIZ yazma araçlarını kapsıyor
+      // (WRITE_TOOL_NAMES) — `Bash` engelini overlay üretmiş OLAMAZ. Canlı kayıtta (cave-r3)
+      // 14 "gate engelledi" kaydının 10'u Bash'ti: MyCL kendi delil defterinde, başka bir
+      // mekanizmanın (kum havuzu / Claude Code izin kuralı) işini kendine mal ediyordu. Artık
+      // atıf ARACIN TÜRÜNE göre ayrılıyor; engel bilgisi kaybolmuyor, yalnız doğru adla yazılıyor.
       const denials = parsePermissionDenials(ev);
+      let overlayDenials = 0;
       for (const d of denials) {
+        // Kanıt süzgeci TÜM engelleri kapsar (engellenen çağrı, hangi mekanizma engellerse
+        // engellesin, "yazdı" kanıtı sayılmamalı) — bu ayrım yalnız DENETİM ADINI etkiler.
         if (d.tool_use_id) this.deniedToolUseIds.add(d.tool_use_id);
+        const fromOverlay = isWriteTool(d.tool_name);
+        if (fromOverlay) overlayDenials++;
         void appendAudit(this.opts.state.project_root, {
           ts: Date.now(),
           phase: this.opts.state.current_phase,
-          event: "overlay_gate_triggered",
+          event: fromOverlay ? "overlay_gate_triggered" : "tool-permission-denied",
           caller: "mycl-orchestrator",
           detail: `${d.tool_name || "?"} ${d.target.slice(-80)}`.trim(),
-        }).catch((e) => log.warn("cli-backend", "overlay engel kaydi yazilamadi", e));
+        }).catch((e) => log.warn("cli-backend", "engel kaydi yazilamadi", e));
       }
-      if (denials.length > 0) {
+      if (overlayDenials > 0) {
         emitChatMessage(
           "system",
-          `🛡️ İterasyon gate'i ${denials.length} yazma girişimini engelledi — ajan farklı bir yol denemek zorunda kaldı.`,
+          `🛡️ İterasyon gate'i ${overlayDenials} yazma girişimini engelledi — ajan farklı bir yol denemek zorunda kaldı.`,
         );
       }
       // Engel kümesi artık kesin → bekleyen yazma kanıtlarını süzüp gözlemciye ver.
