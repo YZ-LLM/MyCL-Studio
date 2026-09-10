@@ -21,14 +21,24 @@ describe("extractTokenUsage — 4 CLI runner'ın ortak usage sözleşmesi", () =
     });
   });
 
-  it("eksik alanlar → 0 (Number(x ?? 0) sözleşmesi)", () => {
+  // BİLİNÇLİ DAVRANIŞ DEĞİŞİKLİĞİ (adli denetim, 2026-09-10): boş `{}` eskiden dolu bir sıfır
+  // nesnesi döndürüyordu; "kullanım bildirilmedi" ile "kullanım gerçekten sıfırdı" ayrımı
+  // kayboluyordu. Canlı kayıtta 88 maliyet kaydı bu yüzden model + tur + süre taşırken jeton
+  // sıfır görünüyordu — jeton çapası adli olarak güvenilmez hale gelmişti. Blokta beklenen
+  // alanlardan EN AZ BİRİ varsa sözleşme aynen sürer (aşağıdaki ilk iddia); hiçbiri yoksa
+  // artık `undefined` (çağıran no-op yapar, sahte sıfır üretilmez).
+  it("bildirilen blokta eksik alanlar → 0; HİÇ alan yoksa undefined", () => {
     expect(extractTokenUsage({ input_tokens: 5 })).toEqual({
       input_tokens: 5,
       output_tokens: 0,
       cache_read_input_tokens: 0,
       cache_creation_input_tokens: 0,
     });
-    expect(extractTokenUsage({})).toEqual({
+    expect(extractTokenUsage({})).toBeUndefined();
+  });
+
+  it("eski sözleşmenin korunan yanı: gerçekten sıfır BİLDİRİLDİYSE sıfır döner", () => {
+    expect(extractTokenUsage({ input_tokens: 0 })).toEqual({
       input_tokens: 0,
       output_tokens: 0,
       cache_read_input_tokens: 0,

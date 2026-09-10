@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  extractTokenUsage,
   scanBalancedObjects,
   extractLastJsonObject,
   extractKindBlock,
@@ -136,5 +137,55 @@ describe("extractKindBlock", () => {
   });
   it("eşleşen kind yoksa null", () => {
     expect(extractKindBlock(`{"kind":"other"}`, ["askq", "complete"])).toBeNull();
+  });
+});
+
+// ADLİ DENETİM BULGUSU (2026-09-10): bu fonksiyon `raw` bir nesne olduğu sürece — boş `{}` bile
+// olsa — dolu bir kullanım nesnesi döndürüyordu. Böylece "kullanım hiç bildirilmedi" ile "kullanım
+// gerçekten sıfırdı" ayrımı kayboluyor, tur sayacı artıyor ama jeton sıfır görünüyordu. Canlı
+// kayıtta 694 maliyet kaydının 88'i bu durumdaydı (model + 394 tur + gerçek süre, jeton sıfır) —
+// yani adli doğrulamanın en güçlü çapası (jetonu sağlayıcı üretir) güvenilmez hale gelmişti.
+describe("extractTokenUsage — bildirilmedi ile gerçekten sıfır ayrımı", () => {
+  it("BOŞ nesne → undefined (sahte sıfır üretilmez)", () => {
+    expect(extractTokenUsage({})).toBeUndefined();
+  });
+
+  it("alakasız alanlar → undefined", () => {
+    expect(extractTokenUsage({ foo: 1, service_tier: "standard" })).toBeUndefined();
+  });
+
+  it("GERÇEKTEN sıfır bildirildiyse sıfır döner (bildirim var, değer sıfır)", () => {
+    const u = extractTokenUsage({ input_tokens: 0, output_tokens: 0 });
+    expect(u).toBeDefined();
+    expect(u?.input_tokens).toBe(0);
+    expect(u?.output_tokens).toBe(0);
+  });
+
+  it("tek alan bile bildirildiyse blok geçerlidir, kalanı sıfırlanır", () => {
+    const u = extractTokenUsage({ output_tokens: 120 });
+    expect(u?.output_tokens).toBe(120);
+    expect(u?.cache_read_input_tokens).toBe(0);
+  });
+
+  it("DAVRANIŞ KORUNUR: dolu blok eskisiyle birebir aynı çözülür", () => {
+    expect(
+      extractTokenUsage({
+        input_tokens: 8,
+        output_tokens: 5568,
+        cache_read_input_tokens: 91422,
+        cache_creation_input_tokens: 18259,
+      }),
+    ).toEqual({
+      input_tokens: 8,
+      output_tokens: 5568,
+      cache_read_input_tokens: 91422,
+      cache_creation_input_tokens: 18259,
+    });
+  });
+
+  it("nesne olmayan girdi → undefined (eski davranış)", () => {
+    expect(extractTokenUsage(null)).toBeUndefined();
+    expect(extractTokenUsage("x")).toBeUndefined();
+    expect(extractTokenUsage(undefined)).toBeUndefined();
   });
 });

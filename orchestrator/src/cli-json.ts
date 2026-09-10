@@ -177,9 +177,30 @@ export interface TokenUsage {
  * PARİTE (mahkeme denetimi 2026-07-11): bu blok cli-run/cli-session/codegen-cli-backend'de (ve o zamanki
  * kalıcı oturumda) BİREBİR kopyaydı → tek saf helper. Nesne değilse undefined (çağıran no-op — davranış korunur).
  */
+/** Kullanım bloğunda beklenen alanlar — en az biri VARSA blok gerçekten bildirilmiş sayılır. */
+const USAGE_FIELDS = [
+  "input_tokens",
+  "output_tokens",
+  "cache_read_input_tokens",
+  "cache_creation_input_tokens",
+] as const;
+
+/**
+ * ADLİ DENETİM DÜZELTMESİ (2026-09-10): eskiden `raw` bir NESNE olduğu sürece — boş `{}` bile olsa —
+ * tüm alanlar `?? 0` ile doldurulup DOLU bir nesne dönüyordu. Böylece "kullanım bloğu hiç
+ * bildirilmedi" ile "kullanım gerçekten sıfırdı" ayrımı kayboluyordu.
+ *
+ * Bedeli ölçüldü: cave koşusunda 694 maliyet kaydının 88'inde model adı, toplam 394 tur ve 147
+ * saniyeye varan süre varken jeton sıfır görünüyor (tur sayacı YALNIZ bu fonksiyon dolu döndüğünde
+ * artıyor). Sonuç: "jeton harcanmamışsa iş yapılmamıştır" çıkarımı güvenilmez hale gelmişti — oysa
+ * bu, adli doğrulamanın en güçlü çapası (jetonu sağlayıcı üretir, MyCL uyduramaz).
+ *
+ * Artık beklenen alanlardan HİÇBİRİ yoksa `undefined` → çağıran no-op yapar, sahte sıfır üretilmez.
+ */
 export function extractTokenUsage(raw: unknown): TokenUsage | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const u = raw as Record<string, unknown>;
+  if (!USAGE_FIELDS.some((f) => u[f] !== undefined)) return undefined;
   return {
     input_tokens: Number(u.input_tokens ?? 0),
     output_tokens: Number(u.output_tokens ?? 0),
