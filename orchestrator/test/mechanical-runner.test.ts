@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  collectToolGaps,
   MechanicalRunnerBase,
   expandFilesPlaceholder,
   resolveMechanicalCmd,
@@ -722,5 +723,61 @@ describe("isRedundantGateCommand (anlamsız eşitlik stub'ı)", () => {
 
   it("anlamsız komut otomatik 'gerçek ölçüm ekle' işi açar", () => {
     expect(isToolInstallableSkip("redundant_gate_command sameAs=build")).toBe(true);
+  });
+});
+
+// ADLİ ÖZ DENETİM BULGUSU (2026-09-10): eksik araç tespiti yalnız FAZ seviyesinde yapılıyordu.
+// Bir fazın ek taramalarından biri eksikse faz yine tamamlanıyor (öteki tarayıcılar koşuyor) →
+// `phase-N-skipped` hiç yazılmıyor → eksik araç "aracı kur" işine HİÇ ulaşmıyordu.
+// CANLI KANIT: cave'de `gitleaks-skipped` 47 kez yazılmış, 0 kez koşmuş, hiç iş açılmamış ve araç
+// bugün hâlâ kurulu değil. Boşluk fazda değil, tespitin granülerliğindeydi.
+describe("collectToolGaps (tarayıcı seviyesi eksik araç)", () => {
+  const ev = (event: string, phase: number, detail?: string) => ({ event, phase, detail });
+
+  it("CANLI DURUM: faz tamamlanmışken eksik tarayıcı yine de yakalanır", () => {
+    const g = collectToolGaps([
+      ev("semgrep-pass", 13),
+      ev("gitleaks-skipped", 13, 'missing_command cmd="gitleaks detect --source src/"'),
+      ev("phase-13-complete", 13),
+    ]);
+    expect([...g.keys()]).toEqual(["gitleaks"]);
+    expect(g.get("gitleaks")?.phase).toBe(13);
+  });
+
+  it("YANLIŞ ALARM YOK: kurulumla çözülemeyen atlama boşluk sayılmaz", () => {
+    const g = collectToolGaps([
+      ev("ts-prune-skipped", 11, "ts_tool_js_project"),
+      ev("bir-sey-skipped", 12, "aborted"),
+      ev("baska-skipped", 12, "mycl_tool_broken"),
+    ]);
+    expect(g.size).toBe(0);
+  });
+
+  it("faz atlamaları ve gerçek uygulama kapısı BURADA ele alınmaz (kendi yolları var)", () => {
+    const g = collectToolGaps([
+      ev("phase-12-skipped", 12, 'missing_command cmd="npm run perf"'),
+      ev("realapp-verify-skipped", 16, "missing_command"),
+    ]);
+    expect(g.size).toBe(0);
+  });
+
+  it("fazın KENDİSİ zaten boşluk olarak açıldıysa çift iş açılmaz", () => {
+    const events = [ev("gitleaks-skipped", 13, "missing_command")];
+    expect(collectToolGaps(events).size).toBe(1);
+    expect(collectToolGaps(events, new Set([13])).size).toBe(0);
+  });
+
+  it("aynı araç birden çok kez atlansa da TEK kayıt (47 tekrar → 1 iş)", () => {
+    const tekrar = Array.from({ length: 47 }, () => ev("gitleaks-skipped", 13, "missing_command"));
+    expect(collectToolGaps(tekrar).size).toBe(1);
+  });
+
+  it("detay taşınır (iş metnine beklenen komut girebilsin)", () => {
+    const g = collectToolGaps([ev("gitleaks-skipped", 13, 'missing_command cmd="gitleaks detect"')]);
+    expect(g.get("gitleaks")?.detail).toContain('cmd="gitleaks detect"');
+  });
+
+  it("detay yoksa/nesne değilse boşluk sayılmaz (kanıtsız iş açma)", () => {
+    expect(collectToolGaps([{ event: "gitleaks-skipped", phase: 13 }]).size).toBe(0);
   });
 });

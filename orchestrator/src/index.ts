@@ -285,7 +285,7 @@ import { realAppGateDecision, buildRealAppVerifyMarker, decideFullDevelopGate } 
 import { setAgentTraceRoot } from "./agent-trace.js";
 import { buildTouchpointSummary } from "./fix/touch-map.js";
 import { formatBlastRadius } from "./fix/dep-graph/index.js";
-import { MechanicalRunnerBase, isNotApplicableSkip, isToolInstallableSkip } from "./base/mechanical-runner.js";
+import { MechanicalRunnerBase, collectToolGaps, isNotApplicableSkip, isToolInstallableSkip } from "./base/mechanical-runner.js";
 import {
   computeChangedScope,
   shouldComputeScope,
@@ -884,6 +884,15 @@ async function emitVerificationSummary(state: State): Promise<void> {
       }
     } else if (done) passed.push(dim);
   }
+  // TARAYICI SEVİYESİ BOŞLUK (adli öz denetim, 2026-09-10): yukarıdaki döngü yalnız FAZ seviyesine
+  // bakıyor. Bir fazın ek taramalarından BİRİ eksikse (aracı kurulu değil) faz yine tamamlanıyor —
+  // çünkü öteki tarayıcılar koşuyor — ve o eksik araç "aracı kur" işine HİÇ ulaşmıyordu. Canlı kanıt:
+  // cave'de `gitleaks-skipped` 47 kez yazılmış, 0 kez koşmuş, hiç iş açılmamış ve araç bugün hâlâ
+  // kurulu değil. Boşluk fazın kendisinde değil, tespitin granülerliğindeydi.
+  //
+  // YANLIŞ ALARM YASAĞI: bu, "boyut doğrulanmadı" DEĞİLDİR (faz öteki tarayıcılarla geçti) — ayrı ve
+  // daha yumuşak bir satırla, aracın adıyla bildirilir.
+  const toolGaps = collectToolGaps(thisIter, new Set(installable.map((g) => g.n)));
   // GERÇEK-APP DOĞRULAMA (mekanik faz değil → ayrı event'ler; YZLLM 2026-07-21): fix'in bildirilen bug'ı
   // gerçek çalışan uygulamada çözdüğü kanıtlandı mı? pass=doğrulandı, skipped=araç yok (sarı), fail=aşağıda ❌.
   const realappPass = thisIter.some((e) => e.event === "realapp-verify-pass");
@@ -950,6 +959,34 @@ async function emitVerificationSummary(state: State): Promise<void> {
       if (skipped.length > queuedDims.length) lines.push(`Kalanlar için: bilerek kabul et veya aracı elle ekle.`);
     } else {
       lines.push(`Bilerek kabul et veya aracı ekle.`);
+    }
+  }
+  if (toolGaps.size > 0) {
+    const adlar = [...toolGaps.keys()].sort();
+    lines.push(
+      `🔍 Eksik tarama aracı: ${adlar.join(", ")} — ilgili faz öteki tarayıcılarla geçti, bu EK katman koşmadı.`,
+    );
+    const acilan: string[] = [];
+    for (const [tool, info] of toolGaps) {
+      try {
+        const cmd = /cmd="([^"]+)"/.exec(info.detail)?.[1];
+        const dec = await enqueueSystemFixTask(
+          state.project_root,
+          `"${tool}" tarama aracı kurulu değil (Faz ${info.phase} ek taraması) — neden: ${info.detail || "araç yok"}. ` +
+            `${cmd ? `Beklenen komut: ${cmd}. ` : ""}` +
+            `Bu ek doğrulamanın gerçekten koşabilmesi için aracı kur (bağımlılık + gerekli config + GERÇEK ` +
+            `kontrol komutu; echo/stub YASAK) ve komutun gerçekten koşup anlamlı sonuç ürettiğini kanıtla.`,
+          "verify-gap",
+          { kind: "verify-gap", subject: `tool:${tool}`, includeDone: true },
+        );
+        if (dec?.action === "create" || dec?.action === "refresh") acilan.push(tool);
+      } catch (e) {
+        log.warn("orchestrator", "tarayıcı boşluğu işi kuyruğa eklenemedi", { tool, error: String(e) });
+        lines.push(`⚠️ "${tool}" için araç kurulum işi açılamadı (${String(e).slice(0, 60)}) — elle kurabilirsin.`);
+      }
+    }
+    if (acilan.length > 0) {
+      lines.push(`🔧 ${acilan.join(", ")} için "aracı kur + taramayı koştur" işi kuyruğa eklendi.`);
     }
   }
   emitChatMessage("system", lines.join("\n"));

@@ -83,6 +83,37 @@ export function isNotApplicableSkip(reason: string | undefined | null): boolean 
   return GATE_SKIP_NOT_APPLICABLE.has(String(reason).trim().split(/\s+/)[0]);
 }
 
+/**
+ * SAF: TARAYICI SEVİYESİ araç boşlukları — "faz geçti ama içindeki bir ek tarama aracı yok".
+ *
+ * KÖK NEDEN (adli öz denetim, 2026-09-10): eksik araç tespiti yalnız FAZ seviyesinde yapılıyordu.
+ * Bir fazın ek taramalarından biri eksikse faz yine tamamlanıyor (öteki tarayıcılar koşuyor), bu
+ * yüzden `phase-N-skipped` hiç yazılmıyor ve eksik araç "aracı kur" işine HİÇ ulaşmıyordu. Canlı
+ * kanıt: cave'de `gitleaks-skipped` 47 kez yazılmış, 0 kez koşmuş, hiç iş açılmamış, araç hâlâ
+ * kurulu değil. Boşluk fazda değil, tespitin granülerliğindeydi.
+ *
+ * `phaseGapPhases`: fazın KENDİSİ zaten boşluk olarak ele alınmış faz numaraları → çift iş açılmaz.
+ * Yalnız `isToolInstallableSkip` geçen (araç gerçekten eksik) atlamalar döner — yanlış alarm yasağı.
+ */
+export function collectToolGaps(
+  events: ReadonlyArray<{ event?: string; phase?: number; detail?: unknown }>,
+  phaseGapPhases: ReadonlySet<number> = new Set(),
+): Map<string, { phase: number; detail: string }> {
+  const out = new Map<string, { phase: number; detail: string }>();
+  for (const e of events) {
+    const ev = e.event ?? "";
+    if (!ev.endsWith("-skipped")) continue;
+    // Faz atlamaları ve gerçek uygulama kapısı AYRI ele alınıyor (kendi mesajları/işleri var).
+    if (ev.startsWith("phase-") || ev === "realapp-verify-skipped") continue;
+    if (!isToolInstallableSkip(typeof e.detail === "string" ? e.detail : undefined)) continue;
+    const tool = ev.slice(0, -"-skipped".length);
+    const ph = Number(e.phase ?? 0);
+    if (phaseGapPhases.has(ph)) continue;
+    if (!out.has(tool)) out.set(tool, { phase: ph, detail: typeof e.detail === "string" ? e.detail : "" });
+  }
+  return out;
+}
+
 /** SAF (YZLLM 2026-07-24 "aracı eklemeye karar vermesi ve çalıştırması gerekiyordu"): bir gate-skip'i
  *  ARAÇ KURULUMUYLA oto-çözülebilir mi? missing_command (araç/komut sistemde yok) + stub_script (echo-stub,
  *  gerçek kontrol yok) → EVET (kuyruğa "aracı kur + gate'i koştur" işi açılır). mycl_tool_broken (MyCL'in
