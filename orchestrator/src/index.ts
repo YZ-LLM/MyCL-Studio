@@ -262,6 +262,13 @@ import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
 import { refreshAuditAnchor, verifyAuditAnchor } from "./audit-anchor.js";
+import {
+  buildSourcePrompt,
+  classifyGapOwner,
+  persistSourcePrompt,
+  sourceGapKey,
+  type SourceGap,
+} from "./mycl-source-gap.js";
 import { copyProjectToAccessible } from "./onboarding/copy-to-accessible.js";
 import {
   decideIntegrationRestart,
@@ -863,6 +870,8 @@ async function emitVerificationSummary(state: State): Promise<void> {
   // gerekiyordu ve ekleyip çalıştırması gerekiyordu") — kullanıcıya "bilerek kabul et veya aracı ekle"
   // deyip DURMAK yerine karar verilir: kuyruğa "aracı kur + gate'i gerçekten koştur" işi açılır.
   const installable: Array<{ n: number; dim: string; detail: string }> = [];
+  // Projede ÇÖZÜLEMEZ boşluklar (MyCL'in kendi kaynağı gerekiyor) — aşağıda prompta çevrilir.
+  const sourceGaps: SourceGap[] = [];
   for (const [nStr, dim] of Object.entries(GATE_DIMS)) {
     const n = Number(nStr);
     const skip = thisIter.find((e) => e.event === `phase-${n}-skipped`);
@@ -877,10 +886,22 @@ async function emitVerificationSummary(state: State): Promise<void> {
       const reason = skip.detail ? String(skip.detail).split(" ")[0] : "";
       const label = `${dim}${reason ? ` (${reason})` : ""}`;
       // KESİN-N/A (ts-prune JS'te / profil null) → nötr; şüpheli/araç-eksik → sarı (false-green önleme).
-      if (isNotApplicableSkip(skip.detail)) notApplicable.push(label);
+      // 2026-09-11 (YZLLM): "uygulanamaz" damgası burada BİTMİYOR. Bazıları gerçekten uygulanamaz
+      // (stack o boyuta sahip değil), bazıları ise MyCL'in KENDİ aracının dar olmasından — boyut
+      // geçerli ama ölçülemiyor. İkincisini projede çözmek İMKÂNSIZ; ayrı toplanıp geliştiriciye
+      // yapıştırılabilir bir iş tanımına çevriliyor.
+      if (isNotApplicableSkip(skip.detail)) {
+        notApplicable.push(label);
+        if (classifyGapOwner(skip.detail) === "mycl-source") {
+          sourceGaps.push({ phase: n, dimension: dim, detail: String(skip.detail ?? "") });
+        }
+      }
       else {
         skipped.push(label);
         if (isToolInstallableSkip(skip.detail)) installable.push({ n, dim, detail: String(skip.detail ?? "") });
+        else if (classifyGapOwner(skip.detail) === "mycl-source") {
+          sourceGaps.push({ phase: n, dimension: dim, detail: String(skip.detail ?? "") });
+        }
       }
     } else if (done) passed.push(dim);
   }
@@ -990,7 +1011,35 @@ async function emitVerificationSummary(state: State): Promise<void> {
     }
   }
   emitChatMessage("system", lines.join("\n"));
+
+  // PROJEDE ÇÖZÜLEMEZ BOŞLUKLAR → yapıştırılabilir iş tanımı (YZLLM 2026-09-11: "sadece görünür
+  // kılmakla kalmasın, çözümü için MyCL'de geliştirme gerekiyorsa onun promptunu da versin").
+  // Ayrı mesaj: özet karışmasın, kullanıcı promptu tek parça kopyalayabilsin.
+  if (sourceGaps.length > 0) {
+    const stack = state.stack ?? undefined;
+    for (const gap of sourceGaps) {
+      const key = sourceGapKey({ ...gap, stack });
+      // Aynı boşluk için her iterasyonda aynı promptu basma — ilk kez ve neden değişince yeter.
+      if (_announcedSourceGaps.has(key)) continue;
+      _announcedSourceGaps.add(key);
+      // `occurrences` BİLEREK doldurulmuyor: burada yalnız BU iterasyonun olayları var, "kaç
+      // iterasyondur sürüyor" bilgisi yok. Uydurulmuş bir sayı promptu zayıflatır (kanıtsız aciliyet).
+      const full: SourceGap = { ...gap, ...(stack ? { stack } : {}) };
+      const prompt = buildSourcePrompt(full);
+      const file = await persistSourcePrompt(state.project_root, full, prompt);
+      emitChatMessage(
+        "system",
+        `🧩 **Faz ${gap.phase} (${gap.dimension}) bu projede ölçülemiyor ve bunu proje tarafında çözmem mümkün değil** — ` +
+          `düzeltme benim kaynağımda. Aşağıdaki iş tanımını kopyalayıp geliştiriciye (ya da Claude'a) ` +
+          `yapıştırabilirsin${file ? `; ayrıca \`${file.slice(file.indexOf(".mycl"))}\` dosyasına da yazdım` : ""}:\n\n` +
+          "```\n" + prompt + "\n```",
+      );
+    }
+  }
 }
+
+/** Aynı kaynak boşluğu için promptu bir kez basmak üzere (oturum boyu). */
+const _announcedSourceGaps = new Set<string>();
 
 // Merdiven KALDIRILDI (YZLLM 2026-06-16 "merdiven kullanmıcaz"): faz model+eforu artık iş-türüne göre SABİT
 // (escalatedModelEffort) → "hangi model hangi işte iyi" merdiven-öğrenme raporu anlamını yitirdi → no-op

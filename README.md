@@ -287,6 +287,14 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   Boş bırakılırsa varsayılan davranış sürer. Bu seçim yalnız plan metnini yazan
   modeli belirler; onaylanan planı uygulayan fazlar her zamanki gibi kendi iş
   türlerinin model katmanını kullanır.
+- **🧩 "Bunu kendim çözemem" iş tanımı** — bir kalite boyutu ölçülemiyorsa MyCL önce
+  bunu projede çözmeye çalışır (aracı kurar, kapıyı koşturur). Ama bazı boşluklar
+  proje tarafında çözülemez: MyCL'in kendi tarama aracı bozuksa ya da o boyut için
+  seçtiği araç tek bir dile bağlıysa, hedef projede yapılacak hiçbir şey işe
+  yaramaz. Bu durumda MyCL yalnız "atlandı" demekle kalmaz; **geliştiriciye
+  yapıştırılabilir, kendi kendine yeten bir iş tanımı üretir** (kanıtı, teşhisi,
+  kısıtları ve kabul edilmeyen çözümleriyle) ve `.mycl/mycl-source-tasks/`
+  altına da yazar. Aynı boşluk için tek kez üretilir.
 - **🔒 Çalışma kaydı bütünlüğü** — MyCL'in "tamamlandı / doğrulandı" hükmü, kendi
   tuttuğu çalışma kaydından üretiliyor. Bu kayıt projenin içinde durduğu için,
   her iterasyonun başında kaydın o anki hâli **projenin dışına**, MyCL'in kendi
