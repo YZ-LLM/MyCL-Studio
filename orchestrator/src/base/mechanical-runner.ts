@@ -355,6 +355,20 @@ export function isStubGateCommand(cmd: string): boolean {
 }
 
 /**
+ * SAF: `tool_error_codes` tetiklendiğinde kullanıcıya yazılacak atlama mesajı.
+ *
+ * Varsayılan metin "araç düzgün çalışmadı" der ve bu her zaman DOĞRU DEĞİLDİR: stack bağımsız
+ * sadeleştirme taraması, taranacak kaynak dosya bulamadığında da bu yola girer ve orada araçta bir
+ * sorun yoktur. Yanlış sebep söylemek, atlamanın kendisini görünmez kılmaktan farklı bir dürüstlük
+ * kaybıdır — kullanıcı olmayan bir araç sorununu kovalar. Not verilmezse eski metin aynen korunur.
+ */
+export function toolErrorSkipMessage(name: string, code: number, note?: string): string {
+  return note
+    ? `⏭ ${name} atlandı — ${note} (çıkış kodu ${code}; bulgu değil).`
+    : `⏭ ${name} atlandı — araç düzgün çalışmadı (çıkış kodu ${code}; bulgu değil, araç/sürüm sorunu).`;
+}
+
+/**
  * SAF (2026-08-03): "anlamsız eşitlik" stub'ı — bir kapının komutu BAŞKA bir kapının komutunun aynısı mı?
  *
  * CANLI KANIT: MyCL'in kendi Faz 5 şablonu codegen'e `"perf": "npm run build"` yazmayı ZORUNLU tutuyordu
@@ -647,10 +661,7 @@ export class MechanicalRunnerBase {
         detail: `tool_error code=${result.code} cmd="${extra.cmd}"`,
       });
       if (shouldAnnounceSkip(skipKey, "tool_error"))
-        emitChatMessage(
-          "system",
-          `⏭ ${extra.name} atlandı — araç düzgün çalışmadı (çıkış kodu ${result.code}; bulgu değil, araç/sürüm sorunu).`,
-        );
+        emitChatMessage("system", toolErrorSkipMessage(extra.name, result.code, extra.tool_error_note));
       return "skipped";
     }
 

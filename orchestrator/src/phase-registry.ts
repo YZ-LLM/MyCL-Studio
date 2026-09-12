@@ -308,10 +308,26 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
     name_i18n_key: "phase.11.name",
     required_audits: ["simplify-pass", "simplify-fail"],
     mechanical_config: {
-      // ts-prune (Node) / non-Node stack'lerde profilde tanımlıysa kendi aracı.
+      // Dilin KENDİ aracı (varsa): ts-prune (Node) / profilde tanımlı başka bir araç.
       scan_cmd: { type: "profile_key", key: "simplify" },
       max_rescans: 0,
       skip_unless: "always",
+      // 2026-09-12 (YZLLM: "aracın tek dile bağlı olma ihtimalini ortadan kaldır"): `simplify`
+      // komutu 19 profilin yalnız 4'ünde vardı ve o dörtte de araç TypeScript'e bağlıydı — boyut
+      // pratikte yalnız "Node + TypeScript" kesişiminde ölçülüyordu (adli denetim: cave'in 94
+      // iterasyonunda Faz 11 BİR KEZ bile koşmadı). Ana komut olmasa da stack bağımsız taban koşar.
+      run_extras_when_main_skipped: true,
+      extra_scans: [
+        {
+          // Dilden bağımsız taban: satır düzeyinde kopya kod. "Bu N satır birebir aynı" bir
+          // OLGUDUR (yorum değil) → her dilde aynı anlamı taşır. Karar temel çizgiye göre:
+          // ilk koşu asla düşmez, yalnız belirgin büyüme düşürür (eski proje cezalandırılmaz).
+          name: "simplify-agnostic",
+          cmd: `node "${securityToolPath("simplify-check.mjs")}" .`,
+          tool_error_codes: [3], // ölçülemedi → atlama ("temiz" DEĞİL)
+          tool_error_note: "taranacak kaynak dosya bulunamadı, bu boyut ölçülemedi",
+        },
+      ],
     },
   },
   12: {

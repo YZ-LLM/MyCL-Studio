@@ -280,6 +280,13 @@ export interface MechanicalConfig {
      * taraması harness-verdict'te securitySkipped→PARTIAL ile dürüstçe yüzeye çıkar.
      */
     tool_error_codes?: number[];
+    /**
+     * `tool_error_codes` tetiklendiğinde kullanıcıya söylenecek GERÇEK neden. Varsayılan mesaj
+     * "araç düzgün çalışmadı" der; bu her zaman doğru değildir — örn. stack bağımsız sadeleştirme
+     * taraması, taranacak kaynak dosya bulamadığında da atlanır ve orada araçta bir sorun YOKTUR.
+     * Verilmezse eski mesaj aynen kullanılır (geriye uyumlu).
+     */
+    tool_error_note?: string;
   }>;
 }
 

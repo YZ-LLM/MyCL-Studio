@@ -60,13 +60,22 @@ ortak controller'a dayanır:
 | 8 | BDD + TDD Uygulama | codegen |
 | 9 | Risk İncelemesi | qa-askq |
 | 10 | Lint | mechanical |
-| 11 | Sadeleştirme | mechanical |
+| 11 | Sadeleştirme — dilin kendi aracı + **stack bağımsız kopya kod ölçümü** (her dilde koşar) | mechanical |
 | 12 | Performans — sayfa skoru (Lighthouse) + paket boyutu bütçesi + DB index | mechanical |
 | 13 | Güvenlik — semgrep + gizli anahtar + bağımlılık zafiyeti (osv) + DB şeması | mechanical |
 | 14 | Birim Testler | mechanical |
 | 15 | Entegrasyon Testleri | mechanical |
 | 16 | E2E Testler (UI varsa) | mechanical |
 | 17 | Sızma Testi — **otomatik koşar** (hızlı profil); tam tarama 🛡️ butonuyla | — |
+
+**Faz 11 hiçbir dile bağlı değil:** Sadeleştirme boyutu eskiden yalnız `ts-prune` ile ölçülüyordu,
+yani pratikte sadece TypeScript projelerinde koşabiliyordu. Artık dilin kendi aracının ALTINA
+stack bağımsız bir taban kondu: MyCL kaynak dosyaları satır düzeyinde karşılaştırıp kopyala yapıştır
+ile büyümeyi ölçer (Python, Go, Rust, Java, PHP, Dart, Swift… hepsinde aynı şekilde). İlk koşu
+**temel** kaydeder ve asla kırmızıya boyamaz — eski projeler cezalandırılmaz; sonraki koşularda
+yalnız **belirgin büyüme** kapıyı düşürür, azalma hemen temele işlenir. Hiçbir yerden çağrılmayan
+dosyalar **yalnız rapor** edilir (dinamik yükleme bu çıkarımı çürütebilir, kapıyı düşürmez).
+Taranacak kaynak yoksa "temiz" denmez, atlama görünür kalır.
 
 **Faz 8 davranış öncelikli (BDD → TDD, çift döngü):** Faz 8, kod yazmadan önce yeni/değişen her
 davranış için proje kökünde görünür `features/*.feature` yaşayan dokümantasyonu yazar (spec'in

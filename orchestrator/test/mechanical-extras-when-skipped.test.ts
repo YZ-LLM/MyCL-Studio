@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MechanicalRunnerBase } from "../src/base/mechanical-runner.js";
+import { MechanicalRunnerBase, toolErrorSkipMessage } from "../src/base/mechanical-runner.js";
 import { PHASE_SPECS } from "../src/phase-registry.js";
 import type { State } from "../src/types.js";
 
@@ -107,8 +107,34 @@ describe("faz kaydı sözleşmesi", () => {
     expect(names).toContain("perf-web");
   });
 
+  // BİLEREK DEĞİŞTİ (YZLLM 2026-09-12: "aracın tek dile bağlı olma ihtimalini ortadan kaldır").
+  // Faz 11 bu kilidin İÇİNDEYDİ, yani "ana tarama atlanırsa hiçbir şey koşmaz" davranışı korunuyordu.
+  // Adli denetim o davranışın kendisinin bug olduğunu gösterdi: `simplify` komutu 19 profilin yalnız
+  // 4'ünde tanımlı ve orada da ts-prune (TypeScript'e bağlı) → cave'in 94 iterasyonunda Faz 11 BİR KEZ
+  // bile koşmadı. Eski davranış boşluğu koruyordu; yerine stack bağımsız taban kondu.
+  it("Faz 11 bayrağı AÇIK (simplify 19 stack'in yalnız 4'ünde var, orada da tek dile bağlı)", () => {
+    expect(PHASE_SPECS[11]?.mechanical_config?.run_extras_when_main_skipped).toBe(true);
+    const names = (PHASE_SPECS[11]?.mechanical_config?.extra_scans ?? []).map((e) => e.name);
+    expect(names).toContain("simplify-agnostic");
+  });
+
+  it("Faz 11 atlama mesajı GERÇEK nedeni söyler (uydurma araç sorunu değil)", () => {
+    const extra = (PHASE_SPECS[11]?.mechanical_config?.extra_scans ?? [])
+      .find((e) => e.name === "simplify-agnostic");
+    expect(extra?.tool_error_codes).toContain(3);
+    expect(toolErrorSkipMessage("simplify-agnostic", 3, extra?.tool_error_note)).toContain(
+      "taranacak kaynak dosya bulunamadı",
+    );
+  });
+
+  it("REGRESYON KİLİDİ: not verilmeyen ek taramalarda ESKİ mesaj aynen kalır", () => {
+    expect(toolErrorSkipMessage("semgrep", 2)).toBe(
+      "⏭ semgrep atlandı — araç düzgün çalışmadı (çıkış kodu 2; bulgu değil, araç/sürüm sorunu).",
+    );
+  });
+
   it("REGRESYON KİLİDİ: geri kalan mekanik fazlar bayrağı AÇMAZ (davranışları değişmedi)", () => {
-    for (const id of [10, 11, 14, 15, 16, 17]) {
+    for (const id of [10, 14, 15, 16, 17]) {
       expect(PHASE_SPECS[id as 10]?.mechanical_config?.run_extras_when_main_skipped ?? false).toBe(false);
     }
   });

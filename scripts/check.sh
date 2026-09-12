@@ -13,19 +13,19 @@ step() { printf '\n── %s ──\n' "$1"; }
 ok()   { printf '  ✓ %s\n' "$1"; }
 bad()  { printf '  ✗ %s\n' "$1"; fail=1; }
 
-step "1/7 Orchestrator build (tsc)"
+step "1/8 Orchestrator build (tsc)"
 if npm --prefix orchestrator run build; then ok "build temiz"; else bad "orchestrator build"; fi
 
-step "2/7 Orchestrator testleri (vitest)"
+step "2/8 Orchestrator testleri (vitest)"
 if npm --prefix orchestrator test; then ok "testler yeşil"; else bad "orchestrator test"; fi
 
-step "3/7 Frontend tip kontrolü (tsc --noEmit)"
+step "3/8 Frontend tip kontrolü (tsc --noEmit)"
 if npx tsc --noEmit; then ok "frontend typecheck temiz"; else bad "frontend typecheck"; fi
 
 # Pattern'ler bu dosyada da geçtiği için taramadan check.sh + lockfile hariç tutulur.
 EXCL=(':(exclude)scripts/check.sh' ':(exclude)package-lock.json')
 
-step "4/7 Sızıntı taraması (secret dosya / gerçek anahtar)"
+step "4/8 Sızıntı taraması (secret dosya / gerçek anahtar)"
 secrets=$(git ls-files | grep -iE 'secrets\.json|auth\.json|(^|/)\.env$|\.key$|\.pem$' || true)
 skant=$(git grep -nE "sk-ant-[A-Za-z0-9]{6}" -- . "${EXCL[@]}" 2>/dev/null \
         | grep -viE "test|placeholder|redact|SECRET_KEY_RE" || true)
@@ -40,7 +40,7 @@ fi
 # Not: "Opus 4.7" gibi model isimleri DESEN DEĞİL — "ultracode yalnızca Opus
 # 4.7/4.8'de geçerli" gibi meşru/doğru kullanımlar var (false positive olur).
 # Yalnızca tartışmasız eskimiş sürüm/mimari banner'ları taranır.
-step "5/7 Eski-iddia taraması (aktif/tracked dosyalar)"
+step "5/8 Eski-iddia taraması (aktif/tracked dosyalar)"
 stale=$(git grep -lE "20 Faz|20-phase|MIMARI YASAKLARI|126 test|v1[34] —" -- . "${EXCL[@]}" 2>/dev/null || true)
 if [ -z "$stale" ]; then ok "eski iddia yok"; else bad "eski iddia bulundu"; echo "$stale" | sed 's/^/      /'; fi
 
@@ -48,7 +48,7 @@ if [ -z "$stale" ]; then ok "eski iddia yok"; else bad "eski iddia bulundu"; ech
 # tool_error_codes ile SESSİZCE skip eder → gate sessizce düşer. O yüzden YAML'ları
 # validate et. semgrep yoksa (CI'da kurulu olmayabilir) ATLA — eksik araç CI'yı KIRMASIN
 # (bu bir geliştirme-zamanı drift guard'ı; gerçek tarama runtime'da Faz 10/13'te).
-step "6/7 Custom semgrep kuralları (güvenlik + kod-kalite; --validate, varsa)"
+step "6/8 Custom semgrep kuralları (güvenlik + kod-kalite; --validate, varsa)"
 if command -v semgrep >/dev/null 2>&1; then
   if semgrep --validate --config assets/security-rules/ >/dev/null 2>&1; then
     ok "custom güvenlik kuralları geçerli (Faz 13)"
@@ -66,7 +66,7 @@ fi
 
 # setup.sh "kopyala/clone → çalışır" sözleşmesini taşır. Kod yeni bir dış araç eklerse
 # (toolInstalled("X")) setup.sh onu kurmuyorsa burada PATLAR → "eksik kalmasın" otomasyonu.
-step "7/7 setup.sh dış-araç kapsamı (eksik kalmasın)"
+step "7/8 setup.sh dış-araç kapsamı (eksik kalmasın)"
 req=$(grep -rhoE 'toolInstalled\("[a-z0-9_-]+"\)' orchestrator/src 2>/dev/null \
       | sed -E 's/.*"([a-z0-9_-]+)".*/\1/' | sort -u)
 req="$req semgrep gitleaks playwright cargo node osv-scanner"  # toolInstalled kullanmayan sabit baz araçlar
@@ -76,6 +76,36 @@ if [ -z "$miss" ]; then
   ok "setup.sh tüm dış araçları kapsıyor ($(echo $req | tr ' ' ',' ))"
 else
   bad "setup.sh eksik araç(lar):$miss — setup.sh'e kurulum ekle (yeni makine bunlarsız çalışmaz)"
+fi
+
+# YZLLM 2026-09-12: "aracın tek dile bağlı olma ihtimalini ortadan kaldır."
+# Bir kalite BOYUTU yalnız bazı stack profillerinde tanımlıysa, o boyut geri kalan stack'lerde HİÇ
+# ölçülmez ve bu sessizce olur (adli denetim: `simplify` 19 profilin 4'ünde vardı, Faz 11 cave'in 94
+# iterasyonunda bir kez bile koşmadı). Kural: profil komutu her stack'te tanımlı DEĞİLSE, o fazın
+# stack bağımsız bir taban taraması (extra_scans + run_extras_when_main_skipped) olmak ZORUNDA.
+step "8/8 kapı boyutları stack bağımsız mı (tek dile bağlanma yasağı)"
+gaps=""
+# YALNIZ ÖLÇÜM komutları (scan_cmd). `fix_cmd` bir onarım aracıdır — yokluğu "boyut ölçülmedi"
+# demek değil, "otomatik onaramıyorum" demektir; onu boşluk saymak yanlış alarm olurdu.
+for key in $(grep -oE 'scan_cmd: \{ type: "profile_key", key: "[a-z_]+"' orchestrator/src/phase-registry.ts | sed -E 's/.*key: "([a-z_]+)".*/\1/' | sort -u); do
+  missing=0
+  for prof in assets/profiles/*.json; do
+    node -e "
+      const c = require('./$prof');
+      const cmds = c.commands ?? c;
+      process.exit(cmds['$key'] ? 0 : 1);
+    " 2>/dev/null || missing=1
+  done
+  [ "$missing" -eq 0 ] && continue                      # her stack'te tanımlı → sorun yok
+  # Boşluk var → o boyutun stack bağımsız tabanı olmalı.
+  if ! grep -q "run_extras_when_main_skipped" <(awk "/key: \"$key\"/,/^    },\$/" orchestrator/src/phase-registry.ts); then
+    gaps="$gaps $key"
+  fi
+done
+if [ -z "$gaps" ]; then
+  ok "her kapı boyutu ya tüm stack'lerde tanımlı ya da stack bağımsız tabanı var"
+else
+  bad "tek dile/stack'e bağlı boyut(lar):$gaps — stack bağımsız taban tarama ekle (extra_scans + run_extras_when_main_skipped)"
 fi
 
 printf '\n'
