@@ -37,8 +37,17 @@ Node orchestrator   (Tauri'dekiyle AYNI süreç, aynı sözleşme)
 ```bash
 npm run dev:browser     # köprü + vite (tarayıcı modu) → http://localhost:1420
 npm run e2e:smoke       # uçtan-uca duman testi (kendi yığınını kurar/yıkar)
+npm run e2e:faz11       # Faz 11 stack bağımsız tabanı — GERÇEK faz koşturur (elle, LLM maliyeti var)
 npm run bridge          # yalnız köprü (:1799), ayrı vite ile kullanmak için
 ```
+
+`e2e:smoke` hiçbir faz/LLM tetiklemez, bu yüzden serbestçe koşulabilir.
+`e2e:faz11` bilerek bir faz çalıştırır: iki Python dosyasında birebir kopya bloğu olan geçici
+bir proje kurar, Faz 11'i UI'dan tetikler ve dilin kendi aracı (ts-prune) bu projeye
+uygulanamazken stack bağımsız tabanın gerçekten ölçtüğünü denetim kaydından doğrular. Proje
+açılışı yaşayan doküman üretimini de tetiklediği için küçük bir LLM maliyeti vardır → **CI'da
+koşmaz, elle koşulur**. Birim testleri çekirdeği kanıtlar; bu betik farklı bir şeyi kanıtlar:
+paketlenmiş yolun çözüldüğünü ve sonucun kullanıcıya göründüğünü.
 
 Tarayıcıda proje açmak: `http://localhost:1420/?project=/mutlak/proje/yolu`
 (veya Splash'ta klasör yolunu gir). Native klasör seçici tarayıcıda gerçek yol
