@@ -9,7 +9,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MechanicalRunnerBase, toolErrorSkipMessage } from "../src/base/mechanical-runner.js";
+import {
+  MechanicalRunnerBase,
+  toolErrorSkipMessage,
+  toolReasonLine,
+} from "../src/base/mechanical-runner.js";
 import { PHASE_SPECS } from "../src/phase-registry.js";
 import type { State } from "../src/types.js";
 
@@ -127,10 +131,31 @@ describe("faz kaydı sözleşmesi", () => {
     );
   });
 
-  it("REGRESYON KİLİDİ: not verilmeyen ek taramalarda ESKİ mesaj aynen kalır", () => {
+  it("REGRESYON KİLİDİ: neden yoksa ESKİ mesaj aynen kalır", () => {
     expect(toolErrorSkipMessage("semgrep", 2)).toBe(
       "⏭ semgrep atlandı — araç düzgün çalışmadı (çıkış kodu 2; bulgu değil, araç/sürüm sorunu).",
     );
+    expect(toolErrorSkipMessage("semgrep", 2, undefined, "   ")).toContain("araç düzgün çalışmadı");
+  });
+
+  // CANLI KANIT (2026-09-12, tarayıcı koşusu): tek ekranda bundle-budget, db-schema-perf ve perf-web
+  // birlikte "araç/sürüm sorunu" dedi; üç araç da sağlamdı, fixture'da ölçülecek şey yoktu.
+  it("aracın KENDİ açıkladığı neden kullanılır (sebep uydurulmaz)", () => {
+    const says = toolReasonLine("bundle-budget", "bundle-budget: dist içinde ölçülebilir varlık yok\n", "");
+    expect(says).toBe("dist içinde ölçülebilir varlık yok"); // araç adı tekrarlanmaz
+    expect(toolErrorSkipMessage("bundle-budget", 3, undefined, says)).toBe(
+      "⏭ bundle-budget atlandı — dist içinde ölçülebilir varlık yok (çıkış kodu 3; bulgu değil).",
+    );
+  });
+
+  it("aracın açıklaması sabit nottan ÖNCE gelir (kaynağından gelen bilgi daha doğru)", () => {
+    expect(toolErrorSkipMessage("x", 3, "sabit not", "araç ne dediyse")).toContain("araç ne dediyse");
+  });
+
+  it("çıktı yoksa neden üretilmez; uzun çıktı kesilir", () => {
+    expect(toolReasonLine("x", "", "")).toBeUndefined();
+    expect(toolReasonLine("x", "\n\n", "  \n")).toBeUndefined();
+    expect((toolReasonLine("x", "y".repeat(500), "") ?? "").length).toBe(160);
   });
 
   it("REGRESYON KİLİDİ: geri kalan mekanik fazlar bayrağı AÇMAZ (davranışları değişmedi)", () => {

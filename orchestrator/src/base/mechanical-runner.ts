@@ -355,16 +355,40 @@ export function isStubGateCommand(cmd: string): boolean {
 }
 
 /**
+ * SAF: aracın KENDİ söylediği neden — çıktısının ilk anlamlı satırı, kendi ad önekinden arındırılmış.
+ * Aracın adı zaten mesajın başında geçtiği için "bundle-budget: bundle-budget ..." tekrarı olmasın.
+ */
+export function toolReasonLine(name: string, stdout: string, stderr: string): string | undefined {
+  const line = `${stdout}\n${stderr}`
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!line) return undefined;
+  const stripped = line.startsWith(`${name}:`) ? line.slice(name.length + 1).trim() : line;
+  return stripped.slice(0, 160) || undefined;
+}
+
+/**
  * SAF: `tool_error_codes` tetiklendiğinde kullanıcıya yazılacak atlama mesajı.
  *
- * Varsayılan metin "araç düzgün çalışmadı" der ve bu her zaman DOĞRU DEĞİLDİR: stack bağımsız
- * sadeleştirme taraması, taranacak kaynak dosya bulamadığında da bu yola girer ve orada araçta bir
- * sorun yoktur. Yanlış sebep söylemek, atlamanın kendisini görünmez kılmaktan farklı bir dürüstlük
- * kaybıdır — kullanıcı olmayan bir araç sorununu kovalar. Not verilmezse eski metin aynen korunur.
+ * Sabit metin "araç düzgün çalışmadı" diyordu ve bu ÇOĞU ZAMAN yanlıştı: bu yola giren taramaların
+ * büyük kısmı (bundle-budget, perf-web, db-schema-perf, osv, sadeleştirme) "ölçülecek bir şey yok"
+ * demek için de aynı çıkış kodunu kullanıyor. Canlı kanıt (2026-09-12, tarayıcı koşusu): tek ekranda
+ * üç tarama birden "araç/sürüm sorunu" dedi, oysa üç araç da sağlamdı. Yanlış sebep söylemek,
+ * atlamayı gizlemekten farklı bir dürüstlük kaybıdır — kullanıcı olmayan bir arıza kovalar.
+ *
+ * Öncelik: aracın kendi açıklaması > faz kaydındaki sabit not > eski metin. Böylece neden UYDURULMAZ,
+ * kaynağından gelir; hiçbiri yoksa davranış birebir eskisi gibi kalır.
  */
-export function toolErrorSkipMessage(name: string, code: number, note?: string): string {
-  return note
-    ? `⏭ ${name} atlandı — ${note} (çıkış kodu ${code}; bulgu değil).`
+export function toolErrorSkipMessage(
+  name: string,
+  code: number,
+  note?: string,
+  toolSays?: string,
+): string {
+  const reason = toolSays?.trim() || note?.trim();
+  return reason
+    ? `⏭ ${name} atlandı — ${reason} (çıkış kodu ${code}; bulgu değil).`
     : `⏭ ${name} atlandı — araç düzgün çalışmadı (çıkış kodu ${code}; bulgu değil, araç/sürüm sorunu).`;
 }
 
@@ -661,7 +685,15 @@ export class MechanicalRunnerBase {
         detail: `tool_error code=${result.code} cmd="${extra.cmd}"`,
       });
       if (shouldAnnounceSkip(skipKey, "tool_error"))
-        emitChatMessage("system", toolErrorSkipMessage(extra.name, result.code, extra.tool_error_note));
+        emitChatMessage(
+          "system",
+          toolErrorSkipMessage(
+            extra.name,
+            result.code,
+            extra.tool_error_note,
+            toolReasonLine(extra.name, result.stdout, result.stderr),
+          ),
+        );
       return "skipped";
     }
 
