@@ -8,6 +8,7 @@
     "dev:browser": "node browser-bridge/start.mjs",
     "bridge": "node browser-bridge/server.mjs",
     "e2e:smoke": "node e2e/smoke.mjs",
+    "e2e:tour": "node e2e/ui-tour.mjs",
     "e2e:faz11": "node e2e/faz11-simplify.mjs",
     "build": "tsc && vite build",
     "build:all": "npm --prefix orchestrator run build && npm run build",

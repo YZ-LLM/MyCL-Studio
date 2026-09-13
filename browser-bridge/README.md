@@ -37,11 +37,19 @@ Node orchestrator   (Tauri'dekiyle AYNI süreç, aynı sözleşme)
 ```bash
 npm run dev:browser     # köprü + vite (tarayıcı modu) → http://localhost:1420
 npm run e2e:smoke       # uçtan-uca duman testi (kendi yığınını kurar/yıkar)
+npm run e2e:tour        # geniş arayüz gezintisi: her panel açılıp kapanıyor mu (elle)
 npm run e2e:faz11       # Faz 11 stack bağımsız tabanı — GERÇEK faz koşturur (elle, LLM maliyeti var)
 npm run bridge          # yalnız köprü (:1799), ayrı vite ile kullanmak için
 ```
 
-`e2e:smoke` hiçbir faz/LLM tetiklemez, bu yüzden serbestçe koşulabilir.
+`e2e:smoke` hiçbir faz/LLM tetiklemez, bu yüzden serbestçe koşulabilir (ölçüldü: fixture'ında
+`.mycl` bile oluşmadan biter).
+
+`e2e:tour` faz tetiklemez ama uzun sürer; proje açılışı bir süre sonra yaşayan doküman üretimini
+ve yabancı proje analizini başlattığı için küçük bir LLM maliyeti olabilir. Gezinti her paneli
+açıp kapatır, dar pencereyi (1024x768, `tauri.conf.json` minimumu) ve erişilebilirliği ölçer.
+
+
 `e2e:faz11` bilerek bir faz çalıştırır: iki Python dosyasında birebir kopya bloğu olan geçici
 bir proje kurar, Faz 11'i UI'dan tetikler ve dilin kendi aracı (ts-prune) bu projeye
 uygulanamazken stack bağımsız tabanın gerçekten ölçtüğünü denetim kaydından doğrular. Proje

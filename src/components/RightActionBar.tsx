@@ -111,6 +111,7 @@ export function RightActionBar({
         <button
           type="button"
           onClick={onToggleTaskQueueClick}
+          data-testid="task-queue-btn"
           className={`rab-btn${taskQueueOpen ? " rab-active" : ""}`}
           title="İş kuyruğunu aç/kapat"
           aria-label="İş kuyruğu"
@@ -125,6 +126,7 @@ export function RightActionBar({
         <button
           type="button"
           onClick={onSummarizeChat}
+          data-testid="summary-btn"
           className={`rab-btn${summaryOpen ? " rab-active" : ""}`}
           title="Sohbet özeti panelini aç/kapat — yapılanlar, kararlar, hatalar, bekleyenler (ayrı süreç; önemli yerler atlanmaz)"
           aria-label="Sohbet özeti paneli"
@@ -182,6 +184,7 @@ export function RightActionBar({
         <button
           type="button"
           onClick={onToggleLeftClick}
+          data-testid="left-toggle-btn"
           className="rab-btn"
           title={leftPanelsOpen ? "Faz menüsünü gizle" : "Faz menüsünü göster"}
           aria-label={leftPanelsOpen ? "Faz menüsünü gizle" : "Faz menüsünü göster"}
