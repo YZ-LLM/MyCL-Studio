@@ -26,11 +26,25 @@ if (!PROJECT) {
 const BRIDGE_PORT = 1799;
 const APP_URL = "http://localhost:1420";
 
-// Sınırlar — sonsuz/saatlerce koşmasın.
-const WALL_CLOCK_MS = 25 * 60 * 1000; // 25 dk toplam
+// Sınırlar — sonsuz/saatlerce koşmasın. Sıfırdan proje kurmak 25 dakikadan uzun sürer;
+// süre env ile uzatılabilir (varsayılan değişmedi).
+const WALL_CLOCK_MS = (Number(process.env.MYCL_WALL_CLOCK_MIN) || 25) * 60 * 1000;
 const IDLE_STOP_MS = 200 * 1000; // 200s olaysız + koşmuyor → dur
-const MAX_ASKQ = 40;
+const MAX_ASKQ = Number(process.env.MYCL_MAX_ASKQ) || 40;
 const NUDGE_AFTER_MS = 35 * 1000; // açılıştan sonra bu kadar sessizlikte "devam" dürt
+
+/**
+ * Proje açıldıktan sonra gönderilecek İLK mesaj (sıfırdan proje kurarken hedefi verir).
+ * Verilmezse eski davranış: sessizlikte "Kaldığın yerden devam et." dürtüsü.
+ */
+const FIRST_MESSAGE = process.env.MYCL_FIRST_MESSAGE || "";
+
+/**
+ * Faz 6 (UI İnceleme) KULLANICININ fazıdır — uygulamayı insan inceler ve karar verir.
+ * Otomatik sürücü oraya karışırsa kullanıcı adına onay vermiş olur; bu yüzden Faz 6'da
+ * askq yanıtlanmaz, sürücü durur ve durumu bildirir.
+ */
+const STOP_PHASE = 6;
 
 const HIGH_FREQ = new Set(["claude_stream", "history_chunk", "agent_event", "token_totals", "cost_phase", "cost_history"]);
 
@@ -55,6 +69,14 @@ const state = {
   lastEventAt: Date.now(),
   running: false,
   pipelineEnded: null, // {verdict, gateFailures}
+  /**
+   * ⏸️ İki Claude kanalı da kapalıyken (abonelik limiti) MyCL BİLEREK bekler ve reset saatinde
+   * kaldığı yerden otomatik devam eder (llm-outage.ts). Bu bir asılma DEĞİLDİR.
+   * CANLI KANIT (2026-09-13, cüzdan koşusu): sürücü bunu bilmediği için 200 sn sessizlikten sonra
+   * yığını kapattı → orchestrator öldü → 14:00'teki otomatik devam da öldü. Yani sürücünün
+   * "asıldı" teşhisi, MyCL'in doğru davranışını iptal etti.
+   */
+  outageWait: null, // {active, resetMs}
   counts: {},
   errors: [], // {kind, text, ts}
   startedAt: Date.now(),
@@ -100,6 +122,13 @@ function handleEvent(ev) {
     case "askq_resolved":
       state.pendingAskq = null;
       break;
+    case "outage_wait": {
+      const active = Boolean(ev.data?.active);
+      state.outageWait = active ? { active, resetMs: ev.data?.reset_ms } : null;
+      const saat = ev.data?.reset_ms ? new Date(ev.data.reset_ms).toISOString().slice(11, 16) : "bilinmiyor";
+      logLine(active ? `⏸️ LLM erişimi kapalı — MyCL bekliyor (reset ~${saat} UTC). Sürücü BEKLER, kapatmaz.` : "▶ LLM erişimi geri geldi — bekleme bitti.");
+      break;
+    }
     case "pipeline_end":
       state.pipelineEnded = ev.data;
       state.running = false;
@@ -261,11 +290,21 @@ async function main() {
     await page.screenshot({ path: path.join(ARTIFACTS, "drive-opened.png"), fullPage: false });
     snapshotState();
 
+    // Sıfırdan proje: hedefi ilk mesajla ver. Boşsa eski davranış (idle dürtüsü) geçerli.
+    if (FIRST_MESSAGE) {
+      logLine(`➤ ilk mesaj gönderiliyor: "${FIRST_MESSAGE.replace(/\n/g, " ").slice(0, 90)}…"`);
+      await sendCommand({ kind: "user_message", data: { text: FIRST_MESSAGE } }).catch((e) =>
+        logLine(`ilk mesaj hata: ${e.message}`),
+      );
+      await sleep(2000);
+    }
+
     // ── Sürüş döngüsü ──
     let askqAnswered = 0;
-    let nudged = false;
+    let nudged = Boolean(FIRST_MESSAGE); // hedef verildiyse ayrıca "devam" dürtmeye gerek yok
     let lastAnsweredQuestion = null;
     let lastShot = 0;
+    let lastOutageNote = 0;
     const t0 = Date.now();
 
     while (true) {
@@ -293,6 +332,13 @@ async function main() {
 
       // Askq kartı var mı → UI'dan yanıtla (önerileni, yoksa ilkini).
       const cardCount = await page.locator('[data-testid="askq-card"]').count().catch(() => 0);
+      // Faz 6 KULLANICININ fazı: uygulamayı insan inceler. Sürücü burada karar veremez.
+      if (cardCount > 0 && state.phase === STOP_PHASE) {
+        logLine(`🛑 Faz ${STOP_PHASE} (UI İnceleme) sorusu — bu KULLANICININ kararı, sürücü yanıtlamaz.`);
+        await page.screenshot({ path: path.join(ARTIFACTS, "drive-phase6-stop.png") }).catch(() => {});
+        snapshotState({ askqAnswered, endReason: "phase6_user_review" });
+        break;
+      }
       if (cardCount > 0) {
         const q = (await page.locator('[data-testid="askq-card"] .askq-question').first().textContent().catch(() => "")) || "";
         if (q !== lastAnsweredQuestion) {
@@ -308,6 +354,18 @@ async function main() {
           await sleep(1500);
           continue;
         }
+      }
+
+      // ⏸️ MyCL LLM erişimi için BEKLİYORSA sessizlik asılma değildir: dürtme de, kapatma da yapma.
+      // Reset saatinde MyCL kendi devam eder; sürücünün tek işi hayatta kalmak. (Sınırı duvar saati koyar.)
+      if (state.outageWait?.active) {
+        if (now - lastOutageNote > 5 * 60 * 1000) {
+          lastOutageNote = now;
+          const kalan = state.outageWait.resetMs ? Math.max(0, Math.round((state.outageWait.resetMs - now) / 60000)) : null;
+          logLine(`⏸️ bekleniyor${kalan !== null ? ` — resete ~${kalan} dk` : ""}`);
+        }
+        await sleep(5000);
+        continue;
       }
 
       // Açılıştan sonra uzun sessizlik + koşmuyor + askq yok → "devam" dürt (bir kez).
