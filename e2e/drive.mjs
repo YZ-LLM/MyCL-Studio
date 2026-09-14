@@ -305,12 +305,18 @@ async function main() {
     let lastAnsweredQuestion = null;
     let lastShot = 0;
     let lastOutageNote = 0;
+    let outageMs = 0; // LLM erişimi kapalıyken geçen toplam süre — çalışma bütçesinden düşülmez
     const t0 = Date.now();
 
     while (true) {
       const now = Date.now();
-      if (now - t0 > WALL_CLOCK_MS) {
-        logLine("⏱ duvar-saat sınırı (25dk) — duruluyor.");
+      // Duvar saati ÇALIŞMA bütçesidir; LLM erişimi kapalıyken geçen süre iş değildir ve bütçeyi
+      // yememeli. CANLI KANIT (cüzdan koşusu, 2026-09-13): beklemeyi öğrendikten sonra sürücü 128
+      // dakika doğru şekilde bekledi, ama o süre bütçeden düşüldüğü için reset saatinden ÖNCE
+      // kapandı — MyCL'in otomatik devamı yine ölmüş oldu. Bekleme süresi artık hariç tutuluyor.
+      // (Metin de sabit "25dk" diyordu; gerçek sınır env ile değişiyor — yanlış bilgi kalktı.)
+      if (now - t0 - outageMs > WALL_CLOCK_MS) {
+        logLine(`⏱ çalışma süresi sınırı (${Math.round(WALL_CLOCK_MS / 60000)} dk; ${Math.round(outageMs / 60000)} dk bekleme hariç) — duruluyor.`);
         break;
       }
       if (state.pipelineEnded) {
@@ -365,6 +371,7 @@ async function main() {
           logLine(`⏸️ bekleniyor${kalan !== null ? ` — resete ~${kalan} dk` : ""}`);
         }
         await sleep(5000);
+        outageMs += 5000;
         continue;
       }
 
