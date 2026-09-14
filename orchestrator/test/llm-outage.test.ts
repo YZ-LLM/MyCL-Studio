@@ -6,10 +6,16 @@ import {
   cancelLlmOutageWait,
   computeRetryAtMs,
   isLlmOutageWaiting,
+  kickLlmOutageWaitNow,
   LONG_WAIT_PROBE_INTERVAL_MS,
   OUTAGE_RETRY_INTERVAL_MS,
 } from "../src/llm-outage.js";
-import { noteCliRateLimitError, noteRateLimitEvent, resetCliRateLimitState } from "../src/cli-rate-limit.js";
+import {
+  noteCliRateLimitError,
+  noteCliSuccess,
+  noteRateLimitEvent,
+  resetCliRateLimitState,
+} from "../src/cli-rate-limit.js";
 
 describe("computeRetryAtMs (saf)", () => {
   const NOW = 1_000_000_000_000;
@@ -136,5 +142,69 @@ describe("armLlmOutageWait / fire / cancel (sahte zamanlayıcı)", () => {
     armLlmOutageWait("test", resume);
     await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
     expect(isLlmOutageWaiting()).toBe(false); // sonlandı (yeniden kurulmadı)
+  });
+});
+
+// CANLI KANIT (cüzdan koşusu, 2026-09-14): abonelik limiti reset saatinden ÖNCE açıldı; bir CLI çağrısı
+// başarıyla tamamlanıp `noteCliSuccess()` limiti temizledi ve fazlar koşmaya başladı. Ama llm-outage
+// bundan habersizdi: bekleme kurulu kaldı, reset saatini beklemeye devam etti ve `outage_wait` olayı
+// DÖRT kez "bekliyorum" deyip "bitti" hiç demedi. UI şeridi ve olayı tüketen her taraf saatlerce
+// yanlış durum gördü. Bu testler iki modülün artık haberleştiğini kilitler.
+describe("erişim reset saatinden ÖNCE geri gelirse", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetCliRateLimitState();
+    cancelLlmOutageWait();
+  });
+  afterEach(() => {
+    cancelLlmOutageWait();
+    resetCliRateLimitState();
+    vi.useRealTimers();
+  });
+
+  it("başarılı CLI çağrısı beklemeyi ÖNE ALIR (reset saatine kadar oturulmaz)", async () => {
+    const resetSec = Math.floor((Date.now() + 3 * 60 * 60_000) / 1000); // 3 saat sonra
+    noteRateLimitEvent({ status: "allowed", resetsAt: resetSec });
+    noteCliRateLimitError("usage-limit");
+    const resume = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("abonelik limiti", resume);
+    expect(isLlmOutageWaiting()).toBe(true);
+
+    // Erişim erken geri geldi (kredi yüklendi / pencere açıldı).
+    noteCliSuccess();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(resume).toHaveBeenCalledTimes(1); // 3 saat beklenmedi
+    expect(isLlmOutageWaiting()).toBe(false); // bekleme GERÇEKTEN bitti
+  });
+
+  it("öne alınan deneme 'skipped' dönerse bekleme SÜRER (askq asılıyken iş kaybolmaz)", async () => {
+    const resetSec = Math.floor((Date.now() + 3 * 60 * 60_000) / 1000);
+    noteRateLimitEvent({ status: "allowed", resetsAt: resetSec });
+    noteCliRateLimitError("usage-limit");
+    const resume = vi.fn(async () => "skipped" as const);
+    armLlmOutageWait("abonelik limiti", resume);
+    noteCliSuccess();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(isLlmOutageWaiting()).toBe(true); // devam denemesi kaybolmadı
+  });
+
+  it("REGRESYON KİLİDİ: bekleme yokken gelen sinyal hiçbir şey yapmaz", () => {
+    expect(isLlmOutageWaiting()).toBe(false);
+    kickLlmOutageWaitNow();
+    expect(isLlmOutageWaiting()).toBe(false);
+  });
+
+  it("REGRESYON KİLİDİ: bekleme bitince dinleyici bırakılır — sonraki limit temizliği tetiklemez", async () => {
+    const resume = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("test", resume);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(isLlmOutageWaiting()).toBe(false);
+    // Bekleme bittikten sonra gelen limit temizliği yeni bir deneme başlatmamalı.
+    noteRateLimitEvent({ status: "allowed", resetsAt: Math.floor((Date.now() + 60_000) / 1000) });
+    noteCliRateLimitError("usage-limit");
+    noteCliSuccess();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(resume).toHaveBeenCalledTimes(1); // ilk denemeden fazlası yok
   });
 });

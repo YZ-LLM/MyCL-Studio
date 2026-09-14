@@ -12,7 +12,7 @@
 // eski işi değil son kesilen işi devam ettirir). Başarısız devam denemesi kaybolmaz: çağrı zinciri
 // yeniden arm eder ya da buradaki catch 5 dk sonra tekrar kurar.
 
-import { getKnownResetMs } from "./cli-rate-limit.js";
+import { getKnownResetMs, setOnLimitCleared } from "./cli-rate-limit.js";
 import { emit, emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 
@@ -51,6 +51,23 @@ export function isLlmOutageWaiting(): boolean {
   return _timer !== null;
 }
 
+/**
+ * LLM erişimi BAŞKA bir yoldan geri geldi (bir CLI çağrısı rate-limit olmadan tamamlandı) → devam
+ * denemesini reset saatine kadar erteleme, ŞİMDİ yap.
+ *
+ * Neden iptal DEĞİL: `cancelLlmOutageWait()` `_resume`'u da düşürür; o zaman kesintide yarıda kalan
+ * işin otomatik devamı kaybolurdu (tam da bu modülün kapattığı delik). Burada bekleme sonlandırılmaz,
+ * ÖNE ALINIR: deneme başarılıysa `fire()` bayrağı zaten temizler, "skipped" dönerse bekleme kendini
+ * yeniden kurar. Bekleme yoksa hiçbir şey yapmaz (sinyal boşta gelirse olay spam'i olmasın).
+ */
+export function kickLlmOutageWaitNow(): void {
+  if (_timer === null) return;
+  clearTimeout(_timer);
+  _timer = null;
+  log.info("llm-outage", "erişim geri geldi — devam denemesi öne alındı");
+  schedule(0); // MIN_DELAY_MS tabanı uygulanır
+}
+
 function fmtClock(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -85,6 +102,7 @@ async function fire(): Promise<void> {
     // (_timer dolu olur). Gerçek sonlanmada şerit bekleme durumu kapanır.
     if (_timer === null) {
       emitOutageWait(false);
+      setOnLimitCleared(null); // bekleme bitti → dinleyiciyi bırak
     }
   } catch (e) {
     log.warn("llm-outage", "devam denemesi hata verdi", { error: String(e) });
@@ -118,6 +136,8 @@ export function armLlmOutageWait(reason: string, resume: () => Promise<OutageRes
   );
   log.info("llm-outage", "bekle-ve-devam kuruldu", { at, resetKnown: resetMs !== undefined });
   emitOutageWait(true, resetMs);
+  // Erişim reset saatinden ÖNCE geri gelirse (kredi yüklendi / pencere erken açıldı) haberdar ol.
+  setOnLimitCleared(kickLlmOutageWaitNow);
   schedule(at - now);
 }
 
@@ -129,5 +149,6 @@ export function cancelLlmOutageWait(): void {
     log.info("llm-outage", "bekle-ve-devam iptal edildi");
     emitOutageWait(false); // yalnız gerçekten aktifken (kickWorkQueue her tetikte çağırır — boşta event spam'i olmasın)
   }
+  setOnLimitCleared(null);
   _resume = null;
 }

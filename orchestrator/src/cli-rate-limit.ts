@@ -226,6 +226,20 @@ export function noteCliSuccess(): void {
     "✅ Claude Code aboneliği yeniden çalışıyor (limit açılmış / kredi yüklenmiş) — CLI'ye dönüldü.",
   );
   log.info("cli-rate-limit", "limit cleared on successful CLI call (early)");
+  // Bekle-ve-devam kurulmuşsa haber ver: erişim GERİ GELDİ, reset saatini beklemenin anlamı yok.
+  // CANLI KANIT (cüzdan koşusu, 2026-09-14): limit burada temizlendi ve fazlar koştu, ama llm-outage
+  // bundan habersiz olduğu için bekleme bayrağı açık kaldı — `outage_wait` dört kez "bekliyorum"
+  // dedi, "bitti" hiç demedi. UI şeridi ve olayı tüketen herkes saatlerce yanlış durum gördü.
+  _onLimitCleared?.();
+}
+
+/**
+ * "Abonelik limiti temizlendi" dinleyicisi. llm-outage beklemeyi kurarken kaydolur, bekleme bitince
+ * bırakır — iki modül birbirini import etmeden (döngüsel bağımlılık olmadan) haberleşir.
+ */
+let _onLimitCleared: (() => void) | null = null;
+export function setOnLimitCleared(fn: (() => void) | null): void {
+  _onLimitCleared = fn;
 }
 
 /**

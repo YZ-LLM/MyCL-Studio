@@ -165,7 +165,10 @@ Her ajan rolünün backend'i Ayarlar'dan rol başına seçilir:
   erişimi yeniden dener ve açılınca kaldığı işten **otomatik devam eder**. Açılma
   saati çok uzaksa (ör. 7 günlük pencere) o saate kilitlenmez — saatte bir yoklar,
   erken açılırsa hemen sürer (elle devam edersen çift koşum olmaz; iptal edersen
-  bekleme de iptal olur).
+  bekleme de iptal olur). Erişim **beklenen saatten önce** geri gelirse (kredi
+  yüklendi / pencere erken açıldı) MyCL bunu o an fark eder: devam denemesini öne
+  alır ve "LLM erişimi bekleniyor" şeridi kapanır — çalışırken "bekliyorum" yazılı
+  kalmaz.
 
 Karmaşık işlerde Faz 5 birden çok bağımsız tasarım üreten **çok-ajanlı tasarım
 fan-out**'u kullanabilir; birbirinden bağımsız ≥2 modül varsa **Çoklu Ajan
