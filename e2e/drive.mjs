@@ -336,6 +336,30 @@ async function main() {
         snapshotState();
       }
 
+      // SAYFA SPLASH'A DÜŞTÜ MÜ? CANLI KANIT (cüzdan koşusu, 2026-09-14): tarayıcı bir noktada proje
+      // ekranını bırakıp Splash'a döndü. Olay akışı (SSE) tarayıcıdan BAĞIMSIZ olduğu için sürücü
+      // hiçbir şeyin ters gittiğini görmedi: fazlar ilerliyor görünüyordu, ama DOM'da askq kartı YOKTU.
+      // MyCL soru sorup yanıt bekledi, sürücü soruyu göremediği için yanıtlamadı, MyCL'in devam denemesi
+      // "askq asılı" diye skipped döndü → üç saatten uzun karşılıklı kilitlenme. Açık DOM kanıtı olmadan
+      // "soru yok" sonucuna varmak bu yüzden güvenli değil; önce projenin açık olduğunu doğrula.
+      const projeAcik = (await page.locator('[data-testid="app-header"]').count().catch(() => 0)) > 0;
+      if (!projeAcik) {
+        const splashVar = (await page.locator('[data-testid="splash-pick-folder"]').count().catch(() => 0)) > 0;
+        logLine(`⚠ proje ekranı kayboldu (splash=${splashVar}) — yeniden açılıyor.`);
+        await page.screenshot({ path: path.join(ARTIFACTS, "drive-lost-project.png") }).catch(() => {});
+        if (splashVar) {
+          await page.click('[data-testid="splash-pick-folder"]').catch((e) => logLine(`yeniden açma hata: ${e.message}`));
+        } else {
+          await page.goto(APP_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+          await page.waitForSelector('[data-testid="splash-pick-folder"]', { timeout: 20000 }).catch(() => {});
+          await page.click('[data-testid="splash-pick-folder"]').catch(() => {});
+        }
+        await page.waitForSelector('[data-testid="app-header"]', { timeout: 30000 }).catch(() => {});
+        logLine((await page.locator('[data-testid="app-header"]').count().catch(() => 0)) > 0 ? "✅ proje yeniden açıldı." : "💥 proje yeniden AÇILAMADI.");
+        await sleep(2000);
+        continue;
+      }
+
       // Askq kartı var mı → UI'dan yanıtla (önerileni, yoksa ilkini).
       const cardCount = await page.locator('[data-testid="askq-card"]').count().catch(() => 0);
       // Faz 6 KULLANICININ fazı: uygulamayı insan inceler. Sürücü burada karar veremez.
@@ -362,9 +386,21 @@ async function main() {
         }
       }
 
+      // Bekleme bayrağı TAKILI KALABİLİR: canlı kanıt (cüzdan koşusu, 2026-09-14) — outage_wait dört
+      // kez active:true geldi, active:false HİÇ gelmedi; abonelik 11:17'de geri gelip işler koştuğu
+      // hâlde bayrak açık kaldı. Reset saati geçtiyse bayrağı kendimiz düşürürüz, yoksa sonsuz bekleriz.
+      if (state.outageWait?.active && state.outageWait.resetMs && now > state.outageWait.resetMs + 60_000) {
+        logLine("▶ reset saati geçti — bekleme bayrağı düşürüldü (MyCL 'bekleme bitti' yayınlamadı).");
+        state.outageWait = null;
+      }
+
       // ⏸️ MyCL LLM erişimi için BEKLİYORSA sessizlik asılma değildir: dürtme de, kapatma da yapma.
       // Reset saatinde MyCL kendi devam eder; sürücünün tek işi hayatta kalmak. (Sınırı duvar saati koyar.)
-      if (state.outageWait?.active) {
+      // AMA askq bunun ÜSTÜNDEDİR (aşağıda önce ele alınır): MyCL'in devam denemesi askq asılıyken
+      // "skipped" döner ve bekleme SONA ERMEZ; sürücü de beklediği için soruyu yanıtlamazsa iki taraf
+      // birbirini bekler — canlı kanıtta tam 3 saat süren karşılıklı kilitlenme. Soruyu yanıtlamak
+      // LLM harcamaz, sadece tıklamadır; kesinti sırasında da yapılmalıdır.
+      if (state.outageWait?.active && cardCount === 0) {
         if (now - lastOutageNote > 5 * 60 * 1000) {
           lastOutageNote = now;
           const kalan = state.outageWait.resetMs ? Math.max(0, Math.round((state.outageWait.resetMs - now) / 60000)) : null;
