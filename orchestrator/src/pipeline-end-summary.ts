@@ -73,6 +73,30 @@ export function buildPipelineEndLines(input: PipelineEndInput): string[] {
     uyarilar.push("Giriş yapılmadı (giriş bilgisi yer tutucu).");
   }
 
+  // SAHTE YEŞİL KÖK FİX (2026-09-15, canlı kanıt: cüzdan koşusu). Aşağıdaki dal "Sonuç" satırını
+  // hükme değil, UYARI LİSTESİNİN DOLULUĞUNA bakarak seçiyordu. Liste yalnız gate hatası / atlanan
+  // tarama / yer tutucu sinyallerinden dolduğu için, listesi boş olan her FAIL sessizce yeşil dala
+  // düşüyordu. Kritik olan şu: computeVerdict'in ÜÇ sert FAIL yolu da bu listeleri BOŞ bırakır —
+  // kayıt kurcalandı ve boş build dalları sabit boş döner, "pipeline tamamlanmadı" dalında ise koşu
+  // hiç gate'e ulaşmadığı için doğal olarak boştur. Yani hüküm ne kadar ağırsa özet o kadar yeşildi.
+  // Canlı kanıt: Faz 2-17 HİÇ koşmadı, hüküm FAIL geldi, kullanıcı "tüm gate'ler yeşil" okudu.
+  // Hükmün kendi dürüst metni (verdict.summary) zaten üretiliyordu ama hiç okunmuyordu.
+  //
+  // KAPSAM SINIRI: düzeltme YALNIZ bu özet metnindedir. computeVerdict'in PASS/PARTIAL/FAIL
+  // semantiğine dokunulmaz — prototip kaydı (prototype-cache) ve modül stoklaması (module-stock)
+  // o hükme bağlıdır; hükmü sertleştirmek onları sessizce devre dışı bırakırdı.
+  if (verdict && verdict.verdict !== "PASS" && uyarilar.length === 0) {
+    uyarilar.push(verdict.summary);
+  }
+  // Hüküm HİÇ hesaplanamadıysa (denetim kaydı okunamadı) "tüm gate'ler yeşil" demek kanıtsız bir
+  // iddiadır. Çağıran zaten görünür uyarı veriyor ve pipeline_end'i PARTIAL emit ediyor; özet de
+  // aynı gerçeği söylesin (üç kanal birbiriyle çelişmesin).
+  if (!verdict && uyarilar.length === 0) {
+    uyarilar.push(
+      "Pipeline sonu hükmü hesaplanamadı (denetim kaydı okunamadı) — gate sonuçları doğrulanmadı.",
+    );
+  }
+
   if (uyarilar.length > 0) {
     lines.push("• ⚠ Dürüst uyarı: " + uyarilar.join(" "));
     const sonucKelime =

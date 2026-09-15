@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   shouldPreserveIterationState,
   decideIterationStart,
+  resumeEntryPoint,
   resumeWasStale,
 } from "../src/resume-decision.js";
 
@@ -101,5 +102,26 @@ describe("decideIterationStart", () => {
     expect(
       resumeWasStale({ task: { resume_phase: 9, resume_iter_ts: 500 }, stateIterationStartedAt: 500, stateHasIntent: true }),
     ).toBe(false);
+  });
+});
+
+// CANLI KANIT (cüzdan koşusu, 2026-09-15): "devam et" denince Faz 2-17 HİÇ koşmadan pipeline
+// sonlandı. Kök: current_phase=1 iken advanceToNextPhase(0) çağrılıyordu ve PHASE_TRANSITIONS[0]
+// null olduğu için döngü ilk adımda kırılıyordu. Aynı hata 2026-05-25'te run_phase yolunda
+// düzeltilmiş, resume yolunda düzeltilmemişti.
+describe("resumeEntryPoint — 'kaldığın yerden devam' başlangıç noktası", () => {
+  it("Faz 1'de devam → advance DEĞİL, Faz 1 doğrudan başlar (faz atlama yok)", () => {
+    expect(resumeEntryPoint(1)).toEqual({ kind: "phase1" });
+  });
+
+  it("savunma: 0 veya negatif faz da Faz 1'e düşer (advanceToNextPhase(0) asla üretilmez)", () => {
+    expect(resumeEntryPoint(0)).toEqual({ kind: "phase1" });
+    expect(resumeEntryPoint(-1)).toEqual({ kind: "phase1" });
+  });
+
+  it("REGRESYON KİLİDİ: Faz 2 ve üstünde eski davranış aynen (bir önceki fazdan advance)", () => {
+    expect(resumeEntryPoint(2)).toEqual({ kind: "advance", from: 1 });
+    expect(resumeEntryPoint(5)).toEqual({ kind: "advance", from: 4 });
+    expect(resumeEntryPoint(17)).toEqual({ kind: "advance", from: 16 });
   });
 });

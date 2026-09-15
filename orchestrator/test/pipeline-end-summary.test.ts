@@ -95,9 +95,16 @@ describe("pipeline-end-summary · buildPipelineEndLines", () => {
     expect(out).toContain("KISMÎ");
   });
 
-  it("verdict null (audit okunamadı) → smoke/auth temizse yine '✅ Tamamlandı'", () => {
+  // BİLEREK DEĞİŞTİ (2026-09-15): eski test "hüküm hesaplanamadıysa yine ✅ Tamamlandı" davranışını
+  // kilitliyordu. Denetim kaydı okunamamışken "tüm gate'ler yeşil" demek KANITSIZ bir iddiadır ve
+  // tam da yasak olan sahte yeşildir. Yerine geçen mekanizma AYNI işte zaten kurulu: çağıran hem
+  // görünür uyarı yazıyor (index.ts) hem pipeline_end'i PARTIAL emit ediyor; özet artık onlarla
+  // çelişmiyor — üç kanal aynı gerçeği söylüyor.
+  it("verdict null (audit okunamadı) → '✅ Tamamlandı' DEMEZ, dürüstçe doğrulanmadı der", () => {
     const out = lines({ verdict: null });
-    expect(out).toContain("✅ Tamamlandı");
+    expect(out).not.toContain("✅ Tamamlandı");
+    expect(out).toContain("hesaplanamadı");
+    expect(out).toContain("KISMÎ");
   });
 
   it("niyet boş → '(kayıtlı bir niyet özeti yok)'", () => {
@@ -132,5 +139,90 @@ describe("pipeline-end-summary · buildPipelineEndLines", () => {
     expect(out).toContain("Güvenlik taraması atlandı");
     expect(out).toContain("özel olarak test edilmedi");
     expect(out).toContain("KISMÎ");
+  });
+});
+
+// SAHTE YEŞİL KİLİDİ (2026-09-15, canlı kanıt: cüzdan koşusu).
+// "Sonuç" satırı hükme değil, uyarı listesinin doluluğuna bakıyordu. computeVerdict'in ÜÇ sert FAIL
+// yolu da o listeleri BOŞ bırakır (kayıt kurcalandı / boş build sabit boş döner; "tamamlanmadı"
+// yolunda koşu hiç gate'e ulaşmadığı için doğal olarak boştur) → en ağır başarısızlıklar en yeşil
+// dalı tetikliyordu. Kullanıcı, Faz 2-17 hiç koşmadığı hâlde "tüm gate'ler yeşil" okudu.
+// Hatanın aylarca saklanma sebebi tam olarak buydu: mevcut FAIL testi gateFailures'ı DOLU veriyor,
+// yani "FAIL + üç dizi boş" kombinasyonu hiç test edilmemişti.
+describe("sahte yeşil: FAIL ama uyarı listeleri boş", () => {
+  const bosListeler = { gateFailures: [], securitySkipped: [], realAppSkipped: [] };
+
+  it("pipeline TAMAMLANMADI (hiç gate koşmadı) → yeşil YAZILMAZ", () => {
+    const out = lines({
+      verdict: verdict({
+        verdict: "FAIL",
+        completed: false,
+        summary: "Pipeline TAMAMLANMADI (phase-17-complete yok / hard hata).",
+        exitCode: 1,
+        ...bosListeler,
+      }),
+    });
+    expect(out).not.toContain("✅ Tamamlandı");
+    expect(out).toContain("BAŞARISIZ");
+    expect(out).toContain("TAMAMLANMADI"); // hükmün KENDİ dürüst metni yüzeye çıkıyor
+  });
+
+  it("denetim kaydı kurcalanmış → yeşil YAZILMAZ (en güçlü güvenlik sinyali özete ulaşır)", () => {
+    const out = lines({
+      verdict: verdict({
+        verdict: "FAIL",
+        completed: true,
+        summary: "Denetim kaydı kurcalanmış — sonuçlara güvenilemez.",
+        exitCode: 1,
+        ...bosListeler,
+      }),
+    });
+    expect(out).not.toContain("✅ Tamamlandı");
+    expect(out).toContain("kurcalanmış");
+  });
+
+  it("boş build (teslim edilebilir yok) → yeşil YAZILMAZ", () => {
+    const out = lines({
+      verdict: verdict({
+        verdict: "FAIL",
+        completed: true,
+        summary: "Teslim edilebilir çıktı yok (boş build).",
+        exitCode: 1,
+        ...bosListeler,
+      }),
+    });
+    expect(out).not.toContain("✅ Tamamlandı");
+    expect(out).toContain("boş build");
+  });
+
+  it("PARTIAL + boş listeler → yeşil YAZILMAZ, KISMÎ der", () => {
+    const out = lines({
+      verdict: verdict({
+        verdict: "PARTIAL",
+        completed: true,
+        summary: "Bazı boyutlar doğrulanmadı.",
+        ...bosListeler,
+      }),
+    });
+    expect(out).not.toContain("✅ Tamamlandı");
+    expect(out).toContain("KISMÎ");
+  });
+
+  it("REGRESYON KİLİDİ: PASS + temiz → eskisi gibi '✅ Tamamlandı'", () => {
+    const out = lines({ verdict: verdict({ verdict: "PASS", completed: true, ...bosListeler }) });
+    expect(out).toContain("✅ Tamamlandı");
+  });
+
+  it("REGRESYON KİLİDİ: uyarı zaten varken hükmün metni İKİNCİ kez eklenmez", () => {
+    const out = lines({
+      verdict: verdict({
+        verdict: "FAIL",
+        completed: false,
+        summary: "tekrarlanmamalı-imza",
+        gateFailures: [{ phase: 16, event: "phase-16-fail" }],
+      }),
+    });
+    expect(out).toContain("BAŞARISIZ");
+    expect(out).not.toContain("tekrarlanmamalı-imza");
   });
 });

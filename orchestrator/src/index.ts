@@ -98,6 +98,7 @@ import {
 import {
   shouldPreserveIterationState,
   decideIterationStart,
+  resumeEntryPoint,
   resumeWasStale,
 } from "./resume-decision.js";
 import { decideTaskCompletion } from "./task-completion.js";
@@ -4669,9 +4670,19 @@ async function executeDispatchedIntent(
       "system",
       `Akış Faz ${runtime.state.current_phase}'ten devam ediyor.`,
     );
-    await advanceToNextPhase(
-      (runtime.state.current_phase - 1) as PhaseId,
-    );
+    // v15.7 (2026-05-25) Faz 0 bug'ının İKİZ YOLU — o gün yalnız `run_phase` yolu düzeltilmişti.
+    // PHASE_TRANSITIONS[0] = null olduğu için current_phase=1 iken advanceToNextPhase(0) döngüyü
+    // HİÇBİR faz koşturmadan doğrudan pipeline sonuna düşürür. CANLI KANIT (cüzdan koşusu,
+    // 2026-09-15): kullanıcı "devam et" dedi, log aynı saniyede "Akış Faz 1'ten devam ediyor" ve
+    // `pipeline_end` yazdı; Faz 2-17 hiç çalışmadı ama özet "tamamlandı" göründü.
+    const giris = resumeEntryPoint(runtime.state.current_phase);
+    if (giris.kind === "phase1") {
+      const intentForResume =
+        runtime.state.intent_summary ?? "(devam: niyet tekrar açıklanacak)";
+      await restartPhase1WithIntent(intentForResume);
+      return;
+    }
+    await advanceToNextPhase(giris.from as PhaseId);
     return;
   }
 

@@ -86,3 +86,23 @@ export function resumeWasStale(p: {
     p.task.resume_iter_ts !== undefined && p.task.resume_iter_ts === p.stateIterationStartedAt;
   return !(tsMatch && p.stateHasIntent);
 }
+
+/**
+ * SAF: "kaldığın yerden devam et" hangi noktadan başlamalı?
+ *
+ * `advanceToNextPhase(prev)` semantiği "prev fazından SONRAKİNE geç"tir. Faz 1 için prev=0 olur, ama
+ * PHASE_TRANSITIONS[0] = null (Faz 0 pipeline dışı, tek başına çalışan hata ayıklama fazı) → döngü
+ * HİÇBİR faz koşturmadan doğrudan pipeline sonuna düşer.
+ *
+ * CANLI KANIT (cüzdan koşusu, 2026-09-15): kullanıcı devam dedi; log aynı saniyede hem "Akış Faz
+ * 1'ten devam ediyor" hem `pipeline_end` yazdı. Faz 2-17 hiç çalışmadı, üstelik özet "tamamlandı"
+ * göründü. Aynı hata 2026-05-25'te `run_phase` yolunda düzeltilmiş, bu yolda düzeltilmemişti —
+ * kararı saf bir fonksiyona taşımak iki yolun bir daha ayrışmasını engeller.
+ */
+export type ResumeEntry = { kind: "phase1" } | { kind: "advance"; from: number };
+
+export function resumeEntryPoint(currentPhase: number): ResumeEntry {
+  // Faz 1 (ve savunma olarak 1'in altı) advanceToNextPhase ile ifade EDİLEMEZ → Faz 1 doğrudan başlar.
+  if (currentPhase <= 1) return { kind: "phase1" };
+  return { kind: "advance", from: currentPhase - 1 };
+}
