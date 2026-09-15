@@ -376,6 +376,17 @@ async function main() {
           // Önerilen seçenek (askq-option-suggested) varsa onu, yoksa ilk seçeneği tıkla.
           const suggested = page.locator('[data-testid="askq-card"] .askq-option-suggested').first();
           const target = (await suggested.count().catch(() => 0)) > 0 ? suggested : page.locator('[data-testid="askq-card"] [data-testid="askq-option"]').first();
+          // TUM secenekleri logla: surucu "onerilen, yoksa ilk" diye koru korune seciyor ve bu
+          // baglam gerektiren sorularda yanlis yone sokabiliyor (canli kanit, 2026-09-15: "hata
+          // hizmet kesintisiydi, ne kontrol edeyim?" sorusunda olmayan bir uygulama hatasi
+          // kovalatti). Secilmeyen secenekleri de gormek, yanlis yonu ERKEN fark ettirir.
+          const tumSecenekler = await page
+            .locator('[data-testid="askq-card"] [data-testid="askq-option"]')
+            .allTextContents()
+            .catch(() => []);
+          if (tumSecenekler.length > 1) {
+            logLine(`   seçenekler: ${tumSecenekler.map((s) => `"${s.trim().slice(0, 45)}"`).join(" | ")}`);
+          }
           const chosen = (await target.textContent().catch(() => "")) || "?";
           await target.click({ timeout: 5000 }).catch((e) => logLine(`askq tıklama hata: ${e.message}`));
           askqAnswered++;
