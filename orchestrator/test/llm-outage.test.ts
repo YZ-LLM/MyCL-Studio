@@ -208,3 +208,73 @@ describe("erişim reset saatinden ÖNCE geri gelirse", () => {
     expect(resume).toHaveBeenCalledTimes(1); // ilk denemeden fazlası yok
   });
 });
+
+// CANLI KANIT (cüzdan koşusu, 2026-09-16): kullanıcı "DUR, Faz 5'e dön ve eksik giriş dosyasını yaz"
+// dedi; mesaj kesintiye denk geldiği için devamı bekleme yuvasına saklandı. ÜÇ SANİYE sonra Faz 7
+// kota hatası verdi ve aynı yuvayı kendi devamıyla ezdi — üstelik `_timer` dolu olduğu için fonksiyon
+// sessizce döndü, tek satır uyarı çıkmadı. Erişim açıldığında her seferinde Faz 7 koştu; kullanıcının
+// talimatı hiç işlenmedi ve yutulduğu GÖRÜLMEDİ. Bu testler önceliği ve görünürlüğü kilitler.
+describe("kullanıcı talimatı vs sistem devamı önceliği", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetCliRateLimitState();
+    cancelLlmOutageWait();
+  });
+  afterEach(() => {
+    cancelLlmOutageWait();
+    resetCliRateLimitState();
+    vi.useRealTimers();
+  });
+
+  it("sistem devamı, bekleyen KULLANICI talimatını EZEMEZ", async () => {
+    const kullanici = vi.fn(async () => "resumed" as const);
+    const sistem = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("kullanıcı mesajı", kullanici, { source: "user" });
+    armLlmOutageWait("faz 7 kota", sistem); // varsayılan source: "system"
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(kullanici).toHaveBeenCalledTimes(1);
+    expect(sistem).not.toHaveBeenCalled();
+  });
+
+  it("kullanıcının YENİ talimatı eskisinin yerine geçer (en son söz geçerli)", async () => {
+    const ilk = vi.fn(async () => "resumed" as const);
+    const yeni = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("ilk mesaj", ilk, { source: "user" });
+    armLlmOutageWait("ikinci mesaj", yeni, { source: "user" });
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(yeni).toHaveBeenCalledTimes(1);
+    expect(ilk).not.toHaveBeenCalled();
+  });
+
+  it("REGRESYON KİLİDİ: sistem→sistem ezmesi eskisi gibi (son kesilen iş devam eder)", async () => {
+    const eski = vi.fn(async () => "resumed" as const);
+    const son = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("faz 5", eski);
+    armLlmOutageWait("faz 7", son);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(son).toHaveBeenCalledTimes(1);
+    expect(eski).not.toHaveBeenCalled();
+  });
+
+  it("kullanıcı talimatı işlendikten SONRA sistem devamı yeniden kurulabilir", async () => {
+    const kullanici = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("kullanıcı mesajı", kullanici, { source: "user" });
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(kullanici).toHaveBeenCalledTimes(1);
+    expect(isLlmOutageWaiting()).toBe(false);
+
+    const sistem = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("faz 7", sistem);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(sistem).toHaveBeenCalledTimes(1); // yuva boşaldı, sistem artık kurabiliyor
+  });
+
+  it("iptal sonrası sahiplik sıfırlanır — sistem devamı yine kurulabilir", async () => {
+    armLlmOutageWait("kullanıcı mesajı", vi.fn(async () => "resumed" as const), { source: "user" });
+    cancelLlmOutageWait();
+    const sistem = vi.fn(async () => "resumed" as const);
+    armLlmOutageWait("faz 7", sistem);
+    await vi.advanceTimersByTimeAsync(OUTAGE_RETRY_INTERVAL_MS + 1000);
+    expect(sistem).toHaveBeenCalledTimes(1);
+  });
+});

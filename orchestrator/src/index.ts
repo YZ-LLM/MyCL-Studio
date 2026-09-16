@@ -4037,7 +4037,10 @@ async function handleUserMessageInner(text: string): Promise<void> {
         emitChatMessage("system", "🔄 LLM erişimini yeniden deniyorum — açıldıysa mesajını kaldığım yerden yanıtlayacağım.");
         await respondAndExecute();
         return "resumed";
-      });
+      // KULLANICI TALİMATI: sistem işi (faz devamı) bunun üzerine YAZAMAZ. Canlı kanıtta tam bu
+      // yuva, üç saniye sonra gelen Faz 7 kota devamıyla sessizce ezildi ve kullanıcının "DUR,
+      // Faz 5'e dön" talimatı hiç işlenmedi.
+      }, { source: "user" });
     } else {
       emitChatMessage(
         "system",

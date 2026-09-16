@@ -422,6 +422,20 @@ async function main() {
         continue;
       }
 
+      // FAZ 6'DA DÜRTME YOK. CANLI KANIT (cüzdan koşusu, 2026-09-16): Faz 6 kullanıcı incelemesini
+      // beklerken sürücü "Kaldığın yerden devam et." dürtüsünü gönderdi; Faz 6 sözleşmesi bu ifadeyi
+      // ONAY jetonu sayıyor ("Beğendiysen → tamam / devam et / onayla"). Sonuç: uygulama BOZUKKEN
+      // (main.jsx hiç yazılmamış, ekran bomboş) inceleme otomatik onaylandı ve akış Faz 7'ye geçti.
+      // Faz 6 KULLANICININ fazıdır; sürücü orada sessiz kalır — dürtmek onay vermektir.
+      if (state.phase === STOP_PHASE && !nudged && !state.running) {
+        if (now - lastOutageNote > 5 * 60 * 1000) {
+          lastOutageNote = now;
+          logLine(`🛑 Faz ${STOP_PHASE} (UI İnceleme) kullanıcıyı bekliyor — sürücü dürtmez (dürtmek onay sayılır).`);
+        }
+        await sleep(5000);
+        continue;
+      }
+
       // Açılıştan sonra uzun sessizlik + koşmuyor + askq yok → "devam" dürt (bir kez).
       if (!nudged && !state.running && !state.pendingAskq && now - state.lastEventAt > NUDGE_AFTER_MS) {
         nudged = true;

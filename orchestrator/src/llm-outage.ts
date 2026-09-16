@@ -46,6 +46,8 @@ export type OutageResumeResult = "resumed" | "skipped";
 
 let _timer: NodeJS.Timeout | null = null;
 let _resume: (() => Promise<OutageResumeResult | void>) | null = null;
+/** Saklı devamın sahibi: kullanıcı talimatı mı, sistemin kendi işi mi (öncelik kararı buna bakar). */
+let _resumeSource: "user" | "system" = "system";
 
 export function isLlmOutageWaiting(): boolean {
   return _timer !== null;
@@ -84,6 +86,7 @@ async function fire(): Promise<void> {
   _timer = null;
   const resume = _resume;
   _resume = null;
+  _resumeSource = "system";
   if (!resume) return;
   // "🔄 deneniyor" mesajı BURADA BASILMAZ (MAHKEME 2026-07-23): resume "skipped" dönebilir (meşgul/askq —
   // gerçek deneme yok) ve bekleme sessizce yeniden kurulur; her 5 dk mesaj basmak spam olurdu. Gerçek
@@ -118,9 +121,39 @@ async function fire(): Promise<void> {
 /**
  * Bekle-ve-devam kur. Tek uçuş: zaten bekleniyorsa zamanlayıcı korunur, yalnız resume güncellenir
  * (en son kesilen iş devam ettirilir; mesaj tekrarı yok). reason kullanıcıya kısaca gösterilir.
+ *
+ * KULLANICI TALİMATI SİSTEM İŞİNE EZDİRİLMEZ (2026-09-16, canlı kanıt: cüzdan koşusu). `_resume` TEK
+ * yuvadır ve eskiden KOŞULSUZ üzerine yazılıyordu. Gerçek olay: kullanıcının "DUR, Faz 5'e dön ve
+ * eksik giriş dosyasını yaz" mesajı kesintiye denk geldi ve devamı buraya saklandı; ÜÇ SANİYE sonra
+ * Faz 7 kota hatası verip aynı yuvayı kendi devamıyla ezdi. Üstelik `_timer` dolu olduğu için
+ * fonksiyon sessizce döndü — tek bir satır uyarı bile çıkmadı. Erişim geri geldiğinde her seferinde
+ * kullanıcının talimatı değil Faz 7 koştu; kullanıcı talimatının yutulduğunu göremedi.
+ *
+ * Kural: `source: "user"` ile saklanan devam, bir `"system"` devamı tarafından EZİLEMEZ. Sistem işi
+ * kaybolmaz — kullanıcı talimatı öncelikli kalır ve sistem kendi yolundan yeniden kurulur. Ezme ya da
+ * reddetme her durumda GÖRÜNÜR (KATI #4: sessiz düşüş yok).
  */
-export function armLlmOutageWait(reason: string, resume: () => Promise<OutageResumeResult | void>): void {
+export function armLlmOutageWait(
+  reason: string,
+  resume: () => Promise<OutageResumeResult | void>,
+  opts: { source?: "user" | "system" } = {},
+): void {
+  const source = opts.source ?? "system";
+  if (_resume !== null && _resumeSource === "user" && source === "system") {
+    // Kullanıcının bekleyen talimatı korunur. Sistem devamı REDDEDİLİR ve bu görünür söylenir.
+    log.info("llm-outage", "sistem devamı reddedildi — kullanıcı talimatı bekliyor", { reason: reason.slice(0, 80) });
+    emitChatMessage(
+      "system",
+      "ℹ️ Erişim açılınca ÖNCE senin son talimatını işleyeceğim; sistemin kendi devam denemesi onun arkasına alındı.",
+    );
+    return;
+  }
+  if (_resume !== null && _resumeSource === "user" && source === "user") {
+    // Kullanıcının ikinci talimatı birincinin yerine geçer (en son söz geçerli) — ama sessizce değil.
+    emitChatMessage("system", "ℹ️ Bekleyen talimatın yenisiyle değiştirildi — erişim açılınca sonuncusu işlenecek.");
+  }
   _resume = resume;
+  _resumeSource = source;
   if (_timer !== null) return;
   const now = Date.now();
   const resetMs = getKnownResetMs(now);
@@ -151,4 +184,5 @@ export function cancelLlmOutageWait(): void {
   }
   setOnLimitCleared(null);
   _resume = null;
+  _resumeSource = "system";
 }
