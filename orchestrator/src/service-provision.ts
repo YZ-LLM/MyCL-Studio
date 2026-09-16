@@ -33,7 +33,7 @@ export async function launchWithProvision(
   projectRoot: string,
   candidates: Array<{ cmd: string; ports: number[] }>,
   timeoutMs: number,
-  opts: { stackId?: StackId | null } = {},
+  opts: { stackId?: StackId | null; depsOnly?: boolean } = {},
 ): Promise<{ result: DevServerChainResult; provisionAudit?: string }> {
   const crashOf = (r: DevServerChainResult): string =>
     r.attempts.map((a) => a.output).filter((o): o is string => !!o).join("\n---\n");
@@ -92,6 +92,13 @@ export async function launchWithProvision(
   // ROUND 2 — EKSİK SERVİS (DB/cache). Crash'teki ECONNREFUSED :port → servis; docker-compose ile tamamla veya rehber.
   // Tablo VERİ dosyasından (services.json — yok/bozuksa THROW, görünür; KATI #4); imza eşleşmesi stack'in KENDİ
   // manifestleri üzerinde (profil manifest_files; profil yoksa package.json = eski davranış).
+  // `depsOnly`: yalnız bağımlılık kurulumu istendi — SERVİS tamamlama (docker-compose ile konteyner
+  // ayağa kaldırma) yapılmaz. UI incelemesi gibi yollar bu helper'ı bağımlılık garantisi için çağırır;
+  // orada sessizce konteyner açmak sözleşmenin dışına taşan bir davranış genişlemesi olurdu.
+  if (opts.depsOnly) {
+    return { result, provisionAudit: auditParts.length ? auditParts.join("; ") : undefined };
+  }
+
   const services = await loadKnownServices();
   const manifestText = profile ? await readManifestText(projectRoot, profile.manifest_files) : pkgDeps;
   const missing = detectMissingService(crashOut, manifestText, services);
@@ -267,6 +274,22 @@ export function detectMissingDeps(
  * npm-install-koşulmamış) durumunu crash'ten ÖNCE yakalar. Kısmi/bozuk kurulumu (dizin var, gerçek girdi var ama
  * eksik) reaktif yol (detectMissingDeps, crash imzası) yakalar — o stack-format'ından bağımsız. fs yan etkili.
  */
+/**
+ * Bu projede bağımlılıklar kurulu DEĞİL mi? Dizin adı stack profilinden gelir (KATI #1: hardcode
+ * yok). Profil deps dizini bildirmiyorsa (global cache kullanan python/go/rust) soru yanıtlanamaz →
+ * false döner, yani "kurulu değil" diye YANLIŞ bir iddiada bulunulmaz.
+ */
+export async function projectDepsMissing(
+  projectRoot: string,
+  stackId: StackId | null,
+): Promise<boolean> {
+  if (!stackId) return false;
+  const profile = await loadProfile(stackId).catch(() => null);
+  const depsDir = profile?.deps_dir;
+  if (!depsDir) return false;
+  return depsDirNeedsInstall(projectRoot, depsDir);
+}
+
 export async function depsDirNeedsInstall(projectRoot: string, depsDir: string): Promise<boolean> {
   let entries: string[];
   try {

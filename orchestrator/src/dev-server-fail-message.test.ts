@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildDevServerFailMessage } from "./dev-server-launcher.js";
+import { buildDevServerFailMessage, delegatedScripts } from "./dev-server-launcher.js";
 
 // DONMUŞ HEDEF #1: otonom ("hiçbir şey sorma") modda MyCL kullanıcıya "sen çöz + 'devam et' yaz" DEMEMELİ.
 // Canlı bug: Faz 5 dev-server fail'de bu park talimatı KOŞULSUZ basılıyordu. Bu testler mod-farkındalığı kilitler.
@@ -81,5 +81,66 @@ describe("buildDevServerFailMessage — otonom mod farkındalığı", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// CANLI KANIT (cüzdan projesi, 2026-09-16): kullanıcı üç gün uygulamayı hiç açamadı. Tanı
+// "npm run dev Vite başlatmıyor, dev:frontend ekleyin" dedi — oysa `dev:frontend: vite` ZATEN
+// vardı; dev script sadece onu `concurrently "npm:dev:frontend"` ile çağırıyordu. Gerçek sebep
+// node_modules'un hiç olmamasıydı. Yanlış tanı, gerçek sebebi gizledi.
+describe("tanı: delegasyon ve en temel sebep", () => {
+  it("delegatedScripts: concurrently npm:x ve npm run x gövdelerini çıkarır", () => {
+    const scripts = {
+      dev: 'concurrently "npm:dev:backend" "npm:dev:frontend"',
+      "dev:backend": "node --watch server/index.js",
+      "dev:frontend": "vite",
+      other: "npm run dev:frontend",
+    };
+    expect(delegatedScripts(scripts.dev, scripts).sort()).toEqual(
+      ["node --watch server/index.js", "vite"].sort(),
+    );
+    expect(delegatedScripts(scripts.other, scripts)).toEqual(["vite"]);
+  });
+
+  it("delegatedScripts: delegasyon yoksa boş; tanımsız ada boş", () => {
+    expect(delegatedScripts("vite", { dev: "vite" })).toEqual([]);
+    expect(delegatedScripts("npm:yok-boyle-bir-script", { dev: "x" })).toEqual([]);
+  });
+
+  it("delege edilmiş vite GÖRÜLÜR: 'dev:frontend ekleyin' önerisi ARTIK çıkmaz", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "mycl-devfail-"));
+    await fs.writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({
+        scripts: {
+          dev: 'concurrently "npm:dev:backend" "npm:dev:frontend"',
+          "dev:backend": "node server.js",
+          "dev:frontend": "vite",
+        },
+      }),
+    );
+    const msg = await buildDevServerFailMessage(dir, -1, 5173, 15000, true);
+    expect(msg).not.toContain("Vite/Next/Webpack-dev-server başlatmıyor");
+    expect(msg).not.toContain('"dev:frontend": "vite"');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("bağımlılıklar kurulu değilse EN ÖNCE o söylenir (script tahminleri yanıltmasın)", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "mycl-devfail-"));
+    await fs.writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { dev: "some-runner" } }));
+    const msg = await buildDevServerFailMessage(dir, -1, 5173, 15000, true, { depsMissing: true });
+    expect(msg).toContain("Bağımlılıklar kurulu değil");
+    expect(msg).not.toContain("Vite/Next/Webpack-dev-server başlatmıyor");
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("faz etiketi çağırandan gelir; verilmezse eski metin (Faz 5) korunur", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "mycl-devfail-"));
+    await fs.writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { dev: "vite" } }));
+    expect(await buildDevServerFailMessage(dir, -1, 5173, 15000, true)).toContain("Faz 5:");
+    expect(
+      await buildDevServerFailMessage(dir, -1, 5173, 15000, true, { phaseLabel: "Faz 6" }),
+    ).toContain("Faz 6:");
+    await fs.rm(dir, { recursive: true, force: true });
   });
 });

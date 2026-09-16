@@ -12,8 +12,8 @@ import {
   buildDevServerFailMessage,
   openBrowser,
   stopActiveDevServer,
-  tryDevServerChain,
 } from "./dev-server-launcher.js";
+import { launchWithProvision, projectDepsMissing } from "./service-provision.js";
 import {
   detectStack,
   expectedPortsFor,
@@ -106,7 +106,19 @@ export async function restartDevServerSimple(
     ports: expectedPortsFor(cmd, scripts, state.project_root),
   }));
   emitChatMessage("system", "🔄 Dev server yeniden başlatılıyor…");
-  const result = await tryDevServerChain(state.project_root, candidates, 20_000);
+  // KURULUM GARANTİSİ (2026-09-16, canlı kanıt: cüzdan projesi). Eskiden burada doğrudan
+  // `tryDevServerChain` çağrılıyordu; bağımlılıkları kuran proaktif kontrol yalnız
+  // `launchWithProvision` içinde olduğu için bu yol onu hiç görmüyordu. Bağımlılık kurulumunu
+  // garanti eden TEK yer Faz 5'ti ve Faz 5 dört kez `degraded` ile düşünce (kurulum bloğundan önce
+  // `return "fail"`) kurulum hiç koşmadı; beşinci turda Faz 5 kapsam dışı kalınca ihtimal bitti.
+  // Sonuç: `node_modules` hiç oluşmadı, ZORUNLU olan Faz 6 incelemesi uygulamayı hiç açamadı ve
+  // kullanıcı günlerce çalışan bir uygulama göremedi. Artık dev server'ı başlatan bu yol da
+  // kurulumu kendi garanti ediyor — "Faz 5 koşmadı → kurulum yok" boşluğu yapısal olarak kapandı.
+  // `depsOnly`: yalnız bağımlılık; servis (docker-compose) tamamlama BU yolda yapılmaz.
+  const { result } = await launchWithProvision(state.project_root, candidates, 20_000, {
+    stackId: stack,
+    depsOnly: true,
+  });
   if (result.ok && result.handle) {
     state.dev_server_pid = result.handle.pid;
     replaceActiveWatcher({
@@ -126,11 +138,15 @@ export async function restartDevServerSimple(
     openBrowser(`http://localhost:${result.handle.port}?theme=dark`);
     return { ok: true, port: result.handle.port };
   }
+  // Tanı, ÇAĞIRAN fazın adıyla ve gerçek bağımlılık durumuyla üretilir: Faz 6 incelemesinden gelen
+  // hata "Faz 5" dememeli, ve bağımlılıklar hiç kurulmamışsa sebep script yapısı diye gösterilmemeli.
   const diag = await buildDevServerFailMessage(
     state.project_root,
     -1,
     candidates[0]?.ports[0] ?? 5173,
     20_000,
+    false,
+    { phaseLabel: "Faz 6", depsMissing: await projectDepsMissing(state.project_root, stack) },
   );
   emitChatMessage(
     "error",

@@ -469,6 +469,24 @@ export async function tryDevServerChain(
  * Test edilebilir (saf fonksiyon, sadece fs.readFile + isProcessAlive yan
  * etkileri); SDK call yok.
  */
+/**
+ * SAF: bir npm script'inin DELEGE ettiği diğer script gövdeleri.
+ *
+ * `concurrently "npm:dev:backend" "npm:dev:frontend"`, `npm run dev:frontend`, `yarn dev:frontend`
+ * gibi yollarla asıl iş başka script'e devredilir. Yalnız çağıran script'in metnine bakmak, gerçek
+ * dev sunucusunu (alt script'teki `vite`) görmemeye ve kullanıcıya zaten var olan bir şeyi
+ * "ekleyin" diye önermeye yol açar (canlı kanıt: cüzdan projesi, 2026-09-16).
+ */
+export function delegatedScripts(
+  script: string,
+  scripts: Record<string, string>,
+): string[] {
+  const adlar = new Set<string>();
+  for (const m of script.matchAll(/npm:([A-Za-z0-9:_-]+)/g)) adlar.add(m[1]!);
+  for (const m of script.matchAll(/(?:npm run|yarn|pnpm run)\s+([A-Za-z0-9:_-]+)/g)) adlar.add(m[1]!);
+  return [...adlar].map((ad) => scripts[ad]).filter((v): v is string => typeof v === "string");
+}
+
 export async function buildDevServerFailMessage(
   projectRoot: string,
   pid: number,
@@ -477,23 +495,35 @@ export async function buildDevServerFailMessage(
   /** Otonom ("hiçbir şey sorma") mod açık mı — açıksa manuel "sen çöz + 'devam et' yaz" park talimatı BASILMAZ
    *  (DONMUŞ HEDEF #1: otonom modda kullanıcıya iş bırakma). MyCL failPhase ile oto-çözer veya dürüstçe durur. */
   neverAsk = false,
+  /** Tanıyı üreten faz + bağımlılık durumu. `phaseLabel` verilmezse "Faz 5" (eski davranış) yazılır;
+   *  Faz 6 incelemesinden gelen hata "Faz 5" demesin. `depsMissing` çağıranın stack profiliyle
+   *  hesapladığı gerçek: bağımlılık dizini yok/boş. */
+  opts: { phaseLabel?: string; depsMissing?: boolean } = {},
 ): Promise<string> {
   // package.json scripts.dev + scripts.start oku — parse fail veya dosya yoksa boş
   let devScript = "";
   let startScript = "";
+  let allScripts: Record<string, string> = {};
   try {
     const pkgRaw = await fs.readFile(join(projectRoot, "package.json"), "utf-8");
     const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
-    devScript = String(pkg.scripts?.dev ?? "");
-    startScript = String(pkg.scripts?.start ?? "");
+    allScripts = pkg.scripts ?? {};
+    devScript = String(allScripts.dev ?? "");
+    startScript = String(allScripts.start ?? "");
   } catch {
     // package.json yok veya bozuk — boş
   }
-  const hasVite = /(^|\s|"|')(vite|next|webpack-dev-server|wmr|astro\s+dev)(\s|$)/.test(devScript);
+  // CANLI KANIT (cüzdan projesi, 2026-09-16): dev script'i
+  // `concurrently "npm:dev:backend" "npm:dev:frontend"` idi ve `dev:frontend` ZATEN `vite`'tı; ama bu
+  // regex yalnız dev script'in KENDİ metnine baktığı için false döndü ve kullanıcıya "dev:frontend
+  // ekleyin" diye ZATEN VAR OLAN bir öneri yapıldı. Delegasyonu izle: dev script başka script'leri
+  // çağırıyorsa (npm:x / npm run x / yarn x) onların gövdeleri de taranır.
+  const DEV_SERVER_RE = /(^|\s|"|')(vite|next|webpack-dev-server|wmr|astro\s+dev)(\s|$)/;
+  const hasVite = DEV_SERVER_RE.test(devScript) || delegatedScripts(devScript, allScripts).some((b) => DEV_SERVER_RE.test(b));
   const alive = pid > 0 ? isProcessAlive(pid) : false;
 
   const lines: string[] = [];
-  lines.push(`❌ Faz 5: Dev server başlatılamadı.`);
+  lines.push(`❌ ${opts.phaseLabel ?? "Faz 5"}: Dev server başlatılamadı.`);
   lines.push(`   pid=${pid}, beklenen port=${port}, timeout=${Math.floor(timeoutMs / 1000)}s.`);
   lines.push(``);
   lines.push(
@@ -502,7 +532,14 @@ export async function buildDevServerFailMessage(
   lines.push(`package.json "dev" script: \`${devScript || "(yok)"}\``);
   lines.push(``);
 
-  if (!devScript && startScript) {
+  // EN TEMEL SEBEP ÖNCE (2026-09-16): bağımlılıklar hiç kurulmamışsa hiçbir script çalışamaz ve
+  // script yapısı üzerine kurulan her tahmin yanıltıcı olur. Canlı kanıtta kullanıcı tam bu yüzden
+  // "dev script'iniz vite başlatmıyor" okudu; oysa script doğruydu, eksik olan kurulumdu.
+  if (opts.depsMissing) {
+    lines.push(`⚠ Bağımlılıklar kurulu değil — hiçbir script çalışamaz. Gerçek sebep bu.`);
+    lines.push(`MyCL kurulumu kendi denedi; başarısız olduysa nedeni yukarıdaki çıktıda.`);
+    lines.push(`Elle: \`cd ${projectRoot} && npm install\``);
+  } else if (!devScript && startScript) {
     // Backend / start-tabanlı proje (dev script YOK ama start VAR — ör. Express `node ./bin/www`). Vite/frontend
     // önerme ALAKASIZ. Gerçek çöküş nedeni (eksik bağımlılık / çalışmayan servis) yukarıdaki çıktıda + MyCL onu
     // otomatik tamamlamaya çalıştı (deps kurulumu / servis provision); son söz gerçek hataya yönlendirir.
