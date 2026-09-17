@@ -281,6 +281,18 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
       // SADECE kaynak taranır (semgrep .next'i default'ta ELEMEZ; node_modules'u eler).
       extra_scans: [
         {
+          // GİRİŞ ZİNCİRİ BÜTÜNLÜĞÜ (2026-09-17, canlı kanıt: cüzdan projesi). MyCL 27 dosyalık bir
+          // uygulama yazdı ama `index.html`'in çağırdığı giriş dosyası hiç yazılmamıştı; React
+          // hiçbir yere bağlanmadı, ekran bomboş kaldı ve HİÇBİR kapı bunu görmedi — "teslim
+          // edilebilir var mı?" ölçütü klasörde görünür bir şey arıyor, içeriğe bakmıyor.
+          // Ölçtüğü şey bir OLGU: "bu HTML diskte olmayan yerel bir dosyayı çağırıyor." HTML
+          // semantiği her ekosistemde aynı → stack bağımsız. Çözemediği her referansı ATLAR.
+          name: "entry-graph",
+          cmd: `node "${securityToolPath("entry-graph-check.mjs")}" .`,
+          tool_error_codes: [3],
+          tool_error_note: "çözülebilir HTML giriş referansı bulunamadı, bu boyut ölçülemedi",
+        },
+        {
           name: "code-quality",
           cmd: `semgrep --config "${qualityRulePath("code-quality.yml")}" . ${SEMGREP_EXCLUDE_FLAGS} --error --quiet`,
           scoped_cmd_template: `semgrep --config "${qualityRulePath("code-quality.yml")}" {files} ${SEMGREP_EXCLUDE_FLAGS} --error --quiet`,

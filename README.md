@@ -59,7 +59,7 @@ ortak controller'a dayanır:
 | 7 | Veritabanı Tasarımı | production-schema |
 | 8 | BDD + TDD Uygulama | codegen |
 | 9 | Risk İncelemesi | qa-askq |
-| 10 | Lint | mechanical |
+| 10 | Lint + kod kalitesi + mimari sınır + **giriş zinciri bütünlüğü** | mechanical |
 | 11 | Sadeleştirme — dilin kendi aracı + **stack bağımsız kopya kod ölçümü** (her dilde koşar) | mechanical |
 | 12 | Performans — sayfa skoru (Lighthouse) + paket boyutu bütçesi + DB index | mechanical |
 | 13 | Güvenlik — semgrep + gizli anahtar + bağımlılık zafiyeti (osv) + DB şeması | mechanical |
@@ -67,6 +67,13 @@ ortak controller'a dayanır:
 | 15 | Entegrasyon Testleri | mechanical |
 | 16 | E2E Testler (UI varsa) | mechanical |
 | 17 | Sızma Testi — **otomatik koşar** (hızlı profil); tam tarama 🛡️ butonuyla | — |
+
+**Faz 10 uygulamanın giriş zincirini de ölçer:** Bir HTML dosyası diskte olmayan yerel bir script
+ya da stil dosyası çağırıyorsa yakalanır — çünkü o durumda uygulama açılır ama ekran boş kalır.
+Gerçek olay: 27 dosyalık bir uygulama yazıldı, `index.html`'in çağırdığı giriş dosyası hiç
+yazılmamıştı ve hiçbir kapı bunu görmedi. Ölçüm HTML semantiğine dayanır, hiçbir dile bağlı değildir.
+Çözülemeyen her referans (dış URL, şablon motoru yer tutucusu, sorgu dizesi, build çıktısı) atlanır;
+şüphede "ölçemedim" denir, asla yanlış alarm verilmez.
 
 **Faz 11 hiçbir dile bağlı değil:** Sadeleştirme boyutu eskiden yalnız `ts-prune` ile ölçülüyordu,
 yani pratikte sadece TypeScript projelerinde koşabiliyordu. Artık dilin kendi aracının ALTINA
