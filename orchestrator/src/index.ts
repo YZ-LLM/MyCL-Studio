@@ -27,7 +27,7 @@ import {
   type SelectedModels,
 } from "./config.js";
 import { loadOrInit, save as saveState } from "./state.js";
-import { ensurePendingIterationDir, currentSpecPath } from "./devs-paths.js";
+import { ensurePendingIterationDir, currentSpecPath, specRequiredMessage } from "./devs-paths.js";
 import {
   runBehaviorConsentGate,
   resolveConsentAnswer,
@@ -823,6 +823,16 @@ const _declinedModelUpgrades = new Set<string>();
 // YZLLM 2026-06-11: kullanıcı çalışan fazı başka faza yönlendirdi → abort tamamlanınca BU fazdan OTOMATİK devam
 // (tekrar yazdırma yok). failPhase'in user-abort dalı tüketir.
 let _resumePhaseAfterAbort: PhaseId | null = null;
+/**
+ * Kullanıcı BİLEREK başka bir faza yönlendirdi ve o faz HENÜZ BAŞLAMADI.
+ *
+ * `_resumePhaseAfterAbort`'tan farkı ÖMRÜ: o bayrak `failPhase` içinde hemen tüketiliyor, oysa
+ * kuyruk uzlaştırması AYNI olay turunda koşuyor ve o ana kadar "bu bir kullanıcı yönlendirmesiydi"
+ * bilgisi ortadan kalkmış oluyor. CANLI KANIT (cüzdan koşusu, 2026-09-17): Faz 7 koşarken Faz 5
+ * istendi; uzlaştırma bunu terminal hata sayıp işi tavana çıkardı ve iterasyon durumunu sildi —
+ * tek satır uyarı bile çıkmadan. Bu bayrak, hedef faz GERÇEKTEN başlayana kadar yaşar.
+ */
+let _userRedirectPending: PhaseId | null = null;
 
 /** Hata imzası: faz + lastFailReason'ın ilk ~160 char'ı (sayılar normalize → port/pid/ts gürültüsü eşleşmeyi bozmasın). */
 function failSignature(n: PhaseId, ctrl?: FailReasonHolder): string {
@@ -1644,10 +1654,16 @@ async function failPhase(
     if (resume !== null) {
       _resumePhaseAfterAbort = null;
       setTimeout(() => {
-        void handleRunPhase(resume, "advance").catch((e) =>
-          log.error("orchestrator", "resume-after-abort failed", e),
-        );
+        void handleRunPhase(resume, "advance").catch((e) => {
+          // Devam denemesi patlarsa yönlendirme bayrağı ASILI KALMASIN → kuyruk kilitlenir
+          // (iş bir daha pending'e düşmez). Bayrağın iki çıkışı var: hedef faz başladı, ya da burası.
+          _userRedirectPending = null;
+          log.error("orchestrator", "resume-after-abort failed", e);
+        });
       }, 100);
+    } else {
+      // Yönlendirme vardı ama devam planlanamadı → bayrağı bırakma (yaşayan tek sahibi kalmadı).
+      _userRedirectPending = null;
     }
     return;
   }
@@ -6289,6 +6305,9 @@ async function reconcileAndDrainTasks(): Promise<void> {
       const root = runtime.state.project_root;
       if (runtime.currentTaskId) {
         if (isPipelineParked()) break; // kullanıcı cevabı bekleniyor → dur
+        // Kullanıcı başka bir faza yönlendirdi ve o faz henüz başlamadı → bu terminal hata DEĞİL.
+        // İşi pending'e düşürmek ve durumu silmek, kullanıcının verdiği hedefi de silmek olurdu.
+        if (_userRedirectPending !== null) break;
         // park DEĞİL → iş tamamlanmadan durdu (terminal fail/abort) → düşür, devam et.
         const id = runtime.currentTaskId;
         runtime.currentTaskId = null;
@@ -6302,6 +6321,7 @@ async function reconcileAndDrainTasks(): Promise<void> {
         // Kesintide durumu koru + işe "hangi fazda kaldı" yaz; erişim dönünce oradan sürer.
         const keep = shouldPreserveIterationState({
           outageWaiting: isLlmOutageWaiting(),
+          userRedirect: _userRedirectPending !== null,
           currentPhase: runtime.state.current_phase,
           hasIntent: Boolean(runtime.state.intent_summary),
           iterationStartedAt: runtime.state.iteration_started_at,
@@ -6333,6 +6353,21 @@ async function reconcileAndDrainTasks(): Promise<void> {
           updated_at: Date.now(),
         };
         await saveState(runtime.state);
+        // SESSİZ DÜŞÜŞ YOK (KATI #4). Bu blok iterasyonun niyetini, spec onayını ve artefakta giden
+        // TEK İŞARETÇİYİ (iteration_started_at) siliyor; canlı kanıtta bu sessizce olduğu için
+        // kullanıcı neden "Faz 4'ü tamamla" dendiğini anlayamadı ve var olan spec'i yanlış yerde aradı.
+        emitChatMessage(
+          "system",
+          "🔄 Yarıda kalan iterasyonun durumu temizlendi (niyet + spec onayı sıfırlandı) — sonraki iş " +
+            "bayat durumu devralmasın diye. Üretilmiş dosyalar SİLİNMEDİ, yerinde duruyor.",
+        );
+        await appendAuditModule(root, {
+          ts: Date.now(),
+          phase: 1,
+          event: "iteration-state-reset",
+          caller: "mycl-orchestrator",
+          detail: `terminal_fail task=${id}`,
+        }).catch(() => {});
         clearClarifyLog(root); // yarım işin clarify Q&A'sı sonraki denemeye SIZMASIN
         await emitQueueChangedFor(root);
       }
@@ -9797,6 +9832,7 @@ async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<voi
     if ("abort" in runtime.controller && typeof runtime.controller.abort === "function") {
       _userInitiatedAbort = true;
       _resumePhaseAfterAbort = phaseId as PhaseId;
+      _userRedirectPending = phaseId as PhaseId; // hedef faz başlayana kadar yaşar (uzlaştırma korur)
       runtime.controller.abort();
     }
     emitChatMessage(
@@ -9869,6 +9905,10 @@ async function handleRunPhase(
   // MAHKEME HIGH (2026-07-17): kullanıcı elle devam ediyor → bekle-ve-devam zamanlayıcısı iptal
   // (aksi halde reset saatinde insan + zamanlayıcı AYNI fazı iki kez koşturabilirdi).
   cancelLlmOutageWait();
+  // YÖNLENDİRME BAYRAĞININ TEK TEMİZLEME NOKTASI. Hedef faz artık gerçekten başlıyor → koruma
+  // görevini tamamladı. Başka yerde temizlemek hatayı geri getirir (uzlaştırma yine terminal hata
+  // sayar); hiç temizlememek kuyruğu kilitler (iş bir daha pending'e düşmez). Bu yüzden tek nokta.
+  if (_userRedirectPending === phaseId) _userRedirectPending = null;
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
     return;
@@ -9889,10 +9929,7 @@ async function handleRunPhase(
     try {
       await import("node:fs/promises").then((m) => m.access(specMdPath));
     } catch {
-      emitChatMessage(
-        "system",
-        `⚠ **Faz ${phaseId}** için \`.mycl/spec.md\` (Faz 4 çıktısı) gerekli. Önce Faz 4'ü tamamla.`,
-      );
+      emitChatMessage("system", specRequiredMessage(phaseId, runtime.state));
       return;
     }
   }

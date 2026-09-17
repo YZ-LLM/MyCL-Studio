@@ -125,3 +125,58 @@ describe("resumeEntryPoint — 'kaldığın yerden devam' başlangıç noktası"
     expect(resumeEntryPoint(17)).toEqual({ kind: "advance", from: 16 });
   });
 });
+
+// CANLI KANIT (cüzdan koşusu, 2026-09-17): Faz 7 koşarken kullanıcı Faz 5'i istedi. Bu bir
+// YÖNLENDİRMEDİR, terminal hata değil — ama kuyruk uzlaştırması "park değil + çalışan iş var"
+// durumunu koşulsuz terminal hata sayıp iterasyon durumunu sıfırladı (current_phase=1,
+// intent_summary=undefined, spec_approved=false, iteration_started_at=undefined) ve deneme sayacını
+// tavana çıkardı. Sıfırlama artefaktı silmedi; artefakta giden TEK İŞARETÇİYİ sildi — o işaretçiyi
+// Faz 5/8/9, düşman testi ve davranış onayı kapısı birlikte okuduğu için beşi aynı anda körleşti.
+describe("shouldPreserveIterationState — kullanıcı yönlendirmesi üçüncü durum", () => {
+  const taban = { currentPhase: 7, hasIntent: true, iterationStartedAt: 1789492860037 };
+
+  it("kullanıcı yönlendirmesi: durum KORUNUR (terminal hata sayılmaz)", () => {
+    const r = shouldPreserveIterationState({ ...taban, outageWaiting: false, userRedirect: true });
+    expect(r.preserve).toBe(true);
+    expect(r.resumePhase).toBe(7);
+    expect(r.resumeIterTs).toBe(1789492860037);
+    expect(r.why).toContain("kullanıcı yönlendirmesi");
+  });
+
+  it("yönlendirme, kesinti bayrağından BAĞIMSIZ önceliklidir", () => {
+    expect(shouldPreserveIterationState({ ...taban, outageWaiting: true, userRedirect: true }).preserve).toBe(true);
+  });
+
+  it("yönlendirmede niyet/damga eksikse bile durum korunur — kullanıcı hedefi zaten söyledi", () => {
+    const r = shouldPreserveIterationState({
+      currentPhase: 1,
+      hasIntent: false,
+      outageWaiting: false,
+      userRedirect: true,
+    });
+    expect(r.preserve).toBe(true);
+    expect(r.resumeIterTs).toBeUndefined(); // olmayan damga UYDURULMAZ
+  });
+
+  it("REGRESYON KİLİDİ: yönlendirme YOKKEN terminal hata davranışı birebir aynı", () => {
+    const r = shouldPreserveIterationState({ ...taban, outageWaiting: false });
+    expect(r.preserve).toBe(false);
+    expect(r.why).toContain("terminal hata");
+  });
+
+  it("REGRESYON KİLİDİ: kesinti dalı aynen çalışır (yönlendirme yokken)", () => {
+    const r = shouldPreserveIterationState({ ...taban, outageWaiting: true, userRedirect: false });
+    expect(r.preserve).toBe(true);
+    expect(r.why).toContain("sağlayıcı kesintisi");
+  });
+
+  it("REGRESYON KİLİDİ: kesintide niyet yoksa yine korunmaz", () => {
+    const r = shouldPreserveIterationState({
+      currentPhase: 1,
+      hasIntent: false,
+      outageWaiting: true,
+      userRedirect: false,
+    });
+    expect(r.preserve).toBe(false);
+  });
+});

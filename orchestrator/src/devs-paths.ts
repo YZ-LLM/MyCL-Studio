@@ -116,3 +116,22 @@ export function withDevsPath(
   const rel = join("devs", "_pending", formatIterationTs(ts), devsArtifactName(config.output_artifact_path));
   return { ...config, output_artifact_path: rel };
 }
+
+/**
+ * SAF: "bu faz için spec gerekli" mesajı — GERÇEKTEN aranan yolu söyler.
+ *
+ * CANLI ZARAR (2026-09-17): mesaj sabit `.mycl/spec.md` yazıyordu ama kontrol `currentSpecPath` ile
+ * `devs/_pending/<ts>/iter-spec.md` yapılıyordu. Kullanıcı (ve MyCL'i inceleyen asistan) var olan
+ * bir dosyayı yanlış yerde arayıp "spec kayboldu, sahte yeşil" diye YANLIŞ teşhis koydu — spec
+ * aslında devs yolunda sapasağlam duruyordu (sha256'sı onay kaydıyla byte-aynı). Yanlış yol söyleyen
+ * bir mesaj, sessiz kalmaktan daha zararlı: insanı yanlış tarafa koşturuyor.
+ */
+export function specRequiredMessage(
+  phaseId: number,
+  state: Pick<State, "iteration_started_at">,
+): string {
+  return (
+    `⚠ **Faz ${phaseId}** için \`${currentSpecRelPath(state)}\` (Faz 4 çıktısı) gerekli. ` +
+    `Önce Faz 4'ü tamamla.`
+  );
+}

@@ -5,6 +5,7 @@ import {
   pendingSpecPath,
   currentSpecPath,
   currentSpecRelPath,
+  specRequiredMessage,
   withDevsPath,
 } from "../src/devs-paths.js";
 import type { ProductionConfig } from "../src/types.js";
@@ -69,5 +70,32 @@ describe("devs-paths — Faz 2/3 spec yazım/okuma yolları", () => {
 
     // iteration_started_at yok → config DEĞİŞMEDEN döner (güvenli fallback)
     expect(withDevsPath(spec, { project_root: "/proj" }).output_artifact_path).toBe(".mycl/spec.md");
+  });
+});
+
+// CANLI ZARAR (2026-09-17): "Faz N için spec gerekli" mesajı sabit `.mycl/spec.md` yazıyordu, ama
+// kontrol `currentSpecPath` ile `devs/_pending/<ts>/iter-spec.md` yapılıyordu. Var olan bir dosya
+// yanlış yerde arandı ve "spec kayboldu, sahte yeşil" diye YANLIŞ teşhis üretildi — spec devs
+// yolunda sapasağlamdı (sha256'sı onay kaydıyla byte-aynı). Mesaj artık aranan yolu söylüyor.
+describe("specRequiredMessage — mesaj GERÇEKTEN aranan yolu söyler", () => {
+  it("iterasyon damgası varken devs yolunu söyler (.mycl/spec.md DEMEZ)", () => {
+    const msg = specRequiredMessage(5, { iteration_started_at: 1789492860037 });
+    expect(msg).toContain("devs/_pending/");
+    expect(msg).toContain("iter-spec.md");
+    expect(msg).not.toContain(".mycl/spec.md");
+    expect(msg).toContain("Faz 5");
+  });
+
+  it("damga yokken eski yolu söyler (geriye uyum)", () => {
+    const msg = specRequiredMessage(8, { iteration_started_at: undefined });
+    expect(msg).toContain(".mycl/spec.md");
+    expect(msg).toContain("Faz 8");
+  });
+
+  it("KİLİT: mesajın söylediği yol, kontrolün baktığı yolla AYNI kaynaktan gelir", () => {
+    const state = { project_root: "/tmp/proje", iteration_started_at: 1789492860037 };
+    // Kontrol currentSpecPath'e bakar; mesaj currentSpecRelPath'ten üretilir. İkisi ayrışırsa
+    // kullanıcı var olan dosyayı yanlış yerde arar — bu test o ayrışmayı yakalar.
+    expect(currentSpecPath(state)).toContain(currentSpecRelPath(state));
   });
 });

@@ -14,6 +14,17 @@
 export function shouldPreserveIterationState(p: {
   /** llm-outage bekleme aktif mi (sağlayıcıya erişim yok, otomatik devam kurulu). */
   outageWaiting: boolean;
+  /**
+   * Kullanıcı BİLEREK başka bir faza yönlendirdi mi (sidebar'dan faz çalıştırma / açık talimat)?
+   *
+   * CANLI KANIT (cüzdan koşusu, 2026-09-17): Faz 7 koşarken Faz 5 istendi. Bu bir yönlendirmedir,
+   * terminal hata DEĞİL — ama akış onu terminal hata sayıp iterasyon durumunu sıfırladı
+   * (current_phase=1, intent_summary=undefined, spec_approved=false, iteration_started_at=undefined)
+   * ve deneme sayacını tavana çıkardı. Sıfırlama artefaktı silmedi; artefakta giden TEK İŞARETÇİYİ
+   * (iteration_started_at) sildi — o işaretçiyi Faz 5/8/9, düşman testi ve davranış onayı kapısı
+   * birlikte okuduğu için beşi aynı anda körleşti. Hepsi tek satır uyarı bile çıkmadan oldu.
+   */
+  userRedirect?: boolean;
   /** İşin kesildiği faz. */
   currentPhase: number;
   /** Niyet üretilmiş mi (yoksa korunacak anlamlı ilerleme yok). */
@@ -21,6 +32,16 @@ export function shouldPreserveIterationState(p: {
   /** İterasyon başlangıç damgası — resume'da eşleşme anahtarı. */
   iterationStartedAt?: number;
 }): { preserve: boolean; resumePhase?: number; resumeIterTs?: number; why: string } {
+  // Kullanıcı yönlendirmesi ÜÇÜNCÜ durumdur: ne terminal hata ne sağlayıcı kesintisi. Kullanıcı
+  // nereye gideceğini zaten söyledi; durumu silmek onun verdiği hedefi de siler.
+  if (p.userRedirect) {
+    return {
+      preserve: true,
+      resumePhase: p.currentPhase,
+      ...(p.iterationStartedAt !== undefined ? { resumeIterTs: p.iterationStartedAt } : {}),
+      why: "kullanıcı yönlendirmesi — terminal hata değil, iterasyon durumu korunuyor",
+    };
+  }
   if (!p.outageWaiting) {
     return { preserve: false, why: "kesinti yok — terminal hata: bayat durum sonraki işe sızmasın" };
   }
