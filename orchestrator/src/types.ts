@@ -476,6 +476,14 @@ export interface State {
    */
   pending_ui_review?: boolean;
   /**
+   * Faz 6 incelemesinde uygulamanın ekranı BOŞ göründü mü (görsel tarama `nearlyBlank`).
+   * Onay kapısı bunu okur: boş bir ekran "gördüm ve beğendim" anlamına gelemez, bu yüzden çıplak
+   * bir "tamam/devam et" onayı doğrudan kabul edilmez — bir kez açıkça sorulur.
+   * CANLI KANIT (cüzdan koşusu, 2026-09-16): giriş dosyası hiç yazılmadığı için ekran bomboştu;
+   * inceleme yine de onaylandı ve akış ilerledi (sahte yeşil).
+   */
+  ui_review_blank?: boolean;
+  /**
    * v15.7 (2026-05-27): Phase 7 onaylanınca yazılan migration SQL dosyalarının
    * relative path listesi. Phase 8 başlangıcında bu migration'lar uygulanır
    * (apply komutu stack profile'a göre). Boş array Phase 7 atlandıysa veya

@@ -226,6 +226,12 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   atlandıysa) ve E2E gerçek bir doğrulama yapmadıysa, iterasyonun niyeti çalışan
   uygulamada gerçekten karşılandı mı diye kontrol eder — böylece "birim yeşil ama
   arayüz bozuk" iş sessizce "tamamlandı" olmaz.
+- **Boş ekran onaylanamaz** (Faz 6) — UI incelemesinde sayfa neredeyse tek renk
+  görünüyorsa (uygulama hiç açılmamış olabilir) çıplak bir `tamam` onayı doğrudan
+  kabul edilmez: MyCL bir kez "ekran boş görünüyor, yine de onaylıyor musun?" diye
+  sorar. Bu bir kapı değil bilinçli onaydır — ısrar edersen ikinci onay geçer.
+  Gerçek olay: uygulamanın giriş dosyası hiç yazılmamıştı, ekran bomboştu ve
+  inceleme yine de "onaylandı" sayılıp akış ilerlemişti.
 - **Düşman-gözü inceleme** (Faz 9) — bulan ve çürüten ajanlar birlikte çalışır;
   yanlış-pozitif bulgular elenir, gerçek riskler otomatik düzeltmeye yönlenir.
 - **Mahkeme** (müfettiş ↔ orkestratör) — opsiyonel bağımsız denetim katmanı: bir

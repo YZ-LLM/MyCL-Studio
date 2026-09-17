@@ -29,7 +29,10 @@ import type { State } from "./types.js";
  * tabanıyla piksel karşılaştırır; "hiçbir şey sorma" modunda kullanıcı gözünün emniyet ağı.
  * Taban terfisi advanceToNextPhase(6)'da (onay/oto-geçiş) — burada yalnız çekim + rapor.
  */
-async function buildVisualReport(state: State, port: number | undefined): Promise<string> {
+async function buildVisualReport(
+  state: State,
+  port: number | undefined,
+): Promise<{ text: string; nearlyBlank: boolean }> {
   try {
     const url = `http://localhost:${port ?? 5173}`;
     const result = await captureAndCompare(url, state.project_root);
@@ -42,10 +45,20 @@ async function buildVisualReport(state: State, port: number | undefined): Promis
         ? `baseline=${result.baselineExisted} routes=${result.diffs.length} changed=${result.diffs.filter((d) => d.status !== "unchanged").length}`
         : (result.skippedReason ?? "").slice(0, 120),
     }).catch(() => {});
-    return formatVisualReport(result);
+    return {
+      text: formatVisualReport(result),
+      // BOŞ SAYFA BAYRAĞI (2026-09-17): eskiden yalnız rapor METNİNE gömülüyordu, hiçbir karar bunu
+      // okumuyordu. Canlı kanıt (cüzdan koşusu): `/` neredeyse tek renkti — uygulama hiç mount
+      // olmuyordu çünkü giriş dosyası yazılmamıştı — ve inceleme yine de onaylandı. Bayrak artık
+      // state'e taşınıyor ve onay kapısı onu görüyor.
+      nearlyBlank: result.diffs.some((d) => d.nearlyBlank),
+    };
   } catch (err) {
     log.warn("phase-6", "görsel karşılaştırma raporu kurulamadı (non-fatal)", { error: String(err) });
-    return "🖼️ **Görsel karşılaştırma:** yapılamadı (beklenmedik hata; incelemeyi engellemez).";
+    return {
+      text: "🖼️ **Görsel karşılaştırma:** yapılamadı (beklenmedik hata; incelemeyi engellemez).",
+      nearlyBlank: false, // ölçülemedi → "boş" İDDİA EDİLMEZ (yanlış alarm yasağı)
+    };
   }
 }
 
@@ -124,7 +137,8 @@ export class Phase6Controller {
     // hiçbir şeyi bloklamaz. Hata olursa görünür "taranamadı" (sessiz değil). Bütünüyle best-effort.
     const a11yReport = await buildA11yReport(this.state, dev.port);
     // 🖼️ Görsel önce/sonra (iterasyonlar arası) SALT-RAPOR — aynı desen; never-ask'ta da görünür.
-    const visualReport = await buildVisualReport(this.state, dev.port);
+    const visual = await buildVisualReport(this.state, dev.port);
+    const visualReport = visual.text;
 
     emitChatMessage(
       "system",
@@ -138,13 +152,30 @@ export class Phase6Controller {
         "• İptal etmek istiyorsan → `iptal` / `vazgeç` → pipeline durur.",
     );
 
+    // Boş ekran bayrağını park durumuna taşı — onay kapısı (approve_ui) bunu okuyacak.
+    this.statePatch = { ...this.statePatch, ui_review_blank: visual.nearlyBlank };
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 6,
       event: "phase-6-deferred",
       caller: "mycl-orchestrator",
+      detail: visual.nearlyBlank ? "blank_screen" : "",
     });
 
     return "deferred";
   }
+}
+
+/**
+ * SAF: Faz 6 onayı geldi — boş ekran yüzünden bir kez teyit istenmeli mi?
+ *
+ * Boş bir ekran "gördüm ve beğendim" anlamına gelemez; çıplak onay bir kez geri çevrilir. Ama bu bir
+ * gate DEĞİL: kullanıcı ısrar ederse (bayrak temizlendiği için) ikinci onay geçer — irade ezilmez.
+ * CANLI KANIT (cüzdan koşusu, 2026-09-16): giriş dosyası hiç yazılmadığı için ekran bomboştu, görsel
+ * tarama bunu tespit edip rapora yazdı, ama hiçbir karar okumadı ve inceleme onaylandı (sahte yeşil).
+ */
+export type BlankScreenGate = { kind: "confirm-needed" } | { kind: "accept" };
+
+export function blankScreenGate(state: { ui_review_blank?: boolean }): BlankScreenGate {
+  return state.ui_review_blank ? { kind: "confirm-needed" } : { kind: "accept" };
 }

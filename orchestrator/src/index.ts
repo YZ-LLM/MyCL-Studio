@@ -200,7 +200,7 @@ import { Phase4Controller } from "./phase-4.js";
 import { resolveRiskFixTarget } from "./risk-fix-routing.js";
 import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller } from "./phase-5.js";
-import { Phase6Controller } from "./phase-6.js";
+import { blankScreenGate, Phase6Controller } from "./phase-6.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import { runFullTest, formatFullTestReport, fixTasksFromReport, type FullTestDeps } from "./full-test.js";
 import { runMaintenance, formatMaintenanceReport } from "./maintenance.js";
@@ -4694,6 +4694,30 @@ async function executeDispatchedIntent(
     log.info("orchestrator", "phase 6 approve_ui", {
       current_phase: runtime.state.current_phase,
     });
+    // BOŞ EKRAN KAPISI (2026-09-17, canlı kanıt: cüzdan koşusu). Görsel tarama ekranın neredeyse tek
+    // renk olduğunu ZATEN tespit etmiş ve rapora yazmıştı, ama hiçbir karar onu okumuyordu: uygulama
+    // giriş dosyası hiç yazılmadığı için hiç mount olmuyordu, ekran bomboştu ve inceleme yine de
+    // onaylandı — akış "onaylandı" diye ilerledi (sahte yeşil). Boş bir ekran "gördüm ve beğendim"
+    // anlamına GELEMEZ, bu yüzden çıplak onay bir kez geri çevrilir ve durum açıkça sorulur.
+    // Bu bir gate değil, bilinçli onay kapısı: kullanıcı ısrar ederse ikinci onay GEÇER (irade ezilmez).
+    if (blankScreenGate(runtime.state).kind === "confirm-needed") {
+      runtime.state = { ...runtime.state, ui_review_blank: undefined, updated_at: Date.now() };
+      await saveState(runtime.state);
+      await appendAuditModule(runtime.state.project_root, {
+        ts: Date.now(),
+        phase: 6,
+        event: "phase-6-blank-confirm",
+        caller: "mycl-orchestrator",
+        detail: text.slice(0, 120),
+      }).catch(() => {});
+      emitChatMessage(
+        "system",
+        "⚠️ Ekran BOŞ görünüyor (sayfa neredeyse tek renk) — uygulama çalışmıyor olabilir. Boş bir ekranı onaylamak, işi doğrulamadan ilerletmek olur.\n" +
+          "• Gerçekten böyle kalsın istiyorsan onayını **bir kez daha** yaz — geçerim.\n" +
+          "• Beklediğin bu değilse ne görmen gerektiğini yaz; düzeltip tekrar açayım.",
+      );
+      return;
+    }
     await appendAuditModule(runtime.state.project_root, {
       ts: Date.now(),
       phase: 6,
