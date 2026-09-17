@@ -305,6 +305,13 @@ async function main() {
     let lastAnsweredQuestion = null;
     let lastShot = 0;
     let lastOutageNote = 0;
+    // YIĞIN GERÇEKTEN AYAKTA MI? CANLI KANIT (2026-09-17): önceki koşudan kalan bir vite süreci
+    // portu tuttuğu için yeni vite "Port 1420 is already in use" ile hiç başlamadı; köprü ayaktaydı,
+    // sağlık kontrolü geçti, sürücü sorunsuz sandı ve ÜÇ DAKİKA boşa bekledi (olay sayısı: sıfır).
+    // Sağlık kontrolü "port cevap veriyor" der, "benim başlattığım süreç çalışıyor" DEMEZ. Bu yüzden
+    // gerçek sinyal olay akışıdır: hiç olay gelmiyorsa erkenden görünür hata ver, sessizce bekleme.
+    const BOS_AKIS_MS = 60_000;
+    let bosAkisBildirildi = false;
     let outageMs = 0; // LLM erişimi kapalıyken geçen toplam süre — çalışma bütçesinden düşülmez
     const t0 = Date.now();
 
@@ -325,6 +332,15 @@ async function main() {
       }
       if (askqAnswered >= MAX_ASKQ) {
         logLine("askq sınırı (40) — duruluyor.");
+        break;
+      }
+
+      // Hiç olay gelmediyse yığın aslında ayağa kalkmamıştır — sessiz beklemek yerine söyle ve dur.
+      if (!bosAkisBildirildi && Object.keys(state.counts).length === 0 && now - t0 > BOS_AKIS_MS) {
+        bosAkisBildirildi = true;
+        logLine("💥 Orkestratörden HİÇ olay gelmedi — yığın ayağa kalkmamış olabilir (port çakışması?).");
+        await page.screenshot({ path: path.join(ARTIFACTS, "drive-no-events.png") }).catch(() => {});
+        snapshotState({ endReason: "no_events" });
         break;
       }
 
