@@ -13,7 +13,7 @@ import { declaredArtifact, artifactExists } from "../src/phase-artifacts.js";
 import { checkPreconditions } from "../src/phase-preconditions.js";
 import { PHASE_SPECS } from "../src/phase-registry.js";
 
-const TS = 1789492860037; // 2026-09-15-20-21-00
+const TS = 1789492860037; // klasör adı yerel saatten üretilir → testte SABİT yazılmaz
 let root = "";
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "mycl-precond-"));
@@ -27,6 +27,16 @@ const yaz = async (rel: string, icerik = "# spec\n") => {
   const p = join(root, rel);
   await fs.mkdir(dirname(p), { recursive: true });
   await fs.writeFile(p, icerik);
+};
+
+/**
+ * Faz 4 artefaktını ÇÖZÜCÜNÜN söylediği yere yaz.
+ * Klasör adı yerel saatten üretiliyor; testte sabit yazmak saat dilimine bağımlılık yaratır
+ * (ilk yazımda tam bu oldu: yerel yeşil, CI kırmızı). Yol tek kaynaktan alınır.
+ */
+const yazSpec = async (icerik = "# spec\n"): Promise<void> => {
+  const d = declaredArtifact(faz4(), { project_root: root, iteration_started_at: TS })!;
+  await yaz(d.rel, icerik);
 };
 
 describe("declaredArtifact — yazıcıyla AYNI yolu çözer", () => {
@@ -48,7 +58,7 @@ describe("declaredArtifact — yazıcıyla AYNI yolu çözer", () => {
 
 describe("artifactExists — üç durumlu", () => {
   it("dosya varsa 'yes'", async () => {
-    await yaz("devs/_pending/2026-09-15-20-21-00/iter-spec.md");
+    await yazSpec();
     expect(await artifactExists(faz4(), { project_root: root, iteration_started_at: TS })).toBe("yes");
   });
 
@@ -57,7 +67,7 @@ describe("artifactExists — üç durumlu", () => {
   });
 
   it("BOŞ dosya 'no' sayılır — var görünüp içi boş olan çıktı, çıktı değildir", async () => {
-    await yaz("devs/_pending/2026-09-15-20-21-00/iter-spec.md", "");
+    await yazSpec("");
     expect(await artifactExists(faz4(), { project_root: root, iteration_started_at: TS })).toBe("no");
   });
 
@@ -70,7 +80,7 @@ describe("checkPreconditions", () => {
   const state = () => ({ project_root: root, iteration_started_at: TS });
 
   it("önkoşul karşılanıyorsa geçer", async () => {
-    await yaz("devs/_pending/2026-09-15-20-21-00/iter-spec.md");
+    await yazSpec();
     expect(await checkPreconditions(PHASE_SPECS[5]!, state())).toEqual({ ok: true });
   });
 
