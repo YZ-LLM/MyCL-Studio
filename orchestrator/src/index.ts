@@ -201,6 +201,7 @@ import { resolveRiskFixTarget } from "./risk-fix-routing.js";
 import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller } from "./phase-5.js";
 import { blankScreenGate, Phase6Controller } from "./phase-6.js";
+import { stampPhaseCompletion } from "./phase-complete.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import { runFullTest, formatFullTestReport, fixTasksFromReport, type FullTestDeps } from "./full-test.js";
 import { runMaintenance, formatMaintenanceReport } from "./maintenance.js";
@@ -7029,19 +7030,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
 
     const spec = getSpec(next);
     if (!spec) {
-      // Controller yok — deterministik skip stub: skipped + complete audit.
-      await appendAuditModule(state.project_root, {
-        ts: Date.now(),
-        phase: next,
-        event: `phase-${next}-skipped`,
-        caller: "mycl-orchestrator",
-      });
-      await appendAuditModule(state.project_root, {
-        ts: Date.now(),
-        phase: next,
-        event: `phase-${next}-complete`,
-        caller: "mycl-orchestrator",
-      });
+      // Controller yok — deterministik skip stub. Damga TEK kapıdan: skipped ve complete artık
+      // ayrı çağrılar değil, ayrışmaları imkânsız.
+      await stampPhaseCompletion(state, next, { kind: "skipped", reason: "no_controller" });
       log.info("orchestrator", "phase skipped (no controller)", { phase: next });
       cur = next;
       continue;
@@ -7254,18 +7245,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       const specShowsUi = await shouldRunMechanical(state.project_root, "has_ui"); // pozitif sinyal (regex eşleşmesi)
       const tweakRequested = !!state.pending_ui_tweak;
       if (!tweakRequested && state.skip_ui_phases && !specShowsUi) {
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 5,
-          event: "phase-5-skipped",
-          caller: "mycl-orchestrator",
-          detail: `classifier_skip project_type=${state.project_type ?? "unknown"} (spec'te de UI işareti yok)`,
-        });
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 5,
-          event: "phase-5-complete",
-          caller: "mycl-orchestrator",
+        await stampPhaseCompletion(state, 5, {
+          kind: "skipped",
+          reason: `classifier_skip project_type=${state.project_type ?? "unknown"} (spec'te de UI işareti yok)`,
         });
         emitChatMessage(
           "system",
@@ -7298,18 +7280,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // sorulmuyordu. Artık UI'lı projede Faz 6 ASLA atlanmaz/oto-geçilmez → MUTLAKA kullanıcıdan
       // inceleme ister + uygulamayı açar (phase-6 ensureDevServerForReview).
       if (state.skip_ui_phases) {
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 6,
-          event: "phase-6-skipped",
-          caller: "mycl-orchestrator",
-          detail: `classifier_skip project_type=${state.project_type ?? "unknown"}`,
-        });
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 6,
-          event: "phase-6-complete",
-          caller: "mycl-orchestrator",
+        await stampPhaseCompletion(state, 6, {
+          kind: "skipped",
+          reason: `classifier_skip project_type=${state.project_type ?? "unknown"}`,
         });
         emitChatMessage(
           "system",
@@ -7396,19 +7369,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         skipReason = "no_database_in_spec";
       }
       if (skipDb) {
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 7,
-          event: "phase-7-skipped",
-          caller: "mycl-orchestrator",
-          detail: skipReason,
-        });
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 7,
-          event: "phase-7-complete",
-          caller: "mycl-orchestrator",
-        });
+        await stampPhaseCompletion(state, 7, { kind: "skipped", reason: skipReason });
         emitChatMessage(
           "system",
           state.has_database === false
@@ -7594,18 +7555,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // v15.7 (2026-05-25): Faz 16 (E2E) için Playwright feature toggle.
       // Settings → Özellikler → "Playwright" kapalıysa fazı atla.
       if (next === 16 && runtime.config?.features.playwright_enabled === false) {
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 16,
-          event: "phase-16-skipped",
-          caller: "mycl-orchestrator",
-          detail: "playwright_disabled (Settings → Özellikler)",
-        });
-        await appendAuditModule(state.project_root, {
-          ts: Date.now(),
-          phase: 16,
-          event: "phase-16-complete",
-          caller: "mycl-orchestrator",
+        await stampPhaseCompletion(state, 16, {
+          kind: "skipped",
+          reason: "playwright_disabled (Settings → Özellikler)",
         });
         emitChatMessage(
           "system",
@@ -7621,18 +7573,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       if (next === 16) {
         const pre = await ensurePlaywrightForPhase16(state);
         if (!pre.proceed) {
-          await appendAuditModule(state.project_root, {
-            ts: Date.now(),
-            phase: 16,
-            event: "phase-16-skipped",
-            caller: "mycl-orchestrator",
-            detail: `precheck_fail reason=${pre.reason}`,
-          });
-          await appendAuditModule(state.project_root, {
-            ts: Date.now(),
-            phase: 16,
-            event: "phase-16-complete",
-            caller: "mycl-orchestrator",
+          await stampPhaseCompletion(state, 16, {
+            kind: "skipped",
+            reason: `precheck_fail reason=${pre.reason}`,
           });
           cur = 16;
           continue;
