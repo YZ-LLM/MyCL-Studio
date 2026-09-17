@@ -3826,6 +3826,18 @@ async function handleUserMessage(text: string): Promise<void> {
   if (_handlingUserMessage) {
     // REDDETME (eski "beni dinlemedi" hatası): kullanıcı çalışan iş varken yeni bir şey yazdıysa,
     // bu açık bir yönlendirmedir → çalışanı DURDUR + bu mesajı sıraya al; lock boşalınca işlenir.
+    //
+    // SESSİZ EZME YOK (2026-09-17, canlı kanıt: cüzdan koşusu). Bu yuva TEK ve koşulsuz üzerine
+    // yazılıyordu: kullanıcı ilk mesajında "biter bitmez bu isteğini işleyeceğim" sözünü aldı, üç
+    // dakika sonra ikinci mesajı ilkini HABER VERİLMEDEN ezdi ve verilen söz tutulmadı. Yuva tek
+    // kalıyor (sözleşme: en son söz geçerli) ama ezme artık GÖRÜNÜR — kullanıcı hangi isteğinin
+    // düştüğünü bilir (KATI #4: sessiz düşüş yok).
+    if (_pendingRedirect !== null && _pendingRedirect !== text) {
+      emitChatMessage(
+        "system",
+        `ℹ️ Bekleyen önceki isteğin yerine bu sonuncusunu işleyeceğim. Düşen istek: "${_pendingRedirect.slice(0, 80)}${_pendingRedirect.length > 80 ? "…" : ""}" — hâlâ geçerliyse tekrar yaz.`,
+      );
+    }
     _pendingRedirect = text;
     if (
       runtime.controller &&
