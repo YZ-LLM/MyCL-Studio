@@ -171,6 +171,8 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
   5: {
     id: 5,
     type: "codegen",
+    // Bugünkü davranış: spec yoksa faz fail (phase-5.ts stat kontrolü). Bildirimsel hale getirildi.
+    requires: [{ kind: "artifact_of_phase", phase: 4, severity: "block" }],
     name_i18n_key: "phase.5.name",
     model_role: "main",
     // AskUserQuestion = doubt-driven eskalasyon (SDK backend; nadir). CLI backend
@@ -218,6 +220,10 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
   7: {
     id: 7,
     type: "production",
+    // Faz 7'de bugüne kadar spec varlık kontrolü HİÇ YOKTU — spec olmadan da veritabanı tasarımına
+    // giriliyordu. Kontrol ekleniyor ama "warn": bir anda "block" yapmak bugüne kadar geçen
+    // koşuları kırardı (KATI #14). Görünür uyarı verilir, akış sürer.
+    requires: [{ kind: "artifact_of_phase", phase: 4, severity: "warn" }],
     name_i18n_key: "phase.7.name",
     model_role: "main",
     prompt_template_path: templatePath("phase-07-db.md"),
@@ -232,6 +238,7 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
   8: {
     id: 8,
     type: "codegen",
+    requires: [{ kind: "artifact_of_phase", phase: 4, severity: "block" }],
     name_i18n_key: "phase.8.name",
     model_role: "main",
     // AskUserQuestion = doubt-driven eskalasyon (Faz 8 her zaman SDK backend).

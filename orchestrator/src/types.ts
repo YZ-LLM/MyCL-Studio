@@ -290,8 +290,23 @@ export interface MechanicalConfig {
   }>;
 }
 
+/**
+ * Bir fazın koşabilmesi için gereken önkoşul. Bildirimsel: faz neye ihtiyaç duyduğunu SÖYLER,
+ * kontrolü `phase-preconditions.ts` tek yerden yapar.
+ *
+ * `severity` "warn" → görünür uyarı ama akış sürer. Bugün kontrolü hiç olmayan bir faza kontrol
+ * eklerken kullanılır: davranışı bir anda sertleştirmek bugüne kadar geçen koşuları kırardı.
+ */
+export interface PhaseRequirement {
+  kind: "artifact_of_phase";
+  phase: PhaseId;
+  severity?: "block" | "warn";
+}
+
 export interface PhaseSpec {
   id: PhaseId;
+  /** Bu faz koşmadan önce var olması gereken çıktılar (bkz. phase-preconditions.ts). */
+  requires?: PhaseRequirement[];
   type: PhaseType;
   /** i18n anahtarı — runtime t(`phase.N.name`, locale) ile resolve edilir. */
   name_i18n_key: string;

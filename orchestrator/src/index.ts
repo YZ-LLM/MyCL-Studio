@@ -9923,7 +9923,11 @@ async function handleRunPhase(
   // emitPhaseRunAskq'ta zaten yakalandı). Yönlendirdiyse burada bitir.
   if (await redirectForeignRunToDevServer(phaseId)) return;
 
-  // Spec dependency kontrolü — defansif
+  // Spec dependency kontrolü — defansif.
+  // NOT: bu liste fazın KENDİ bildirdiği önkoşuldan (PhaseSpec.requires) ayrıdır ve bilerek daha
+  // geniştir: elle faz çalıştırmada 4/6/9/10 da spec'e dayanır ama o fazlar spec'i ÜRETMEZ ya da
+  // kendi controller'ında kontrol eder. Mesaj artık GERÇEKTEN aranan yolu söyler (yanlış yol
+  // söyleyen eski metin, var olan bir dosyayı yanlış yerde arattırıp yanlış teşhis ürettirdi).
   if ([4, 5, 6, 7, 9, 10].includes(phaseId)) {
     const specMdPath = currentSpecPath(runtime.state);
     try {

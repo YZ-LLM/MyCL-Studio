@@ -13,6 +13,7 @@ import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import { emitError, emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
+import { checkPreconditions } from "./phase-preconditions.js";
 import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
 import { substitute } from "./template-engine.js";
 import {
@@ -184,6 +185,18 @@ export class Phase7Controller {
       emitError("Faz 7 üretim yapılandırması eksik", null);
       this.lastFailReason = "production_config missing in spec";
       return "fail";
+    }
+
+    // ÖNKOŞUL (2026-09-17): Faz 7'de spec varlık kontrolü bugüne kadar HİÇ YOKTU — spec olmadan da
+    // veritabanı tasarımına giriliyordu. Kontrol eklendi ama `severity: "warn"`: bir anda bloklamak
+    // bugüne kadar geçen koşuları kırardı (KATI #14). Görünür uyarı verilir, akış SÜRER.
+    const onkosul = await checkPreconditions(this.spec, this.state);
+    if (!onkosul.ok) {
+      emitChatMessage("system", `${onkosul.message} (uyarı — akış sürüyor)`);
+      if (onkosul.severity === "block") {
+        this.lastFailReason = "precondition not met";
+        return "fail";
+      }
     }
 
     // Brief.md artık relevance engine ile section-bazlı filter ediliyor.
