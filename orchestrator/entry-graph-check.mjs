@@ -34,6 +34,13 @@ const MAX_BYTES = 2 * 1024 * 1024;
 const TRY_EXT = ["", ".js", ".mjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte"];
 /** Dizin referansında denenecek giriş dosyaları. */
 const TRY_INDEX = ["index.js", "index.mjs", "index.jsx", "index.ts", "index.tsx"];
+/**
+ * STATİK KÖK KLASÖRLERİ: içerikleri kök URL'den servis edilir, yani `public/styles.css` tarayıcıya
+ * `/styles.css` olarak gider. CANLI YANLIŞ ALARM (2026-09-18): bunu bilmediğim için `public/` altına
+ * yazılmış bir stil dosyasını "diskte yok" sanıp Faz 10'u düşürdüm ve pipeline'ı blokladım — tam da
+ * bu betiğin kaçınmak zorunda olduğu hata. Kök-göreli her referans bu klasörlerde de aranır.
+ */
+const STATIC_ROOTS = ["public", "static", "www", "assets", "dist", "build"];
 
 async function collectHtml(dir, acc = []) {
   if (acc.length >= MAX_HTML) return acc;
@@ -81,21 +88,27 @@ async function cozumle(ref, htmlFile) {
   const temiz = ref.trim().split("#")[0];
   if (!temiz) return "unknown";
   // Köke göreli ("/src/main.jsx") ya da dosyaya göreli ("./main.jsx").
-  const taban = temiz.startsWith("/") ? join(projectRoot, temiz.slice(1)) : resolve(dirname(htmlFile), temiz);
-  // Proje kökünün DIŞINA çıkan referans bizim ölçemeyeceğimiz bir şeydir.
-  if (!resolve(taban).startsWith(resolve(projectRoot) + sep)) return "unknown";
-  for (const ext of TRY_EXT) {
-    try {
-      const st = await fs.stat(taban + ext);
-      if (st.isFile()) return "yes";
-      if (st.isDirectory()) {
-        for (const idx of TRY_INDEX) {
-          try {
-            if ((await fs.stat(join(taban + ext, idx))).isFile()) return "yes";
-          } catch { /* sıradaki */ }
+  // Kök-göreli referans ("/styles.css") hem proje kökünde hem statik kök klasörlerinde aranır;
+  // dosyaya göreli ("./main.jsx") yalnız HTML'in yanında.
+  const adaylar = temiz.startsWith("/")
+    ? [join(projectRoot, temiz.slice(1)), ...STATIC_ROOTS.map((r) => join(projectRoot, r, temiz.slice(1)))]
+    : [resolve(dirname(htmlFile), temiz)];
+  for (const taban of adaylar) {
+    // Proje kökünün DIŞINA çıkan referans bizim ölçemeyeceğimiz bir şeydir.
+    if (!resolve(taban).startsWith(resolve(projectRoot) + sep)) return "unknown";
+    for (const ext of TRY_EXT) {
+      try {
+        const st = await fs.stat(taban + ext);
+        if (st.isFile()) return "yes";
+        if (st.isDirectory()) {
+          for (const idx of TRY_INDEX) {
+            try {
+              if ((await fs.stat(join(taban + ext, idx))).isFile()) return "yes";
+            } catch { /* sıradaki */ }
+          }
         }
-      }
-    } catch { /* sıradaki uzantı */ }
+      } catch { /* sıradaki uzantı */ }
+    }
   }
   return "no";
 }

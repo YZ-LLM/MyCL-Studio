@@ -121,6 +121,32 @@ describe("entry-graph-check", () => {
     expect((await kos()).code).toBe(3);
   });
 
+  it("CANLI YANLIŞ ALARM: public/ altındaki dosya kök URL'den servis edilir — bulgu DEĞİL", async () => {
+    // 2026-09-18: MyCL `styles.css`'i public/ altına yazdı; index.html `/styles.css` çağırıyordu.
+    // Statik kök klasörlerini bilmediğim için "diskte yok" dedim ve Faz 10'u düşürüp pipeline'ı
+    // blokladım — tam da bu betiğin kaçınmak zorunda olduğu hata.
+    await yaz("index.html", '<link rel="stylesheet" href="/styles.css"><script src="/src/main.jsx"></script>');
+    await yaz("public/styles.css", "body{}");
+    await yaz("src/main.jsx", "x");
+    const r = await kos();
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("sağlam");
+  });
+
+  it("diğer statik kök adları da tanınır (static/, www/)", async () => {
+    await yaz("index.html", '<script src="/app.js"></script>');
+    await yaz("static/app.js", "x");
+    expect((await kos()).code).toBe(0);
+  });
+
+  it("hiçbir statik kökte de yoksa YİNE bulgu (kaçış yolu değil)", async () => {
+    await yaz("index.html", '<script src="/gercekten-yok.js"></script>');
+    await yaz("public/baska.js", "x");
+    const r = await kos();
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("gercekten-yok.js");
+  });
+
   it("stylesheet de zincire dahil; eksikse yakalanır", async () => {
     await yaz("index.html", '<link rel="stylesheet" href="/src/yok.css">');
     const r = await kos();
