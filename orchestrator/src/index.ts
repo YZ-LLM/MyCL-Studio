@@ -202,6 +202,7 @@ import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller } from "./phase-5.js";
 import { blankScreenGate, Phase6Controller, runtimeErrorGate } from "./phase-6.js";
 import { stampPhaseCompletion } from "./phase-complete.js";
+import { lensTaskText } from "./pre-commit-lens.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import { runFullTest, formatFullTestReport, fixTasksFromReport, type FullTestDeps } from "./full-test.js";
 import { runMaintenance, formatMaintenanceReport } from "./maintenance.js";
@@ -7241,6 +7242,16 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         runtime.state = state;
         await saveState(state);
         emitChatMessage("system", "Faz 4 tamamlandı — spec onaylandı.");
+        // Merceğin `high` görüşleri ARAŞTIRMA işine dönüşür (2026-09-18). Eskiden bu görüşler yalnız
+        // sohbete basılıp kayboluyordu — mercek "bu koşu sahte yeşil verecek" diye tam isabet uyardı
+        // ve hiçbir etkisi olmadı. İş bir İDDİA değil doğrulama talebidir: metin merceğin cümlesini
+        // tırnak içinde taşır ve "önce geçerli mi diye kontrol et" der (LLM görüşü ≠ ölçüm).
+        for (const b of p4.lensQueue) {
+          await enqueueSystemFixTask(state.project_root, lensTaskText(b), "maintenance", {
+            kind: "blindspot",
+            subject: b.note.slice(0, 60),
+          }).catch((e) => log.warn("orchestrator", "mercek işi kuyruğa yazılamadı", e));
+        }
         cur = 4;
         continue;
       } else {

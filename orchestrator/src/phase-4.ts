@@ -17,7 +17,7 @@ import { escalatedModelEffort } from "./escalation.js";
 import { modelChoiceLineIfChanged } from "./model-catalog.js";
 import { blindspotLensDecision, specIsConsequential } from "./pre-commit-lens-gate.js";
 import { withDevsPath } from "./devs-paths.js";
-import { runBlindspotLens, formatLensFindings } from "./pre-commit-lens.js";
+import { runBlindspotLens, lensActions, type Blindspot } from "./pre-commit-lens.js";
 import { buildRelevantEngineeringBrief } from "./relevance/injectors.js";
 import { substitute } from "./template-engine.js";
 import {
@@ -184,6 +184,9 @@ ${assumptions}`;
 }
 
 export class Phase4Controller {
+  /** Merceğin `high` görüşleri — çağıran bunları araştırma işine çevirir (iddia değil, doğrulama). */
+  public lensQueue: Blindspot[] = [];
+
   private base: ProductionBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
@@ -327,10 +330,21 @@ export class Phase4Controller {
           specToMarkdown(writeInput as unknown as SpecData),
           this.state.intent_summary,
         );
-        if (!lens.clean) {
-          const m = formatLensFindings(lens);
-          if (m) emitChatMessage("system", m);
+        // Mercek artık İZ BIRAKIYOR (2026-09-18): eskiden çıktı yalnız sohbete basılıyordu, yani
+        // merceğin koşup koşmadığı ve ne bulduğu sonradan ölçülemiyordu. `high` görüşler ayrıca
+        // araştırma işi açar — iddia değil, doğrulama talebi (mercek çıktısı ölçüm değil görüştür).
+        const acts = lensActions(lens);
+        if (!lens.clean && acts.chat) emitChatMessage("system", acts.chat);
+        if (acts.auditDetail) {
+          await appendAudit(this.state.project_root, {
+            ts: Date.now(),
+            phase: 4,
+            event: "blindspot-lens",
+            caller: "mycl-orchestrator",
+            detail: acts.auditDetail,
+          }).catch(() => {});
         }
+        this.lensQueue = acts.queue;
       },
     });
 

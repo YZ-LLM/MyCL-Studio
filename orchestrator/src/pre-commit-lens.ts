@@ -144,3 +144,49 @@ export function formatLensFindings(lens: LensResult): string | null {
     lines.join("\n")
   );
 }
+
+/**
+ * SAF: merceğin çıktısından türeyen EYLEMLER — sohbet metni, denetim detayı ve kuyruğa girecek işler.
+ *
+ * NEDEN (2026-09-18): merceğin çıktısı bugüne kadar YALNIZ sohbete basılıyordu. `severity: "high"`
+ * bulgular bile hiçbir yere yazılmıyor, hiçbir karara girmiyordu — yani mercek koştu mu, ne buldu,
+ * bulduğu şeye ne oldu, sonradan ÖLÇÜLEMİYORDU. Canlı kanıt: mercek "hiç çalışmamış bir faz
+ * tamamlanmış sayılır ve final rapor sahte yeşil çıkar" diye tam isabet uyardı; hiçbir etkisi olmadı.
+ *
+ * KAPSAM SINIRI (yanlış alarm yasağı): merceğin söylediği bir LLM GÖRÜŞÜDÜR, ölçüm değildir. Bu
+ * yüzden hükme ASLA girmez ve "bulgu" diye sunulmaz. `high` bir görüş için açılan iş bir iddia
+ * değil, bir ARAŞTIRMA talebidir — bu yüzden iş metni merceğin cümlesini tırnak içinde taşır ve
+ * "doğrula" der.
+ */
+export interface LensActions {
+  /** Sohbete basılacak metin (bugünkü davranış — değişmedi). */
+  chat: string | null;
+  /** Denetim defterine yazılacak ölçüm detayı; mercek hiç koşmadıysa null. */
+  auditDetail: string | null;
+  /** Araştırma işi açılacak bulgular (yalnız `high`). */
+  queue: Blindspot[];
+}
+
+export function lensActions(lens: LensResult): LensActions {
+  const chat = formatLensFindings(lens);
+  if (!lens.ran) return { chat, auditDetail: null, queue: [] };
+  if (lens.error) return { chat, auditDetail: `error=${lens.error.slice(0, 80)}`, queue: [] };
+  const say = (s: LensSeverity): number => lens.blindspots.filter((b) => b.severity === s).length;
+  return {
+    chat,
+    auditDetail: `clean=${lens.clean} high=${say("high")} med=${say("medium")} low=${say("low")}`,
+    // Yalnız "high": orta/düşük görüşler için iş açmak kuyruk gürültüsü olur ve merceği
+    // kullanışsızlaştırır. Mercek zaten en fazla birkaç bulgu döner.
+    queue: lens.clean ? [] : lens.blindspots.filter((b) => b.severity === "high"),
+  };
+}
+
+/** SAF: `high` bir kör nokta için açılacak ARAŞTIRMA işinin metni (iddia değil, doğrulama talebi). */
+export function lensTaskText(b: Blindspot): string {
+  return (
+    `Bağımsız kör-nokta merceği şunu iddia etti: "${b.note.slice(0, 300)}". ` +
+    `Bu bir LLM görüşüdür, doğrulanmış bir bulgu DEĞİLDİR — önce gerçekten geçerli mi diye kontrol et. ` +
+    `Geçerliyse düzelt; değilse neden geçersiz olduğunu tek cümleyle yaz ve devam et.` +
+    (b.recommendation ? ` Merceğin önerisi: "${b.recommendation.slice(0, 200)}".` : "")
+  );
+}

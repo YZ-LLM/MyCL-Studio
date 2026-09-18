@@ -19,7 +19,9 @@ export type SystemTaskKind =
   | "maintenance-audit" // bakım turu bağımlılık taraması
   | "maintenance-sast" // bakım turu statik güvenlik bulgusu (konu: etiket)
   | "verify-gap" // atlanan doğrulama boyutu (konu: faz numarası)
-  | "deferred-phase-error"; // çözülmeden ertelenen faz hatası (konu: faz + imza)
+  | "deferred-phase-error" // çözülmeden ertelenen faz hatası (konu: faz + imza)
+  | "blindspot"; // kör-nokta merceğinin `high` görüşü (konu: notun ilk cümlesi) — İDDİA DEĞİL,
+  // doğrulama talebi: mercek çıktısı bir LLM görüşüdür, ölçüm değildir.
 
 /**
  * SAF: konuyu kanonik hale getir — küçük harf, boşluk sıkıştırma, ilk 12 kelime. Regex yok.

@@ -10,6 +10,8 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import {
+  lensActions,
+  lensTaskText,
   parseBlindspots,
   isLensClean,
   formatLensFindings,
@@ -115,5 +117,55 @@ describe("runBlindspotLens (fail-safe; mock turn)", () => {
     expect(r.clean).toBe(false);
     expect(r.blindspots).toHaveLength(1);
     expect(r.blindspots[0].severity).toBe("high");
+  });
+});
+
+// S7 (2026-09-18): merceğin çıktısı bugüne kadar YALNIZ sohbete basılıyordu. `severity: "high"`
+// bulgular bile hiçbir yere yazılmıyor, hiçbir karara girmiyordu — mercek koştu mu, ne buldu,
+// bulduğuna ne oldu, sonradan ÖLÇÜLEMİYORDU. Canlı kanıt: mercek "hiç çalışmamış bir faz
+// tamamlanmış sayılır ve final rapor sahte yeşil çıkar" diye tam isabet uyardı; hiçbir etkisi olmadı.
+describe("lensActions — mercek iz bırakır ve 'high' görüş araştırmaya döner", () => {
+  const bs = (severity: "low" | "medium" | "high", note = "not") => ({
+    severity,
+    note,
+    recommendation: "öneri",
+  });
+
+  it("temiz koşuda iş açılmaz ama ÖLÇÜM yazılır (mercek koştu, bir şey bulmadı)", () => {
+    const a = lensActions({ ran: true, clean: true, blindspots: [] });
+    expect(a.queue).toEqual([]);
+    expect(a.auditDetail).toContain("clean=true");
+  });
+
+  it("yalnız 'high' görüşler iş açar; orta/düşük sohbette kalır", () => {
+    const a = lensActions({
+      ran: true,
+      clean: false,
+      blindspots: [bs("high", "A"), bs("medium", "B"), bs("low", "C")],
+    });
+    expect(a.queue).toHaveLength(1);
+    expect(a.queue[0]!.note).toBe("A");
+    expect(a.auditDetail).toContain("high=1");
+    expect(a.auditDetail).toContain("med=1");
+  });
+
+  it("mercek hiç koşmadıysa ölçüm de iş de yok", () => {
+    const a = lensActions({ ran: false, clean: false, blindspots: [] });
+    expect(a.auditDetail).toBeNull();
+    expect(a.queue).toEqual([]);
+  });
+
+  it("mercek hata verdiyse iş açılmaz ama hata ÖLÇÜLÜR (sessiz kaybolmaz)", () => {
+    const a = lensActions({ ran: true, clean: false, blindspots: [bs("high")], error: "zaman aşımı" });
+    expect(a.queue).toEqual([]);
+    expect(a.auditDetail).toContain("error=");
+  });
+
+  it("YANLIŞ ALARM YASAĞI: iş metni İDDİA değil, doğrulama talebidir", () => {
+    const t = lensTaskText(bs("high", "X varsayımı doğrulanmamış"));
+    expect(t).toContain('"X varsayımı doğrulanmamış"'); // merceğin cümlesi TIRNAK içinde
+    expect(t).toContain("LLM görüşüdür");
+    expect(t).toContain("doğrulanmış bir bulgu DEĞİLDİR");
+    expect(t).toContain("kontrol et");
   });
 });
