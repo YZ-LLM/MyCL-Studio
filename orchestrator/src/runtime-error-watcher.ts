@@ -26,6 +26,7 @@ import type { MyclConfig } from "./config.js";
 import { insertErrors } from "./errors-db.js";
 import { emit, emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
+import { appendAudit } from "./audit.js";
 import { translate } from "./translator.js";
 
 // White-list: bu pattern'lerden HERHANGI birini içeren satır → skip.
@@ -243,6 +244,22 @@ export function attachRuntimeErrorWatcher(opts: AttachOpts): RuntimeErrorWatcher
       location,
       description_tr: descriptionTR,
     });
+
+    // DENETİM KAYDI (2026-09-18): bu sinyalin bugüne kadar HİÇBİR tüketicisi yoktu — veritabanına
+    // yazılıyor, olay yayınlanıyor, sohbete basılıyordu ama faz/kapı/hüküm tarafında kimse okumuyordu.
+    // Canlı kanıt: Vite sürekli "Failed to load url /src/main.jsx" diye bağırdı, uygulama hiç
+    // açılmadı, hiçbir karar bunu görmedi. Audit'e yazmak sinyali ÖLÇÜLEBİLİR kılar (Faz 6 onay
+    // kapısı ve iterasyon sonu bunu okuyabilsin). INFRA hariç: port çakışması/ENOENT ortam
+    // gürültüsüdür, uygulama hatası değil — toast kuralıyla aynı gerekçe.
+    if (category.typeCode !== "INFRA") {
+      void appendAudit(opts.projectRoot, {
+        ts: now,
+        phase: 0,
+        event: "runtime-error-recorded",
+        caller: "mycl-orchestrator",
+        detail: `${errorCode} ${location}`.slice(0, 160),
+      }).catch(() => {});
+    }
 
     // Chat toast — rate-limited (aynı hata 10sn içinde 2. kez gelse atla).
     // v15.10: infra/başlangıç hataları (EADDRINUSE, ECONNREFUSED, ENOENT, EACCES,

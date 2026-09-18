@@ -16,10 +16,15 @@
 
 import { formatA11yReport, runAccessibilityScan } from "./accessibility-scan.js";
 import { captureAndCompare, formatVisualReport } from "./visual-regression.js";
+import { join } from "node:path";
 import { appendAudit } from "./audit.js";
 import type { MyclConfig } from "./config.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
+import { selectRecentRuntimeErrors } from "./errors-db.js";
+
+/** Faz 6 incelemesinde "bu koşuda" sayılan çalışma zamanı hatası penceresi. */
+const RUNTIME_ERROR_WINDOW_MS = 10 * 60_000;
 import type { PhaseDeps } from "./phase-deps.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import type { State } from "./types.js";
@@ -152,8 +157,27 @@ export class Phase6Controller {
         "• İptal etmek istiyorsan → `iptal` / `vazgeç` → pipeline durur.",
     );
 
+    // ÇALIŞMA ZAMANI HATASI BAYRAĞI (2026-09-18): uygulama açıldıktan sonra tarayıcı/dev-server
+    // hata yayınladıysa bunu onay kapısına taşı. Bu sinyalin bugüne kadar hiçbir tüketicisi yoktu:
+    // Vite sürekli "Failed to load url /src/main.jsx" diye bağırdı, uygulama hiç açılmadı ve hiçbir
+    // karar bunu görmedi. Okumak best-effort — okunamazsa hata SAYILMAZ (ölçemediğine iddia yok).
+    let runtimeHata = 0;
+    try {
+      const rows = await selectRecentRuntimeErrors(
+        join(this.state.project_root, "error_folder", "mycl_errors.db"),
+        RUNTIME_ERROR_WINDOW_MS,
+      );
+      runtimeHata = rows.length;
+    } catch (err) {
+      log.warn("phase-6", "runtime hata sayımı okunamadı (non-fatal)", { error: String(err) });
+    }
+
     // Boş ekran bayrağını park durumuna taşı — onay kapısı (approve_ui) bunu okuyacak.
-    this.statePatch = { ...this.statePatch, ui_review_blank: visual.nearlyBlank };
+    this.statePatch = {
+      ...this.statePatch,
+      ui_review_blank: visual.nearlyBlank,
+      ui_review_runtime_errors: runtimeHata,
+    };
     await appendAudit(this.state.project_root, {
       ts: Date.now(),
       phase: 6,
@@ -178,4 +202,19 @@ export type BlankScreenGate = { kind: "confirm-needed" } | { kind: "accept" };
 
 export function blankScreenGate(state: { ui_review_blank?: boolean }): BlankScreenGate {
   return state.ui_review_blank ? { kind: "confirm-needed" } : { kind: "accept" };
+}
+
+/**
+ * SAF: Faz 6 onayı geldi — çalışma zamanı hatası yüzünden bir kez teyit istenmeli mi?
+ *
+ * `blankScreenGate`'in ikizi ve aynı sözleşme: GATE DEĞİL, bilinçli onay. Bayrak teyit istenirken
+ * temizlendiği için ikinci onay geçer — kullanıcının fazına bloklayıcı kapı konmaz (KATI #9).
+ * Uygulama açılırken hata fırlatıyorsa "gördüm ve beğendim" demek zor; bunu bir kez sormak,
+ * kullanıcının kırık bir uygulamayı farkında olmadan onaylamasını engeller.
+ */
+export type RuntimeErrorGate = { kind: "confirm-needed"; count: number } | { kind: "accept" };
+
+export function runtimeErrorGate(state: { ui_review_runtime_errors?: number }): RuntimeErrorGate {
+  const n = state.ui_review_runtime_errors ?? 0;
+  return n > 0 ? { kind: "confirm-needed", count: n } : { kind: "accept" };
 }

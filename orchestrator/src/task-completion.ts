@@ -88,6 +88,9 @@ export const NON_EVIDENCE_EVENTS: ReadonlySet<string> = new Set([
   "devs-spec-refresh",
   "prototype-cache-saved",
   "error-catalog-ensured",
+  // Çalışma zamanı hatası kaydı bir İŞ KANITI değildir — tam tersi, uygulamanın hata verdiğini
+  // söyler. Kanıt sayılırsa hata fırlatan boş bir tur "iş yapıldı" diye yeşile döner.
+  "runtime-error-recorded",
 ]);
 
 /** SAF: iş "Tamamlandı" damgalanabilir mi? Karar sırası deterministik. */

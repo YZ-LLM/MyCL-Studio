@@ -499,6 +499,11 @@ export interface State {
    */
   ui_review_blank?: boolean;
   /**
+   * Faz 6 incelemesi sırasında kaydedilmiş çalışma zamanı hatası sayısı (INFRA hariç).
+   * Onay kapısı bunu okur: uygulama açılırken hata fırlatıyorsa çıplak onay bir kez geri çevrilir.
+   */
+  ui_review_runtime_errors?: number;
+  /**
    * v15.7 (2026-05-27): Phase 7 onaylanınca yazılan migration SQL dosyalarının
    * relative path listesi. Phase 8 başlangıcında bu migration'lar uygulanır
    * (apply komutu stack profile'a göre). Boş array Phase 7 atlandıysa veya

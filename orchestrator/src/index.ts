@@ -200,7 +200,7 @@ import { Phase4Controller } from "./phase-4.js";
 import { resolveRiskFixTarget } from "./risk-fix-routing.js";
 import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller } from "./phase-5.js";
-import { blankScreenGate, Phase6Controller } from "./phase-6.js";
+import { blankScreenGate, Phase6Controller, runtimeErrorGate } from "./phase-6.js";
 import { stampPhaseCompletion } from "./phase-complete.js";
 import { ensureDevServerForReview } from "./smoke-test.js";
 import { runFullTest, formatFullTestReport, fixTasksFromReport, type FullTestDeps } from "./full-test.js";
@@ -4729,6 +4729,28 @@ async function executeDispatchedIntent(
     // onaylandı — akış "onaylandı" diye ilerledi (sahte yeşil). Boş bir ekran "gördüm ve beğendim"
     // anlamına GELEMEZ, bu yüzden çıplak onay bir kez geri çevrilir ve durum açıkça sorulur.
     // Bu bir gate değil, bilinçli onay kapısı: kullanıcı ısrar ederse ikinci onay GEÇER (irade ezilmez).
+    // ÇALIŞMA ZAMANI HATASI KAPISI (2026-09-18): uygulama açılırken hata fırlattıysa çıplak onay bir
+    // kez geri çevrilir. Boş ekran kapısının ikizi ve aynı sözleşme: gate DEĞİL, bilinçli onay —
+    // bayrak temizlendiği için ikinci onay geçer (Faz 6 kullanıcınındır, KATI #9).
+    const rtGate = runtimeErrorGate(runtime.state);
+    if (rtGate.kind === "confirm-needed") {
+      runtime.state = { ...runtime.state, ui_review_runtime_errors: 0, updated_at: Date.now() };
+      await saveState(runtime.state);
+      await appendAuditModule(runtime.state.project_root, {
+        ts: Date.now(),
+        phase: 6,
+        event: "phase-6-runtime-error-confirm",
+        caller: "mycl-orchestrator",
+        detail: `count=${rtGate.count}`,
+      }).catch(() => {});
+      emitChatMessage(
+        "system",
+        `⚠️ Uygulama açılırken ${rtGate.count} çalışma zamanı hatası kaydedildi — ekranda gördüğün şey eksik ya da bozuk olabilir.\n` +
+          "• Yine de onaylamak istiyorsan onayını **bir kez daha** yaz — geçerim.\n" +
+          "• Beklediğin bu değilse ne görmen gerektiğini yaz; düzeltip tekrar açayım.",
+      );
+      return;
+    }
     if (blankScreenGate(runtime.state).kind === "confirm-needed") {
       runtime.state = { ...runtime.state, ui_review_blank: undefined, updated_at: Date.now() };
       await saveState(runtime.state);

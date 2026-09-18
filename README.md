@@ -68,6 +68,12 @@ ortak controller'a dayanır:
 | 16 | E2E Testler (UI varsa) | mechanical |
 | 17 | Sızma Testi — **otomatik koşar** (hızlı profil); tam tarama 🛡️ butonuyla | — |
 
+**Uygulama hata fırlatıyorsa onay bir kez sorulur:** Faz 6 incelemesinde, uygulama açılırken
+çalışma zamanı hatası kaydedildiyse çıplak bir `tamam` doğrudan kabul edilmez — MyCL kaç hata
+gördüğünü söyleyip bir kez teyit ister. Boş ekran kapısıyla aynı sözleşme: kapı değil bilinçli onay,
+ısrar edersen ikinci onay geçer. Gerçek olay: uygulama hiç açılmıyordu, tarayıcı sürekli hata
+yayınlıyordu ve hiçbir karar bunu okumuyordu.
+
 **E2E koşamadıysa bu hükme yansır:** Faz 16 atlandığında akış eskiden "tüm gate'ler yeşil" diyebiliyordu.
 Artık atlamanın NEDENİ ayırt ediliyor: proje arayüz sunmuyorsa, Playwright'ı sen kapattıysan ya da
 stack E2E'ye çevrilemiyorsa hüküm etkilenmez (bunlar zaten doğrulama özetinde "DOĞRULANMADI" olarak
