@@ -251,3 +251,31 @@ export function computeVerdict(
     summary,
   };
 }
+
+/**
+ * SAF: bu iterasyonun olaylarından "uygulama gerçekten çalıştı mı" kanıtlarını topla.
+ *
+ * Hiçbiri yeni ölçüm yapmaz — hepsi ZATEN üretilen sinyaller. Bugüne kadar pipeline sonunda bu
+ * soruyu soran bir şey yoktu; yerine geçen ölçüt "klasörde görünür bir şey var mı"ydı ve içeriğe
+ * bakmıyordu (canlı kanıt: 27 dosyalık proje, hiç açılmayan uygulama).
+ *
+ * Her alan POZİTİF kanıt arar: "kanıt yok" ile "çalışmıyor" farklı şeylerdir ve özet metni bu
+ * ayrımı korur.
+ */
+export function collectRunEvidence(events: AuditEvent[]): {
+  e2ePassed: boolean;
+  screenNotBlank: boolean;
+  entryGraphOk: boolean;
+  noRuntimeErrors: boolean;
+} {
+  const has = (p: (e: AuditEvent) => boolean): boolean => events.some(p);
+  return {
+    e2ePassed: has((e) => e.event === "phase-16-complete" && !String(e.detail ?? "").includes("skipped"))
+      && !has((e) => e.event === "phase-16-skipped"),
+    // Faz 6 görsel taraması koştu VE boş bulmadı. Hiç koşmadıysa kanıt YOK (iddia da yok).
+    screenNotBlank:
+      has((e) => e.event === "visual-diff") && !has((e) => String(e.detail ?? "").includes("blank_screen")),
+    entryGraphOk: has((e) => e.event === "entry-graph-pass"),
+    noRuntimeErrors: !has((e) => e.event === "runtime-error-recorded"),
+  };
+}

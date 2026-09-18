@@ -68,6 +68,13 @@ ortak controller'a dayanır:
 | 16 | E2E Testler (UI varsa) | mechanical |
 | 17 | Sızma Testi — **otomatik koşar** (hızlı profil); tam tarama 🛡️ butonuyla | — |
 
+**Her akış sonunda "çalışma kanıtı" satırı:** MyCL artık iterasyon sonunda uygulamanın gerçekten
+çalıştığına dair pozitif kanıt topladığını yazar — E2E geçti mi, ekran boş değil mi, giriş zinciri
+sağlam mı, çalışma zamanı hatası var mı. Hiçbiri yoksa "uygulamanın çalıştığı bu koşuda
+kanıtlanmadı" der; **"çalışmıyor" demez** — kanıt yokluğu çalışmadığının kanıtı değildir. Daha önce
+bu soruyu soran hiçbir şey yoktu: yerine geçen ölçüt "proje klasöründe görünür bir şey var mı"ydı ve
+içeriğe bakmıyordu.
+
 **Uygulama hata fırlatıyorsa onay bir kez sorulur:** Faz 6 incelemesinde, uygulama açılırken
 çalışma zamanı hatası kaydedildiyse çıplak bir `tamam` doğrudan kabul edilmez — MyCL kaç hata
 gördüğünü söyleyip bir kez teyit ister. Boş ekran kapısıyla aynı sözleşme: kapı değil bilinçli onay,

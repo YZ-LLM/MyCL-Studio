@@ -457,16 +457,34 @@ const NON_DELIVERABLE_TOP = new Set([
 // görev (`.eslintrc` tek başına, dizinsiz) hâlâ sayılmaz; nadir + kullanıcı yeniden gönderebilir (kabul edilen denge).
 const DELIVERABLE_DOTDIRS = new Set([".github", ".husky", ".vscode", ".circleci", ".gitlab", ".devcontainer"]);
 
-export async function hasDeliverable(projectRoot: string): Promise<boolean> {
+/**
+ * Proje kökünde görünür bir çıktı var mı — ÜÇ DURUMLU.
+ *
+ * `hasDeliverable` bunun `unknown → true` saran ince kabuğudur (bugünkü fail-open davranışı birebir
+ * korunur). Ayrımın sebebi (2026-09-18): "okuyamadım" ile "gerçekten boş" aynı şey değil; özet
+ * bunları ayırt edebilsin ki okunamayan bir kökü sessizce "dolu" saymak yerine dürüstçe söyleyebilsin.
+ *
+ * NOT (kapsam): bu ölçüt İÇERİĞE bakmaz — klasörde görünür bir şey olması uygulamanın ÇALIŞTIĞI
+ * anlamına gelmez. Canlı kanıt: 27 dosyalık bir proje vardı, uygulama hiç açılmıyordu. "Çalışıyor mu"
+ * sorusunun kanıtı pipeline sonu özetindeki ayrı kanıt satırıdır.
+ */
+export async function deliverableProbe(projectRoot: string): Promise<"yes" | "no" | "unknown"> {
   try {
     const entries = await fs.readdir(projectRoot, { withFileTypes: true });
     return entries.some(
       (e) =>
         (!e.name.startsWith(".") && !NON_DELIVERABLE_TOP.has(e.name)) ||
         (e.isDirectory() && DELIVERABLE_DOTDIRS.has(e.name)),
-    );
+    )
+      ? "yes"
+      : "no";
   } catch (e) {
-    log.warn("phase-1-probe", "hasDeliverable: proje kökü okunamadı → true (boş-build guard'ı atlanır)", { error: String(e) });
-    return true;
+    log.warn("phase-1-probe", "deliverableProbe: proje kökü okunamadı → unknown", { error: String(e) });
+    return "unknown";
   }
+}
+
+export async function hasDeliverable(projectRoot: string): Promise<boolean> {
+  // unknown → true: boş-build guard'ı atlanır (bugünkü fail-open davranışı korunur).
+  return (await deliverableProbe(projectRoot)) !== "no";
 }

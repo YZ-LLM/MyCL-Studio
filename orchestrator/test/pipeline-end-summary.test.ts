@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPipelineEndLines,
   type PipelineEndInput,
+  type RunEvidence,
 } from "../src/pipeline-end-summary.js";
 import type { HarnessVerdict } from "../src/harness-verdict.js";
 import type { Phase16Verification } from "../src/playwright-setup.js";
@@ -247,5 +248,46 @@ describe("E2E atlaması özette görünür", () => {
 
   it("REGRESYON KİLİDİ: e2eSkipped boşken metin değişmez", () => {
     expect(lines({ verdict: verdict({ e2eSkipped: [] }) })).toContain("✅ Tamamlandı");
+  });
+});
+
+// S8 (2026-09-18): pipeline sonunda "uygulama gerçekten çalıştı mı?" diye soran hiçbir şey yoktu.
+// Yerine geçen ölçüt "proje klasöründe görünür bir şey var mı"ydı — içeriğe, derlemeye, çalışmaya
+// bakmıyor. CANLI KANIT: 27 dosyalık bir proje vardı, uygulama hiç açılmadı, ekran bomboştu ve akış
+// bunu hiç sormadı. Aşağıdaki testler satırın hem VAR olduğunu hem de ASLA "çalışmıyor" demediğini
+// kilitler — kanıt yokluğu, çalışmadığının kanıtı değildir.
+describe("çalışma kanıtı satırı", () => {
+  const ev = (over: Partial<RunEvidence> = {}): RunEvidence => ({
+    e2ePassed: false,
+    screenNotBlank: false,
+    entryGraphOk: false,
+    noRuntimeErrors: false,
+    ...over,
+  });
+
+  it("kanıt varsa hangileri olduğu yazılır", () => {
+    const out = lines({ evidence: ev({ e2ePassed: true, entryGraphOk: true }) });
+    expect(out).toContain("Çalışma kanıtı");
+    expect(out).toContain("E2E geçti");
+    expect(out).toContain("giriş zinciri sağlam");
+  });
+
+  it("hiç kanıt yoksa DÜRÜST metin — 'çalışmıyor' DEMEZ", () => {
+    const out = lines({ evidence: ev() });
+    expect(out).toContain("kanıtlanmadı");
+    expect(out).not.toContain("çalışmıyor");
+  });
+
+  it("dört kanıt da varsa dördü de listelenir", () => {
+    const out = lines({
+      evidence: ev({ e2ePassed: true, screenNotBlank: true, entryGraphOk: true, noRuntimeErrors: true }),
+    });
+    for (const s of ["E2E geçti", "ekran boş değil", "giriş zinciri sağlam", "çalışma zamanı hatası yok"]) {
+      expect(out).toContain(s);
+    }
+  });
+
+  it("REGRESYON KİLİDİ: kanıt verilmezse satır hiç basılmaz (eski çıktı birebir)", () => {
+    expect(lines({})).not.toContain("Çalışma kanıtı");
   });
 });

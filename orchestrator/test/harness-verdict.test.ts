@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeVerdict, eventsSince } from "../src/harness-verdict.js";
+import { collectRunEvidence, computeVerdict, eventsSince } from "../src/harness-verdict.js";
 import type { AuditEvent } from "../src/types.js";
 
 function ev(phase: number, event: string, detail?: string): AuditEvent {
@@ -362,5 +362,42 @@ describe("Faz 16 atlaması hükme yansır (yalnız gerçek boşlukta)", () => {
       { deliverableExists: true },
     );
     expect(v.summary).toContain("gate başarısız");
+  });
+});
+
+// S8: kanıt toplayıcı — hepsi ZATEN üretilen sinyaller, yeni ölçüm yok.
+describe("collectRunEvidence", () => {
+  const e = (event: string, detail?: string): AuditEvent =>
+    ({ ts: 1, phase: 0, event, caller: "x", detail }) as AuditEvent;
+
+  it("E2E koştu ve atlanmadıysa kanıt sayılır", () => {
+    expect(collectRunEvidence([e("phase-16-complete")]).e2ePassed).toBe(true);
+  });
+
+  it("E2E ATLANDIYSA kanıt sayılmaz (complete damgası olsa bile)", () => {
+    const r = collectRunEvidence([e("phase-16-skipped", "install_failed"), e("phase-16-complete")]);
+    expect(r.e2ePassed).toBe(false);
+  });
+
+  it("görsel tarama koşmadıysa 'ekran boş değil' kanıtı YOK (iddia da yok)", () => {
+    expect(collectRunEvidence([]).screenNotBlank).toBe(false);
+  });
+
+  it("görsel tarama koştu ve boş bulmadıysa kanıt var", () => {
+    expect(collectRunEvidence([e("visual-diff", "routes=1")]).screenNotBlank).toBe(true);
+  });
+
+  it("boş ekran işaretlendiyse kanıt YOK", () => {
+    const r = collectRunEvidence([e("visual-diff"), e("phase-6-deferred", "blank_screen")]);
+    expect(r.screenNotBlank).toBe(false);
+  });
+
+  it("giriş zinciri taraması geçtiyse kanıt var", () => {
+    expect(collectRunEvidence([e("entry-graph-pass")]).entryGraphOk).toBe(true);
+  });
+
+  it("çalışma zamanı hatası kaydı varsa o kanıt düşer", () => {
+    expect(collectRunEvidence([e("runtime-error-recorded", "RUNTIME_VITE x")]).noRuntimeErrors).toBe(false);
+    expect(collectRunEvidence([]).noRuntimeErrors).toBe(true);
   });
 });

@@ -21,6 +21,25 @@ export interface PipelineEndCost {
   cache_read_input_tokens: number;
 }
 
+/**
+ * "Uygulama bu koşuda GERÇEKTEN çalıştı mı?" sorusuna dair POZİTİF kanıtlar.
+ *
+ * NEDEN (2026-09-18): pipeline sonunda bu soruyu soran hiçbir şey yoktu. Yerine geçen ölçüt
+ * "proje klasöründe görünür bir şey var mı"ydı — içeriğe, derlemeye, çalışmaya bakmıyor. Canlı
+ * kanıt: 27 dosyalık bir proje vardı, uygulama hiç açılmadı, ekran bomboştu ve akış bunu hiç
+ * sormadı. Buradaki alanlar zaten ÜRETİLEN sinyallerdir; tek yaptığımız onları bir satırda toplamak.
+ */
+export interface RunEvidence {
+  /** Faz 16 E2E gerçekten koştu ve geçti. */
+  e2ePassed: boolean;
+  /** Faz 6 görsel taraması ekranı boş BULMADI (yani bir şey render olmuş). */
+  screenNotBlank: boolean;
+  /** Uygulamanın giriş zinciri tarandı ve sağlam çıktı. */
+  entryGraphOk: boolean;
+  /** Bu koşuda çalışma zamanı hatası kaydedilmedi. */
+  noRuntimeErrors: boolean;
+}
+
 export interface PipelineEndInput {
   /** state.intent_summary (boş olabilir). */
   intent: string;
@@ -30,6 +49,8 @@ export interface PipelineEndInput {
   verdict: HarnessVerdict | null;
   /** Faz-bazında token harcaması (boş olabilir). */
   costs: PipelineEndCost[];
+  /** Uygulamanın çalıştığına dair pozitif kanıtlar (verilmezse satır basılmaz). */
+  evidence?: RunEvidence;
 }
 
 /**
@@ -111,6 +132,24 @@ export function buildPipelineEndLines(input: PipelineEndInput): string[] {
     );
   } else {
     lines.push("• Sonuç: ✅ Tamamlandı — tüm gate'ler yeşil, güvenlik tarandı.");
+  }
+
+  // ÇALIŞMA KANITI (2026-09-18). Dikkat: buradaki metin "çalışmıyor" DEMEZ — kanıt yokluğu,
+  // çalışmadığının kanıtı değildir (yanlış alarm yasağı). Söylediği tek şey şu: bu koşuda
+  // uygulamanın çalıştığına dair pozitif bir kanıt toplanamadı.
+  const ev = input.evidence;
+  if (ev) {
+    const kanitlar = [
+      ev.e2ePassed ? "E2E geçti" : null,
+      ev.screenNotBlank ? "ekran boş değil" : null,
+      ev.entryGraphOk ? "giriş zinciri sağlam" : null,
+      ev.noRuntimeErrors ? "çalışma zamanı hatası yok" : null,
+    ].filter((x): x is string => x !== null);
+    lines.push(
+      kanitlar.length > 0
+        ? `• 🚦 Çalışma kanıtı: ${kanitlar.join(" · ")}`
+        : "• 🚦 Çalışma kanıtı: uygulamanın çalıştığı bu koşuda kanıtlanmadı.",
+    );
   }
 
   // Token gözlemi — toplam + per-faz döküm (regresyon görünür).

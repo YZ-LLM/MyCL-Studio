@@ -54,7 +54,12 @@ import {
   readAuditLogTail,
   wasPipelineCompleted,
 } from "./audit.js";
-import { computeVerdict, eventsSince, type HarnessVerdict } from "./harness-verdict.js";
+import {
+  collectRunEvidence,
+  computeVerdict,
+  eventsSince,
+  type HarnessVerdict,
+} from "./harness-verdict.js";
 import { classifyOpenedFolder, hasDeliverable, buildCodebaseSnapshot } from "./phase-1-codebase-probe.js";
 import { buildPipelineEndLines } from "./pipeline-end-summary.js";
 import {
@@ -10438,6 +10443,7 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
     // (soft_complete_after_fail) yazıp devam eder. computeVerdict audit'ten
     // gerçeği çıkarır: gate-fail veya güvenlik-skip varsa hüküm PASS değildir.
     let verdict: HarnessVerdict | null = null;
+    let runEvidence: ReturnType<typeof collectRunEvidence> | null = null;
     try {
       // SARI-GATE KÖK FIX (YZLLM 2026-06-20, canlı remax_BO iter#2 bulgusu): verdict YALNIZ BU İTERASYONUN
       // olaylarına baksın. audit.jsonl append-only + tüm iterasyonları tutar → eski computeVerdict TÜM log'u
@@ -10457,10 +10463,13 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
           `⛔ Çalışma kaydının bütünlüğü doğrulanamadı (${anchor.file}): ${anchor.reason}. Bu koşu yeşil sayılamaz.`,
         );
       }
-      verdict = computeVerdict(eventsSince(allEvents, state.iteration_started_at ?? 0), {
+      const iterEvents = eventsSince(allEvents, state.iteration_started_at ?? 0);
+      verdict = computeVerdict(iterEvents, {
         deliverableExists,
         ...(anchor.status === "tampered" ? { auditTampered: true } : {}),
       });
+      // Çalışma kanıtı: hepsi ZATEN üretilen sinyaller; tek yaptığımız bir satırda toplamak.
+      runEvidence = collectRunEvidence(iterEvents);
     } catch (err) {
       // Pipeline-sonu hüküm (sessiz-fallback denetimi): audit okunamazsa verdict null kalır → özet hükümsüz.
       // log.warn→log.error + GÖRÜNÜR (kullanıcı gate sonuçlarını elle kontrol etsin).
@@ -10476,7 +10485,13 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
     }
     emitChatMessage(
       "system",
-      buildPipelineEndLines({ intent, v16, verdict, costs }).join("\n"),
+      buildPipelineEndLines({
+        intent,
+        v16,
+        verdict,
+        costs,
+        ...(runEvidence ? { evidence: runEvidence } : {}),
+      }).join("\n"),
     );
     // Frontend'e yapılandırılmış hüküm — sidebar başarısız gate'lere ⚠️ bassın,
     // header kısmî/başarısız çipi göstersin (ordinal ✅ "sessiz yeşil" yalanını düzeltir).
