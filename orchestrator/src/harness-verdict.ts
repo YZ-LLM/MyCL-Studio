@@ -27,6 +27,8 @@ export interface HarnessVerdict {
    * koruması (PASS yerine PARTIAL).
    */
   securitySkipped: string[];
+  /** Faz 16 (E2E) atlandı ve bu MyCL'in kapatabileceği bir boşluk (ortam/ayar kaynaklı DEĞİL). */
+  e2eSkipped: string[];
   /**
    * Gerçek-app doğrulama kapısı KOŞMASI gerekiyordu ama koşamadı (Playwright/dev-server yok /
    * codegen üretemedi — `realapp-verify-skipped`). Boş değilse: fix yalnız birim-doğrulandı,
@@ -70,6 +72,31 @@ function isSecuritySkip(e: AuditEvent): boolean {
     return true; // missing_command / scan_failed / bilinmeyen → gercek bosluk
   }
   return false;
+}
+
+/**
+ * SAF (2026-09-18): Faz 16 (E2E) ATLANDI mı — ve bu atlama hükmü düşürmeli mi?
+ *
+ * KANIT: üç atlama yolu da `phase-16-skipped` yazıp hemen ardından düz `phase-16-complete` yazıyordu;
+ * `computeVerdict` yalnız `*-fail` aradığı için E2E hiç koşmasa bile hüküm temiz kalıyordu. Hasar
+ * YALNIZ hükümdeydi — doğrulama özeti atlamayı kullanıcıya zaten "DOĞRULANMADI" diye gösteriyor.
+ *
+ * Faz 17'nin taksonomisi burada birebir tekrarlanıyor: hükmü YALNIZ "MyCL'in düzeltebileceği boşluk"
+ * düşürür. Ortam/kapsam/kullanıcı ayarı NÖTR kalır — aksi halde kalıcı bir ayar kalıcı KISMİ üretir,
+ * bu da prototip kaydını ve modül stoklamasını sessizce öldürür (yaşanmış regresyon).
+ *
+ * Detay iki formatta gelebilir: eski kayıtlarda çıplak (`playwright_disabled ...`), yeni damga
+ * kapısından geçenlerde `via=skipped reason=<...>`. İkisi de aynı şekilde sınıflandırılır.
+ */
+function isE2ESkip(e: AuditEvent): boolean {
+  if (e.event !== "phase-16-skipped") return false;
+  const ham = String(e.detail ?? "");
+  const d = ham.startsWith("via=skipped reason=") ? ham.slice("via=skipped reason=".length) : ham;
+  if (d.startsWith("skip_unless=")) return false; // proje UI sunmuyor → NÖTR
+  if (d.startsWith("playwright_disabled")) return false; // kullanıcı ayarı → NÖTR
+  if (d.startsWith("precheck_fail reason=unsupported")) return false; // stack E2E'ye çevrilemez → NÖTR
+  if (d === "no_controller") return false; // pipeline dışı stub → NÖTR
+  return true; // install_failed / scaffold_failed / bilinmeyen → gerçek boşluk
 }
 
 /**
@@ -118,6 +145,7 @@ export function computeVerdict(
       completed,
       gateFailures: [],
       securitySkipped: [],
+      e2eSkipped: [],
       realAppSkipped: [],
       exitCode: 1,
       summary:
@@ -135,6 +163,7 @@ export function computeVerdict(
       completed,
       gateFailures: [],
       securitySkipped: [],
+      e2eSkipped: [],
       realAppSkipped: [],
       exitCode: 1,
       summary:
@@ -160,6 +189,9 @@ export function computeVerdict(
   const securitySkipped = [
     ...new Set(events.filter((e) => isSecuritySkip(e)).map((e) => e.event)),
   ];
+
+  // false-green koruması: E2E atlandı ve bu MyCL'in kapatabileceği bir boşluk (ortam/ayar DEĞİL).
+  const e2eSkipped = [...new Set(events.filter((e) => isE2ESkip(e)).map((e) => String(e.detail ?? e.event)))];
 
   // false-green koruması: gerçek-app doğrulama kapısı koşamadı (ortamsal) — birim yeşil ama app kanıtlanmadı.
   const realAppSkipped = [
@@ -187,6 +219,14 @@ export function computeVerdict(
     summary = `Pipeline tamamlandı ve gate'ler patlamadı AMA güvenlik taraması atlandı (${securitySkipped.join(
       ", ",
     )}) — "tam tarandı" sayılmaz.`;
+  } else if (e2eSkipped.length > 0) {
+    // Gate'ler patlamadı AMA E2E koşamadı ve nedeni MyCL'in kapatabileceği bir boşluk (araç
+    // kurulamadı / iskelet kurulamadı) → "uçtan uca doğrulandı" denemez.
+    verdict = "PARTIAL";
+    exitCode = 2;
+    summary = `Pipeline tamamlandı ve gate'ler patlamadı AMA uçtan uca test koşamadı (${e2eSkipped.join(
+      ", ",
+    )}) — "E2E doğrulandı" sayılmaz.`;
   } else if (realAppSkipped.length > 0) {
     // Gate'ler patlamadı AMA gerçek-app doğrulama kapısı koşamadı (Playwright/dev-server yok) →
     // fix yalnız birim-doğrulandı, çalışan uygulamada kanıtlanmadı → çıplak PASS değil PARTIAL (KATI #4).
@@ -205,6 +245,7 @@ export function computeVerdict(
     completed,
     gateFailures,
     securitySkipped,
+    e2eSkipped,
     realAppSkipped,
     exitCode,
     summary,

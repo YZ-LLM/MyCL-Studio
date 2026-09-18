@@ -68,6 +68,12 @@ ortak controller'a dayanır:
 | 16 | E2E Testler (UI varsa) | mechanical |
 | 17 | Sızma Testi — **otomatik koşar** (hızlı profil); tam tarama 🛡️ butonuyla | — |
 
+**E2E koşamadıysa bu hükme yansır:** Faz 16 atlandığında akış eskiden "tüm gate'ler yeşil" diyebiliyordu.
+Artık atlamanın NEDENİ ayırt ediliyor: proje arayüz sunmuyorsa, Playwright'ı sen kapattıysan ya da
+stack E2E'ye çevrilemiyorsa hüküm etkilenmez (bunlar zaten doğrulama özetinde "DOĞRULANMADI" olarak
+görünür). Ama araç kurulamadıysa ya da test iskeleti kurulamadıysa — yani MyCL'in kapatabileceği bir
+boşluksa — sonuç **kısmi** olur ve nedeni özette yazar.
+
 **Faz 10 uygulamanın giriş zincirini de ölçer:** Bir HTML dosyası diskte olmayan yerel bir script
 ya da stil dosyası çağırıyorsa yakalanır — çünkü o durumda uygulama açılır ama ekran boş kalır.
 Gerçek olay: 27 dosyalık bir uygulama yazıldı, `index.html`'in çağırdığı giriş dosyası hiç

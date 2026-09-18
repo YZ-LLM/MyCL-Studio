@@ -59,6 +59,11 @@ export function buildPipelineEndLines(input: PipelineEndInput): string[] {
       `Güvenlik taraması atlandı (${verdict.securitySkipped.join(", ")}) — araç eksikti, "tam tarandı" denemez.`,
     );
   }
+  if (verdict && verdict.e2eSkipped.length > 0) {
+    uyarilar.push(
+      `Uçtan uca (E2E) test koşamadı (${verdict.e2eSkipped.join(", ")}) — akış uçtan uca doğrulanmadı.`,
+    );
+  }
   if (verdict && verdict.realAppSkipped.length > 0) {
     uyarilar.push(
       'Gerçek uygulama doğrulaması koşamadı (Playwright/dev-server yok) — fix yalnız birim-doğrulandı, çalışan app\'te kanıtlanmadı.',

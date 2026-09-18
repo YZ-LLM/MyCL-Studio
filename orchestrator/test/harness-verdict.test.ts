@@ -247,3 +247,120 @@ describe("kayıt bütünlüğü — kurcalanmış kayıt asla yeşil olamaz", ()
     expect(v.summary).toContain("bütünlüğü");
   });
 });
+
+// KARAKTERİZASYON (2026-09-18, S5 ön koşulu): Faz 16 atlamasını hükme bağlamadan ÖNCE bugünkü
+// semantiği donduruyorum. Hükmü sertleştiren her kenar iki tüketiciyi sessizce öldürebilir:
+// prototip kaydı (PASS değilse yalnız baseline snapshot) ve modül stoklaması (listeler doluysa
+// hiç stoklamaz). Bu regresyon daha önce yaşandı ve kodun kendi yorumuna yazıldı. Aşağıdaki
+// testler "bugün ne oluyor"u sabitler; yeni dal bunları KIRMAMALI.
+describe("KARAKTERİZASYON: bugünkü hüküm semantiği", () => {
+  const iter = 1_000;
+  const tamam = (extra: AuditEvent[] = []): AuditEvent[] => [
+    { ts: iter + 1, phase: 17, event: "phase-17-complete", caller: "mycl-orchestrator" },
+    ...extra,
+  ];
+
+  it("temiz koşu → PASS", () => {
+    const v = computeVerdict(tamam(), { deliverableExists: true });
+    expect(v.verdict).toBe("PASS");
+  });
+
+  it("playwright KULLANICI AYARIYLA kapalı → bugün PASS (kalıcı ayar kalıcı sarı yapmamalı)", () => {
+    const v = computeVerdict(
+      tamam([
+        { ts: iter + 2, phase: 16, event: "phase-16-skipped", caller: "x", detail: "playwright_disabled (Settings)" },
+        { ts: iter + 3, phase: 16, event: "phase-16-complete", caller: "x" },
+      ]),
+      { deliverableExists: true },
+    );
+    expect(v.verdict).toBe("PASS");
+  });
+
+  it("proje UI sunmuyor (skip_unless) → bugün PASS", () => {
+    const v = computeVerdict(
+      tamam([
+        { ts: iter + 2, phase: 16, event: "phase-16-skipped", caller: "x", detail: "skip_unless=has_ui" },
+        { ts: iter + 3, phase: 16, event: "phase-16-complete", caller: "x" },
+      ]),
+      { deliverableExists: true },
+    );
+    expect(v.verdict).toBe("PASS");
+  });
+
+  it("Faz 17 ortam kaynaklı atlama → PASS (nötr taksonomi korunur)", () => {
+    const v = computeVerdict(
+      tamam([{ ts: iter + 2, phase: 17, event: "phase-17-skipped", caller: "x", detail: "no_dev_server" }]),
+      { deliverableExists: true },
+    );
+    expect(v.verdict).toBe("PASS");
+  });
+
+  it("Faz 17 araç eksik → PARTIAL (gerçek boşluk taksonomisi korunur)", () => {
+    const v = computeVerdict(
+      tamam([{ ts: iter + 2, phase: 17, event: "phase-17-skipped", caller: "x", detail: "missing_command" }]),
+      { deliverableExists: true },
+    );
+    expect(v.verdict).toBe("PARTIAL");
+  });
+});
+
+// S5 (2026-09-18): Faz 16 atlaması artık hükme yansıyor — AMA yalnız MyCL'in kapatabileceği boşluk.
+// Üç atlama yolu da `phase-16-skipped` + düz `phase-16-complete` yazıyordu; computeVerdict yalnız
+// `*-fail` aradığı için E2E hiç koşmasa bile hüküm temizdi.
+describe("Faz 16 atlaması hükme yansır (yalnız gerçek boşlukta)", () => {
+  const iter = 1_000;
+  const kos = (detail: string) =>
+    computeVerdict(
+      [
+        { ts: iter + 1, phase: 17, event: "phase-17-complete", caller: "x" },
+        { ts: iter + 2, phase: 16, event: "phase-16-skipped", caller: "x", detail },
+        { ts: iter + 3, phase: 16, event: "phase-16-complete", caller: "x" },
+      ] as AuditEvent[],
+      { deliverableExists: true },
+    );
+
+  it("araç kurulamadı → PARTIAL (MyCL'in kapatabileceği boşluk)", () => {
+    const v = kos("install_failed");
+    expect(v.verdict).toBe("PARTIAL");
+    expect(v.e2eSkipped).toContain("install_failed");
+    expect(v.summary).toContain("uçtan uca");
+  });
+
+  it("iskelet kurulamadı → PARTIAL", () => {
+    expect(kos("scaffold_failed").verdict).toBe("PARTIAL");
+  });
+
+  it("YENİ DAMGA FORMATI da tanınır (via=skipped reason=...)", () => {
+    expect(kos("via=skipped reason=install_failed").verdict).toBe("PARTIAL");
+    expect(kos("via=skipped reason=playwright_disabled (Settings)").verdict).toBe("PASS");
+    expect(kos("via=skipped reason=skip_unless=has_ui").verdict).toBe("PASS");
+  });
+
+  it("NÖTR kalanlar: kullanıcı ayarı, proje UI sunmuyor, stack desteklemiyor, controller yok", () => {
+    expect(kos("playwright_disabled (Settings)").verdict).toBe("PASS");
+    expect(kos("skip_unless=has_ui").verdict).toBe("PASS");
+    expect(kos("precheck_fail reason=unsupported_stack").verdict).toBe("PASS");
+    expect(kos("no_controller").verdict).toBe("PASS");
+  });
+
+  it("REGRESYON KİLİDİ: Faz 16 hiç atlanmadıysa e2eSkipped boş ve hüküm PASS", () => {
+    const v = computeVerdict(
+      [{ ts: iter + 1, phase: 17, event: "phase-17-complete", caller: "x" }] as AuditEvent[],
+      { deliverableExists: true },
+    );
+    expect(v.e2eSkipped).toEqual([]);
+    expect(v.verdict).toBe("PASS");
+  });
+
+  it("öncelik: gate hatası varsa o kazanır (E2E atlaması onu gölgelemez)", () => {
+    const v = computeVerdict(
+      [
+        { ts: iter + 1, phase: 17, event: "phase-17-complete", caller: "x" },
+        { ts: iter + 2, phase: 14, event: "phase-14-fail", caller: "x" },
+        { ts: iter + 3, phase: 16, event: "phase-16-skipped", caller: "x", detail: "install_failed" },
+      ] as AuditEvent[],
+      { deliverableExists: true },
+    );
+    expect(v.summary).toContain("gate başarısız");
+  });
+});

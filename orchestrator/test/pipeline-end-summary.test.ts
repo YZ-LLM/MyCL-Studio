@@ -20,6 +20,7 @@ function verdict(partial: Partial<HarnessVerdict>): HarnessVerdict {
     completed: true,
     gateFailures: [],
     securitySkipped: [],
+    e2eSkipped: [],
     realAppSkipped: [],
     exitCode: 0,
     summary: "",
@@ -224,5 +225,27 @@ describe("sahte yeşil: FAIL ama uyarı listeleri boş", () => {
     });
     expect(out).toContain("BAŞARISIZ");
     expect(out).not.toContain("tekrarlanmamalı-imza");
+  });
+});
+
+// S5 (2026-09-18): E2E atlaması hükmü düşürüyorsa kullanıcı NEDENİNİ de görmeli — hükmü düşüren
+// her sınıfın özette bir karşılığı olmalı, yoksa "neden kısmi?" sorusu cevapsız kalır.
+describe("E2E atlaması özette görünür", () => {
+  it("e2eSkipped doluysa uyarı satırı çıkar ve yeşil YAZILMAZ", () => {
+    const out = lines({
+      verdict: verdict({
+        verdict: "PARTIAL",
+        completed: true,
+        e2eSkipped: ["install_failed"],
+        summary: "E2E koşamadı",
+      }),
+    });
+    expect(out).toContain("Uçtan uca");
+    expect(out).toContain("install_failed");
+    expect(out).not.toContain("✅ Tamamlandı");
+  });
+
+  it("REGRESYON KİLİDİ: e2eSkipped boşken metin değişmez", () => {
+    expect(lines({ verdict: verdict({ e2eSkipped: [] }) })).toContain("✅ Tamamlandı");
   });
 });
