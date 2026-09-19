@@ -13,6 +13,8 @@ import {
   checkPlaywrightScaffold,
   ensureAuthTemplate,
   ensurePlaywrightScaffold,
+  configManagesServer,
+  readPlaywrightConfig,
 } from "../src/playwright-setup.js";
 
 describe("playwright-setup · checkPlaywrightScaffold", () => {
@@ -472,5 +474,44 @@ describe("playwright-setup · assessPhase16Verification (dürüst rapor sinyalle
     );
     v = await assessPhase16Verification(projectRoot);
     expect(v.authStatus).toBe("configured");
+  });
+});
+
+// CANLI KANIT (cüzdan projesi, 2026-09-19): Faz 16 hazırlığı sunucuyu hiç kendisi başlatmıyordu; tek
+// güvencesi ayar dosyasına `webServer` koymaktı. Kod yazan ajan kendi ayar dosyasını yazınca dosya
+// MyCL imzası taşımadı, "kullanıcının dosyası" sayılıp dokunulmadı ve sunucu hiç ayağa kalkmadı.
+// E2E her seferinde ERR_CONNECTION_REFUSED ile düştü — uygulamada hiçbir sorun yokken.
+describe("configManagesServer — sunucu önkoşulunun sahibi kim", () => {
+  it("webServer bloğu varsa dosya yönetir → MyCL KARIŞMAZ (port çakışması olmasın)", () => {
+    expect(configManagesServer("export default defineConfig({ webServer: { command: 'npm run dev' } })")).toBe(true);
+  });
+
+  it("CANLI VAKA: webServer yoksa sunucuyu MyCL garanti etmeli", () => {
+    const cuzdan = `import { defineConfig, devices } from "@playwright/test";
+export default defineConfig({
+  reporter: [["list"]],
+  use: { baseURL: "http://localhost:5173" },
+});`;
+    expect(configManagesServer(cuzdan)).toBe(false);
+  });
+
+  it("MyCL'in kendi şablonu dev komutuyla üretildiğinde sunucuyu yönetir", () => {
+    // Şablon webServer'ı yalnız dev komutu biliniyorsa ekler — bu dalın kilidi.
+    expect(configManagesServer("  webServer: {\n    command: \"npm run dev\",")).toBe(true);
+  });
+});
+
+describe("readPlaywrightConfig", () => {
+  it("ayar dosyası yoksa null — 'sunucu yönetilmiyor' İDDİA EDİLMEZ", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mycl-pwcfg-"));
+    expect(await readPlaywrightConfig(dir)).toBeNull();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("aday adlardan hangisi varsa onu okur", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mycl-pwcfg-"));
+    await writeFile(join(dir, "playwright.config.js"), "webServer: {}");
+    expect(await readPlaywrightConfig(dir)).toContain("webServer");
+    await rm(dir, { recursive: true, force: true });
   });
 });

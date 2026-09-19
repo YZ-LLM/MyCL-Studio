@@ -310,7 +310,9 @@ import {
   assessPhase16Verification,
   ensureAuthTemplate,
   ensurePlaywrightInstalled,
+  configManagesServer,
   ensurePlaywrightScaffold,
+  readPlaywrightConfig,
 } from "./playwright-setup.js";
 import { verifyFeatureHandler, runRealAppBugGate, verifyIntentAgainstApp, type RealAppGateOutcome } from "./verify-feature.js";
 import {
@@ -10381,6 +10383,27 @@ async function ensurePlaywrightForPhase16(
     return { proceed: false, reason: "scaffold_failed" };
   }
   // "already" → silent (chat'i kirletme)
+
+  // SUNUCU ÖNKOŞULU (2026-09-19, canlı kanıt: cüzdan projesi). E2E çalışan bir uygulamaya bağlanır;
+  // bu hazırlık bugüne kadar sunucuyu hiç kendisi başlatmıyordu — tek güvencesi ayar dosyasına
+  // `webServer` koymaktı. Ama dosya MyCL imzası taşımıyorsa (kod yazan ajan kendi dosyasını yazdıysa)
+  // ona dokunulmuyor. Sonuç: sunucu yok, E2E her seferinde ERR_CONNECTION_REFUSED ile düşüyor ve
+  // kanıt taşıyan faz olduğu için akış orada takılıyordu — uygulamada hiçbir sorun yokken.
+  // Kaldığı yerden devam eden bir iterasyonda Faz 6 koşmadığı için sunucu hiç ayağa kalkmıyordu.
+  // Dosya sunucuyu kendisi yönetiyorsa MyCL KARIŞMAZ (aynı porta iki süreç çakışır). Dosyaya dokunulmaz.
+  const pwConfig = await readPlaywrightConfig(state.project_root);
+  if (pwConfig !== null && !configManagesServer(pwConfig) && runtime.config) {
+    const dev = await ensureDevServerForReview(state, runtime.config, { openBrowser: false });
+    await appendAuditModule(state.project_root, {
+      ts: Date.now(),
+      phase: 16,
+      event: dev.ok ? "e2e-dev-server-ready" : "e2e-dev-server-failed",
+      caller: "mycl-orchestrator",
+      detail: dev.alreadyAlive ? "already_alive" : `started port=${dev.port ?? "?"}`,
+    }).catch(() => {});
+    // Başlatılamazsa E2E YİNE koşar ve gerçek sonucu verir — tanı zaten görünür basıldı. Burada
+    // sessizce atlamak, kanıt taşıyan bir fazın ölçülmeden geçmesi olurdu.
+  }
 
   // v15.8 (2026-05-28): Auth template — .mycl/auth.json placeholder yaz.
   // Smoke test login flow için credentials okuma yeri. Yoksa template + chat

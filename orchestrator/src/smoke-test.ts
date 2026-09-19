@@ -43,11 +43,13 @@ export interface RestartResult {
 export async function ensureDevServerForReview(
   state: State,
   config: MyclConfig,
+  /** `openBrowser: false` → sunucu ayağa kalkar ama tarayıcı açılmaz (E2E gibi insan-dışı tüketiciler). */
+  opts: { openBrowser?: boolean } = {},
 ): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number }> {
   const alive =
     state.dev_server_pid !== undefined && isProcessAliveSync(state.dev_server_pid);
   if (alive) return { ok: true, alreadyAlive: true, port: await deriveDevPort(state) };
-  const restart = await restartDevServerSimple(state, config);
+  const restart = await restartDevServerSimple(state, config, opts);
   return { ok: restart.ok, alreadyAlive: false, port: restart.port };
 }
 
@@ -76,6 +78,7 @@ async function deriveDevPort(state: State): Promise<number | undefined> {
 export async function restartDevServerSimple(
   state: State,
   config: MyclConfig,
+  opts: { openBrowser?: boolean } = {},
 ): Promise<RestartResult> {
   stopActiveDevServer(state);
   // YZLLM 2026-06-15: dev-server'dan ÖNCE Vite runtime-error injection'ını GARANTİLE (idempotent).
@@ -129,13 +132,17 @@ export async function restartDevServerSimple(
       dbPath: `${state.project_root}/error_folder/mycl_errors.db`,
       config,
     });
-    emitChatMessage(
-      "system",
-      `✅ Dev server hazır: http://localhost:${result.handle.port}. Tarayıcı açılıyor.`,
-    );
-    // Faz 6 incelemesi DARK modda açılır (YZLLM: responsive+dark/light zorunlu). App `?theme=dark`'ı
-    // okur (phase-05-ui mandate); desteklemeyen app param'ı yoksayar → zararsız.
-    openBrowser(`http://localhost:${result.handle.port}?theme=dark`);
+    if (opts.openBrowser === false) {
+      emitChatMessage("system", `✅ Dev server hazır: http://localhost:${result.handle.port}.`);
+    } else {
+      emitChatMessage(
+        "system",
+        `✅ Dev server hazır: http://localhost:${result.handle.port}. Tarayıcı açılıyor.`,
+      );
+      // Faz 6 incelemesi DARK modda açılır (YZLLM: responsive+dark/light zorunlu). App `?theme=dark`'ı
+      // okur (phase-05-ui mandate); desteklemeyen app param'ı yoksayar → zararsız.
+      openBrowser(`http://localhost:${result.handle.port}?theme=dark`);
+    }
     return { ok: true, port: result.handle.port };
   }
   // Tanı, ÇAĞIRAN fazın adıyla ve gerçek bağımlılık durumuyla üretilir: Faz 6 incelemesinden gelen

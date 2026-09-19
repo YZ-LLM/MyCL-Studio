@@ -1038,3 +1038,31 @@ export async function assessPhase16Verification(
   ]);
   return { smokeKind, authStatus };
 }
+
+/**
+ * SAF: Playwright ayar dosyası dev sunucusunu KENDİSİ yönetiyor mu (`webServer` bloğu)?
+ *
+ * NEDEN (2026-09-19, canlı kanıt: cüzdan projesi): Faz 16 hazırlığı sunucuyu hiç kendisi başlatmıyor;
+ * tek güvencesi ayar dosyasına `webServer` koymak. Ama dosya MyCL imzası taşımıyorsa — ki kod yazan
+ * ajan kendi ayar dosyasını yazdığında böyle olur — "kullanıcının dosyası" sayılıp ona dokunulmuyor.
+ * Sonuç: sunucu yok, E2E her seferinde `ERR_CONNECTION_REFUSED` ile düşüyor ve kanıt taşıyan faz
+ * olduğu için akış orada takılıyor. Uygulamada hiçbir sorun yokken.
+ *
+ * Bu fonksiyon yalnız "dosya sunucuyu yönetiyor mu" sorusunu cevaplar. Yönetiyorsa MyCL KARIŞMAZ
+ * (aynı porta iki süreç çakışır); yönetmiyorsa sunucuyu MyCL garanti eder. Dosyaya dokunulmaz.
+ */
+export function configManagesServer(configContent: string): boolean {
+  return configContent.includes("webServer:") || configContent.includes("webServer :");
+}
+
+/** Projedeki Playwright ayar dosyasının içeriği; yoksa ya da okunamazsa null. */
+export async function readPlaywrightConfig(projectRoot: string): Promise<string | null> {
+  for (const candidate of CONFIG_CANDIDATES) {
+    try {
+      return await readFile(join(projectRoot, candidate), "utf-8");
+    } catch {
+      /* sıradaki aday */
+    }
+  }
+  return null;
+}
