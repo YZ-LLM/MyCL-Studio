@@ -346,6 +346,26 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   geçmiş kayıtlar sonradan değiştirilmiş ya da silinmişse koşu **yeşil sayılmaz**
   ve neden yeşil sayılmadığı açıkça söylenir. Sonradan eklenen satırlar normal
   akıştır, çapayı bozmaz. Bulguları kalıcı olarak susturan kayıt da aynı korumada.
+  Çapa iterasyon başında alındığı için o iterasyonda yazılan satırları kapsamaz;
+  bunları **MyCL'in çalışan sürecinin belleğindeki ikinci bir tanık** korur: MyCL
+  yazdığı her satırı aklında tutar ve iş bitiminde kaydı bununla karşılaştırır.
+  Değiştirilmiş, silinmiş ya da MyCL'in yazmadığı bir satır varsa koşu yeşil
+  sayılmaz. Bu tanık bir dosyada durmadığı için, kaydı ya da çapayı değiştirmek onu
+  kandırmaya yetmez. Sınırları: MyCL yeniden başlatılınca tanık sıfırdan başlar (o
+  andan öncesi için yalnız çapa konuşur); tanık iş bitiminde sorulur, aradaki faz
+  kontrolleri kaydı doğrulamadan okur; aynı proje aynı anda iki MyCL penceresinde
+  açıksa ya da kaydı çalışma sırasında elle düzenlerseniz bu da "yabancı satır"
+  olarak görünür; çalışan MyCL sürecinin belleğine erişebilen bir program tanığı da
+  aşabilir.
+- **🧷 Ajan kendi talimatını yazamaz** — kod yazan ajan, proje kökündeki
+  `CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json` dosyalarını ve `.claude/` klasörünü
+  **okuyabilir ama değiştiremez**. Bunlar sonraki her ajana ve denetçiye talimat,
+  kanca ve araç olarak yüklendiği için, yazılabilir olsalardı bir ajanın gerekçesi
+  kendisini denetleyenlere sızardı. Bu dosyaları siz elle düzenlemeye devam
+  edebilirsiniz. Sınırları: yalnız proje kökü korunur, alt klasörlerdeki `CLAUDE.md`
+  kapsam dışıdır; abonelik (CLI) yolunda engel işletim sistemi hapsiyle zorlanır,
+  API yolunda ve hapis kapalıyken yalnız yazma araçları ile açık komut desenleri
+  engellenir (dolaylı bir komutla aşılabilir).
 - **🛡️ İterasyon gate'leri (gate overlay)** — her iş başlarken MyCL, o işe özel
   riskleri kapalı bir gate sözlüğünden seçip iterasyona özel kilitler derler:
   örneğin "şu dosya bu iterasyonda değiştirilemez", "bağımlılık dosyalarına

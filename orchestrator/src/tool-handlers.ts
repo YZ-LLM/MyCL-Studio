@@ -15,6 +15,7 @@ import { promises as fs } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
 import { appendAudit } from "./audit.js";
 import { inspectBashCommand } from "./bash-guard.js";
+import { AGENT_INSTRUCTION_DIRS, AGENT_INSTRUCTION_FILES } from "./agent-sandbox.js";
 import { getActiveOverlay } from "./gate-overlay/compile.js";
 import { buildGuardRules, decideWrite, isWriteTool, writeToolTargetPath } from "./gate-overlay/decide.js";
 import { log } from "./logger.js";
@@ -107,6 +108,21 @@ const DEFAULT_DENIED_PREFIXES = [
   ".git/",
 ];
 
+/**
+ * AJAN TALİMAT YÜZEYİ — yalnız YAZMAYA kapalı (okuma/arama etkilenmez; bu yüzden yukarıdaki
+ * DEFAULT_DENIED_PREFIXES'e eklenmedi — o liste Glob/Grep gezintisinden de dışlıyor).
+ * Gerekçe ve liste: agent-sandbox.ts `agentInstructionPaths` (CLI yolu ile simetri). Faz
+ * whitelist'i (extra_allowed_paths) bunu EZMEZ: hiçbir faz ajanın kendi talimatını yazmasını gerektirmez.
+ */
+function isAgentInstructionPath(rel: string): boolean {
+  // Büyük/küçük harf KATLANIR: macOS dosya sistemi duyarsız → `claude.md` aynı fiziksel dosyadır.
+  // (Linux'ta `claude.md` ayrı ve zararsız bir dosya olurdu; onu da reddetmek ihmal edilebilir bir
+  // yanlış engel, tersi ise macOS'ta kilidi boşa çıkarırdı.)
+  const norm = rel.split("\\").join("/").toLowerCase();
+  if (AGENT_INSTRUCTION_FILES.some((f) => f.toLowerCase() === norm)) return true;
+  return AGENT_INSTRUCTION_DIRS.some((d) => norm === d.toLowerCase() || norm.startsWith(`${d.toLowerCase()}/`));
+}
+
 function normalizeAndCheck(
   inputPath: string,
   ctx: ToolContext,
@@ -119,6 +135,9 @@ function normalizeAndCheck(
   const rel = relative(ctx.project_root, abs);
   if (rel.startsWith("..") || isAbsolute(rel)) {
     return { error: `path outside project_root: ${inputPath}` };
+  }
+  if (forWrite && isAgentInstructionPath(rel)) {
+    return { error: `path is agent instruction surface (CLAUDE.md / .claude / .mcp.json) — write denied: ${rel}` };
   }
   if (forWrite) {
     // Faz-özel İSTİSNA (YZLLM 2026-06-18 login-istisnası): match → PHASE-deny'ı (extra_denied_paths/

@@ -262,6 +262,37 @@ export function buildOverlayHookBlock(overlay: OverlayHooks): Record<string, unk
 }
 
 /**
+ * AJAN TALİMAT YÜZEYİ (harness kaçış denetimi, 2026-11-26). Claude Code her spawn'da proje kökündeki
+ * `CLAUDE.md` / `CLAUDE.local.md` dosyalarını bağlama, `.claude/` ayarlarını (KANCALAR dahil) ve
+ * `.mcp.json` sunucularını oturuma yükler. Bunlar proje İÇİNDE durduğu için kod yazan ajan onlara
+ * yazabiliyordu → iki kaçış:
+ *   (1) Bir ajanın gerekçesi sonraki TÜM işçilere ve "bağımsız" müfettişlere talimat olarak sızar
+ *       (durumsuz işçi + ayrı denetçi varsayımı çöker — denetçi, denetlediği ajanın yazdığını okur).
+ *   (2) `.claude/settings.json` içine yazılan kanca / `.mcp.json` içine yazılan sunucu sonraki spawn'da
+ *       kum havuzu DIŞINDA koşar.
+ * OKUMA açık kalır (kullanıcının kendi proje talimatları ajanlara ulaşmaya devam eder — davranış aynı);
+ * yalnız AJANIN bunları değiştirmesi kapanır. MyCL'in kendi (orkestratör süreci) yazımı etkilenmez.
+ * SINIR (dürüst): yalnız proje KÖKÜ korunur. Alt dizinlerdeki `CLAUDE.md` glob gerektirir; Seatbelt'te
+ * glob genişlemesi güvenilir değil (yukarıdaki V2 notu) → kapsam dışı, README'de yazılı.
+ */
+export const AGENT_INSTRUCTION_FILES = ["CLAUDE.md", "CLAUDE.local.md", ".mcp.json"] as const;
+export const AGENT_INSTRUCTION_DIRS = [".claude"] as const;
+
+/** SAF: ajan talimat yüzeyinin mutlak yolları (dosyalar + dizinler). */
+export function agentInstructionPaths(projectRoot: string): { files: string[]; dirs: string[] } {
+  return {
+    files: AGENT_INSTRUCTION_FILES.map((f) => pathPosix.join(projectRoot, f)),
+    dirs: AGENT_INSTRUCTION_DIRS.map((d) => pathPosix.join(projectRoot, d)),
+  };
+}
+
+/** SAF: talimat yüzeyi için `permissions.deny` girdileri (Edit tüm yazma araçlarını kapsar). */
+export function agentInstructionPermDeny(projectRoot: string): string[] {
+  const { files, dirs } = agentInstructionPaths(projectRoot);
+  return [...files.map((f) => `Edit(${f})`), ...dirs.map((d) => `Edit(${d}/**)`)];
+}
+
+/**
  * SAF: home top-level girdilerinden (runtime + proje HARİÇ) denyRead + Claude Code
  * `--settings` nesnesi üret. platform enjekte edilir (test edilebilir).
  *   - off → yalnız ultracode (sandbox yok).
@@ -304,7 +335,9 @@ export function buildAgentSandboxSettings(params: {
     return {
       settings: {
         ...base,
-        permissions: { deny: evidenceDirs.map((d) => `Edit(${d}/**)`) },
+        permissions: {
+          deny: [...evidenceDirs.map((d) => `Edit(${d}/**)`), ...agentInstructionPermDeny(projectRoot)],
+        },
       },
       denyCount: 0,
     };
@@ -372,7 +405,16 @@ export function buildAgentSandboxSettings(params: {
   // (sahte-yeşil — güven-modelinin kalbi; EMPİRİK doğrulandı sandbox izin veriyordu). MyCL'in KENDİ (orkestratör
   // süreci) .mycl yazımı etkilenmez — bu yalnız AJAN sandbox'ı. READ açık (spec.md/patterns.md okunur).
   const myclDir = pathPosix.join(projectRoot, ".mycl");
-  const denyWrite = [gitDir, `${gitDir}/**`, myclDir, `${myclDir}/**`];
+  const instr = agentInstructionPaths(projectRoot);
+  const denyWrite = [
+    gitDir,
+    `${gitDir}/**`,
+    myclDir,
+    `${myclDir}/**`,
+    // Ajan talimat yüzeyi (CLAUDE.md / .claude / .mcp.json) — gerekçe yukarıda agentInstructionPaths.
+    ...instr.files,
+    ...instr.dirs.flatMap((d) => [d, `${d}/**`]),
+  ];
   // npm/araç paket-cache YAZMA izni (YZLLM 2026-06-17): sandbox default YALNIZ cwd + $TMPDIR'e yazdırır → npm cache
   // ~/.npm (home-altı) write-deny → `npm install` EPERM ("root-owned" yanıltıcı; gerçekte sandbox write-deny).
   // Cache dizinleri (paket tarball/araç cache — executable DEĞİL) `allowWrite` ile açılır; auth (.claude/.config)
@@ -398,7 +440,12 @@ export function buildAgentSandboxSettings(params: {
       // "Write(path) is not matched by file permission checks — only Edit(path) rules are. Edit rules
       // cover all file-editing tools." → Write(...) formu ETKİSİZ; koruma zaten Edit(...) ile sağlanıyor.
       // Etkisiz formu kaldırdık: koruma AYNI (Edit tüm yazma araçlarını kapsıyor), uyarı gürültüsü bitti.
-      deny: [...permDeny, `Edit(${gitDir}/**)`, `Edit(${myclDir}/**)`],
+      deny: [
+        ...permDeny,
+        `Edit(${gitDir}/**)`,
+        `Edit(${myclDir}/**)`,
+        ...agentInstructionPermDeny(projectRoot),
+      ],
       allow: permAllow,
     },
   };
@@ -417,9 +464,10 @@ export function sandboxSettingsArgs(
   overlay?: OverlayHooks,
 ): string[] {
   if (_policy === "off") {
-    // Sandbox kapalı olsa DA overlay kancaları eklenir (ayrı sözleşme). İkisi de yoksa
-    // bugünkü davranış birebir: hiç `--settings` bayrağı yazılmaz.
-    if (!ultracode && !overlay) return [];
+    // Sandbox kapalı olsa DA overlay kancaları ve kanıt/talimat yazma reddi eklenir (ayrı sözleşmeler).
+    // (2026-11-26, mahkeme O3) Eskiden ultracode de overlay de yoksa buradan `[]` dönülüyordu → yukarıdaki
+    // "off olsa BİLE kanıt defteri yazmaya kapalı" kuralı o spawn'lara HİÇ ulaşmıyordu (ayar üretiliyor
+    // ama gönderilmiyordu). Artık her zaman gönderilir: içinde yalnız yazma reddi var, kum havuzu YOK.
     const { settings } = buildAgentSandboxSettings({
       projectRoot,
       ultracode,

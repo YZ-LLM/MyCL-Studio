@@ -1,3 +1,37 @@
+## 2026-11-26
+
+- **fix(güvenlik): harness kaçış denetimi — hükmün üretildiği satırlar korumasızdı + ajan kendi talimatını yazabiliyordu:**
+  İki açık, tek soru: "model söyleneni gözden kaçırır ya da tersini mantıklı bulursa harness'tan çıkabilir mi?"
+  **(1) Çapa hükmün girdisini kapsamıyordu.** `refreshAuditAnchor` iterasyon BAŞINDA çağrılıyor ve yalnız o ana kadarki
+  öneki özetliyor; hüküm ise `eventsSince(iteration_started_at)` ile yalnız BU iterasyonun satırlarından hesaplanıyor →
+  o satırlar çapanın dışında. Testle kanıtlandı (`audit-ledger.test.ts` "ASIL AÇIK"): çapadan sonra yazılan
+  `phase-13-fail` → `phase-13-complete` yapılınca çapa "ok" diyor. Ayrıca çapa dosyası (`~/.mycl`) ajan kum havuzuna
+  kapalı ama MyCL'in hapis DIŞINDA koşturduğu proje komutlarına (test/lint/build/dev — ajanın yazdığı kod) ve API arka
+  ucundaki Bash'e açık. **Fix:** `audit-ledger.ts` — tanık diskte değil orkestratör sürecinin belleğinde. `appendAudit`
+  yazdığı her satırın özetini tutar; `emitPipelineEndSummary` hükümden önce dosyayı tanıkla karşılaştırır (önek
+  değişmemiş + kuyruk TAM OLARAK bu sürecin yazdıkları, sırasız çoklu küme — beklemesiz `void appendAudit` çağrıları
+  yanlış alarm üretmez). Sapma → mevcut `auditTampered` → FAIL. `accepted-findings.jsonl` "additions" kipinde: yabancı
+  EKLEME yakalanır, satır SİLME serbest (belgelenmiş "bulguyu yeniden etkinleştir" akışı korunur). Platform/arka uç
+  bağımsız; yazım davranışı aynı. `no-ledger` (bu süreç henüz yazmadı) kurcalama DEĞİL → eski davranış.
+  **(2) Ajan talimat yüzeyi yazılabiliyordu.** Yazma yasağı yalnız `.mycl` + `.git` idi; proje kökündeki `CLAUDE.md` /
+  `CLAUDE.local.md` / `.mcp.json` / `.claude/` Claude Code tarafından sonraki her spawn'a (müfettişler dahil) yükleniyor.
+  **Fix:** `agent-sandbox.ts` `denyWrite` + `permissions.deny` (politika "off" iken de), `tool-handlers.ts` API yolu
+  (faz whitelist'i ezmez, büyük/küçük harf katlanır). OKUMA açık — kullanıcının proje talimatları ajana aynen ulaşır.
+  **Çapraz-aile mahkemesi (KATI #12) bulguları düzeltildi:** (Y1) doğrulama okurken başlayan `void appendAudit`
+  sahte "eksik satır" üretiyordu → tanık anlık görüntüsü okumadan ÖNCE alınır, okuma sırasında yazım olduysa yeniden
+  denenir (kararlı an; hiç durulmazsa `busy` = kurcalama değil, log'a düşer). (Y2) `write` başarılı + `fsync` hatalı
+  yazım "yabancı satır" sayılıyordu → "belki yazıldı" kümesi. (O1) eşzamanlılık testi tanık doğmadan doğruluyordu
+  (totolojik) → geciktirilmiş yazımlı gerçek testler. (O2) API yolunda Bash talimat yüzeyine yazabiliyordu →
+  `bash-guard` desenleri (kök hedefler; `docs/CLAUDE.md`, `cat CLAUDE.md`, `cp CLAUDE.md x` serbest). (O3) ÖNCEDEN VAR
+  OLAN boşluk: politika "off" + ultracode/overlay yokken `sandboxSettingsArgs` `[]` dönüyor, 2026-09-10'da eklenen
+  "off olsa bile `.mycl` yazmaya kapalı" ayarı o spawn'lara hiç gönderilmiyordu → artık her zaman gönderilir.
+  (O5) hüküm girdisi okunmadan ÖNCE ve SONRA doğrulanır; README'deki "atlatılamaz" iddiası gerçek sınırlarla değiştirildi.
+  **Doğrulanmadı (gerçek `claude` + macOS gerekir):** yeni `denyWrite` girdilerinin Seatbelt/bwrap altında var olmayan
+  dosyalar için davranışı ve `Edit(<yol>)` kurallarının bu dosyalarda etkisi — mevcut `.mycl` kurallarıyla aynı biçimde.
+  **Dürüst sınır:** tanık süreçle doğar (yeniden başlatmada sıfırlanır); alt dizin `CLAUDE.md` kapsam dışı; MyCL'in
+  koşturduğu proje komutları hâlâ işletim sistemi hapsinde değil (kayıt sahteciliği artık YAKALANIR ama `~/.mycl`
+  altındaki diğer dosyalar o komutlara açık) — ayrı karar bekliyor.
+
 ## 2026-07-13
 
 - **feat(ui): kuyruk işinin GERÇEK süresini göster (running→done) — "kaç dakika sürdü" (YZLLM canlı "tamamlanma saatleri + kaç dakika sürdü bilmem lazım"):**

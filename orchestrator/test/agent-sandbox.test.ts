@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentInstructionPaths,
+  sandboxSettingsArgs,
+  setSandboxPolicy,
+  getSandboxPolicy,
   buildAgentSandboxSettings,
   detectSandboxAvailability,
   runtimeAllowFor,
@@ -153,7 +157,40 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS home-deny + allowR
     expect(permDeny).toContain("Edit(/tmp/mycl-validate/shop/.mycl/**)");
     expect(permDeny).not.toContain("Write(/tmp/mycl-validate/shop/.git/**)");
     const denyWrite = (settings.sandbox as { filesystem: { denyWrite: string[] } }).filesystem.denyWrite;
-    expect(denyWrite).toEqual([`${PROJ}/.git`, `${PROJ}/.git/**`, `${PROJ}/.mycl`, `${PROJ}/.mycl/**`]);
+    expect(denyWrite).toEqual([
+      `${PROJ}/.git`,
+      `${PROJ}/.git/**`,
+      `${PROJ}/.mycl`,
+      `${PROJ}/.mycl/**`,
+      // Ajan talimat yüzeyi (2026-11-26): ajan kendi/sonraki işçilerin talimatını ve kancalarını yazamaz.
+      `${PROJ}/CLAUDE.md`,
+      `${PROJ}/CLAUDE.local.md`,
+      `${PROJ}/.mcp.json`,
+      `${PROJ}/.claude`,
+      `${PROJ}/.claude/**`,
+    ]);
+  });
+
+  // HARNESS KAÇIŞ DENETİMİ (2026-11-26): Claude Code her spawn'da proje kökündeki CLAUDE.md'yi bağlama,
+  // .claude/ ayarlarını (kancalar) ve .mcp.json'u oturuma yükler. Ajan bunlara yazabiliyordu → gerekçesi
+  // sonraki işçilere/müfettişlere talimat olarak sızıyor, yazdığı kanca hapis DIŞINDA koşuyordu.
+  it("ajan talimat yüzeyi YAZMAYA kapalı, OKUMAYA açık (kullanıcının proje talimatları ajana ulaşır)", () => {
+    const permDeny = (settings.permissions as { deny: string[] }).deny;
+    expect(permDeny).toContain(`Edit(${PROJ}/CLAUDE.md)`);
+    expect(permDeny).toContain(`Edit(${PROJ}/CLAUDE.local.md)`);
+    expect(permDeny).toContain(`Edit(${PROJ}/.mcp.json)`);
+    expect(permDeny).toContain(`Edit(${PROJ}/.claude/**)`);
+    // Okuma reddi YOK: proje Read-allow'u bu dosyaları da kapsar, ayrı bir Read-deny eklenmedi.
+    expect(permDeny.filter((d) => d.startsWith("Read(") && d.includes("CLAUDE"))).toEqual([]);
+    const fsCfg = (settings.sandbox as { filesystem: { denyRead: string[] } }).filesystem;
+    expect(fsCfg.denyRead.some((d) => d.includes("CLAUDE.md") || d.endsWith("/.claude"))).toBe(false);
+  });
+
+  it("agentInstructionPaths: yalnız proje KÖKÜ (alt dizin glob'u yok — Seatbelt glob güvenilmez)", () => {
+    expect(agentInstructionPaths("/p")).toEqual({
+      files: ["/p/CLAUDE.md", "/p/CLAUDE.local.md", "/p/.mcp.json"],
+      dirs: ["/p/.claude"],
+    });
   });
 
   it("ağ: güvenilir paket registry'leri allowedDomains'te (npm install için; ağ default deny-all, keyfi domain hariç)", () => {
@@ -314,6 +351,11 @@ describe("agent-sandbox · ultracode merge + policy modları", () => {
     const deny = (off.settings.permissions as { deny: string[] } | undefined)?.deny ?? [];
     expect(deny).toContain("Edit(/tmp/x/.mycl/**)");
     expect(deny).toContain("Edit(/tmp/x/.git/**)");
+    // Talimat yüzeyi de politikadan BAĞIMSIZ korunur (aynı gerekçe: hapsi kapatmak ≠ "ajan kendi
+    // talimatını ve kancasını yazsın" demek).
+    expect(deny).toContain("Edit(/tmp/x/CLAUDE.md)");
+    expect(deny).toContain("Edit(/tmp/x/.claude/**)");
+    expect(deny).toContain("Edit(/tmp/x/.mcp.json)");
     // Kum havuzu YİNE yok — yalnız kanıt koruması eklendi (politikanın anlamı korunuyor).
     expect("sandbox" in off.settings).toBe(false);
     expect(off.denyCount).toBe(0);
@@ -368,5 +410,24 @@ describe("agent-sandbox · yerel port yeteneği (SandboxCaps)", () => {
     // Kod yazmayan / sunucu açmayan roller: izin YOK (kuşkuda verme).
     for (const t of ["phase-2", "phase-4", "phase-7", "translator", "quality-audit", "phase-9-debate", ""])
       expect(needsLocalBinding(t)).toBe(false);
+  });
+});
+
+// MAHKEME O3 (2026-11-26): "off" + ultracode yok + overlay yok iken sandboxSettingsArgs `[]` dönüyordu →
+// üretilen "kanıt defteri yazmaya kapalı" ayarı o spawn'lara HİÇ gönderilmiyordu.
+describe("sandboxSettingsArgs: policy off iken de yazma reddi GÖNDERİLİR", () => {
+  it("ultracode ve overlay yokken bile --settings üretir; içinde sandbox yok, yazma reddi var", () => {
+    const prev = getSandboxPolicy();
+    setSandboxPolicy("off");
+    try {
+      const args = sandboxSettingsArgs("/tmp/x", false);
+      expect(args[0]).toBe("--settings");
+      const parsed = JSON.parse(args[1] ?? "{}") as { sandbox?: unknown; permissions?: { deny?: string[] } };
+      expect(parsed.sandbox).toBeUndefined();
+      expect(parsed.permissions?.deny).toContain("Edit(/tmp/x/.mycl/**)");
+      expect(parsed.permissions?.deny).toContain("Edit(/tmp/x/CLAUDE.md)");
+    } finally {
+      setSandboxPolicy(prev);
+    }
   });
 });

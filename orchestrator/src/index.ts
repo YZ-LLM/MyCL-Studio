@@ -49,6 +49,8 @@ import {
   appendAudit as appendAuditModule,
   appendCost,
   appendAcceptedFinding,
+  auditLogPath,
+  acceptedFindingsPath,
   readCosts,
   readAuditLog,
   readAuditLogTail,
@@ -270,6 +272,7 @@ import { pruneOldLogs } from "./log-retention.js";
 import { getCachedProjectMap, clearProjectMapCache } from "./onboarding/project-map.js";
 import { runOnboarding, onboardingSucceeded } from "./onboarding/onboard-existing.js";
 import { refreshAuditAnchor, verifyAuditAnchor } from "./audit-anchor.js";
+import { verifyLedger } from "./audit-ledger.js";
 import {
   buildSourcePrompt,
   classifyGapOwner,
@@ -10473,6 +10476,7 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
       // okuyup ÖNCEKİ iterasyonun gate-fail'lerini (örn. iter#1'de sarı kalan Faz 11/12/16) BU iterasyona
       // taşıyordu → gate gerçekte temiz geçse bile "yine sarı"/PARTIAL. iteration_started_at'tan itibaren süz
       // (genuine bu-iterasyon fail'i pencere içinde kalır → doğru sarı). İlk-ever (set yok) → tümü (geriye-uyumlu).
+      const ledgerBefore = await verifyLedger(auditLogPath(state.project_root));
       const allEvents = await readAuditLog(state.project_root);
       // BOŞ-BUILD KORUMASI (2026-06-24): deliverable üretilmediyse (Faz 5 yanlış atlandı vb.) hüküm FAIL —
       // gate'ler yoklukta sahte-geçip "yeşil" demesin.
@@ -10486,10 +10490,37 @@ async function emitPipelineEndSummary(state: State): Promise<void> {
           `⛔ Çalışma kaydının bütünlüğü doğrulanamadı (${anchor.file}): ${anchor.reason}. Bu koşu yeşil sayılamaz.`,
         );
       }
+      // SÜREÇ İÇİ TANIK (2026-11-26): çapa iterasyon BAŞINDA alınır → bu iterasyonun satırlarını (hükmün
+      // asıl girdisi) kapsamaz ve ev dizinindeki dosyası hapis dışı koşan proje komutlarınca yazılabilir.
+      // Bellekteki tanık ikisini de kapatır. "no-ledger" KURCALAMA DEĞİLDİR (bu süreç henüz yazmadı).
+      // Defter yukarıda (allEvents) okunmadan ÖNCE de doğrulandı (ledgerBefore) → "okuma anında sahte,
+      // doğrulamadan önce eski hâline getir" penceresi iki doğrulamanın arasına sıkışır.
+      const ledger = await verifyLedger(auditLogPath(state.project_root));
+      const acceptedLedger = await verifyLedger(acceptedFindingsPath(state.project_root));
+      const ledgerProblem =
+        ledgerBefore.status === "tampered"
+          ? { file: ".mycl/audit.log", reason: ledgerBefore.reason }
+          : ledger.status === "tampered"
+            ? { file: ".mycl/audit.log", reason: ledger.reason }
+            : acceptedLedger.status === "tampered"
+              ? { file: ".mycl/accepted-findings.jsonl", reason: acceptedLedger.reason }
+              : null;
+      // Doğrulama YAPILAMADIYSA sessiz geçme (KATI #4): hüküm değişmez (kurcalama kanıtı yok) ama
+      // "bu koşuda süreç içi tanık konuşmadı" kayda düşer.
+      if (ledger.status === "busy" || ledger.status === "no-ledger") {
+        log.warn("orchestrator", "süreç içi kayıt tanığı bu koşuda doğrulama yapamadı", { status: ledger.status });
+      }
+      // Çapa zaten aynı uyarıyı verdiyse ikinci kez basma (tek sorun → tek satır).
+      if (ledgerProblem && anchor.status !== "tampered") {
+        emitChatMessage(
+          "system",
+          `⛔ Çalışma kaydının bütünlüğü doğrulanamadı (${ledgerProblem.file}): ${ledgerProblem.reason}. Bu koşu yeşil sayılamaz.`,
+        );
+      }
       const iterEvents = eventsSince(allEvents, state.iteration_started_at ?? 0);
       verdict = computeVerdict(iterEvents, {
         deliverableExists,
-        ...(anchor.status === "tampered" ? { auditTampered: true } : {}),
+        ...(anchor.status === "tampered" || ledgerProblem ? { auditTampered: true } : {}),
       });
       // Çalışma kanıtı: hepsi ZATEN üretilen sinyaller; tek yaptığımız bir satırda toplamak.
       runEvidence = collectRunEvidence(iterEvents);

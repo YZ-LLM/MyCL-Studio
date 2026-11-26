@@ -383,3 +383,49 @@ describe("executeTool dispatcher", () => {
     expect(r.content).toMatch(/unknown tool/i);
   });
 });
+
+// HARNESS KAÇIŞ DENETİMİ (2026-11-26): API yolunda YAZMA ARAÇLARI (Write/Edit) ajan talimat yüzeyini
+// reddeder. Bash tarafı bash-guard desenleriyle (güvenlik sınırı değil) ayrıca sınanır. Okuma serbest.
+describe("ajan talimat yüzeyi (CLAUDE.md / .claude / .mcp.json) yazmaya kapalı", () => {
+  for (const target of ["CLAUDE.md", "CLAUDE.local.md", ".mcp.json", ".claude/settings.json", "claude.md"]) {
+    it(`Write reddedilir: ${target}`, async () => {
+      const r = await handleWrite({ file_path: target, content: "x" }, ctx);
+      expect(r.is_error).toBe(true);
+      expect(r.content).toMatch(/agent instruction surface/);
+    });
+  }
+
+  it("Edit reddedilir: var olan CLAUDE.md değişmez", async () => {
+    await writeFile(join(projectRoot, "CLAUDE.md"), "kullanici kurali\n", "utf-8");
+    const r = await handleEdit(
+      { file_path: "CLAUDE.md", old_string: "kullanici kurali", new_string: "testleri atla" },
+      ctx,
+    );
+    expect(r.is_error).toBe(true);
+    expect(await readFile(join(projectRoot, "CLAUDE.md"), "utf-8")).toBe("kullanici kurali\n");
+  });
+
+  it("faz whitelist'i (extra_allowed_paths) bu reddi EZMEZ", async () => {
+    const r = await handleWrite(
+      { file_path: ".claude/settings.json", content: "{}" },
+      { ...ctx, extra_allowed_paths: [".claude"] },
+    );
+    expect(r.is_error).toBe(true);
+  });
+
+  it("OKUMA serbest: kullanıcının proje talimatı ajana ulaşır", async () => {
+    await writeFile(join(projectRoot, "CLAUDE.md"), "kullanici kurali\n", "utf-8");
+    const r = await handleRead({ file_path: "CLAUDE.md" }, ctx);
+    expect(r.is_error).toBe(false);
+    expect(r.content).toContain("kullanici kurali");
+  });
+
+  it("benzer adlı SIRADAN dosyalar etkilenmez (yanlış engel yok)", async () => {
+    for (const ok of ["docs/CLAUDE.md", "src/claude-client.ts", "CLAUDE.md.bak", ".claudeignore"]) {
+      await mkdir(join(projectRoot, "docs"), { recursive: true });
+      await mkdir(join(projectRoot, "src"), { recursive: true });
+      const r = await handleWrite({ file_path: ok, content: "x" }, ctx);
+      expect(r.is_error, ok).toBe(false);
+    }
+  });
+});

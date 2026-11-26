@@ -14,6 +14,7 @@ import { promises as fs } from "node:fs";
 import { open as openSync } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { enrichRecord } from "./record-context.js";
+import { ledgerAppend } from "./audit-ledger.js";
 import type { AuditEvent, CostRecord, DecisionRecord } from "./types.js";
 
 const AUDIT_FILE = "audit.log";
@@ -67,13 +68,22 @@ export async function appendAudit(
   await fs.mkdir(dirname(p), { recursive: true });
   // O_APPEND mode'da yazılan her satır POSIX append guarantee'sinden
   // faydalanır (PIPE_BUF altında atomic).
-  const fh = await openSync(p, "a");
-  try {
-    await fh.write(line);
-    await fh.sync();
-  } finally {
-    await fh.close();
-  }
+  // Süreç içi tanık (audit-ledger.ts): hüküm bu dosyadan geri okunuyor → yazılan her satırın özeti
+  // bellekte tutulur, hüküm öncesinde dosya onunla karşılaştırılır. Yazım davranışı aynı.
+  await ledgerAppend(p, line, "strict", async () => {
+    const fh = await openSync(p, "a");
+    try {
+      await fh.write(line);
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+  });
+}
+
+/** Hükmün üretildiği defterin mutlak yolu (bütünlük doğrulaması için). */
+export function auditLogPath(projectRoot: string): string {
+  return auditPath(projectRoot);
 }
 
 /**
@@ -172,15 +182,24 @@ const ACCEPTED_FINDINGS_FILE = "accepted-findings.jsonl";
 
 export async function appendAcceptedFinding(projectRoot: string, rec: AcceptedFinding): Promise<void> {
   const line = JSON.stringify(rec) + "\n";
-  const p = join(projectRoot, MYCL_DIR, ACCEPTED_FINDINGS_FILE);
+  const p = acceptedFindingsPath(projectRoot);
   await fs.mkdir(dirname(p), { recursive: true });
-  const fh = await openSync(p, "a");
-  try {
-    await fh.write(line);
-    await fh.sync();
-  } finally {
-    await fh.close();
-  }
+  // "additions" tanığı: MyCL'in yazmadığı EKLENMİŞ satır yakalanır (bir bulguyu kalıcı susturur);
+  // satır SİLMEK serbest kalır — yukarıda belgelenen "satırı sil → bulgu yeniden aktif" akışı korunur.
+  await ledgerAppend(p, line, "additions", async () => {
+    const fh = await openSync(p, "a");
+    try {
+      await fh.write(line);
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+  });
+}
+
+/** Kalıcı kabul kaydının mutlak yolu (bütünlük doğrulaması için). */
+export function acceptedFindingsPath(projectRoot: string): string {
+  return join(projectRoot, MYCL_DIR, ACCEPTED_FINDINGS_FILE);
 }
 
 /** accepted-findings.jsonl'i okur (bozuk satır atlanır). Dosya yoksa []. */
