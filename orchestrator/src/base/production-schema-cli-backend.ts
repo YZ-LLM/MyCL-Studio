@@ -18,7 +18,7 @@ import { runClaudeCliSession, type CliSessionTurnOpts } from "../cli-session.js"
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isApiAccountError } from "../claude-api.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
-import { backendForRole, isAutoMode } from "../config.js";
+import { backendForRole, isAutoMode, cliMissingRemedy } from "../config.js";
 import { emitChatMessage, emitClaudeStream, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 import {
@@ -253,7 +253,7 @@ export function createProductionSchemaBackend(opts: ProductionRunOpts): Producti
     const m =
       `Main 'Claude Code Aboneliği' (CLI) seçili ama \`claude\` bulunamadı — ` +
       `Faz ${opts.phaseId} (${opts.tag}) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. ` +
-      `\`claude\` kur ya da Ayarlar → Modeller'den main'i 'API' yap.`;
+      cliMissingRemedy(opts.config, "main'i");
     log.warn(opts.tag, "CLI seçili ama claude yok — görünür fail");
     return {
       run: async (): Promise<ProductionOutcome> => {

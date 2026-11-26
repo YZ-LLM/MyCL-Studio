@@ -9,7 +9,7 @@
 // cli-orchestrator agent.ts'ten yalnız buildOrchestratorSystemPrompt alır;
 // respond.ts ikisini de import eder.
 
-import { backendForRole, isAutoMode, type MyclConfig, hasApiKeys } from "../config.js";
+import { backendForRole, isAutoMode, type MyclConfig, hasApiKeys, cliMissingRemedy } from "../config.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { API_LABEL, CLI_LABEL } from "../cli-rate-limit.js";
 import { emitChatMessage, emitError, type ActiveAskqSnapshot } from "../ipc.js";
@@ -70,8 +70,8 @@ export async function respondAsOrchestrator(
   if (wantCli && !isClaudeAvailable()) {
     const m =
       "Orkestratör 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı " +
-      "(`~/.local/bin/claude`). API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da " +
-      "Ayarlar → Modeller'den orkestratörü 'API' yap.";
+      "(`~/.local/bin/claude`). API'ye SESSİZCE DÜŞÜLMEDİ. " +
+      cliMissingRemedy(config, "orkestratörü");
     emitError("Orkestratör: claude bulunamadı (CLI arka ucu)", m);
     emitChatMessage("system", `🔴 ${m}`);
     throw new Error("orchestrator CLI backend kullanılamıyor: claude bulunamadı");

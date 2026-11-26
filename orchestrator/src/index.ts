@@ -241,7 +241,13 @@ import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
 import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
-import { armLlmOutageWait, cancelLlmOutageWait, isLlmOutageWaiting, type OutageResumeResult } from "./llm-outage.js";
+import {
+  armLlmOutageWait,
+  cancelLlmOutageWait,
+  isLlmOutageWaiting,
+  setHasApiChannel,
+  type OutageResumeResult,
+} from "./llm-outage.js";
 import { loadGatePool, type GatePool } from "./gate-overlay/pool.js";
 import {
   archiveActiveOverlay,
@@ -1717,15 +1723,24 @@ async function failPhase(
     }
     // Claude (abonelik + API) İKİSİ DE tükendi/limitli → dürüst dur + BEKLE-VE-DEVAM (YZLLM 2026-07-17,
     // canlı cave 2 saat donması: z.ai sökümü "dur"u getirmiş, otomatik devamı getirmemişti — regresyon).
+    const keylessHere = !hasApiKeys(runtime.config);
     emitChatMessage(
       "system",
-      "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** ve çalışan abonelik (`claude`) da yok/limitli — bu " +
-        "bir ortam sorunu, proje hatası DEĞİL. Otomatik tırmanma/analiz YAPMADIM — hepsi bir sağlayıcı " +
-        "gerektirir, aynı hatayı verirdi. Beklemeden çözmek istersen **Plans & Billing'den kredi yükle** — " +
-        "yüklersen ilk denemede kendiliğinden devam ederim.",
+      keylessHere
+        ? "⛔ **Claude aboneliği (`claude`) hesap ya da oturum hatası verdi** ve API anahtarı da yok — bu bir ortam " +
+            "sorunu, proje hatası DEĞİL. Otomatik tırmanma/analiz YAPMADIM — hepsi bir sağlayıcı gerektirir, aynı " +
+            "hatayı verirdi. Çözmek için `claude auth login` ile oturumu yenile ya da Ayarlar → API Keys'ten anahtar " +
+            "gir — erişim gelince kendiliğinden devam ederim."
+        : "⛔ **Anthropic API krediniz/bakiyeniz yetersiz** ve çalışan abonelik (`claude`) da yok/limitli — bu " +
+            "bir ortam sorunu, proje hatası DEĞİL. Otomatik tırmanma/analiz YAPMADIM — hepsi bir sağlayıcı " +
+            "gerektirir, aynı hatayı verirdi. Beklemeden çözmek istersen **Plans & Billing'den kredi yükle** — " +
+            "yüklersen ilk denemede kendiliğinden devam ederim.",
     );
     _drainActive = false; // MAHKEME CRITICAL: sıradaki işler aynı ölü sağlayıcıyla denemelerini yakmasın
-    armLlmOutageWait("abonelik limitli + API kredisi yetersiz", makePhaseOutageResume(n));
+    armLlmOutageWait(
+      keylessHere ? "abonelik hesap/oturum hatası, API anahtarı yok" : "abonelik limitli + API kredisi yetersiz",
+      makePhaseOutageResume(n),
+    );
     return; // STOP — escalation YOK, analiz YOK, fix YOK; devam zamanlayıcısı kuruldu.
   }
   // CLI ABONELİK LİMİTİ (YZLLM 2026-07-23 canlı log — "aboneliğin tekrar açılacağını unuttu"): faz hatası
@@ -2285,6 +2300,18 @@ function applyConfigDerivedSettings(config: MyclConfig): void {
  * Aynı satır, ayar değişmedikçe bir kez yazılır (var olan model satırı tekilleştiricisiyle).
  */
 function emitKeylessBackendNotice(config: MyclConfig): void {
+  // Yarım anahtar: biri girilmiş, öteki yok → girilen anahtar kullanılmıyor; bunu sessiz bırakma.
+  const hasT = (config.api_keys?.translator ?? "").trim().length > 0;
+  const hasM = (config.api_keys?.main ?? "").trim().length > 0;
+  if (hasT !== hasM) {
+    const partial = modelChoiceLineIfChanged(
+      "api-partial-key",
+      `ℹ️ Yalnız bir API anahtarı var (${hasM ? "ana" : "çevirmen"}); API için çevirmen ve ana anahtarın ikisi de gerekir. ` +
+        `Eksik olan girilene kadar bütün roller abonelikle (claude) çalışıyor.`,
+    );
+    if (partial) emitChatMessage("system", partial);
+    return;
+  }
   const forced = rolesForcedToSubscription(config);
   if (forced.length === 0) return;
   const line = modelChoiceLineIfChanged(
@@ -2322,6 +2349,7 @@ async function emitConfigStatus(): Promise<boolean> {
     });
     emitUnknownModelWarning(runtime.config.selected_models);
     emitKeylessBackendNotice(runtime.config);
+    setHasApiChannel(() => (runtime.config ? hasApiKeys(runtime.config) : true));
     emit("config_status", { ready: true });
     return true;
   } catch (err) {
@@ -3566,9 +3594,15 @@ async function handleListModels(
         const { globalConfigFile } = await import("./paths.js");
         const secretsPath = globalConfigFile("secrets.json");
         const fs = await import("node:fs/promises");
-        const raw = await fs.readFile(secretsPath, "utf-8");
-        const parsed = JSON.parse(raw) as { api_keys?: { translator?: string; main?: string } };
-        apiKey = parsed.api_keys?.[which];
+        // Dosya yoksa (yeni, anahtarsız kurulum) bu bir hata değil "anahtar yok" demektir → aşağıdaki katalog dalı.
+        // Burada hata fırlasaydı dış catch boş liste basar, yeni kullanıcı ana modeli seçemez ve hazır olamazdı.
+        try {
+          const raw = await fs.readFile(secretsPath, "utf-8");
+          const parsed = JSON.parse(raw) as { api_keys?: { translator?: string; main?: string } };
+          apiKey = parsed.api_keys?.[which];
+        } catch {
+          apiKey = undefined;
+        }
       }
     }
     if (!apiKey) {

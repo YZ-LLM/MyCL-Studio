@@ -25,7 +25,7 @@ import { runPreD1UiProbe } from "./phase-0-ui-probe.js";
 import { runTurn, type ToolDef } from "./claude-api.js";
 import { runHypothesisFanout } from "./design-fanout.js";
 import { runHypothesisInvestigations } from "./hypothesis-investigation.js";
-import { backendForRole, type MyclConfig } from "./config.js";
+import { backendForRole, type MyclConfig, cliMissingRemedy } from "./config.js";
 import { ensureErrorCatalog } from "./errors-db.js";
 import { buildReverseImportGraph, getAffected } from "./fix/dep-graph/index.js";
 import { buildFixEvidence, extractFilePaths } from "./fix/evidence.js";
@@ -449,7 +449,7 @@ export class Phase0Controller {
       const m =
         "Main 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı — " +
         "Faz 0 (Hata Ayıklama) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. " +
-        "`claude` kur ya da Ayarlar → Modeller'den main'i 'API' yap.";
+        cliMissingRemedy(this.config, "main'i");
       emitError("Faz 0: claude bulunamadı (CLI)", m);
       emitChatMessage("system", `🔴 ${m}`);
       this.lastOutcome = { kind: "failed", reason: "claude not found (CLI backend)" };

@@ -21,7 +21,7 @@ import { CliCodegenBackend, isClaudeAvailable } from "./cli-backend.js";
 import { MAIN_AGENT_LANGUAGE_RULE, OVER_ENGINEERING_CONTROL_RULE } from "../agent-language.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isApiAccountError } from "../claude-api.js";
-import { backendForRole, isAutoMode } from "../config.js";
+import { backendForRole, isAutoMode, cliMissingRemedy } from "../config.js";
 import { emitChatMessage, emitError } from "../ipc.js";
 import { log } from "../logger.js";
 
@@ -103,7 +103,7 @@ export function createCodegenBackend(opts: CodegenRunOpts): CodegenBackend {
     const m =
       `Main 'Claude Code Aboneliği' (CLI) seçili ama \`claude\` bulunamadı ` +
       `(\`~/.local/bin/claude\`) — Faz ${opts.tag} çalıştırılamadı. API'ye SESSİZCE ` +
-      `DÜŞÜLMEDİ. \`claude\` kur ya da Ayarlar → Modeller'den main'i 'API' yap.`;
+      `DÜŞÜLMEDİ. ${cliMissingRemedy(opts.config, "main'i")}`;
     log.warn("codegen-backend", "CLI seçili ama claude yok — görünür fail", { tag: opts.tag });
     return {
       run: async (): Promise<CodegenOutcome> => {

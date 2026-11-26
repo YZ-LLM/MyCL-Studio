@@ -418,6 +418,7 @@ export class CliCodegenBackend implements CodegenBackend {
 
       let resultIsError = false;
       let resultSeen = false;
+      let resultErrorText = "";
       this.lastTextTail = ""; // bu run için 529-text kuyruğunu sıfırla (YZLLM 2026-06-17)
       let numTurns = 0;
       let stderrTail = "";
@@ -504,6 +505,10 @@ export class CliCodegenBackend implements CodegenBackend {
         } catch {
           return; // NDJSON olmayan satır (banner vs.) — atla
         }
+        // Abonelik limiti iletisi çoğu zaman stderr'de değil `result` olayının metnindedir (cli-run.ts aynısını yapar).
+        if (ev.type === "result" && (ev.is_error === true || ev.subtype === "error")) {
+          resultErrorText = String(ev.result ?? ev.error ?? "");
+        }
         try {
           this.handleEvent(ev, (turns, isErr) => {
             if (typeof turns === "number") numTurns = turns;
@@ -540,8 +545,11 @@ export class CliCodegenBackend implements CodegenBackend {
           finish({ kind: "done", turns: numTurns });
         } else {
           // Auto Mode: hata usage/rate-limit imzası taşıyorsa CLI'yi limitli işaretle (hata-yolu) → fallback.
-          const rlErr = detectCliRateLimit(stderrTail);
+          const rlErr = detectCliRateLimit(`${resultErrorText} ${stderrTail}`);
           if (rlErr) noteCliRateLimitError(rlErr);
+          // Limit imzası yalnız result metnindeyse gerekçeye taşı ki çağıran bunu limit olarak tanısın ve var olan
+          // bekle ve devam et yoluna girsin. Limit değilse gerekçe eskisiyle birebir aynı kalır.
+          const limitHint = rlErr && !detectCliRateLimit(stderrTail) ? ` :: ${resultErrorText.slice(0, 300)}` : "";
           // YZLLM 2026-06-17: 529 "Overloaded" exit-kodunu 1 yapar ama mesaj assistant-TEXT'te (stderr'de DEĞİL) →
           // reason'a yansımıyordu → failPhase'in 529-branch'i eşleşmiyor → debug 3 dk boşa araştırıyordu. İmzayı taşı.
           const transientHint = /529|Overloaded|overloaded_error/i.test(`${this.lastTextTail} ${stderrTail}`)
@@ -549,7 +557,7 @@ export class CliCodegenBackend implements CodegenBackend {
             : "";
           finish({
             kind: "failed",
-            reason: `claude CLI exit=${code}${stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""}${transientHint}`,
+            reason: `claude CLI exit=${code}${stderrTail ? ` :: ${stderrTail.slice(0, 300)}` : ""}${limitHint}${transientHint}`,
           });
         }
       });

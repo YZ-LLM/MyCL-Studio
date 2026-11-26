@@ -16,6 +16,13 @@ import { getKnownResetMs, setOnLimitCleared } from "./cli-rate-limit.js";
 import { emit, emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 
+// API kanalı var mı bilgisi dışarıdan verilir (bu modül config'i içe aktarmaz: döngüsel bağımlılık olurdu).
+// Varsayılan "var": bilgi verilmediyse eski ileti aynen yazılır.
+let _hasApiChannel: () => boolean = () => true;
+export function setHasApiChannel(fn: () => boolean): void {
+  _hasApiChannel = fn;
+}
+
 /** ⏸️ Şerit görünürlüğü (YZLLM 2026-07-23 ekran: şerit "boşta" derken bekleme sürüyordu — banner-yok ≠ boşta):
  *  bekleme kuruldu/çözüldü → UI'ya olay; ActivityBar "LLM erişimi bekleniyor — ~HH:MM'de otomatik devam" gösterir. */
 function emitOutageWait(active: boolean, resetMs?: number): void {
@@ -159,13 +166,15 @@ export function armLlmOutageWait(
   const resetMs = getKnownResetMs(now);
   const at = computeRetryAtMs(resetMs, now);
   const farReset = resetMs !== undefined && resetMs - now > LONG_WAIT_PROBE_INTERVAL_MS;
+  // Kanal sayısı dürüst söylensin: API anahtarı yoksa tek kanal (abonelik) vardır; "iki kanal da kapalı" yanlış olurdu.
+  const head = _hasApiChannel() ? "İki Claude kanalı da şu an kapalı" : "Claude aboneliği şu an kapalı (API anahtarı yok, başka kanal yok)";
   emitChatMessage(
     "system",
     resetMs !== undefined
       ? farReset
-        ? `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). Abonelik limiti ${fmtClock(resetMs)} civarı açılacak (uzun pencere) — saatte bir yoklayacağım; erken açılırsa hemen, en geç o saatte kaldığım yerden OTOMATİK devam ederim.`
-        : `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). Abonelik limiti ${fmtClock(resetMs)} civarı açılacak — o saatte kaldığım yerden OTOMATİK devam edeceğim (beklemeden sürdürmek istersen 'Çalıştır').`
-      : `⏸️ İki Claude kanalı da şu an kapalı (${reason.slice(0, 140)}). 5 dakikada bir yeniden deneyeceğim — açılınca kaldığım yerden OTOMATİK devam ederim.`,
+        ? `⏸️ ${head} (${reason.slice(0, 140)}). Abonelik limiti ${fmtClock(resetMs)} civarı açılacak (uzun pencere) — saatte bir yoklayacağım; erken açılırsa hemen, en geç o saatte kaldığım yerden OTOMATİK devam ederim.`
+        : `⏸️ ${head} (${reason.slice(0, 140)}). Abonelik limiti ${fmtClock(resetMs)} civarı açılacak — o saatte kaldığım yerden OTOMATİK devam edeceğim (beklemeden sürdürmek istersen 'Çalıştır').`
+      : `⏸️ ${head} (${reason.slice(0, 140)}). 5 dakikada bir yeniden deneyeceğim — açılınca kaldığım yerden OTOMATİK devam ederim.`,
   );
   log.info("llm-outage", "bekle-ve-devam kuruldu", { at, resetKnown: resetMs !== undefined });
   emitOutageWait(true, resetMs);

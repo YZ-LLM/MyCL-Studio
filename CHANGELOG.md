@@ -6,9 +6,13 @@
   dönmez), `isAutoMode` anahtarsızken yanlış döner (fabrikalar anahtarsız API yedeği kurmaz). Ayarı açıkça "api" olan
   roller için açılışta görünür bildirim. Model listesi anahtar yokken yerleşik katalogdan gelir; çevirmen modeli sabit
   olduğundan hazır sayılmak için yalnız ana model gerekir. Anahtar varken davranış aynı. Yeni modül yok; var olan
-  seçici ve `hasUsableKeys` ölçütü kullanıldı. **İnceleme akışı tamamlanmadan durduruldu (kullanıcı isteği); sınanmayan:**
-  abonelikle koşamayan kod üretim etiketlerinin anahtarsızken ne yaptığı, limit dolunca bekle ve devam et yolunun
-  anahtarsız kullanıcıda gerçekten devreye girmesi, tek anahtar girmiş kullanıcıya bildirim.
+  seçici ve `hasUsableKeys` ölçütü kullanıldı. **İnceleme (yalnız kod okuyarak; bulgular çalıştırılarak doğrulanmadı)
+  sonrası düzeltmeler:** yeni ve anahtarsız kurulumda `secrets.json` olmadığı için model listesi boş kalıyor, kullanıcı
+  ana modeli seçemiyordu → dosya yoksa "anahtar yok" sayılır, katalog gösterilir. `claude` bulunamadığında "sağlayıcıyı
+  API yap" önerisi anahtarsızken işe yaramıyordu → tek yardımcı (`cliMissingRemedy`) doğru çıkış yolunu söyler. Yalnız
+  tek anahtar girilmişse görünür bildirim. Bekleme ve hesap hatası iletileri anahtarsız kullanıcıya "iki kanal" ya da
+  "API krediniz yetersiz" demez. Kod yazım CLI'sinde abonelik limiti imzası `result` olayındaysa da yakalanır (limit
+  değilse gerekçe aynı kalır). **Bu düzeltmelerden sonra test ve kontrol koşturulmadı; yalnız derlendi.**
 
 - **docs: README baştan yazıldı.** Olay günlüğüne dönmüş 731 satırlık metin yerine kodun bugünkü hâlini anlatan 452
   satır. Her bölüm koddan yazıldı, ayrı bir doğrulayıcı cümle cümle koda karşı denetledi (74 düzeltme uygulandı).

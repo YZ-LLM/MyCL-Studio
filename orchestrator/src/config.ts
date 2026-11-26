@@ -610,6 +610,17 @@ export function isAutoMode(config: MyclConfig, role: AgentRole): boolean {
   return hasApiKeys(config) && (config.agent_backends?.[role] ?? "auto") === "auto";
 }
 
+/**
+ * `claude` bulunamadığında kullanıcıya söylenecek ÇIKIŞ YOLU. Anahtar yokken "sağlayıcıyı API yap" önerisi işe
+ * yaramaz (backendForRole yine abonelik der) ve kullanıcıyı aynı hataya döndürür → o durumda doğru iki yol söylenir.
+ */
+export function cliMissingRemedy(config: MyclConfig, roleLabel: string): string {
+  return hasApiKeys(config)
+    ? `\`claude\` kur ya da Ayarlar → Modeller'den ${roleLabel} 'API' yap.`
+    : `API anahtarı da yok: \`claude\` kur ve \`claude auth login\` ile oturum aç, ya da Ayarlar → API Keys'ten ` +
+        `çevirmen ve ana anahtarı gir. (Anahtar yokken sağlayıcıyı 'API' yapmak bir şey değiştirmez.)`;
+}
+
 /** Kullanılabilir API anahtarı var mı (çevirmen VE ana; kayıt doğrulamasındaki ölçütün aynısı). */
 export function hasApiKeys(config: MyclConfig): boolean {
   return hasUsableKeys(config.api_keys ?? {}, {});

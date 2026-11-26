@@ -431,6 +431,7 @@ export function Settings({
                 ))}
                 <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "2px 0 0" }}>
                   Default Otomatik: abonelik (CLI) ile başlar, limit dolunca API'ye geçer, limit açılınca CLI'ye döner.
+                  API anahtarı yoksa API'ye geçilmez: MyCL bekler ve limit açılınca kaldığı yerden devam eder.
                 </p>
               </div>
               {/* YZLLM 2026-06-16 ("merdiven kullanmıcaz"): Main + Orkestrator model seçimi AÇIK (kilit kaldırıldı).

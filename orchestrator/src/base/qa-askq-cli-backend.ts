@@ -19,7 +19,7 @@ import { selectEffortForTask } from "../model-catalog.js";
 import { autoBackendPair } from "../cli-rate-limit.js";
 import { isApiAccountError } from "../claude-api.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
-import { backendForRole, isAutoMode } from "../config.js";
+import { backendForRole, isAutoMode, cliMissingRemedy } from "../config.js";
 import { appendHistory } from "../history-loader.js";
 import { recordClarify } from "../clarify-log.js";
 import { localizeOptionLabels, t } from "../i18n.js";
@@ -587,8 +587,8 @@ export function createQaAskqBackend(opts: QaAskqRunOpts): QaAskqBackend {
     }
     const m =
       `Main 'Claude Code Aboneliği' (CLI) seçili ama \`claude\` bulunamadı — ` +
-      `${opts.tag} çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. \`claude\` kur ya da ` +
-      `Ayarlar → Modeller'den main'i 'API' yap.`;
+      `${opts.tag} çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. ` +
+      cliMissingRemedy(opts.config, "main'i");
     log.warn(opts.tag, "CLI seçili ama claude yok — görünür fail");
     return {
       run: async (): Promise<QaAskqOutcome> => {

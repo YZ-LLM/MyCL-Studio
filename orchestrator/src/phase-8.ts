@@ -19,7 +19,7 @@ import { probeTestValidity } from "./test-validity.js";
 import { runAdversarialTester, type AdversarialResult } from "./adversarial-test.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
-import { backendForRole, type MyclConfig } from "./config.js";
+import { backendForRole, type MyclConfig, cliMissingRemedy } from "./config.js";
 import {
   isTestPath,
   isProdPath,
@@ -480,8 +480,8 @@ export class Phase8Controller {
     if (this.cliMode && !isClaudeAvailable()) {
       const m =
         "Main 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı — " +
-        "Faz 8 (TDD) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da " +
-        "Ayarlar → Modeller'den main'i 'API' yap.";
+        "Faz 8 (TDD) çalıştırılamadı. API'ye SESSİZCE DÜŞÜLMEDİ. " +
+        cliMissingRemedy(this.config, "main'i");
       emitError("Faz 8: claude bulunamadı (CLI)", m);
       emitChatMessage("system", `🔴 ${m}`);
       this.lastFailReason = "claude not found (CLI backend)";

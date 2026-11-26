@@ -14,7 +14,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { resolveLlmClient } from "./claude-api.js";
 import { TRANSLATOR_MODEL } from "./model-catalog.js";
 import type { MyclConfig } from "./config.js";
-import { backendForRole, isAutoMode } from "./config.js";
+import { backendForRole, isAutoMode, cliMissingRemedy } from "./config.js";
 import { API_LABEL, CLI_LABEL } from "./cli-rate-limit.js";
 import { runClaudeCli } from "./cli-run.js";
 import { PURE_REASONING_DISALLOWED_TOOLS } from "./tool-policy.js";
@@ -366,8 +366,8 @@ export async function translate(
     const m =
       "Translator 'Claude Code Aboneliği' (CLI) seçili ama `claude` bulunamadı " +
       "(`~/.local/bin/claude`). Abonelik backend'i kullanılamıyor — `claude` kurulu " +
-      "değil/PATH'te değil. API'ye SESSİZCE DÜŞÜLMEDİ. `claude` kur ya da Ayarlar → " +
-      "Modeller'den translator'ı 'API' yap.";
+      "değil/PATH'te değil. API'ye SESSİZCE DÜŞÜLMEDİ. " +
+      cliMissingRemedy(config, "translator'ı");
     emitError("Çevirmen: claude bulunamadı (CLI arka ucu)", m);
     emitChatMessage("system", `🔴 ${m}`);
     throw new Error("translator CLI backend kullanılamıyor: claude bulunamadı");
