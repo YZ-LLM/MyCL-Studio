@@ -207,3 +207,40 @@ describe("kanıt defteri (.mycl / .git) yazma girişimleri", () => {
     });
   }
 });
+
+// HARNESS KAÇIŞ DENETİMİ (2026-11-26): API arka ucunda Bash, Write/Edit'in reddettiği ajan talimat
+// yüzeyine yan yoldan yazabiliyordu. Düzenli ifade — güvenlik sınırı değil, açık girişimi keser.
+describe("ajan talimat yüzeyi (CLAUDE.md / .claude / .mcp.json) yazma girişimleri", () => {
+  const ENGEL = [
+    "echo x > CLAUDE.md",
+    "echo x >> ./CLAUDE.local.md",
+    "cat a | tee .mcp.json",
+    "sed -i s/a/b/ CLAUDE.md",
+    "cp /tmp/h.json .claude/settings.json",
+    "mv x .claude",
+    "mv CLAUDE.md eski.md",
+    "rm CLAUDE.md",
+    'echo x > "CLAUDE.md"',
+  ];
+  for (const cmd of ENGEL) {
+    it(`ENGEL: ${cmd}`, () => {
+      expect(inspectBashCommand(cmd).blocked).toBe(true);
+    });
+  }
+  const SERBEST = [
+    "cat CLAUDE.md",
+    "cat CLAUDE.md > /tmp/out.txt",
+    "cp CLAUDE.md docs/kopya.md",
+    "echo x > docs/CLAUDE.md",
+    "sed -i s/a/b/ src/CLAUDE.md",
+    "grep -r foo .claude",
+    "echo x > src/claude.md.bak",
+    "npm test",
+    "git status",
+  ];
+  for (const cmd of SERBEST) {
+    it(`SERBEST: ${cmd}`, () => {
+      expect(inspectBashCommand(cmd).blocked).toBe(false);
+    });
+  }
+});

@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentInstructionPaths,
+  sandboxSettingsArgs,
+  setSandboxPolicy,
+  getSandboxPolicy,
   buildAgentSandboxSettings,
   detectSandboxAvailability,
   runtimeAllowFor,
   sandboxGuard,
   needsLocalBinding,
+  buildHomeReadDeny,
+  escapePermissionGlob,
+  MAX_HOME_READ_DENY_BYTES,
+  normalizeAbs,
+  isShellQuoteSafe,
 } from "../src/agent-sandbox.js";
 
 // Saf fonksiyonlar — platform/home/policy/projectRoot enjekte edilir; host'tan bağımsız (çapraz-platform).
@@ -149,11 +158,68 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS home-deny + allowR
     expect(permAllow).not.toContain(`Read(${HOME}/.ssh/**)`);
     // 2026-07-30: Write(...) formu claude'da dosya izin kontrolüne GİRMİYOR (aracın kendi uyarısı) —
     // koruma Edit(...) ile sağlanıyor (tüm yazma araçlarını kapsar). Etkisiz form kaldırıldı.
-    expect(permDeny).toContain("Edit(/tmp/mycl-validate/shop/.git/**)");
-    expect(permDeny).toContain("Edit(/tmp/mycl-validate/shop/.mycl/**)");
+    expect(permDeny).toContain("Edit(//tmp/mycl-validate/shop/.git/**)");
+    expect(permDeny).toContain("Edit(//tmp/mycl-validate/shop/.mycl/**)");
     expect(permDeny).not.toContain("Write(/tmp/mycl-validate/shop/.git/**)");
     const denyWrite = (settings.sandbox as { filesystem: { denyWrite: string[] } }).filesystem.denyWrite;
-    expect(denyWrite).toEqual([`${PROJ}/.git`, `${PROJ}/.git/**`, `${PROJ}/.mycl`, `${PROJ}/.mycl/**`]);
+    expect(denyWrite).toEqual([
+      `${PROJ}/.git`,
+      `${PROJ}/.git/**`,
+      `${PROJ}/.mycl`,
+      `${PROJ}/.mycl/**`,
+      // Ajan talimat yüzeyi (2026-11-26): ajan kendi/sonraki işçilerin talimatını ve kancalarını yazamaz.
+      `${PROJ}/CLAUDE.md`,
+      `${PROJ}/CLAUDE.local.md`,
+      `${PROJ}/.mcp.json`,
+      `${PROJ}/.claude`,
+      `${PROJ}/.claude/**`,
+    ]);
+  });
+
+  // HARNESS KAÇIŞ DENETİMİ (2026-11-26): Claude Code her spawn'da proje kökündeki CLAUDE.md'yi bağlama,
+  // .claude/ ayarlarını (kancalar) ve .mcp.json'u oturuma yükler. Ajan bunlara yazabiliyordu → gerekçesi
+  // sonraki işçilere/müfettişlere talimat olarak sızıyor, yazdığı kanca hapis DIŞINDA koşuyordu.
+  // YOL BİÇİMİ (2026-11-26, gerçek claude 2.1.332 + macOS denemesi): izin kuralında tek eğik çizgiyle başlayan
+  // yol proje köküne GÖRELİ sayılır → `Edit(/Users/.../.mycl/**)` hiçbir dosyayla eşleşmiyordu ve Write aracı
+  // `.mycl` içine yazabildi. Mutlak yol çift eğik çizgiyle yazılır. Hiçbir Edit kuralı tek çizgili kalmamalı.
+  it("her Edit yazma reddi mutlak yol biçiminde (çift eğik çizgi) — tek çizgili kural eşleşmez", () => {
+    const permDeny = (settings.permissions as { deny: string[] }).deny;
+    const editRules = permDeny.filter((d) => d.startsWith("Edit("));
+    expect(editRules.length).toBeGreaterThanOrEqual(6); // .git + .mycl + 3 dosya + .claude
+    for (const r of editRules) expect(r.startsWith(`Edit(/${PROJ}/`)).toBe(true);
+  });
+
+  // Mahkeme 4. tur: Edit kuralları kaçışsızdı → "proj [v2]" yolunda `.mycl` kuralı eşleşmez; ev dizini altındaki
+  // projede geniş Read reddi artık olmadığından bu kurallar yazma araçları için tek korumadır.
+  it("Edit yazma reddi: proje yolundaki desen karakterleri kaçırılır", () => {
+    const { settings: st } = buildAgentSandboxSettings({
+      projectRoot: "/srv/proj [v2]/a*b", ultracode: false, policy: "enforce", platform: "darwin", home: "/Users/umit",
+    });
+    const d = (st.permissions as { deny: string[] }).deny;
+    expect(d).toContain("Edit(//srv/proj \\[v2\\]/a\\*b/.mycl/**)");
+    expect(d).toContain("Edit(//srv/proj \\[v2\\]/a\\*b/.git/**)");
+    expect(d).toContain("Edit(//srv/proj \\[v2\\]/a\\*b/CLAUDE.md)");
+    expect(d).toContain("Edit(//srv/proj \\[v2\\]/a\\*b/.claude/**)");
+    expect(d.filter((r) => r.startsWith("Edit(") && r.includes("proj [v2]"))).toEqual([]);
+  });
+
+  it("ajan talimat yüzeyi YAZMAYA kapalı, OKUMAYA açık (kullanıcının proje talimatları ajana ulaşır)", () => {
+    const permDeny = (settings.permissions as { deny: string[] }).deny;
+    expect(permDeny).toContain(`Edit(/${PROJ}/CLAUDE.md)`);
+    expect(permDeny).toContain(`Edit(/${PROJ}/CLAUDE.local.md)`);
+    expect(permDeny).toContain(`Edit(/${PROJ}/.mcp.json)`);
+    expect(permDeny).toContain(`Edit(/${PROJ}/.claude/**)`);
+    // Okuma reddi YOK: proje Read-allow'u bu dosyaları da kapsar, ayrı bir Read-deny eklenmedi.
+    expect(permDeny.filter((d) => d.startsWith("Read(") && d.includes("CLAUDE"))).toEqual([]);
+    const fsCfg = (settings.sandbox as { filesystem: { denyRead: string[] } }).filesystem;
+    expect(fsCfg.denyRead.some((d) => d.includes("CLAUDE.md") || d.endsWith("/.claude"))).toBe(false);
+  });
+
+  it("agentInstructionPaths: yalnız proje KÖKÜ (alt dizin glob'u yok — Seatbelt glob güvenilmez)", () => {
+    expect(agentInstructionPaths("/p")).toEqual({
+      files: ["/p/CLAUDE.md", "/p/CLAUDE.local.md", "/p/.mcp.json"],
+      dirs: ["/p/.claude"],
+    });
   });
 
   it("ağ: güvenilir paket registry'leri allowedDomains'te (npm install için; ağ default deny-all, keyfi domain hariç)", () => {
@@ -218,20 +284,164 @@ describe("agent-sandbox · proje home'un ALTINDA olsa bile allowRead ile re-allo
     expect(deny(settings)).toEqual([HOME]); // home tek-deny değişmez
   });
 
-  // YZLLM cave5: ev-altı projede PROMPT-katmanı broad Read(~/**) deny'i, deny>allow ile projeyi de keser →
-  // ajan okuyamaz (/tmp çalışır, ~/proje çalışmaz). Fix: ev-altı projede `~/**` PROMPT-deny'i EKLENMEZ.
-  it("EV-ALTI proje (~/cave5): prompt-katmanı Read(~/**) deny'i EKLENMEZ; proje okunur, kernel ev'i korur", () => {
-    const PROJ = `${HOME}/cave5`;
-    const { settings } = buildAgentSandboxSettings({
-      projectRoot: PROJ, ultracode: false, policy: "enforce", platform: "darwin", home: HOME,
+  // EV DİZİNİ ALTINDAKİ PROJE (2026-11-26, gerçek claude 2.1.332 denemesi + mahkeme): eski tek kural
+  // `Read(//<ev>)` alt ağacı da kapsıyor ve ret izinden baskın → proje dosya araçlarına tümüyle kapanıyordu.
+  // Yeni: (1) taban — projeye giden yol DIŞINDAKİ her girdi ayrı ayrı reddedilir; (2) yüklem — home-guard
+  // kancası var olmayan adları da kapatır. Dar kurallar YALNIZ kanca eklenebiliyorsa üretilir.
+  const tree: Record<string, string[]> = {
+    [HOME]: [".ssh", "Documents", "proj", ".claude", "Library", "notlar.txt"],
+    [`${HOME}/proj`]: ["cave5", "baska-proje", "gizli [eski]"],
+  };
+  const listDir = (d: string): string[] | null => tree[d] ?? null;
+  const GUARD = "/opt/mycl/orchestrator/home-guard.mjs";
+  const readDeny = (st: Record<string, unknown>): string[] =>
+    (st.permissions as { deny: string[] }).deny.filter((r) => r.startsWith("Read("));
+  const preToolUse = (st: Record<string, unknown>): Array<{ matcher: string; hooks: Array<{ command: string }> }> =>
+    ((st.hooks as Record<string, unknown> | undefined)?.PreToolUse ?? []) as never;
+  const build = (projectRoot: string, extra: Record<string, unknown> = {}) =>
+    buildAgentSandboxSettings({
+      projectRoot, ultracode: false, policy: "enforce", platform: "darwin", home: HOME,
+      listDir, homeGuardPath: GUARD, ...extra,
     });
-    const permDeny = (settings.permissions as { deny: string[] }).deny;
-    const permAllow = (settings.permissions as { allow: string[] }).allow;
-    expect(permDeny).not.toContain(`Read(/${HOME}/**)`); // broad ~/** prompt-deny YOK (projeyi kesmesin)
-    expect(permDeny).toContain(`Read(/${HOME})`); // home dizini listesi yine reddedilir
-    expect(permAllow).toContain(`Read(${PROJ}/**)`); // proje okuma izni var
-    expect(deny(settings)).toEqual([HOME]); // çekirdek katman ev'i hâlâ korur (tek-deny)
-    expect(allow(settings)).toContain(PROJ); // çekirdek katman projeyi re-allow eder
+
+  it("EV ALTI proje (~/proj/cave5): kardeşler VE çalışma zamanı girdileri reddedilir, projeye giden yol serbest", () => {
+    const PROJ = `${HOME}/proj/cave5`;
+    const { settings, readFallbackReason } = build(PROJ);
+    const rd = readDeny(settings);
+    expect(readFallbackReason).toBeUndefined();
+    expect(rd).toContain(`Read(/${HOME}/.ssh)`);
+    expect(rd).toContain(`Read(/${HOME}/.ssh/**)`);
+    expect(rd).toContain(`Read(/${HOME}/Documents/**)`);
+    expect(rd).toContain(`Read(/${HOME}/notlar.txt)`);
+    expect(rd).toContain(`Read(/${HOME}/proj/baska-proje/**)`);
+    // Köşeli parantez kaçırılır (kaçışsız kural gerçek claude'da o klasörle EŞLEŞMEDİ → içerik okundu).
+    expect(rd).toContain(`Read(/${HOME}/proj/gizli \\[eski\\]/**)`);
+    // Mahkeme YÜKSEK bulgusu: çalışma zamanı girdileri araç katmanında AÇIK kalmamalı (~/.claude/settings.json
+    // içine yazılan kanca hapis dışında koşar). O liste çekirdek katmanda claude süreci içindir.
+    expect(rd).toContain(`Read(/${HOME}/.claude/**)`);
+    expect(rd).toContain(`Read(/${HOME}/Library/**)`);
+    // Projeyi kapsayan HİÇBİR Read reddi yok: ne ev dizininin kendisi, ne zincir, ne proje.
+    for (const covering of [HOME, `${HOME}/proj`, PROJ]) {
+      expect(rd).not.toContain(`Read(/${covering})`);
+      expect(rd).not.toContain(`Read(/${covering}/**)`);
+    }
+    // Çekirdek katman değişmedi: ev tek kuralla kapalı, proje yeniden açık.
+    expect(deny(settings)).toEqual([HOME]);
+    expect(allow(settings)).toContain(PROJ);
+  });
+
+  it("EV ALTI proje: home-guard kancası tüm dosya araçlarına bağlanır; kurallar argv'de (ev + proje)", () => {
+    const PROJ = `${HOME}/proj/cave5`;
+    const hooks = preToolUse(build(PROJ).settings);
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0]!.matcher).toBe("Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Glob|Grep|LS");
+    const cmd = hooks[0]!.hooks[0]!.command;
+    expect(cmd.startsWith(`"node" "${GUARD}" --rules `)).toBe(true);
+    // Gerçek çağıran MyCL'in kendi node'unu verir: PATH'te node yoksa kanca sessizce atlanmasın.
+    const withNode = preToolUse(build(PROJ, { nodePath: "/opt/node/bin/node" }).settings)[0]!.hooks[0]!.command;
+    expect(withNode.startsWith(`"/opt/node/bin/node" "${GUARD}" --rules `)).toBe(true);
+    const rules = JSON.parse(Buffer.from(cmd.split("--rules ")[1]!, "base64").toString("utf-8"));
+    expect(rules).toEqual({ home: HOME, project_root: PROJ });
+  });
+
+  it("EV ALTI proje + overlay: overlay kancaları aynen kalır, muhafız PreToolUse listesine EKLENİR", () => {
+    const overlay = { guardPath: "/opt/overlay-guard.mjs", rulesB64: "QUJD", ackPath: "/tmp/ack.json" };
+    const st = build(`${HOME}/proj/cave5`, { overlay }).settings;
+    const hooks = st.hooks as Record<string, unknown[]>;
+    expect(hooks.SessionStart).toHaveLength(1); // overlay kanaryası korunur
+    const pre = preToolUse(st);
+    expect(pre).toHaveLength(2);
+    expect(pre[0]!.hooks[0]!.command).toContain("overlay-guard.mjs");
+    expect(pre[1]!.hooks[0]!.command).toContain("home-guard.mjs");
+  });
+
+  it("EV ALTI proje: muhafız yolu yoksa dar kural ÜRETİLMEZ → güvenli geniş ret + neden, kanca da yok", () => {
+    const { settings, readFallbackReason } = build(`${HOME}/proj/cave5`, { homeGuardPath: undefined });
+    expect(readFallbackReason).toContain("home-guard");
+    expect(readDeny(settings)).toEqual([`Read(/${HOME})`, `Read(/${HOME}/**)`]);
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  // Mahkeme 3. tur: kanca komutu çift tırnakla yazılıyor; yolda `$` varsa başka yola genişler → betik bulunamaz,
+  // exit 1 → Claude Code engel saymaz (sessiz açık). Böyle yolda dar kural üretilmez.
+  it("EV ALTI proje: muhafız ya da node yolunda kabuk özel karakteri varsa güvenli geniş ret + neden", () => {
+    for (const extra of [
+      { homeGuardPath: "/opt/my$PWD/home-guard.mjs" },
+      { homeGuardPath: '/opt/a"b/home-guard.mjs' },
+      { nodePath: "/opt/`x`/node" },
+      { nodePath: "/opt/a\\b/node" },
+    ]) {
+      const { settings, readFallbackReason } = build(`${HOME}/proj/cave5`, extra);
+      expect(readFallbackReason).toContain("özel karakter");
+      expect(readDeny(settings)).toEqual([`Read(/${HOME})`, `Read(/${HOME}/**)`]);
+      expect(settings.hooks).toBeUndefined();
+    }
+    // Boşluklu yol güvenlidir (çift tırnak korur).
+    expect(build(`${HOME}/proj/cave5`, { homeGuardPath: "/Applications/MyCL Studio.app/x/home-guard.mjs" })
+      .readFallbackReason).toBeUndefined();
+    expect(isShellQuoteSafe("/a b/c")).toBe(true);
+    expect(isShellQuoteSafe("/a$b")).toBe(false);
+  });
+
+  it("EV ALTI proje: liste okunamazsa / verilmezse güvenli geniş ret + neden (sessiz düşüş yok)", () => {
+    const a = build(`${HOME}/okunamayan/app`, { listDir: (d: string) => (d === HOME ? ["okunamayan"] : null) });
+    expect(a.readFallbackReason).toContain("listelenemedi");
+    expect(readDeny(a.settings)).toEqual([`Read(/${HOME})`, `Read(/${HOME}/**)`]);
+    expect(a.settings.hooks).toBeUndefined();
+    const b = build(`${HOME}/proj/cave5`, { listDir: undefined });
+    expect(b.readFallbackReason).toBeDefined();
+    expect(readDeny(b.settings)).toEqual([`Read(/${HOME})`, `Read(/${HOME}/**)`]);
+  });
+
+  // Mahkeme bulgusu: readdir farklı yazım (büyük küçük harf / Unicode) dönerse proje "kardeş" sayılıp
+  // sessizce kilitlenirdi. Emin değilsek dar kural yok: görünür geniş ret.
+  it("EV ALTI proje: projeye giden ad listede AYNEN yoksa güvenli geniş ret + neden", () => {
+    const r = buildHomeReadDeny({ home: HOME, projectRoot: `${HOME}/Proj/cave5`, listDir });
+    expect(r.fallbackReason).toContain("aynen bulunamadı");
+    expect(r.rules).toEqual([`Read(/${HOME})`, `Read(/${HOME}/**)`]);
+  });
+
+  it("EV ALTI proje: bayt bütçesi aşılırsa güvenli geniş ret + neden (argv taşması yerine)", () => {
+    const long = "ç".repeat(60);
+    const many = Array.from({ length: 700 }, (_, i) => `${long}${i}`);
+    const r = buildHomeReadDeny({ home: HOME, projectRoot: `${HOME}/cave5`, listDir: () => [...many, "cave5"] });
+    expect(r.fallbackReason).toContain("sınırını aşıyor");
+    expect(r.rules).toEqual([`Read(/${HOME})`, `Read(/${HOME}/**)`]);
+    // Aynı SAYIDA kısa ad bütçeye sığar → sınır sayı değil bayt.
+    const short = Array.from({ length: 700 }, (_, i) => `d${i}`);
+    const ok = buildHomeReadDeny({ home: HOME, projectRoot: `${HOME}/cave5`, listDir: () => [...short, "cave5"] });
+    expect(ok.fallbackReason).toBeUndefined();
+    expect(ok.rules).toHaveLength(1400);
+    expect(Buffer.byteLength(JSON.stringify(ok.rules), "utf-8")).toBeLessThan(MAX_HOME_READ_DENY_BYTES);
+  });
+
+  // Mahkeme bulgusu: sondaki eğik çizgi zinciri ["proj","cave5",""] yapıp projenin KENDİ içeriğini reddettiriyordu.
+  it("EV ALTI proje: sondaki eğik çizgi ve `//` içeren proje yolu aynı kuralları üretir", () => {
+    const clean = buildHomeReadDeny({ home: HOME, projectRoot: `${HOME}/proj/cave5`, listDir });
+    for (const messy of [`${HOME}/proj/cave5/`, `${HOME}//proj/./cave5`, `${HOME}/proj/x/../cave5`]) {
+      expect(buildHomeReadDeny({ home: HOME, projectRoot: messy, listDir })).toEqual(clean);
+    }
+    expect(normalizeAbs("/a/b/")).toBe("/a/b");
+    expect(normalizeAbs("/")).toBe("/");
+  });
+
+  it("ön eki aynı olan dizin (/Users/umit2) ev dizini ALTI sayılmaz → geniş ret korunur, kanca yok", () => {
+    const { settings, readFallbackReason } = build(`${HOME}2/app`);
+    expect(readFallbackReason).toBeUndefined();
+    expect(readDeny(settings)).toEqual([`Read(/${HOME})`, `Read(/${HOME}/**)`]);
+    expect(settings.hooks).toBeUndefined();
+  });
+
+  it("proje ev dizininin KENDİSİ ise reddedilecek kardeş yok, liste de okunmaz", () => {
+    const r = buildHomeReadDeny({
+      home: HOME, projectRoot: HOME, listDir: () => { throw new Error("çağrılmamalı"); },
+    });
+    expect(r).toEqual({ rules: [] });
+  });
+
+  it("escapePermissionGlob: yalnız desen karakterleri kaçırılır; boşluk, parantez, Türkçe harf aynen kalır", () => {
+    expect(escapePermissionGlob("/h/a [b]*?\\c")).toBe("/h/a \\[b\\]\\*\\?\\\\c");
+    expect(escapePermissionGlob("/h/d2 (parantez) çğş {a,b}")).toBe("/h/d2 (parantez) çğş {a,b}");
   });
 
   it("ev-DIŞI proje (/tmp/...): broad Read(~/**) prompt-deny KORUNUR (regresyon yok)", () => {
@@ -312,8 +522,13 @@ describe("agent-sandbox · ultracode merge + policy modları", () => {
       projectRoot: "/tmp/x", ultracode: false, policy: "off", platform: "darwin", home: HOME,
     });
     const deny = (off.settings.permissions as { deny: string[] } | undefined)?.deny ?? [];
-    expect(deny).toContain("Edit(/tmp/x/.mycl/**)");
-    expect(deny).toContain("Edit(/tmp/x/.git/**)");
+    expect(deny).toContain("Edit(//tmp/x/.mycl/**)");
+    expect(deny).toContain("Edit(//tmp/x/.git/**)");
+    // Talimat yüzeyi de politikadan BAĞIMSIZ korunur (aynı gerekçe: hapsi kapatmak ≠ "ajan kendi
+    // talimatını ve kancasını yazsın" demek).
+    expect(deny).toContain("Edit(//tmp/x/CLAUDE.md)");
+    expect(deny).toContain("Edit(//tmp/x/.claude/**)");
+    expect(deny).toContain("Edit(//tmp/x/.mcp.json)");
     // Kum havuzu YİNE yok — yalnız kanıt koruması eklendi (politikanın anlamı korunuyor).
     expect("sandbox" in off.settings).toBe(false);
     expect(off.denyCount).toBe(0);
@@ -368,5 +583,82 @@ describe("agent-sandbox · yerel port yeteneği (SandboxCaps)", () => {
     // Kod yazmayan / sunucu açmayan roller: izin YOK (kuşkuda verme).
     for (const t of ["phase-2", "phase-4", "phase-7", "translator", "quality-audit", "phase-9-debate", ""])
       expect(needsLocalBinding(t)).toBe(false);
+  });
+});
+
+// Mahkeme 4. tur: bu üç davranış yalnız sandboxSettingsArgs içinde ve hiçbir testte yoktu.
+describe("sandboxSettingsArgs: ev dizini altındaki projede gerçek çağıran davranışı", () => {
+  const H = "/Users/umit";
+  const P = `${H}/proj/cave5`;
+  const P2 = `${H}/proj/diger`;
+  const listDir = (d: string): string[] | null =>
+    ({ [H]: ["proj", ".ssh"], [`${H}/proj`]: ["cave5", "diger"] })[d] ?? null;
+  const call = (project: string, over: Record<string, unknown>, emitted: string[]) => {
+    const args = sandboxSettingsArgs(project, false, undefined, undefined, {
+      home: H, platform: "darwin", listDir, guardPath: "/opt/mycl/home-guard.mjs",
+      exists: () => true, execPath: "/opt/node/bin/node", emit: (t: string) => emitted.push(t), ...over,
+    });
+    return JSON.parse(args[1] ?? "{}") as {
+      hooks?: { PreToolUse?: Array<{ hooks: Array<{ command: string }> }> };
+      permissions: { deny: string[] };
+    };
+  };
+  const withEnforce = (fn: () => void) => {
+    const prev = getSandboxPolicy();
+    setSandboxPolicy("enforce");
+    try { fn(); } finally { setSandboxPolicy(prev); }
+  };
+
+  it("betik varsa: kanca MyCL'in KENDİ node ikilisiyle koşar, dar kurallar üretilir, uyarı yok", () => withEnforce(() => {
+    const emitted: string[] = [];
+    const st = call(P, {}, emitted);
+    expect(st.hooks?.PreToolUse?.[0]?.hooks[0]?.command.startsWith('"/opt/node/bin/node" "/opt/mycl/home-guard.mjs" --rules ')).toBe(true);
+    expect(st.permissions.deny).toContain(`Read(/${H}/.ssh/**)`);
+    expect(st.permissions.deny).not.toContain(`Read(/${H})`);
+    expect(emitted).toEqual([]);
+  }));
+
+  it("betik diskte YOKSA: geniş ret, kanca yok, GÖRÜNÜR uyarı", () => withEnforce(() => {
+    const emitted: string[] = [];
+    const st = call(`${P}-betiksiz`, { exists: () => false, listDir: () => ["proj"] }, emitted);
+    expect(st.hooks).toBeUndefined();
+    expect(st.permissions.deny).toContain(`Read(/${H})`);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toContain("home-guard.mjs");
+    expect(emitted[0]).toContain("dosya okuma ve yazma araçlarını kullanamaz");
+    // Öneri nedene uygun: kurulum kaynaklı nedende "projeyi taşı" denmez.
+    expect(emitted[0]).toContain("kurulumu onarmak");
+    expect(emitted[0]).not.toContain("daha az girdili");
+  }));
+
+  it("uyarı proje + neden başına BİR kez: aynı proje tekrar etmez, ikinci proje ayrıca uyarılır", () => withEnforce(() => {
+    const emitted: string[] = [];
+    const broken = { listDir: () => null };
+    call(`${P}-tekrar`, broken, emitted);
+    call(`${P}-tekrar`, broken, emitted);
+    expect(emitted).toHaveLength(1);
+    call(`${P2}-tekrar`, broken, emitted);
+    expect(emitted).toHaveLength(2);
+    expect(emitted[1]).toContain("listelenemedi");
+    expect(emitted[1]).toContain("daha az girdili");
+  }));
+});
+
+// MAHKEME O3 (2026-11-26): "off" + ultracode yok + overlay yok iken sandboxSettingsArgs `[]` dönüyordu →
+// üretilen "kanıt defteri yazmaya kapalı" ayarı o spawn'lara HİÇ gönderilmiyordu.
+describe("sandboxSettingsArgs: policy off iken de yazma reddi GÖNDERİLİR", () => {
+  it("ultracode ve overlay yokken bile --settings üretir; içinde sandbox yok, yazma reddi var", () => {
+    const prev = getSandboxPolicy();
+    setSandboxPolicy("off");
+    try {
+      const args = sandboxSettingsArgs("/tmp/x", false);
+      expect(args[0]).toBe("--settings");
+      const parsed = JSON.parse(args[1] ?? "{}") as { sandbox?: unknown; permissions?: { deny?: string[] } };
+      expect(parsed.sandbox).toBeUndefined();
+      expect(parsed.permissions?.deny).toContain("Edit(//tmp/x/.mycl/**)");
+      expect(parsed.permissions?.deny).toContain("Edit(//tmp/x/CLAUDE.md)");
+    } finally {
+      setSandboxPolicy(prev);
+    }
   });
 });

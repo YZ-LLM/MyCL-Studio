@@ -346,6 +346,26 @@ Hiçbir adımı sessizce atlamaz; tamamlayamadığını (ör. app'e özel verita
   geçmiş kayıtlar sonradan değiştirilmiş ya da silinmişse koşu **yeşil sayılmaz**
   ve neden yeşil sayılmadığı açıkça söylenir. Sonradan eklenen satırlar normal
   akıştır, çapayı bozmaz. Bulguları kalıcı olarak susturan kayıt da aynı korumada.
+  Çapa iterasyon başında alındığı için o iterasyonda yazılan satırları kapsamaz;
+  bunları **MyCL'in çalışan sürecinin belleğindeki ikinci bir tanık** korur: MyCL
+  yazdığı her satırı aklında tutar ve iş bitiminde kaydı bununla karşılaştırır.
+  Değiştirilmiş, silinmiş ya da MyCL'in yazmadığı bir satır varsa koşu yeşil
+  sayılmaz. Bu tanık bir dosyada durmadığı için, kaydı ya da çapayı değiştirmek onu
+  kandırmaya yetmez. Sınırları: MyCL yeniden başlatılınca tanık sıfırdan başlar (o
+  andan öncesi için yalnız çapa konuşur); tanık iş bitiminde sorulur, aradaki faz
+  kontrolleri kaydı doğrulamadan okur; aynı proje aynı anda iki MyCL penceresinde
+  açıksa ya da kaydı çalışma sırasında elle düzenlerseniz bu da "yabancı satır"
+  olarak görünür; çalışan MyCL sürecinin belleğine erişebilen bir program tanığı da
+  aşabilir.
+- **🧷 Ajan kendi talimatını yazamaz** — kod yazan ajan, proje kökündeki
+  `CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json` dosyalarını ve `.claude/` klasörünü
+  **okuyabilir ama değiştiremez**. Bunlar sonraki her ajana ve denetçiye talimat,
+  kanca ve araç olarak yüklendiği için, yazılabilir olsalardı bir ajanın gerekçesi
+  kendisini denetleyenlere sızardı. Bu dosyaları siz elle düzenlemeye devam
+  edebilirsiniz. Sınırları: yalnız proje kökü korunur, alt klasörlerdeki `CLAUDE.md`
+  kapsam dışıdır; abonelik (CLI) yolunda engel işletim sistemi hapsiyle zorlanır,
+  API yolunda ve hapis kapalıyken yalnız yazma araçları ile açık komut desenleri
+  engellenir (dolaylı bir komutla aşılabilir).
 - **🛡️ İterasyon gate'leri (gate overlay)** — her iş başlarken MyCL, o işe özel
   riskleri kapalı bir gate sözlüğünden seçip iterasyona özel kilitler derler:
   örneğin "şu dosya bu iterasyonda değiştirilemez", "bağımlılık dosyalarına
@@ -607,6 +627,19 @@ hem API modunda çalışır. Ayrıca MyCL Studio'da projeye dair Türkçe teknik
 
 - **bash-guard** — yıkıcı komutlar (`rm -rf`, `sudo`, force push vb.) reddedilir.
 - **path-sandbox** — dosya işlemleri seçilen proje köküyle sınırlıdır.
+- **ev dizini koruması (abonelik / CLI yolu)** — proje ev dizininin altındaysa (ör. `~/proj/uygulama`) ajanın
+  dosya araçları yalnız projeye dokunabilir: ev dizinindeki diğer her şey (kardeş projeler, `~/.ssh`,
+  `~/.claude`, henüz var olmayan `~/.zshenv` ya da üst dizindeki `CLAUDE.md` dahil) okuma ve yazmaya kapalıdır.
+  İki katman: var olan girdiler için izin kuralları, geri kalan her şey için araç anında çalışan bir muhafız
+  (`orchestrator/home-guard.mjs`). Dar kurallar üretilemezse (proje çok kalabalık bir klasördeyse, klasör
+  listelenemiyorsa, klasör adının yazımı listedekiyle aynen tutmuyorsa, muhafız betiği eksikse ya da MyCL kurulum
+  yolunda kabuk için özel karakter varsa) MyCL sohbette "ev dizini okuma koruması dar kurala çevrilemedi" uyarısı
+  verir ve güvenli tarafta kalır: ajan o projede dosya araçlarını kullanamaz, yalnız kabuk komutlarıyla çalışır.
+  Sınırlar: gerçek `claude` ile yalnız macOS'ta denendi (Linux'ta yalnız birim testleri); muhafız Claude Code
+  tarafından hiç yüklenmezse yalnız var olan girdiler korunur; proje ev dizininin kendisiyse araç katmanında koruma
+  yoktur; sert bağlantılar (hardlink) ayırt edilemez; MCP araçları kapsam dışıdır; ajan kabuk komutuyla proje
+  içindeki bir sembolik bağlantıyı arka planda sürekli değiştirirse denetimle dosyanın açılması arasına girebilir
+  (kasıtlı saldırı gerektirir, yol tabanlı ön denetimle kapatılamaz).
 - **safe-env** — alt process'lere yalnızca izinli ortam değişkenleri geçer; API
   anahtarları ve token'lar sızdırılmaz.
 - **redaction** — loglarda `sk-ant-…` desenleri ve anahtar alanları maskelenir.

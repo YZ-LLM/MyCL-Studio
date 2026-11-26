@@ -127,9 +127,47 @@ const EVIDENCE_WRITE_RULES: DenyRule[] = [
   },
 ];
 
+/**
+ * AJAN TALİMAT YÜZEYİ YAZMA DESENLERİ (2026-11-26). API arka ucunda Write/Edit bu dosyaları reddediyor
+ * (tool-handlers `isAgentInstructionPath`); Bash aynı dosyalara yan yoldan yazabiliyordu. Yalnız PROJE
+ * KÖKÜNDEKİ hedefler (`CLAUDE.md`, `./CLAUDE.md`) — `docs/CLAUDE.md` gibi alt dizin yolları serbest.
+ * DÜRÜST SINIR: yukarıdaki kanıt kurallarıyla aynı — düzenli ifade, güvenlik sınırı DEĞİL (`cd`,
+ * değişken dolaylaması, betik ile aşılır). CLI yolunda gerçek sınır işletim sistemi hapsidir.
+ */
+const INSTR_TARGET = String.raw`["']?(?:\./)?(?:CLAUDE(?:\.local)?\.md|\.mcp\.json|\.claude(?:/[^\s;&|"']*)?)["']?`;
+const INSTRUCTION_HINT_RE = /CLAUDE(\.local)?\.md|\.mcp\.json|\.claude\b/i;
+const INSTRUCTION_WRITE_RULES: DenyRule[] = [
+  {
+    re: new RegExp(String.raw`>{1,2}\s*${INSTR_TARGET}(?=$|[\s;&|)])`, "i"),
+    reason: "agent instruction surface write (redirect into CLAUDE.md/.claude/.mcp.json) not allowed",
+  },
+  {
+    // yerinde değiştiren / silen / taşıyan araçlar: hedef HERHANGİ bir argüman konumunda
+    // (`mv CLAUDE.md x` de dosyayı yok eder).
+    re: new RegExp(
+      String.raw`\b(?:tee|sed\s+-i|perl\s+-i|truncate|rm|mv|touch)\b[^\n;&|]*\s${INSTR_TARGET}(?=$|[\s;&|)])`,
+      "i",
+    ),
+    reason: "agent instruction surface rewrite (CLAUDE.md/.claude/.mcp.json) not allowed",
+  },
+  {
+    // kopyalayan araçlar: yalnız SON argüman (hedef) — `cp CLAUDE.md docs/kopya.md` (kaynak) serbest.
+    re: new RegExp(
+      String.raw`\b(?:cp|ln|install|rsync)\b[^\n;&|]*\s${INSTR_TARGET}\s*(?=$|[;&|)])`,
+      "i",
+    ),
+    reason: "agent instruction surface overwrite (copy into CLAUDE.md/.claude/.mcp.json) not allowed",
+  },
+];
+
 export function inspectBashCommand(cmd: string): BashGuardResult {
   if (EVIDENCE_DIR_RE.test(cmd)) {
     for (const rule of EVIDENCE_WRITE_RULES) {
+      if (rule.re.test(cmd)) return { blocked: true, reason: rule.reason };
+    }
+  }
+  if (INSTRUCTION_HINT_RE.test(cmd)) {
+    for (const rule of INSTRUCTION_WRITE_RULES) {
       if (rule.re.test(cmd)) return { blocked: true, reason: rule.reason };
     }
   }

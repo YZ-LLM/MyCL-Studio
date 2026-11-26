@@ -1,3 +1,103 @@
+## 2026-11-26
+
+- **fix(güvenlik): yazma araçlarındaki `Edit(...)` reddi hiçbir dosyayla eşleşmiyordu (gerçek ortam denemesi):**
+  Yukarıdaki "doğrulanmadı" maddesi gerçek `claude` 2.1.332 + macOS Seatbelt altında denendi (geçici proje, MyCL'in
+  kendi `buildAgentSandboxSettings` çıktısıyla). **Çalışan:** Bash ile `CLAUDE.md` / `CLAUDE.local.md` / `.mcp.json` /
+  `.claude/settings.json` / `.mycl/*` / `.git/hooks/*` yazımı "operation not permitted"; normal dosya yazılır; var
+  olmayan `CLAUDE.md` / `.mcp.json` için yer tutucu dosya OLUŞMAZ. **Açık:** izin kuralında tek eğik çizgiyle başlayan
+  yol proje köküne göreli sayılıyor; mutlak yol çift eğik çizgi ister. `Edit(/Users/.../.mycl/**)` biçimi (2026-06'dan
+  beri `.git` + `.mycl`, bu dalda talimat yüzeyi) eşleşmiyordu → Write aracı `.mycl/y.txt` dosyasını YAZDI (çekirdek
+  `denyWrite` yalnız Bash'i kapsıyor). **Fix:** tüm Edit kuralları tek yerden (`editDenyRule`) çift eğik çizgiyle
+  üretilir. Düzeltme sonrası aynı deneme, ev dizini dışındaki projede, politika "enforce" ve "off" ile: altı korunan
+  yolun hepsi reddedildi, normal dosya yazıldı, `README.md` düzenlendi. Regresyon testi: "her Edit yazma reddi mutlak
+  yol biçiminde". Davranış regresyonu taraması: ajana `.mycl` içine yazdıran bir talimat yok; `.mycl/plans`, spec ve
+  kayıt yazımları orkestratör sürecinde (kural onları etkilemez).
+
+- **fix(güvenlik): ev dizini altındaki projede dosya araçları tümüyle kilitliydi (önceden var olan; gerçek ortam denemesi):**
+  `Read(//<ev>)` reddi `claude` 2.1.332'de tüm alt ağacı kapsıyor ve ret izinden baskın → proje ev dizini altındayken
+  Read / Write / Edit HER proje dosyasında reddediliyordu ("covered by a Read deny rule"); ajan yalnız Bash ile
+  çalışabiliyordu. Kuralı silmek çözüm değil: silince Read aracı ev dizinindeki başka bir klasörü okudu (çekirdek kum
+  havuzu yalnız Bash'i kapsıyor). **Fix, iki katman:** (1) taban — `buildHomeReadDeny`: ev dizininden proje üst dizinine
+  kadar her düzeyde, projeye giden bileşen dışındaki her girdi ayrı ayrı reddedilir (köşeli parantez gibi desen
+  karakterleri kaçırılır; kaçışsız kural gerçek `claude`da eşleşmedi). (2) yüklem — yeni `orchestrator/home-guard.mjs`
+  PreToolUse kancası: hedef ev dizininde ama projede değilse engel (gerçek yol, büyük küçük harf, Unicode, var olmayan
+  hedef). **İlk taslağı mahkeme (Sonnet) reddetti; bulgular düzeltildi:** çalışma zamanı girdileri (`~/.claude`,
+  `Library`…) araç katmanında açık kalıyordu → artık reddediliyor; henüz var olmayan adlar (`~/.zshenv`,
+  `~/proj/CLAUDE.md`) yazmaya açıktı → kanca kapatıyor; sondaki eğik çizgili proje yolu projeyi kilitliyordu →
+  yol sadeleştirilir; projeye giden ad listede aynen yoksa sessiz kilit yerine görünür geniş ret; uyarı süreç başına
+  değil proje ve neden başına; sınır yol sayısı değil bayt (64 KB). **Güvenli taraf:** liste okunamaz, bütçe aşılır ya
+  da kanca yolu yoksa eski geniş ret + sohbette görünür uyarı. **Gerçek `claude` ile doğrulandı** (`~/…/proj/app`):
+  proje içinde okuma, yazma, düzenleme, Glob çalıştı; kardeş klasör, `~/.zprofile`, `~/.claude` içine yazma, var
+  olmayan `~/…/proj/CLAUDE.md` ve `~/yeni.txt` yazımı, ev dizininde Glob ve Grep reddedildi. Ev dizini DIŞINDAKİ
+  projede ve politika "off" iken üretilen ayar değişmedi. **Sınır:** kanca hiç yüklenmezse yalnız taban kalır; proje ev
+  dizininin kendisiyse araç katmanında koruma yok; sert bağlantı ayırt edilemez; MCP araçları kapsam dışı; Linux'ta
+  denenmedi (yalnız birim testleri). **Mahkeme ikinci tur düzeltildi (kaçışlar muhafız BETİĞİ üzerinde kanıtlandı; gerçek Glob aracı göreli deseni arama kökü içinde süzgeç olarak kullandığından ilki gerçek araçta büyük olasılıkla gerçekleşmiyordu — yine de kapatıldı):** göreli
+  Glob deseni `../../**/*.txt` hiç denetlenmiyordu → sabit önek arama köküne göre çözülür, jokerden sonra `..` içeren
+  desen reddedilir; boşta sembolik bağlantı (`proje/x -> ~/olmayan`) proje içi sayılıyordu → bağlantı hedefi izlenir;
+  betik diskte yoksa ya da `node` PATH'te değilse kanca sessizce atlanırdı (Claude Code 0 ve 2 dışındaki çıkış kodunu
+  engel saymıyor) → betik yoksa görünür geniş ret, kanca MyCL'in kendi node ikilisiyle (`process.execPath`) koşar;
+  paketleme testi muhafız betiklerini kilitler. **Mahkeme üçüncü tur (Opus) düzeltildi:** muhafız Grep'in düzenli
+  ifadesini yol sanıp `../components`, `//.*eslint-disable`, `{...props} />` gibi gündelik aramaları engelliyordu →
+  `pattern` yalnız dosya deseni olan araçlarda yol sayılır (Grep'in arama yeri `path` yine denetlenir); yol önce metin
+  olarak sadeleştiriliyordu, `proje/baglanti/../a.txt` proje içi görünüyordu (betikte ve ham işletim sistemi yol
+  çözümünde gösterildi; gerçek `claude` 2.1.332'de Write yolu kendisi sadeleştirdi ve dosya projede kaldı, diğer
+  araçlar ölçülmedi) → muhafız bilerek katı okumayı seçer: yol kökten parça parça, bağlantılar izlenerek FİZİKSEL çözülür; kanca komutundaki yol çift tırnakla yazıldığından
+  kurulum yolunda `$` ya da `"` varsa kanca sessizce devre dışı kalıyordu → böyle yolda görünür geniş ret; desen
+  sözdizimiyle gizlenmiş `..` (`.{.,}/x`) reddedilir. **Dördüncü tur (çok ajanlı akış: dört mercek, her bulgu ayrı ajanla
+  yeniden üretildi; 8 doğrulandı, 3 çürütüldü) düzeltildi:** (YÜKSEK) macOS'ta `/System/Volumes/Data/Users/<ben>/…`
+  ev dizininin kendisidir (firmlink, sembolik bağlantı değil) ve muhafızı metin farkıyla geçiyordu; `/.nofollow`,
+  `/.resolve`, `/.vol` çekirdek önekleri de öyle (betikte gösterildi) → metne EK olarak dosya kimliği (aygıt + inode)
+  karşılaştırması, takma yolun atası üzerinde arama engeli, sihirli öneklerde koşulsuz engel. (ORTA) Edit kuralları
+  kaçışsızdı: `proj [v2]` gibi yolda `.mycl` / `CLAUDE.md` kuralı eşleşmezdi ve ev dizini altında geniş ret artık
+  olmadığından yazma araçlarına açık kalırdı → `editDenyRule` yolu kaçırır. (DÜŞÜK) `*.*.*` ve `.*.*` desenleri
+  haksız yere reddediliyordu; proje yolunda köşeli parantez varken mutlak Glob deseni reddediliyordu; uyarıdaki öneri
+  kurulum kaynaklı nedende yanlıştı; betik varlık denetimi, MyCL'in kendi node'u ve "bir kez uyar" davranışının testi
+  yoktu → `sandboxSettingsArgs` girdileri enjekte edilebilir, üçü de testli. **Kapatılamayan, belgelenen sınır:**
+  denetimle dosyanın açılması arasındaki yarış (ajan Bash ile proje içi bir bağlantıyı arka planda sürekli değiştirir);
+  paralel modül işçisi ana projenin `node_modules` dizinini dosya araçlarıyla okuyamaz (çekirdek katmanda da böyleydi).
+  **Beşinci tur (push sonrası doğrulama akışı; yüksek önemde bulgu yok, 3 doğrulandı, 1 çürütüldü) düzeltildi:**
+  (ORTA, haksız engel) Next.js / SvelteKit tümünü yakala klasörleri `[...slug]`, `[[...slug]]` içindeki `...`
+  tırmanış sayılıp Glob reddediliyordu → parça ancak tam olarak `..` ile eşleşebiliyorsa tırmanış sayılır. (DÜŞÜK)
+  `{/ev/gizli,x}/*` deseninde süslü parantez seçeneği hiç denetlenmiyordu → desen seçeneklerine açılır, her biri ayrı
+  denetlenir (64 açılım sınırı, aşılırsa engel). (DÜŞÜK) proje yolunda köşeli parantez varken KAÇIŞSIZ mutlak desen
+  kardeş dizini de eşliyordu (`app [v2]` ↔ `app 2`) → dördüncü turda eklenen kısayol kaldırıldı; kaçışlı ve göreli
+  desen çalışır, kaçışsız hâl göreli deseni öneren iletiyle reddedilir. Son iki bulgu muhafız betiği üzerinde
+  gösterildi; gerçek Glob aracında gerçekleşip gerçekleşmedikleri ölçülmedi, en kötü durumda dosya ADI sızardı.
+  **Bilinen, kapatılmayan:** Glob / Grep arama KÖKÜ denetlenir; arama sırasında karşılaşılan proje içi sembolik
+  bağlantıların izlenip izlenmediği aracın davranışına bağlıdır (gösterilemedi, hipotez).
+
+- **fix(güvenlik): harness kaçış denetimi — hükmün üretildiği satırlar korumasızdı + ajan kendi talimatını yazabiliyordu:**
+  İki açık, tek soru: "model söyleneni gözden kaçırır ya da tersini mantıklı bulursa harness'tan çıkabilir mi?"
+  **(1) Çapa hükmün girdisini kapsamıyordu.** `refreshAuditAnchor` iterasyon BAŞINDA çağrılıyor ve yalnız o ana kadarki
+  öneki özetliyor; hüküm ise `eventsSince(iteration_started_at)` ile yalnız BU iterasyonun satırlarından hesaplanıyor →
+  o satırlar çapanın dışında. Testle kanıtlandı (`audit-ledger.test.ts` "ASIL AÇIK"): çapadan sonra yazılan
+  `phase-13-fail` → `phase-13-complete` yapılınca çapa "ok" diyor. Ayrıca çapa dosyası (`~/.mycl`) ajan kum havuzuna
+  kapalı ama MyCL'in hapis DIŞINDA koşturduğu proje komutlarına (test/lint/build/dev — ajanın yazdığı kod) ve API arka
+  ucundaki Bash'e açık. **Fix:** `audit-ledger.ts` — tanık diskte değil orkestratör sürecinin belleğinde. `appendAudit`
+  yazdığı her satırın özetini tutar; `emitPipelineEndSummary` hükümden önce dosyayı tanıkla karşılaştırır (önek
+  değişmemiş + kuyruk TAM OLARAK bu sürecin yazdıkları, sırasız çoklu küme — beklemesiz `void appendAudit` çağrıları
+  yanlış alarm üretmez). Sapma → mevcut `auditTampered` → FAIL. `accepted-findings.jsonl` "additions" kipinde: yabancı
+  EKLEME yakalanır, satır SİLME serbest (belgelenmiş "bulguyu yeniden etkinleştir" akışı korunur). Platform/arka uç
+  bağımsız; yazım davranışı aynı. `no-ledger` (bu süreç henüz yazmadı) kurcalama DEĞİL → eski davranış.
+  **(2) Ajan talimat yüzeyi yazılabiliyordu.** Yazma yasağı yalnız `.mycl` + `.git` idi; proje kökündeki `CLAUDE.md` /
+  `CLAUDE.local.md` / `.mcp.json` / `.claude/` Claude Code tarafından sonraki her spawn'a (müfettişler dahil) yükleniyor.
+  **Fix:** `agent-sandbox.ts` `denyWrite` + `permissions.deny` (politika "off" iken de), `tool-handlers.ts` API yolu
+  (faz whitelist'i ezmez, büyük/küçük harf katlanır). OKUMA açık — kullanıcının proje talimatları ajana aynen ulaşır.
+  **Çapraz-aile mahkemesi (KATI #12) bulguları düzeltildi:** (Y1) doğrulama okurken başlayan `void appendAudit`
+  sahte "eksik satır" üretiyordu → tanık anlık görüntüsü okumadan ÖNCE alınır, okuma sırasında yazım olduysa yeniden
+  denenir (kararlı an; hiç durulmazsa `busy` = kurcalama değil, log'a düşer). (Y2) `write` başarılı + `fsync` hatalı
+  yazım "yabancı satır" sayılıyordu → "belki yazıldı" kümesi. (O1) eşzamanlılık testi tanık doğmadan doğruluyordu
+  (totolojik) → geciktirilmiş yazımlı gerçek testler. (O2) API yolunda Bash talimat yüzeyine yazabiliyordu →
+  `bash-guard` desenleri (kök hedefler; `docs/CLAUDE.md`, `cat CLAUDE.md`, `cp CLAUDE.md x` serbest). (O3) ÖNCEDEN VAR
+  OLAN boşluk: politika "off" + ultracode/overlay yokken `sandboxSettingsArgs` `[]` dönüyor, 2026-09-10'da eklenen
+  "off olsa bile `.mycl` yazmaya kapalı" ayarı o spawn'lara hiç gönderilmiyordu → artık her zaman gönderilir.
+  (O5) hüküm girdisi okunmadan ÖNCE ve SONRA doğrulanır; README'deki "atlatılamaz" iddiası gerçek sınırlarla değiştirildi.
+  **Doğrulanmadı (gerçek `claude` + macOS gerekir):** yeni `denyWrite` girdilerinin Seatbelt/bwrap altında var olmayan
+  dosyalar için davranışı ve `Edit(<yol>)` kurallarının bu dosyalarda etkisi — mevcut `.mycl` kurallarıyla aynı biçimde.
+  **Dürüst sınır:** tanık süreçle doğar (yeniden başlatmada sıfırlanır); alt dizin `CLAUDE.md` kapsam dışı; MyCL'in
+  koşturduğu proje komutları hâlâ işletim sistemi hapsinde değil (kayıt sahteciliği artık YAKALANIR ama `~/.mycl`
+  altındaki diğer dosyalar o komutlara açık) — ayrı karar bekliyor.
+
 ## 2026-07-13
 
 - **feat(ui): kuyruk işinin GERÇEK süresini göster (running→done) — "kaç dakika sürdü" (YZLLM canlı "tamamlanma saatleri + kaç dakika sürdü bilmem lazım"):**
