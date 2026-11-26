@@ -1,3 +1,19 @@
+## 2026-11-27
+
+- **fix(kaplama): boş projede `forbid_dependency_change` ilk bağımlılık dosyasının yazılmasını engellemesin.** Ekransız
+  deneme koşusunda model boş projede bu kapıyı seçti; kilitlenecek dosya yoktu ama muhafız ada baktığı için ajan
+  `package.json` dosyasını hiç yazamadı, Faz 5 ve Faz 8 başarısız oldu. Bu kapının bağlam kuralı boştu (kardeşleri var
+  olmayan şeyi kilitlemeyi reddediyordu). Artık projede adı bağımlılık bildirim dosyası olan bir dosya yoksa seçim
+  `bad_context` ile reddediliyor; iterasyon devam ediyor. "Var" ölçütü muhafızla aynı (ağacın herhangi bir yerinde);
+  kök dosyaları dosya sistemine doğrudan soruluyor, envanter sınırda kesildiyse yokluk kanıtlanamadığı için seçim kabul
+  ediliyor (eski davranış). Reddedilen seçimler artık sohbette nedenleriyle yazılıyor (eskiden yalnız sayı; denetim
+  kaydında zaten vardı). Seçici modelin talimatına da eklendi. Yeni düzenek yok: var olan bağlam kuralı tablosu dolduruldu.
+  **Açık kalan (karar bekliyor):** bu hataya düşmüş bir iterasyon kesintiden ya da yeniden açılıştan devam ettirilirse
+  kayıtlı kaplama yeniden doğrulanmadığı için kilit sürer; yeni iş başlatmak yeniden derlediği için kaldırır. Bildirim
+  dosyası adları sabit bir listeden geliyor, stack profillerindeki `manifest_files` kullanılmıyor (pom.xml, build.gradle,
+  *.csproj, Package.swift, deno.json, bun.lockb, uv.lock listede yok). **Test ve kontrol koşturulmadı, yalnız derlendi;**
+  inceleme yalnız kod okunarak yapıldı.
+
 ## 2026-11-26
 
 - **fix: model yükseltme sorusunu otomatik cevaplayan araç kullanıcının model ayarını değiştirmesin.** Ekransız koşu

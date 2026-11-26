@@ -5225,6 +5225,15 @@ async function compileIterationOverlay(taskTexts: string[], reason: string): Pro
       ? `🛡️ İterasyon gate'leri derlendi: ${compiled.accepted.length} seçim${tail}.`
       : `🛡️ Bu iş için ek gate gerekmedi (statik kapılar geçerli)${tail}.`,
   );
+  // Reddedilen seçim SESSİZ düşmesin (KATI #4): hangi kapının neden uygulanmadığı sohbette de görünsün
+  // (denetim kaydında zaten var). İterasyon devam eder; reddedilen kapı uygulanmaz.
+  if (compiled.rejected.length > 0) {
+    emitChatMessage(
+      "system",
+      `ℹ️ Uygulanmayan gate seçimleri:\n` +
+        compiled.rejected.map((r) => `• ${r.sel.gate_id} — ${r.reason.slice(0, 200)}`).join("\n"),
+    );
+  }
   return true;
 }
 

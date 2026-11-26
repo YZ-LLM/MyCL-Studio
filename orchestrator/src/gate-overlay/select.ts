@@ -47,6 +47,14 @@ export interface OverlayContext {
   projectFiles: ReadonlySet<string>;
   /** Projedeki dizinler — göreli, normalize yollar. */
   projectDirs: ReadonlySet<string>;
+  /**
+   * Proje KÖKÜNDE gerçekten var olan bağımlılık bildirim dosyaları (dosya sistemine doğrudan sorulur). Envanterden
+   * bağımsızdır: envanter dosya sınırında kesilebilir, sembolik bağlantıları atlar ve adı birebir karşılaştırır;
+   * kökteki bir bildirim bu yüzden `projectFiles` içinde görünmeyebilir. Verilmezse `projectFiles` kullanılır.
+   */
+  rootManifests?: ReadonlySet<string>;
+  /** Envanter dosya sınırında kesildi mi. Kesildiyse "projede şu dosya YOK" diye kesin konuşulamaz. */
+  inventoryTruncated?: boolean;
 }
 
 export type SelectionFailureCode = "unknown_gate" | "bad_params" | "bad_context";
@@ -54,6 +62,33 @@ export type SelectionFailureCode = "unknown_gate" | "bad_params" | "bad_context"
 export type SelectionResult =
   | { ok: true; entry: GatePoolEntry }
   | { ok: false; code: SelectionFailureCode; reason: string };
+
+/**
+ * STACK-BAĞIMSIZ standart bağımlılık bildirim dosyaları (KATI #1): tek bir ekosisteme
+ * (npm) bağlanmaz. forbid_dependency_change seçildiğinde bunların proje kökünde VAR OLANLARI
+ * taban çizgisine alınır; kökte hiçbiri yoksa seçim geçersizdir (aşağıdaki bağlam kuralı).
+ */
+export const DEPENDENCY_MANIFEST_FILES: readonly string[] = [
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "Cargo.toml",
+  "Cargo.lock",
+  "go.mod",
+  "go.sum",
+  "requirements.txt",
+  "pyproject.toml",
+  "poetry.lock",
+  "Gemfile",
+  "Gemfile.lock",
+  "composer.json",
+  "composer.lock",
+  "pubspec.yaml",
+  "pubspec.lock",
+  "mix.exs",
+  "mix.lock",
+];
 
 /** Yol taşıyan parametre adları — bunlara göreli + temiz yol kuralı uygulanır. */
 const PATH_PARAM_NAMES: ReadonlySet<string> = new Set([
@@ -120,6 +155,17 @@ function pathProblem(value: string, label: string): string | null {
   return null;
 }
 
+/** SAF: projede (kökte ya da alt dizinde) adı bağımlılık bildirim dosyası olan bir dosya var mı. */
+function hasDependencyManifest(ctx: OverlayContext): boolean {
+  if (ctx.rootManifests && ctx.rootManifests.size > 0) return true;
+  const names = new Set(DEPENDENCY_MANIFEST_FILES);
+  for (const f of ctx.projectFiles) {
+    const slash = f.lastIndexOf("/");
+    if (names.has(slash === -1 ? f : f.slice(slash + 1))) return true;
+  }
+  return false;
+}
+
 /**
  * Gate'e özel bağlam kuralı: sorun varsa gerekçe, yoksa null.
  * Tablo havuzdaki HER gate'i kapsar; kapsamayan bir gate eklenirse
@@ -150,7 +196,15 @@ const CONTEXT_RULES: Readonly<Record<string, ContextRule>> = {
     ctx.projectDirs.has(params.dir)
       ? null
       : `dizin projede yok: ${params.dir}`,
-  forbid_dependency_change: () => null,
+  // Projede hiç bağımlılık bildirim dosyası yoksa kilitlenecek bir şey de yoktur. Böyle bir kilit hiçbir şeyi
+  // korumaz, ama muhafız ada baktığı için İLK bildirim dosyasının yazılmasını engeller: yeni (boş) projede ajan
+  // stack'in bildirim dosyasını hiç yazamaz ve iterasyon ilerleyemez.
+  // "Var" ölçütü muhafızla aynıdır (ağacın herhangi bir yerinde o adda dosya): bildirimi olan projede davranış
+  // değişmez. Envanter kesildiyse yokluk kanıtlanamaz → seçim kabul edilir (eski davranış).
+  forbid_dependency_change: (_params, ctx) =>
+    hasDependencyManifest(ctx) || ctx.inventoryTruncated === true
+      ? null
+      : "projede tanınan bir bağımlılık bildirim dosyası yok: kilitlenecek bir şey yok (yeni projede ilk bildirim dosyasının yazılmasını engellerdi)",
   test_must_pass: (params) => {
     const ref = params.test_ref;
     if (ref.trim() === "") return "test_ref boş olamaz";

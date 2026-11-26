@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { loadGatePool } from "../src/gate-overlay/pool.js";
 import type { GatePool } from "../src/gate-overlay/pool.js";
 import type { OverlayContext } from "../src/gate-overlay/select.js";
+import { buildGuardRules } from "../src/gate-overlay/decide.js";
 import {
   archiveActiveOverlay,
   buildOverlayInventory,
@@ -58,6 +59,49 @@ const VALID_BODY = {
   ],
   missing: [{ risk_description: "migration geri alınabilir olmalı", suggested_name: "reversible_migration" }],
 };
+
+// Olay (ekransız deneme koşusu): boş projede derlenen kaplama tek seçim olarak forbid_dependency_change içeriyordu;
+// ajan ilk package.json dosyasını yazamadı. Reddedilen seçimle derlenen kaplamada bağımlılık kilidi OLMAMALI.
+describe("boş projede forbid_dependency_change kaplamaya girmez", () => {
+  const emptyCtx: OverlayContext = { projectFiles: new Set(), projectDirs: new Set(["."]) };
+  const body = {
+    kind: "gate_overlay",
+    selections: [
+      { gate_id: "forbid_dependency_change", params: {}, reason: "tek sayfalık uygulama yeni bağımlılık gerektirmez" },
+    ],
+    missing: [],
+  };
+
+  it("seçim reddedilir, gerekçesiyle birlikte raporlanır; kabul edilen seçim kalmaz", () => {
+    const res = compileOverlayFromProposal(block(body), pool, emptyCtx);
+    expect(res.parseError).toBeUndefined();
+    expect(res.accepted).toEqual([]);
+    expect(res.rejected).toHaveLength(1);
+    expect(res.rejected[0].sel.gate_id).toBe("forbid_dependency_change");
+    expect(res.rejected[0].code).toBe("bad_context");
+    expect(res.rejected[0].reason).toContain("bağımlılık bildirim dosyası yok");
+  });
+
+  it("bu kaplamadan üretilen muhafız kurallarında bağımlılık kilidi yok → package.json yazılabilir", () => {
+    const res = compileOverlayFromProposal(block(body), pool, emptyCtx);
+    const overlay = {
+      overlay_version: 1,
+      pool_version: pool.pool_version,
+      iteration_key: "iter1-1",
+      compiled_at: 1,
+      selections: res.accepted,
+      baselines: {},
+      dir_baselines: {},
+    } as unknown as CompiledOverlay;
+    // Hiç tool_deny seçimi kalmadı → kural da kanca da yok.
+    expect(buildGuardRules(overlay, "/tmp/proje")).toBeNull();
+    // Aynı öneri, bildirim dosyası OLAN projede eskisi gibi kilitler.
+    const kept = compileOverlayFromProposal(block(body), pool, ctx);
+    expect(kept.accepted.map((a) => a.gate_id)).toEqual(["forbid_dependency_change"]);
+    const rules = buildGuardRules({ ...overlay, selections: kept.accepted } as CompiledOverlay, "/tmp/proje");
+    expect(rules?.dependency_file_names).toContain("package.json");
+  });
+});
 
 describe("compileOverlayFromProposal", () => {
   it("geçerli blok → seçimler kabul edilir, missing taşınır", () => {

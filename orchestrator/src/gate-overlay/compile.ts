@@ -27,6 +27,7 @@ import type { GatePool } from "./pool.js";
 import {
   dedupeSelections,
   parseOverlayProposal,
+  DEPENDENCY_MANIFEST_FILES,
   validateSelection,
 } from "./select.js";
 import type {
@@ -230,6 +231,9 @@ export function buildOverlayPrompt(
     "4. Paths are project-relative: no leading slash, no '..' segment, no backslash. They must",
     "   exist in the project inventory, with one exception: file_must_change.path may name a file",
     "   the iteration is expected to create.",
+    "   forbid_dependency_change locks the dependency manifests that ALREADY exist. If the inventory says",
+    "   `Dependency manifests present: (none)` and lists no manifest in a subdirectory, do not select it:",
+    "   there is nothing to lock, and the implementer must be able to create the project's first manifest.",
     "5. Gates only TIGHTEN. Never select a gate meant to permit or loosen something.",
     "6. If this task carries a real risk that NO gate in the dictionary covers, describe it in",
     "   `missing` with a snake_case suggested_name. Do not bend an unrelated gate to cover it —",
@@ -292,32 +296,8 @@ export interface OverlayInventory {
   truncated: boolean;
 }
 
-/**
- * STACK-BAĞIMSIZ standart bağımlılık bildirim dosyaları (KATI #1): tek bir ekosisteme
- * (npm) bağlanmaz. forbid_dependency_change seçildiğinde bunların projede VAR OLANLARI
- * taban çizgisine alınır.
- */
-export const DEPENDENCY_MANIFEST_FILES: readonly string[] = [
-  "package.json",
-  "package-lock.json",
-  "pnpm-lock.yaml",
-  "yarn.lock",
-  "Cargo.toml",
-  "Cargo.lock",
-  "go.mod",
-  "go.sum",
-  "requirements.txt",
-  "pyproject.toml",
-  "poetry.lock",
-  "Gemfile",
-  "Gemfile.lock",
-  "composer.json",
-  "composer.lock",
-  "pubspec.yaml",
-  "pubspec.lock",
-  "mix.exs",
-  "mix.lock",
-];
+// Bağımlılık bildirim dosyası listesi select.ts içindedir (bağlam kuralı da onu kullanır); buradan aynen dışa verilir.
+export { DEPENDENCY_MANIFEST_FILES };
 
 /** Özette gösterilecek örnek dosya sayısı (prompt'u ~100 satırda tutar). */
 const SUMMARY_SAMPLE_FILES = 50;
@@ -366,9 +346,25 @@ export async function buildOverlayInventory(
   };
   await walk("", true);
 
+  // Kökteki bildirim dosyaları dosya sistemine DOĞRUDAN sorulur (taban çizgisiyle aynı yol): envanter sınırda
+  // kesilse, dosya sembolik bağlantı olsa ya da adı farklı büyük küçük harfle yazılmış olsa da görülür.
+  const rootManifests: string[] = [];
+  for (const manifest of DEPENDENCY_MANIFEST_FILES) {
+    try {
+      if ((await fs.stat(join(projectRoot, manifest))).isFile()) rootManifests.push(manifest);
+    } catch {
+      // yok
+    }
+  }
+
   return {
-    ctx: { projectFiles: new Set(files), projectDirs: new Set(dirs) },
-    summary: summarizeInventory(files, dirs, truncated),
+    ctx: {
+      projectFiles: new Set(files),
+      projectDirs: new Set(dirs),
+      rootManifests: new Set(rootManifests),
+      inventoryTruncated: truncated,
+    },
+    summary: summarizeInventory(files, dirs, truncated, rootManifests),
     truncated,
   };
 }
@@ -378,6 +374,8 @@ export function summarizeInventory(
   files: readonly string[],
   dirs: readonly string[],
   truncated: boolean,
+  /** Kökte dosya sistemine sorularak bulunan bildirimler; verilmezse dosya listesinden çıkarılır. */
+  rootManifests?: readonly string[],
 ): string {
   const perTop = new Map<string, number>();
   for (const f of files) {
@@ -398,7 +396,9 @@ export function summarizeInventory(
     samples.push(sorted[i]);
   }
 
-  const manifests = DEPENDENCY_MANIFEST_FILES.filter((m) => files.includes(m));
+  const manifests = [
+    ...new Set([...(rootManifests ?? []), ...DEPENDENCY_MANIFEST_FILES.filter((m) => files.includes(m))]),
+  ];
 
   const out = [
     `Totals: ${files.length} files, ${dirs.length} directories.`,

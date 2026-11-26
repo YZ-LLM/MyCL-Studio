@@ -64,6 +64,62 @@ describe("geçerli seçimler", () => {
     }
   });
 
+  // Olay (ekransız deneme koşusu): boş projede model forbid_dependency_change seçti. Kilitlenecek dosya yoktu, ama
+  // muhafız ada baktığı için ajan package.json dosyasını hiç yazamadı; Faz 5 ve Faz 8 başarısız oldu.
+  describe("forbid_dependency_change bağlam kuralı", () => {
+    const sel: OverlaySelection = { gate_id: "forbid_dependency_change", params: {} };
+
+    it("kökte bağımlılık bildirim dosyası YOKSA seçim reddedilir (bad_context) ve gerekçe nedeni söyler", () => {
+      const empty: OverlayContext = { projectFiles: new Set(), projectDirs: new Set() };
+      const r = validateSelection(sel, pool, empty);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.code).toBe("bad_context");
+        expect(r.reason).toContain("bağımlılık bildirim dosyası yok");
+      }
+      // Kaynak dosyası olan ama bildirimi olmayan proje de aynı: kilitlenecek bir şey yok.
+      const noManifest: OverlayContext = {
+        projectFiles: new Set(["index.html", "src/app.js", "vite.config.js"]),
+        projectDirs: new Set(["src"]),
+      };
+      expect(validateSelection(sel, pool, noManifest).ok).toBe(false);
+    });
+
+    it("kökte bildirim dosyası VARSA seçim kabul edilir (davranış aynı)", () => {
+      expect(validateSelection(sel, pool, ctx).ok).toBe(true); // ctx: package.json var
+    });
+
+    it("tek bir paket yöneticisine bağlı değil: her ekosistemin kök bildirimi sayılır", () => {
+      for (const manifest of ["Cargo.toml", "go.mod", "pyproject.toml", "requirements.txt", "Gemfile", "composer.json", "pubspec.yaml", "mix.exs"]) {
+        const c: OverlayContext = { projectFiles: new Set([manifest, "src/main.x"]), projectDirs: new Set(["src"]) };
+        expect(validateSelection(sel, pool, c).ok, manifest).toBe(true);
+      }
+    });
+
+    it("yalnız alt dizinde bildirimi olan proje (monorepo) de 'var' sayılır: muhafız o dosyaları koruyordu, davranış aynı", () => {
+      const nested: OverlayContext = {
+        projectFiles: new Set(["packages/a/package.json", "backend/requirements.txt"]),
+        projectDirs: new Set(["packages", "packages/a", "backend"]),
+      };
+      expect(validateSelection(sel, pool, nested).ok).toBe(true);
+    });
+
+    it("kökteki bildirim envanterde görünmese de (sınırda kesilme, sembolik bağlantı) dosya sistemi cevabı geçerlidir", () => {
+      const c: OverlayContext = {
+        projectFiles: new Set(["src/app.py"]),
+        projectDirs: new Set(["src"]),
+        rootManifests: new Set(["pyproject.toml"]),
+      };
+      expect(validateSelection(sel, pool, c).ok).toBe(true);
+    });
+
+    it("envanter kesildiyse yokluk kanıtlanamaz → seçim kabul edilir (eski davranış); kesilmediyse reddedilir", () => {
+      const base = { projectFiles: new Set(["src/a.ts"]), projectDirs: new Set(["src"]), rootManifests: new Set<string>() };
+      expect(validateSelection(sel, pool, { ...base, inventoryTruncated: true }).ok).toBe(true);
+      expect(validateSelection(sel, pool, { ...base, inventoryTruncated: false }).ok).toBe(false);
+    });
+  });
+
   it("file_must_change henüz var olmayan dosyayı kabul eder (iterasyon onu yaratabilir)", () => {
     const result = validateSelection(
       { gate_id: "file_must_change", params: { path: "src/yeni/modul.ts" } },
