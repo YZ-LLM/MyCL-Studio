@@ -1,5 +1,10 @@
 ## 2026-11-26
 
+- **ci: MyCL kendi kural doğrulamasını CI'da gerçekten koşuyor.** `check.sh` 6. adım semgrep yokken atlanıyor ve ✓
+  basıyordu; CI'da semgrep hiç kurulmadığı için adım orada her zaman atlanıp yeşil geçiyordu. `check.yml` artık semgrep
+  kuruyor; CI'da semgrep yoksa adım BAŞARISIZ, yerelde ✓ yerine görünür ⏭. Yerelde semgrep 1.136 ile iki kural klasörü
+  de geçerli çıktı (8 + 4 kural).
+
 - **sadeleştirme (danışman incelemesi, kayıpsız adımlar).** Silindi: `agent-quality.ts` (üretimde çağıranı yoktu) ve
   alaka motorundaki `user-guide` kaynağı (hiçbir enjektör istemiyordu). `arch-check.mjs`: taranacak kaynak dosyası yoksa
   "ihlal yok, geçti" yerine çıkış 3 → görünür "ölçülmedi" (Faz 10; hükmü etkilemez). `prototype-cache`: yeşil koşuda
@@ -119,6 +124,10 @@
   **Dürüst sınır:** tanık süreçle doğar (yeniden başlatmada sıfırlanır); alt dizin `CLAUDE.md` kapsam dışı; MyCL'in
   koşturduğu proje komutları hâlâ işletim sistemi hapsinde değil (kayıt sahteciliği artık YAKALANIR ama `~/.mycl`
   altındaki diğer dosyalar o komutlara açık) — ayrı karar bekliyor.
+
+## 2026-07-14 – 2026-11-25
+
+Bu aralık için girdi yazılmadı; git'te 142 commit var. Kaynak: `git log --since=2026-07-14 --until=2026-11-25`.
 
 ## 2026-07-13
 
