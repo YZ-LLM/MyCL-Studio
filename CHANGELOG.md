@@ -1,5 +1,12 @@
 ## 2026-11-26
 
+- **sadeleştirme (danışman incelemesi, kayıpsız adımlar).** Silindi: `agent-quality.ts` (üretimde çağıranı yoktu) ve
+  alaka motorundaki `user-guide` kaynağı (hiçbir enjektör istemiyordu). `arch-check.mjs`: taranacak kaynak dosyası yoksa
+  "ihlal yok, geçti" yerine çıkış 3 → görünür "ölçülmedi" (Faz 10; hükmü etkilemez). `prototype-cache`: yeşil koşuda
+  projenin tamamı kopyalanırken `.env` ailesi, özel anahtarlar ve kimlik dosyaları artık prototipe girmiyor.
+  Tek arka uç, hafızaların birleştirilmesi ve stack ayrımı YAPILMADI: harita akışı bunların senin açık isteklerinle
+  (her zaman otomatik arka uç, API desteği, modül stoku, projeler arası ders, stack bağımsızlık) çakıştığını gösterdi.
+
 - **fix(kapı): "atlandı" kararı artık aracın serbest çıktısına değil başlatıcının sözüne dayanıyor.** Kaçış yolu avında
   gösterildi: başarısız bir test koşusu, çıktısında "command not found" ya da "tsc … FileNotFoundError" geçtiği için
   "atlandı / uygulanamaz" sayılıyor, faz tamamlanıyor, hüküm GEÇTİ çıkıyordu. `isMissingCommand`: çıkış kodu 127, ya da

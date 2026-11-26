@@ -199,3 +199,17 @@ describe("prototype-cache · snapshot + apply round-trip (MYCL_HOME izole)", () 
     expect(applied).toBe(false);
   });
 });
+
+// Harita akışı bulgusu (2026-11-26): yeşil koşuda projenin TAMAMI prototipe kopyalanıyor, `.env` dahil.
+// Prototipler repo içinde durur ve başka projelere kopyalanır → sır dosyaları dışarıda kalmalı.
+describe("isSecretFileName — prototipe girmeyen dosyalar", () => {
+  it("`.env` ailesi dışarıda, örnek dosyalar içeride", async () => {
+    const { isSecretFileName } = await import("../src/prototype-cache.js");
+    for (const n of [".env", ".env.local", ".env.production", ".ENV", "server.pem", "tls.key", "cert.p12", "secrets.json", "credentials.json", "id_rsa", "id_ed25519.pub"]) {
+      expect(isSecretFileName(n), n).toBe(true);
+    }
+    for (const n of [".env.example", ".env.sample", ".env.template", "env.ts", "package.json", ".npmrc", "keyboard.ts", "monkey.tsx", "index.html"]) {
+      expect(isSecretFileName(n), n).toBe(false);
+    }
+  });
+});

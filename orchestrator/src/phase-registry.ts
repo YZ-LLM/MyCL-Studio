@@ -316,7 +316,8 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
           name: "architecture",
           cmd: `node "${securityToolPath("arch-check.mjs")}" --project .`,
           scoped_cmd_template: `node "${securityToolPath("arch-check.mjs")}" {files}`,
-          tool_error_codes: [2], // beklenmeyen hata → skip (kendi script'im; semgrep değil → 7 yok)
+          tool_error_codes: [2, 3], // 2: beklenmeyen hata, 3: taranacak kaynak dosyası yok → skip ("geçti" DEĞİL)
+          tool_error_note: "taranacak JS/TS kaynak dosyası yok ya da araç çalışamadı, mimari katman boyutu ölçülmedi",
         },
       ],
     },
