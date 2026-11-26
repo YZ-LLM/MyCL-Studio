@@ -1,3 +1,5 @@
+<img width="976" height="1096" alt="610782287-2a471953-4ec7-48c7-9f87-1dc2b893c35b" src="https://github.com/user-attachments/assets/b09afda3-5f9b-47a7-ac73-4b88946e0af0" />
+
 # MyCL Studio
 
 MyCL Studio, Claude modellerini çok fazlı bir akıştan geçirerek bir yazılım projesi kuran ya da var olan bir projeyi değiştiren masaüstü uygulamasıdır. Ne istediğini Türkçe yazarsın. MyCL niyeti netleştirir, spec yazar, kodu ve testleri yazdırır; sonra lint, test ve güvenlik kapılarını kendisi koşturur ve sonucu üç değerden biriyle bildirir: tamamlandı, kısmî ya da başarısız.
