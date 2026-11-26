@@ -11,7 +11,7 @@
 //       2 = beklenmeyen hata (tool_error_codes ile skip → yanlış-blocking yapmaz).
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 function argVal(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -83,31 +83,26 @@ function isTestFile(name) {
   const n = name.toLowerCase();
   return n.includes(".test.") || n.includes(".spec.") || n.includes(".stories.");
 }
-/** Satır yorumu (//…) satırlarını ve blok yorumlarını (/* … *\/) at. Satır İÇİ yorum kırpılmaz (URL'ler "//" içerir). */
+/**
+ * Yalnız TAM SATIR yorumlarını at: "//" ile başlayan satır ve satır başında açılan blok yorum ("/*" … "*\/").
+ * Satır ORTASINDAKİ "/*" bilerek yok sayılır: "/static/*" ya da Accept: "*\/*" gibi dizgiler yorum başlangıcı
+ * sanılıp dosyanın geri kalanını siliyordu (inceleme bulgusu: eskiden geçen projeler FAIL oluyordu).
+ */
 function stripComments(src) {
   let out = "";
   let inBlock = false;
   for (const line of src.split("\n")) {
-    let rest = line;
+    const t = line.trim();
     if (inBlock) {
-      const end = rest.indexOf("*/");
-      if (end === -1) continue;
-      rest = rest.slice(end + 2);
-      inBlock = false;
+      if (t.includes("*/")) inBlock = false;
+      continue;
     }
-    const t = rest.trimStart();
-    if (t.startsWith("//") || t.startsWith("*")) continue;
-    const start = rest.indexOf("/*");
-    if (start !== -1) {
-      const end = rest.indexOf("*/", start + 2);
-      if (end === -1) {
-        inBlock = true;
-        rest = rest.slice(0, start);
-      } else {
-        rest = rest.slice(0, start) + rest.slice(end + 2);
-      }
+    if (t.startsWith("//")) continue;
+    if (t.startsWith("/*")) {
+      if (!t.includes("*/")) inBlock = true;
+      continue;
     }
-    out += rest + "\n";
+    out += line + "\n";
   }
   return out;
 }
@@ -125,11 +120,12 @@ function scanForHints(dir, depth) {
     if (DENY.has(e.name)) continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) {
+      if (TEST_DIRS.has(e.name)) continue; // test ağacının TAMAMI kanıt dışı (tests/helpers/… dahil)
       if (scanForHints(p, depth + 1)) return true;
     } else if (e.isFile() && /\.(js|ts|mjs|cjs|jsx|tsx)$/.test(e.name)) {
       // Test dosyaları ve yorum satırları KANIT değildir: bir test dosyasına yazılan
       // "// strict-transport-security" yorumu eskiden kapıyı yeşile çeviriyordu.
-      if (isTestFile(e.name) || TEST_DIRS.has(basename(dir))) continue;
+      if (isTestFile(e.name)) continue;
       try {
         if (statSync(p).size > 512 * 1024) continue; // çok büyük dosya atla
         const lower = stripComments(readFileSync(p, "utf8")).toLowerCase();

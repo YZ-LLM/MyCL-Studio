@@ -72,4 +72,34 @@ describe("isMissingCommand", () => {
     ).toBe(false);
     expect(isMissingCommand(r({ code: 1, stdout: "Docs: if you see Missing script: run npm install" }))).toBe(false);
   });
+  // İnceleme bulguları: çapalı satır alt süreçten de gelebilir.
+  it("araç çıktısı VARSA (workspaces: bir pakette betik yok, ötekinde testler kırmızı) → atlanmış sayılmaz", () => {
+    expect(
+      isMissingCommand(
+        r({
+          code: 1,
+          stdout: " FAIL  packages/a/test/x.test.ts > adds\nAssertionError: expected 3 to be 4\n",
+          stderr: 'npm error Missing script: "test"\nnpm error workspace b@1.0.0\n',
+        }),
+      ),
+    ).toBe(false);
+  });
+  it("girintili alıntı (testin bastığı alt süreç hatası) ve büyük harfli / öneksiz npx satırı sayılmaz", () => {
+    expect(
+      isMissingCommand(r({ code: 1, stderr: 'FAIL test/cli.test.ts\n    npm error Missing script: "build"\n' })),
+    ).toBe(false);
+    expect(isMissingCommand(r({ code: 1, stderr: "NPX CANCELED DUE TO MISSING PACKAGES\n" }))).toBe(false);
+    expect(isMissingCommand(r({ code: 1, stderr: "npx canceled due to missing packages\n" }))).toBe(false);
+  });
+  it("npm'in kendi uyarı satırları ve betik yankısı araç çıktısı değildir (gerçek 'betik yok' hâlâ atlanır)", () => {
+    expect(
+      isMissingCommand(
+        r({
+          code: 1,
+          stdout: "\n> x@1.0.0 lint\n",
+          stderr: 'npm warn Unknown project config "foo"\nnpm error Missing script: "lint"\n',
+        }),
+      ),
+    ).toBe(true);
+  });
 });

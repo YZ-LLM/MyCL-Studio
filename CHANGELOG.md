@@ -6,8 +6,13 @@
   sıfır dışı kod + satır başında paket yöneticisinin kendi hata satırı. `isTsToolNotApplicable` ve `isMyclToolBroken`:
   yalnız koşturulan KOMUT gerçekten o araçsa (komut artık parametre). Çağıranlar aynı, yalnız yanlış atlama kalktı.
   `headers-check.mjs`: yalnız devDependencies'teki helmet, test dosyaları ve yorum satırları artık kanıt sayılmıyor.
-  Yeni modül yok. **Bilerek dokunulmadı (karar gerekiyor):** web arayüzü var ama CSP yokken `csp-check` hâlâ çıkış 0
-  veriyor (mevcut testle sabitlenmiş "yanlış başarısızlık olmasın" kararı); semgrep `nosemgrep` bastırması.
+  Yeni modül yok. İnceleme turunun bulguları düzeltildi: yorum ayıklayıcı dizgi içindeki `/*` yüzünden dosyanın kalanını
+  siliyordu (eskiden geçen projeler başarısız oluyordu) → yalnız tam satır yorumları atılır; npm "betik yok" satırı
+  sütun 0'da ve araç çıktısı yokken sayılır (workspaces ve girintili alıntı durumları); araç kimliği biçime değil
+  konuma ve çalıştırılan programın adına bakar. **Bilerek dokunulmadı (karar gerekiyor):** web arayüzü var ama CSP
+  yokken `csp-check` çıkış 0 veriyor (mevcut testle sabitlenmiş karar); semgrep `nosemgrep` bastırması; `isSpawnEnvFailure`
+  hâlâ serbest çıktıda arıyor ve Full Test'te kırmızı paketi "atlandı" sayabiliyor (ana kapıda kapalı tarafa düşüyor);
+  başlık adının bir dizgide geçmesi kanıt sayılıyor.
 - **kural: mekanizma dondurması** (`CLAUDE.md` madde 15, danışman incelemesi).
 
 - **fix(güvenlik): yazma araçlarındaki `Edit(...)` reddi hiçbir dosyayla eşleşmiyordu (gerçek ortam denemesi):**

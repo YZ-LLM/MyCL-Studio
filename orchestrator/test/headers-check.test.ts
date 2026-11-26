@@ -74,6 +74,24 @@ describe("headers-check · exit-kodu sözleşmesi", () => {
     expect(run(dir)).toBe(1);
   });
 
+  // İnceleme bulgusu (YÜKSEK regresyon): dizgi içindeki "/*" blok yorum sanılıp dosyanın kalanı siliniyordu.
+  it('dizgi içinde "/*" ya da "*/*" geçen dosyada sonraki gerçek başlık ayarı görülür', async () => {
+    await pkg({ express: "^4" });
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(
+      join(dir, "src", "server.js"),
+      'app.use("/static/*", serve("public"));\nfetch(u, { headers: { Accept: "*/*" } });\nres.setHeader("X-Frame-Options", "DENY");\n',
+    );
+    expect(run(dir)).toBe(0);
+  });
+
+  it("test ağacının TAMAMI kanıt dışı (tests/helpers/…)", async () => {
+    await pkg({ express: "^4" });
+    await mkdir(join(dir, "tests", "helpers"), { recursive: true });
+    await writeFile(join(dir, "tests", "helpers", "mock-res.ts"), 'export const h = { "x-frame-options": "DENY" };');
+    expect(run(dir)).toBe(1);
+  });
+
   it("gerçek kullanım yorumla AYNI dosyada olsa da geçer (yanlış engel yok)", async () => {
     await pkg({ express: "^4" });
     await mkdir(join(dir, "src"), { recursive: true });

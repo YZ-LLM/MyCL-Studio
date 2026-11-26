@@ -9,7 +9,8 @@
 
 import { exec } from "node:child_process";
 import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { appendAudit } from "../audit.js";
 import { buildProjectFacts } from "../project-facts.js";
@@ -283,17 +284,35 @@ export async function resolveMechanicalCmd(
  * sıradan bir projede bu, kötü niyet olmadan da olur.
  * Kabul edilen kanıtlar (yalnız BAŞLATICININ sözü):
  *   - çıkış kodu 127 (kabuk: komut bulunamadı; npm betiği içinden de 127 olarak döner),
- *   - çıkış kodu sıfır DEĞİL ve çıktıda, SATIR BAŞINDA, paket yöneticisinin kendi hata satırı:
- *     npm / pnpm "Missing script:", npm "could not determine executable to run",
- *     "npx canceled due to missing packages" (`npx --no-install <araç>` aracı bulamadı).
+ *   - çıkış kodu sıfır DEĞİL ve paket yöneticisinin KENDİ hata satırı (sütun 0'da, birebir yazımla):
+ *     npm "Missing script:" / "could not determine executable to run" / "npx canceled due to missing packages"
+ *     — stderr'de, ve stdout'ta araç çıktısı YOKKEN; pnpm "ERR_PNPM_NO_SCRIPT  Missing script:".
  * SINIR (dürüst): bir test bilerek tam bu biçimde bir satır basar ve sıfır dışı kodla çıkarsa yine
  * yanıltır. Bu, test komutunun tanımını değiştirmekle ("test": "exit 127") aynı sınıftır ve ayrı ele alınır.
  */
-const LAUNCHER_MISSING_LINES: readonly RegExp[] = [
-  /^\s*(npm (error|ERR!)|ERR_PNPM_NO_SCRIPT)\s+Missing script:/m,
-  /^\s*npm (error|ERR!) could not determine executable to run/m,
-  /^\s*(npm (error|ERR!) )?npx canceled due to missing packages/im,
+// npm ailesi: satır SÜTUN 0'da başlar (girintili alıntı — bir testin bastığı alt süreç çıktısı — sayılmaz) ve
+// büyük küçük harf birebirdir.
+const NPM_MISSING_LINES: readonly RegExp[] = [
+  /^npm (error|ERR!) Missing script:/m,
+  /^npm (error|ERR!) could not determine executable to run/m,
+  /^npm (error|ERR!) npx canceled due to missing packages/m,
 ];
+const PNPM_MISSING_LINE = /^ ?ERR_PNPM_NO_SCRIPT\s+Missing script:/m;
+
+/**
+ * SAF: stdout'ta ARACIN kendi çıktısı var mı. npm "betik yok" derken hiçbir şey çalıştırmamıştır → stdout boştur
+ * (en fazla npm'in kendi satırları ve "> paket@sürüm betik" yankısı). Araç çıktısı varsa bir şey KOŞMUŞTUR
+ * (ör. workspaces: bir pakette betik yok, ötekinde testler kırmızı) → "komut yok" denemez.
+ */
+function hasToolStdout(stdout: string): boolean {
+  for (const line of stdout.split("\n")) {
+    const t = line.trim();
+    if (t === "" || t.startsWith("> ") || t.startsWith("npm ")) continue;
+    return true;
+  }
+  return false;
+}
+
 export function isMissingCommand(result: {
   code: number;
   stdout: string;
@@ -301,10 +320,9 @@ export function isMissingCommand(result: {
 }): boolean {
   if (result.code === 127) return true;
   if (result.code === 0) return false;
-  // İki akışa da bakılır (pnpm hata satırını stdout'a yazabiliyor); koruma satır başı çapasıdır: iddia iletisine
-  // gömülü metin satır başında başlatıcı biçiminde durmaz.
-  const s = `${result.stderr}\n${result.stdout}`;
-  return LAUNCHER_MISSING_LINES.some((re) => re.test(s));
+  if (NPM_MISSING_LINES.some((re) => re.test(result.stderr))) return !hasToolStdout(result.stdout);
+  // pnpm hata satırını stdout'a da yazabiliyor → iki akışa bakılır.
+  return PNPM_MISSING_LINE.test(`${result.stderr}\n${result.stdout}`);
 }
 
 /**
@@ -343,25 +361,59 @@ export function isSpawnEnvFailure(result: {
 export function isMyclToolBroken(
   result: { code: number; stdout: string; stderr: string },
   cmd: string,
+  toolDir?: string,
 ): boolean {
   // Yalnız MyCL'in KENDİ aracı koşturulduysa (orchestrator kökündeki .mjs betiği) sorulur. Projenin test ya da
   // lint komutunun çıktısında "Cannot find module … Applications" geçmesi bu sınıfa SOKMAZ (çıktı serbest metindir).
-  if (result.code === 0 || !invokesMyclTool(cmd)) return false;
+  if (result.code === 0 || !invokesMyclTool(cmd, toolDir)) return false;
   const s = `${result.stderr}\n${result.stdout}`;
   const moduleNotFound = /Cannot find module/i.test(s) || /ERR_MODULE_NOT_FOUND/.test(s);
   const pointsAtMyclInstall = /(MyCL Studio\.app|\.app\/Contents|[/\\]_up_[/\\]|[/\\]Applications[/\\])/.test(s);
   return moduleNotFound && pointsAtMyclInstall;
 }
 
-/** SAF: komut MyCL'in kendi gömülü aracını mı çağırıyor (`node "<…>/x.mjs" …`). */
-export function invokesMyclTool(cmd: string): boolean {
-  // Tırnaklı yol boşluk içerebilir ("…/MyCL Studio.app/…/csp-check.mjs").
-  return /^\s*node\s+(?:"[^"]*\.mjs"|'[^']*\.mjs'|[^\s"']+\.mjs)(?=\s|$)/.test(cmd);
+/** MyCL'in gömülü araçlarının durduğu dizin: orchestrator kökü (bu dosya src/base ya da dist/base altında). */
+const MYCL_TOOL_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/**
+ * SAF: komut MyCL'in KENDİ gömülü aracını mı çağırıyor (`node "<orchestrator kökü>/x.mjs" …`).
+ * Biçime değil KONUMA bakılır: projenin kendi `node scripts/x.mjs` betiği bu sınıfa girmez. REGEX YOK.
+ */
+export function invokesMyclTool(cmd: string, toolDir: string = MYCL_TOOL_DIR): boolean {
+  const t = cmd.trimStart();
+  if (!t.startsWith("node ")) return false;
+  let rest = t.slice(5).trimStart();
+  let path: string;
+  if (rest.startsWith('"') || rest.startsWith("'")) {
+    const end = rest.indexOf(rest[0]!, 1);
+    if (end === -1) return false;
+    path = rest.slice(1, end);
+  } else {
+    const sp = rest.indexOf(" ");
+    path = sp === -1 ? rest : rest.slice(0, sp);
+  }
+  return path.endsWith(".mjs") && dirname(path) === toolDir;
 }
 
-/** SAF: komutun ÇAĞIRDIĞI araç yalnız TypeScript'e özgü mü (ts-prune / ts-morph / tsc). */
+/** Araç adından önce gelebilen başlatıcı sözcükleri ve bayrakları (araç DEĞİLLER). */
+const LAUNCHER_WORDS = new Set(["npx", "pnpx", "bunx", "pnpm", "yarn", "bun", "npm", "exec", "dlx", "x", "--"]);
+const TS_ONLY_TOOLS = new Set(["ts-prune", "ts-morph", "tsc"]);
+
+/**
+ * SAF: komutun ÇALIŞTIRDIĞI program yalnız TypeScript'e özgü mü (ts-prune / ts-morph / tsc).
+ * Yalnız çalıştırılan programın adına bakılır; bağımsız değişkenlerdeki yol parçaları (`vitest run src/tsc`)
+ * ve `npm run tsc:check` gibi BETİK adları araç sayılmaz. REGEX YOK.
+ */
 export function invokesTsOnlyTool(cmd: string): boolean {
-  return /(^|[\s/"'])(ts-prune|ts-morph|tsc)(?=$|[\s"'])/.test(cmd);
+  for (const raw of cmd.trim().split(" ")) {
+    if (raw === "") continue;
+    if (LAUNCHER_WORDS.has(raw) || raw.startsWith("-")) continue;
+    let tok = raw;
+    if ((tok.startsWith('"') && tok.endsWith('"')) || (tok.startsWith("'") && tok.endsWith("'"))) tok = tok.slice(1, -1);
+    const slash = tok.lastIndexOf("/");
+    return TS_ONLY_TOOLS.has(slash === -1 ? tok : tok.slice(slash + 1));
+  }
+  return false;
 }
 
 /**
