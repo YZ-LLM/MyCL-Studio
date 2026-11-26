@@ -55,6 +55,16 @@
   yoktu → `sandboxSettingsArgs` girdileri enjekte edilebilir, üçü de testli. **Kapatılamayan, belgelenen sınır:**
   denetimle dosyanın açılması arasındaki yarış (ajan Bash ile proje içi bir bağlantıyı arka planda sürekli değiştirir);
   paralel modül işçisi ana projenin `node_modules` dizinini dosya araçlarıyla okuyamaz (çekirdek katmanda da böyleydi).
+  **Beşinci tur (push sonrası doğrulama akışı; yüksek önemde bulgu yok, 3 doğrulandı, 1 çürütüldü) düzeltildi:**
+  (ORTA, haksız engel) Next.js / SvelteKit tümünü yakala klasörleri `[...slug]`, `[[...slug]]` içindeki `...`
+  tırmanış sayılıp Glob reddediliyordu → parça ancak tam olarak `..` ile eşleşebiliyorsa tırmanış sayılır. (DÜŞÜK)
+  `{/ev/gizli,x}/*` deseninde süslü parantez seçeneği hiç denetlenmiyordu → desen seçeneklerine açılır, her biri ayrı
+  denetlenir (64 açılım sınırı, aşılırsa engel). (DÜŞÜK) proje yolunda köşeli parantez varken KAÇIŞSIZ mutlak desen
+  kardeş dizini de eşliyordu (`app [v2]` ↔ `app 2`) → dördüncü turda eklenen kısayol kaldırıldı; kaçışlı ve göreli
+  desen çalışır, kaçışsız hâl göreli deseni öneren iletiyle reddedilir. Son iki bulgu muhafız betiği üzerinde
+  gösterildi; gerçek Glob aracında gerçekleşip gerçekleşmedikleri ölçülmedi, en kötü durumda dosya ADI sızardı.
+  **Bilinen, kapatılmayan:** Glob / Grep arama KÖKÜ denetlenir; arama sırasında karşılaşılan proje içi sembolik
+  bağlantıların izlenip izlenmediği aracın davranışına bağlıdır (gösterilemedi, hipotez).
 
 - **fix(güvenlik): harness kaçış denetimi — hükmün üretildiği satırlar korumasızdı + ajan kendi talimatını yazabiliyordu:**
   İki açık, tek soru: "model söyleneni gözden kaçırır ya da tersini mantıklı bulursa harness'tan çıkabilir mi?"

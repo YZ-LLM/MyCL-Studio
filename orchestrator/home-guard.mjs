@@ -28,7 +28,6 @@
 // Sözleşme: exit 0 → izin, exit 2 → engel (stderr modele döner).
 
 import { lstatSync, readlinkSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 function readStdin() {
@@ -185,9 +184,10 @@ function isMagicPath(resolved) {
 }
 
 // `~` ile başlayan yol: araç onu genişletirse ev dizinine gider → genişletilmiş hâline bakılır.
+// Ev dizini KURALLARDAKİ değerdir (MyCL'in hesapladığı tek doğruluk kaynağı; ortam değişkenine bakılmaz).
 function expandTilde(p) {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+  if (p === "~") return home;
+  if (p.startsWith("~/")) return join(home, p.slice(2));
   return p;
 }
 
@@ -222,26 +222,99 @@ function unescapeGlob(prefix) {
   return out;
 }
 
-// Desen karakterinden SONRA gelen bir parçada ".." varsa (ör. "src/*/../../..", "{../..,x}") desenin nereye
-// çıkacağı sabit önekten anlaşılamaz → emin değilsek engel.
-function hasDotDotAfterGlob(pattern) {
+// SÜSLÜ PARANTEZ AÇILIMI (5. tur): "{/ev/gizli,x}/*" deseninde sabit önek boştur ve desen "{" ile başladığı için
+// mutlak sayılmaz → seçeneklerden biri mutlak bir ev dizini yolu olsa da hiç denetlenmiyordu. Desen önce
+// seçeneklerine açılır, her açılım ayrı ayrı denetlenir. Virgülsüz "{x}" açılmaz. Çok fazla açılım → HATA = ENGEL.
+const MAX_BRACE_EXPANSIONS = 64;
+function expandBraces(pattern, out) {
+  let open = -1;
+  let depth = 0;
+  const commas = [];
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) {
+        open = i;
+        commas.length = 0;
+      }
+      depth++;
+    } else if (ch === "," && depth === 1) {
+      commas.push(i);
+    } else if (ch === "}" && depth > 0) {
+      depth--;
+      if (depth === 0 && commas.length > 0) {
+        const pre = pattern.slice(0, open);
+        const post = pattern.slice(i + 1);
+        const cuts = [open, ...commas, i];
+        for (let k = 0; k < cuts.length - 1; k++) {
+          expandBraces(pre + pattern.slice(cuts[k] + 1, cuts[k + 1]) + post, out);
+        }
+        return;
+      }
+    }
+  }
+  out.push(pattern);
+  if (out.length > MAX_BRACE_EXPANSIONS) {
+    block("home guard: pattern expands to too many alternatives — failing closed. Use a simpler pattern.");
+  }
+}
+
+// Bir desen PARÇASI tam olarak ".." ile eşleşebilir mi? Yalnız şu durumda: parça tam iki birimden oluşur ve her
+// birim ya düz "." ya da "." içerebilen bir karakter sınıfıdır ("[.][.]"). `*` ve `?` nokta parçalarıyla
+// eşleşmez. ÖNEMLİ (5. tur, haksız engel): eski denetim parçada ".." alt dizgisi arıyordu → Next.js / SvelteKit
+// tümünü yakala klasörleri "[...slug]" ve "[[...slug]]" reddediliyordu; bunlar tek karakterlik sınıflardır.
+function canBeDotDot(seg) {
+  const units = []; // true = "." olabilir, false = olamaz
+  for (let i = 0; i < seg.length; i++) {
+    const ch = seg[i];
+    if (ch === "\\" && i + 1 < seg.length) {
+      i++;
+      units.push(seg[i] === ".");
+    } else if (ch === "*" || ch === "?") {
+      return false; // joker nokta parçası üretmez; parça ".." olamaz
+    } else if (ch === "[") {
+      let j = i + 1;
+      let negated = false;
+      if (seg[j] === "!" || seg[j] === "^") {
+        negated = true;
+        j++;
+      }
+      const start = j;
+      if (seg[j] === "]") j++; // sınıfın ilk karakteri olan "]" düz karakterdir
+      while (j < seg.length && seg[j] !== "]") j++;
+      if (j >= seg.length) {
+        units.push(false); // kapanmamış "[" düz karakterdir
+      } else {
+        const hasDot = seg.slice(start, j).includes(".");
+        units.push(negated ? !hasDot : hasDot);
+        i = j;
+      }
+    } else {
+      units.push(ch === ".");
+    }
+    if (units.length > 2) return false;
+  }
+  return units.length === 2 && units[0] && units[1];
+}
+function isGlobSegment(seg) {
+  for (let i = 0; i < seg.length; i++) {
+    if (seg[i] === "\\") i++;
+    else if (seg[i] === "*" || seg[i] === "?" || seg[i] === "[" || seg[i] === "{") return true;
+  }
+  return false;
+}
+// Joker içeren ilk parçadan İTİBAREN ".." olabilen bir parça varsa desenin nereye çıkacağı sabit önekten
+// anlaşılamaz (ör. "src/*/../../..", "[.][.]/x") → engel. Jokerden ÖNCEKİ ".." sabit önektedir, fiziksel çözülür.
+function climbsAfterGlob(pattern) {
   let seenGlob = false;
   for (const seg of pattern.split("/")) {
-    if (seenGlob && seg.includes("..")) return true;
-    if (seg.includes("*") || seg.includes("?") || seg.includes("[") || seg.includes("{")) {
-      if (seg.includes("..")) return true;
-      // Desen sözdizimiyle gizlenmiş ".." (ör. ".{.,}", "[.][.]", "{.,..}"): sözdizimi karakterleri atılınca
-      // geriye yalnız iki ya da daha çok nokta kalıyorsa parça ".." olarak açılabilir. ("*.{ts,tsx}", ".*", "*.*.*" kalmaz.)
-      let rest = "";
-      for (const ch of seg) {
-        // `*` ve `?` ATILMAZ: "*.*.*" ya da ".*.*" (çift uzantı, noktalı dosya) ".." olarak açılamaz (4. tur: haksız engel).
-        if (ch !== "{" && ch !== "}" && ch !== "[" && ch !== "]" && ch !== ",") rest += ch;
-      }
-      let onlyDots = rest.length >= 2;
-      for (const ch of rest) if (ch !== ".") onlyDots = false;
-      if (onlyDots) return true;
-      seenGlob = true;
-    }
+    const glob = isGlobSegment(seg);
+    if ((seenGlob || glob) && canBeDotDot(seg)) return true;
+    if (glob) seenGlob = true;
   }
   return false;
 }
@@ -264,18 +337,17 @@ const searchBase =
 // güvenli taraf: desen gibi denetle.
 const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
 if (toolName !== "Grep" && typeof toolInput.pattern === "string" && toolInput.pattern !== "") {
-  const expanded = expandTilde(toolInput.pattern);
-  if (hasDotDotAfterGlob(expanded)) {
-    block(`home guard: pattern "${toolInput.pattern}" climbs with ".." after a wildcard. Search inside the project (${projectRoot}) instead.`);
-  }
-  // Sabit önek — göreli de olsa — arama köküne göre çözülüp denetlenir (ör. "../../**/*.txt").
-  // Proje yolunun KENDİSİNDE desen karakteri varsa (ör. "~/işler/app [v2]") mutlak desenin sabit öneki projenin
-  // üstünde kesilir ve projenin kendi dosyaları haksız yere engellenirdi (4. tur). Desen proje köküyle başlıyorsa
-  // kök düz metin sayılır, önek kalan kısımdan hesaplanır (kalan kısımdaki ".." yine fiziksel çözülür).
-  const rootPrefix = [projectRoot, realProject].find((r) => canon(expanded).startsWith(`${canon(r)}/`));
-  if (rootPrefix !== undefined) {
-    targets.push(`${rootPrefix}/${unescapeGlob(staticPrefix(expanded.slice(rootPrefix.length + 1)))}`);
-  } else {
+  const alternatives = [];
+  expandBraces(toolInput.pattern, alternatives);
+  for (const alt of alternatives) {
+    const expanded = expandTilde(alt);
+    if (climbsAfterGlob(expanded)) {
+      block(`home guard: pattern "${toolInput.pattern}" climbs with ".." after a wildcard. Search inside the project (${projectRoot}) instead.`);
+    }
+    // Sabit önek — göreli de olsa — arama köküne göre çözülüp denetlenir (ör. "../../**/*.txt").
+    // Kaçırılmış karakterler düz karakterdir: proje yolunda desen karakteri varsa ("app [v2]") mutlak desen
+    // KAÇIŞLI yazılmalıdır ("app \[v2\]/src/*.ts"). Kaçışsız hâli sınıf olarak okunur ve kardeş "app 2" dizinini
+    // de eşler (5. tur) → öneki projenin üstünde kesilir ve aşağıda engellenir; ileti göreli deseni önerir.
     const prefix = unescapeGlob(staticPrefix(expanded));
     if (isAbsolute(expanded)) targets.push(prefix === "" ? "/" : prefix);
     else if (prefix !== "") targets.push(`${searchBase}/${prefix}`);

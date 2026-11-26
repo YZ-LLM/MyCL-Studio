@@ -196,7 +196,7 @@ describe("bağlantıdan sonra gelen `..` FİZİKSEL çözülür (metin sadeleşt
   });
 
   it("desen sözdizimiyle gizlenmiş `..` ENGEL; `*.{ts,tsx}` ve `.*` İZİNLİ", () => {
-    for (const p of [".{.,}/*", "[.][.]/x", "{.,..}/..", "src/{.,..}/*"]) {
+    for (const p of [".{.,}/*", "[.][.]/x", "{.,..}/.."]) {
       expect(run({ pattern: p }, { tool: "Glob" }).status, p).toBe(2);
     }
     for (const p of ["**/*.{ts,tsx}", "src/**/[a-z]*.ts", "*.md", ".*", ".github/**/*.yml"]) {
@@ -250,11 +250,59 @@ describe("dördüncü tur — haksız engeller", () => {
     await fs.mkdir(join(odd, "src"), { recursive: true });
     const rules = b64({ home, project_root: odd });
     const glob = (pattern: string) => run({ pattern }, { rules, cwd: odd, tool: "Glob" }).status;
-    expect(glob(`${odd}/src/*.ts`)).toBe(0);
+    // KAÇIŞLI mutlak desen ve göreli desen İZİNLİ.
     expect(glob(`${join(home, "My Projects (2026)")}/app \\[v2\\]/src/*.ts`)).toBe(0);
+    expect(glob("src/*.ts")).toBe(0);
+    // 5. tur: KAÇIŞSIZ hâlde "[v2]" karakter sınıfıdır ve kardeş "app 2" dizinini de eşler → ENGEL (ileti göreli
+    // deseni önerir). Gerçek claude'da bu biçim zaten projeyi eşlemiyor ("No files found").
+    await fs.mkdir(join(home, "My Projects (2026)", "app 2"), { recursive: true });
+    const raw = run({ pattern: `${odd}/*` }, { rules, cwd: odd, tool: "Glob" });
+    expect(raw.status).toBe(2);
+    expect(raw.stderr).toContain("relative pattern");
     // Aynı desenle proje DIŞINA çıkış hâlâ engel.
     expect(glob(`${odd}/../*`)).toBe(2);
     expect(glob(`${join(home, "My Projects (2026)")}/*`)).toBe(2);
+  });
+});
+
+// Beşinci tur bulguları.
+describe("beşinci tur — süslü parantez açılımı ve tümünü yakala klasörleri", () => {
+  const glob = (pattern: string, extra: Record<string, unknown> = {}) =>
+    run({ pattern, ...extra }, { tool: "Glob" }).status;
+
+  it("süslü parantez seçeneği mutlak ev dizini yoluysa ENGEL (eskiden hiç denetlenmiyordu)", () => {
+    expect(glob(`{${join(home, ".ssh")},x}/*`)).toBe(2);
+    expect(glob(`{${join(home, ".ssh")},x}/*`, { path: proj })).toBe(2);
+    expect(glob(`{x,${join(home, "proj", "kardes")}}/*`)).toBe(2);
+    expect(glob("{~/.ssh,src}/*")).toBe(2);
+    expect(glob(`src/{a,{b,${join(home, ".ssh")}}}/*`)).toBe(0); // iç seçenek "src/" altında kalır
+    expect(glob(`{src,{lib,${join(home, ".ssh")}}}/*`)).toBe(2); // iç içe seçenek mutlak ev dizini yolu
+  });
+
+  it("proje içinde kalan süslü parantezler İZİNLİ", () => {
+    for (const p of ["**/*.{ts,tsx}", "{src,test}/**/*.ts", "src/{.,alt}/*.ts", "src/{.,..}/*", "{a}/x", "**/{a,b}{c,d}.ts"]) {
+      expect(glob(p), p).toBe(0);
+    }
+  });
+
+  it("çok fazla açılım: HATA = ENGEL", () => {
+    expect(glob("{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}/*")).toBe(2); // 128 açılım
+  });
+
+  it("Next.js / SvelteKit tümünü yakala klasörleri İZİNLİ (içlerindeki `...` tırmanış değildir)", () => {
+    for (const p of [
+      "app/**/[...slug]/*.tsx", "**/[[...slug]]/page.tsx", "app/\\[...slug\\]/page.tsx",
+      "src/routes/[...rest]/+page.svelte", "pages/[...all].vue", "**/*...*", "docs/a..b/*.md",
+    ]) {
+      expect(glob(p), p).toBe(0);
+    }
+  });
+
+  it("gerçek tırmanışlar hâlâ ENGEL", () => {
+    for (const p of ["src/*/../../../*", "**/..", "[.][.]/x", "*/[.][.]/[.][.]/*", "**/\\.\\./\\.\\./*", "src/*/[.].*"]) {
+      const expected = p === "src/*/[.].*" ? 0 : 2; // "[.].*" içinde joker var → ".." olamaz
+      expect(glob(p), p).toBe(expected);
+    }
   });
 });
 
