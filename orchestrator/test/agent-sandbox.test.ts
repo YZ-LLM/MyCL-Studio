@@ -153,8 +153,8 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS home-deny + allowR
     expect(permAllow).not.toContain(`Read(${HOME}/.ssh/**)`);
     // 2026-07-30: Write(...) formu claude'da dosya izin kontrolüne GİRMİYOR (aracın kendi uyarısı) —
     // koruma Edit(...) ile sağlanıyor (tüm yazma araçlarını kapsar). Etkisiz form kaldırıldı.
-    expect(permDeny).toContain("Edit(/tmp/mycl-validate/shop/.git/**)");
-    expect(permDeny).toContain("Edit(/tmp/mycl-validate/shop/.mycl/**)");
+    expect(permDeny).toContain("Edit(//tmp/mycl-validate/shop/.git/**)");
+    expect(permDeny).toContain("Edit(//tmp/mycl-validate/shop/.mycl/**)");
     expect(permDeny).not.toContain("Write(/tmp/mycl-validate/shop/.git/**)");
     const denyWrite = (settings.sandbox as { filesystem: { denyWrite: string[] } }).filesystem.denyWrite;
     expect(denyWrite).toEqual([
@@ -174,12 +174,22 @@ describe("agent-sandbox · buildAgentSandboxSettings · macOS home-deny + allowR
   // HARNESS KAÇIŞ DENETİMİ (2026-11-26): Claude Code her spawn'da proje kökündeki CLAUDE.md'yi bağlama,
   // .claude/ ayarlarını (kancalar) ve .mcp.json'u oturuma yükler. Ajan bunlara yazabiliyordu → gerekçesi
   // sonraki işçilere/müfettişlere talimat olarak sızıyor, yazdığı kanca hapis DIŞINDA koşuyordu.
+  // YOL BİÇİMİ (2026-11-26, gerçek claude 2.1.332 + macOS denemesi): izin kuralında tek eğik çizgiyle başlayan
+  // yol proje köküne GÖRELİ sayılır → `Edit(/Users/.../.mycl/**)` hiçbir dosyayla eşleşmiyordu ve Write aracı
+  // `.mycl` içine yazabildi. Mutlak yol çift eğik çizgiyle yazılır. Hiçbir Edit kuralı tek çizgili kalmamalı.
+  it("her Edit yazma reddi mutlak yol biçiminde (çift eğik çizgi) — tek çizgili kural eşleşmez", () => {
+    const permDeny = (settings.permissions as { deny: string[] }).deny;
+    const editRules = permDeny.filter((d) => d.startsWith("Edit("));
+    expect(editRules.length).toBeGreaterThanOrEqual(6); // .git + .mycl + 3 dosya + .claude
+    for (const r of editRules) expect(r.startsWith(`Edit(/${PROJ}/`)).toBe(true);
+  });
+
   it("ajan talimat yüzeyi YAZMAYA kapalı, OKUMAYA açık (kullanıcının proje talimatları ajana ulaşır)", () => {
     const permDeny = (settings.permissions as { deny: string[] }).deny;
-    expect(permDeny).toContain(`Edit(${PROJ}/CLAUDE.md)`);
-    expect(permDeny).toContain(`Edit(${PROJ}/CLAUDE.local.md)`);
-    expect(permDeny).toContain(`Edit(${PROJ}/.mcp.json)`);
-    expect(permDeny).toContain(`Edit(${PROJ}/.claude/**)`);
+    expect(permDeny).toContain(`Edit(/${PROJ}/CLAUDE.md)`);
+    expect(permDeny).toContain(`Edit(/${PROJ}/CLAUDE.local.md)`);
+    expect(permDeny).toContain(`Edit(/${PROJ}/.mcp.json)`);
+    expect(permDeny).toContain(`Edit(/${PROJ}/.claude/**)`);
     // Okuma reddi YOK: proje Read-allow'u bu dosyaları da kapsar, ayrı bir Read-deny eklenmedi.
     expect(permDeny.filter((d) => d.startsWith("Read(") && d.includes("CLAUDE"))).toEqual([]);
     const fsCfg = (settings.sandbox as { filesystem: { denyRead: string[] } }).filesystem;
@@ -349,13 +359,13 @@ describe("agent-sandbox · ultracode merge + policy modları", () => {
       projectRoot: "/tmp/x", ultracode: false, policy: "off", platform: "darwin", home: HOME,
     });
     const deny = (off.settings.permissions as { deny: string[] } | undefined)?.deny ?? [];
-    expect(deny).toContain("Edit(/tmp/x/.mycl/**)");
-    expect(deny).toContain("Edit(/tmp/x/.git/**)");
+    expect(deny).toContain("Edit(//tmp/x/.mycl/**)");
+    expect(deny).toContain("Edit(//tmp/x/.git/**)");
     // Talimat yüzeyi de politikadan BAĞIMSIZ korunur (aynı gerekçe: hapsi kapatmak ≠ "ajan kendi
     // talimatını ve kancasını yazsın" demek).
-    expect(deny).toContain("Edit(/tmp/x/CLAUDE.md)");
-    expect(deny).toContain("Edit(/tmp/x/.claude/**)");
-    expect(deny).toContain("Edit(/tmp/x/.mcp.json)");
+    expect(deny).toContain("Edit(//tmp/x/CLAUDE.md)");
+    expect(deny).toContain("Edit(//tmp/x/.claude/**)");
+    expect(deny).toContain("Edit(//tmp/x/.mcp.json)");
     // Kum havuzu YİNE yok — yalnız kanıt koruması eklendi (politikanın anlamı korunuyor).
     expect("sandbox" in off.settings).toBe(false);
     expect(off.denyCount).toBe(0);
@@ -424,8 +434,8 @@ describe("sandboxSettingsArgs: policy off iken de yazma reddi GÖNDERİLİR", ()
       expect(args[0]).toBe("--settings");
       const parsed = JSON.parse(args[1] ?? "{}") as { sandbox?: unknown; permissions?: { deny?: string[] } };
       expect(parsed.sandbox).toBeUndefined();
-      expect(parsed.permissions?.deny).toContain("Edit(/tmp/x/.mycl/**)");
-      expect(parsed.permissions?.deny).toContain("Edit(/tmp/x/CLAUDE.md)");
+      expect(parsed.permissions?.deny).toContain("Edit(//tmp/x/.mycl/**)");
+      expect(parsed.permissions?.deny).toContain("Edit(//tmp/x/CLAUDE.md)");
     } finally {
       setSandboxPolicy(prev);
     }

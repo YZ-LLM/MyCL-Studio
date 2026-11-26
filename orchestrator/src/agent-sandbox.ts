@@ -286,10 +286,26 @@ export function agentInstructionPaths(projectRoot: string): { files: string[]; d
   };
 }
 
+/**
+ * SAF: mutlak bir yol için `permissions.deny` YAZMA kuralı (Edit tüm yazma araçlarını kapsar).
+ * YOL BİÇİMİ (ampirik, gerçek claude 2.1.332 + macOS, 2026-11-26): Claude Code izin kurallarında TEK
+ * eğik çizgiyle başlayan yol dosya sistemi kökü DEĞİL, ayarın/projenin köküne göreli sayılır; mutlak
+ * yol ÇİFT eğik çizgiyle (`//Users/...`) yazılır. Eskiden burada `Edit(/Users/.../.mycl/**)` üretiliyordu
+ * → kural hiçbir dosyayla eşleşmiyordu: Write aracı `.mycl/y.txt` dosyasını yazabildi (çekirdek
+ * `denyWrite` yalnız Bash'i kapsıyor, yazma araçlarını değil). Çift eğik çizgiyle aynı deneme reddedildi.
+ * Tüm Edit kuralları BURADAN üretilir ki biçim tek yerde doğru kurulsun.
+ */
+export function editDenyRule(absPath: string, opts: { subtree?: boolean } = {}): string {
+  return `Edit(/${absPath}${opts.subtree ? "/**" : ""})`;
+}
+
 /** SAF: talimat yüzeyi için `permissions.deny` girdileri (Edit tüm yazma araçlarını kapsar). */
 export function agentInstructionPermDeny(projectRoot: string): string[] {
   const { files, dirs } = agentInstructionPaths(projectRoot);
-  return [...files.map((f) => `Edit(${f})`), ...dirs.map((d) => `Edit(${d}/**)`)];
+  return [
+    ...files.map((f) => editDenyRule(f)),
+    ...dirs.map((d) => editDenyRule(d, { subtree: true })),
+  ];
 }
 
 /**
@@ -336,7 +352,10 @@ export function buildAgentSandboxSettings(params: {
       settings: {
         ...base,
         permissions: {
-          deny: [...evidenceDirs.map((d) => `Edit(${d}/**)`), ...agentInstructionPermDeny(projectRoot)],
+          deny: [
+            ...evidenceDirs.map((d) => editDenyRule(d, { subtree: true })),
+            ...agentInstructionPermDeny(projectRoot),
+          ],
         },
       },
       denyCount: 0,
@@ -442,8 +461,8 @@ export function buildAgentSandboxSettings(params: {
       // Etkisiz formu kaldırdık: koruma AYNI (Edit tüm yazma araçlarını kapsıyor), uyarı gürültüsü bitti.
       deny: [
         ...permDeny,
-        `Edit(${gitDir}/**)`,
-        `Edit(${myclDir}/**)`,
+        editDenyRule(gitDir, { subtree: true }),
+        editDenyRule(myclDir, { subtree: true }),
         ...agentInstructionPermDeny(projectRoot),
       ],
       allow: permAllow,

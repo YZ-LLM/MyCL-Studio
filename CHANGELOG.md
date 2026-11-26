@@ -1,5 +1,23 @@
 ## 2026-11-26
 
+- **fix(güvenlik): yazma araçlarındaki `Edit(...)` reddi hiçbir dosyayla eşleşmiyordu (gerçek ortam denemesi):**
+  Yukarıdaki "doğrulanmadı" maddesi gerçek `claude` 2.1.332 + macOS Seatbelt altında denendi (geçici proje, MyCL'in
+  kendi `buildAgentSandboxSettings` çıktısıyla). **Çalışan:** Bash ile `CLAUDE.md` / `CLAUDE.local.md` / `.mcp.json` /
+  `.claude/settings.json` / `.mycl/*` / `.git/hooks/*` yazımı "operation not permitted"; normal dosya yazılır; var
+  olmayan `CLAUDE.md` / `.mcp.json` için yer tutucu dosya OLUŞMAZ. **Açık:** izin kuralında tek eğik çizgiyle başlayan
+  yol proje köküne göreli sayılıyor; mutlak yol çift eğik çizgi ister. `Edit(/Users/.../.mycl/**)` biçimi (2026-06'dan
+  beri `.git` + `.mycl`, bu dalda talimat yüzeyi) eşleşmiyordu → Write aracı `.mycl/y.txt` dosyasını YAZDI (çekirdek
+  `denyWrite` yalnız Bash'i kapsıyor). **Fix:** tüm Edit kuralları tek yerden (`editDenyRule`) çift eğik çizgiyle
+  üretilir. Düzeltme sonrası aynı deneme, ev dizini dışındaki projede, politika "enforce" ve "off" ile: altı korunan
+  yolun hepsi reddedildi, normal dosya yazıldı, `README.md` düzenlendi. Regresyon testi: "her Edit yazma reddi mutlak
+  yol biçiminde". Davranış regresyonu taraması: ajana `.mycl` içine yazdıran bir talimat yok; `.mycl/plans`, spec ve
+  kayıt yazımları orkestratör sürecinde (kural onları etkilemez).
+  **AÇIK KALAN, ÖNCEDEN VAR OLAN (bu dalda düzeltilmedi, karar bekliyor):** proje ev dizini ALTINDAYKEN
+  `Read(//<ev>)` reddi bu `claude` sürümünde tüm alt ağacı kapsıyor → Read / Write / Edit araçları projedeki HER
+  dosyada reddediliyor ("covered by a Read deny rule"); ajan yalnız Bash ile çalışabiliyor. Kural kaldırılınca Read
+  aracı ev dizinindeki başka bir klasörü okuyabildi (çekirdek `denyRead` yalnız Bash'i kapsıyor) → kuralı silmek
+  çözüm değil; ev dizini girdilerini tek tek reddetmek gibi bir tasarım kararı gerekiyor.
+
 - **fix(güvenlik): harness kaçış denetimi — hükmün üretildiği satırlar korumasızdı + ajan kendi talimatını yazabiliyordu:**
   İki açık, tek soru: "model söyleneni gözden kaçırır ya da tersini mantıklı bulursa harness'tan çıkabilir mi?"
   **(1) Çapa hükmün girdisini kapsamıyordu.** `refreshAuditAnchor` iterasyon BAŞINDA çağrılıyor ve yalnız o ana kadarki
