@@ -1,5 +1,9 @@
 ## 2026-11-26
 
+- **docs: README baştan yazıldı.** Olay günlüğüne dönmüş 731 satırlık metin yerine kodun bugünkü hâlini anlatan 452
+  satır. Her bölüm koddan yazıldı, ayrı bir doğrulayıcı cümle cümle koda karşı denetledi (74 düzeltme uygulandı).
+  Eski README'nin kodla çelişen 32 noktası çıkarıldı. Eski metin git geçmişinde duruyor.
+
 - **ci: MyCL kendi kural doğrulamasını CI'da gerçekten koşuyor.** `check.sh` 6. adım semgrep yokken atlanıyor ve ✓
   basıyordu; CI'da semgrep hiç kurulmadığı için adım orada her zaman atlanıp yeşil geçiyordu. `check.yml` artık semgrep
   kuruyor; CI'da semgrep yoksa adım BAŞARISIZ, yerelde ✓ yerine görünür ⏭. Yerelde semgrep 1.136 ile iki kural klasörü
