@@ -11,7 +11,7 @@
 //       2 = beklenmeyen hata (tool_error_codes ile skip → yanlış-blocking yapmaz).
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 function argVal(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -22,6 +22,8 @@ const projectDir = argVal("project") || process.cwd();
 const DENY = new Set([
   "node_modules", "dist", "build", ".git", ".mycl", "coverage", ".next", "out", "tmp",
 ]);
+// Üstte tanımlı olmalı: aşağıdaki ana akış scanForHints'i bu satırdan SONRA, fonksiyon tanımından ÖNCE çağırır.
+const TEST_DIRS = new Set(["test", "tests", "__tests__", "spec", "e2e", "__mocks__"]);
 const BACKEND = ["express", "fastify", "koa", "@nestjs/core", "hapi", "@hapi/hapi", "next"];
 const HELMET = ["helmet", "@fastify/helmet", "koa-helmet"];
 // Manuel header ayarı / helmet kullanımı işaretleri (kaynak taramada).
@@ -51,7 +53,9 @@ try {
     );
     process.exit(0);
   }
-  if (HELMET.some((h) => h in deps)) {
+  // Yalnız ÇALIŞMA ZAMANI bağımlılıkları: devDependencies'teki helmet üretimde yüklenmez → koruma sayılmaz.
+  const runtimeDeps = pkg.dependencies ?? {};
+  if (HELMET.some((h) => h in runtimeDeps)) {
     console.log("security-headers: helmet (güvenlik-header middleware) bağımlılığı bulundu — geçti.");
     process.exit(0);
   }
@@ -75,6 +79,39 @@ try {
   process.exit(2);
 }
 
+function isTestFile(name) {
+  const n = name.toLowerCase();
+  return n.includes(".test.") || n.includes(".spec.") || n.includes(".stories.");
+}
+/** Satır yorumu (//…) satırlarını ve blok yorumlarını (/* … *\/) at. Satır İÇİ yorum kırpılmaz (URL'ler "//" içerir). */
+function stripComments(src) {
+  let out = "";
+  let inBlock = false;
+  for (const line of src.split("\n")) {
+    let rest = line;
+    if (inBlock) {
+      const end = rest.indexOf("*/");
+      if (end === -1) continue;
+      rest = rest.slice(end + 2);
+      inBlock = false;
+    }
+    const t = rest.trimStart();
+    if (t.startsWith("//") || t.startsWith("*")) continue;
+    const start = rest.indexOf("/*");
+    if (start !== -1) {
+      const end = rest.indexOf("*/", start + 2);
+      if (end === -1) {
+        inBlock = true;
+        rest = rest.slice(0, start);
+      } else {
+        rest = rest.slice(0, start) + rest.slice(end + 2);
+      }
+    }
+    out += rest + "\n";
+  }
+  return out;
+}
+
 /** Kaynak dosyalarda güvenlik-header işareti var mı (bounded recursive, DENY atlar). */
 function scanForHints(dir, depth) {
   if (depth > 6) return false;
@@ -90,9 +127,12 @@ function scanForHints(dir, depth) {
     if (e.isDirectory()) {
       if (scanForHints(p, depth + 1)) return true;
     } else if (e.isFile() && /\.(js|ts|mjs|cjs|jsx|tsx)$/.test(e.name)) {
+      // Test dosyaları ve yorum satırları KANIT değildir: bir test dosyasına yazılan
+      // "// strict-transport-security" yorumu eskiden kapıyı yeşile çeviriyordu.
+      if (isTestFile(e.name) || TEST_DIRS.has(basename(dir))) continue;
       try {
         if (statSync(p).size > 512 * 1024) continue; // çok büyük dosya atla
-        const lower = readFileSync(p, "utf8").toLowerCase();
+        const lower = stripComments(readFileSync(p, "utf8")).toLowerCase();
         if (HEADER_HINTS.some((h) => lower.includes(h))) return true;
       } catch {
         /* okunamadı → atla */

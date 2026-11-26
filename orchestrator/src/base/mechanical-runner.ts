@@ -274,29 +274,37 @@ export async function resolveMechanicalCmd(
 
 /**
  * scan_cmd çalıştırıldığında "komut/script yok" durumunu fail'den ayırır.
- * Belirtiler:
- *   - exit code 127 (POSIX: command not found)
- *   - stderr'de "Missing script:" (npm-spesifik)
- *   - stderr'de "command not found"
- *   - stderr'de "could not determine executable" (npx)
+ *
+ * KURAL: "atlandı" demek ARAÇ HİÇ ÇALIŞMADI demektir. Bunun kanıtı aracın kendi serbest çıktısı OLAMAZ —
+ * çalışan bir test ya da lint koşusu çıktısına her şeyi yazabilir. Eski hâl stdout + stderr'in TAMAMINDA
+ * "command not found" / "Missing script:" arıyordu ve çıkış koduna bakmıyordu → başarısız bir test koşusu,
+ * iddia iletisinde bu sözcükler geçtiği için "atlandı" sayılıyor, faz tamamlanıyor, hüküm GEÇTİ çıkıyordu
+ * (kaçış yolu avı, 2026-11-26: gerçek kırmızı vitest paketiyle gösterildi). Bir komut satırı aracını sınayan
+ * sıradan bir projede bu, kötü niyet olmadan da olur.
+ * Kabul edilen kanıtlar (yalnız BAŞLATICININ sözü):
+ *   - çıkış kodu 127 (kabuk: komut bulunamadı; npm betiği içinden de 127 olarak döner),
+ *   - çıkış kodu sıfır DEĞİL ve çıktıda, SATIR BAŞINDA, paket yöneticisinin kendi hata satırı:
+ *     npm / pnpm "Missing script:", npm "could not determine executable to run",
+ *     "npx canceled due to missing packages" (`npx --no-install <araç>` aracı bulamadı).
+ * SINIR (dürüst): bir test bilerek tam bu biçimde bir satır basar ve sıfır dışı kodla çıkarsa yine
+ * yanıltır. Bu, test komutunun tanımını değiştirmekle ("test": "exit 127") aynı sınıftır ve ayrı ele alınır.
  */
+const LAUNCHER_MISSING_LINES: readonly RegExp[] = [
+  /^\s*(npm (error|ERR!)|ERR_PNPM_NO_SCRIPT)\s+Missing script:/m,
+  /^\s*npm (error|ERR!) could not determine executable to run/m,
+  /^\s*(npm (error|ERR!) )?npx canceled due to missing packages/im,
+];
 export function isMissingCommand(result: {
   code: number;
   stdout: string;
   stderr: string;
 }): boolean {
   if (result.code === 127) return true;
+  if (result.code === 0) return false;
+  // İki akışa da bakılır (pnpm hata satırını stdout'a yazabiliyor); koruma satır başı çapasıdır: iddia iletisine
+  // gömülü metin satır başında başlatıcı biçiminde durmaz.
   const s = `${result.stderr}\n${result.stdout}`;
-  return (
-    /Missing script:/.test(s) ||
-    /command not found/i.test(s) ||
-    /could not determine executable/i.test(s) ||
-    /npm error code E[A-Z]+\s+npm error.*Missing script/.test(s) ||
-    // v15.10: `npx --no-install <tool>` aracı projede kurulu değilse npx bunu
-    // yazıp iptal eder. "Araç yok" → hard-fail değil, skip (örn. Faz 11 ts-prune
-    // kurulu olmayan repo) → pipeline kesilmez, görünür `phase-N-skipped`.
-    /npx canceled due to missing packages/i.test(s)
-  );
+  return LAUNCHER_MISSING_LINES.some((re) => re.test(s));
 }
 
 /**
@@ -332,11 +340,28 @@ export function isSpawnEnvFailure(result: {
  * bundle / _up_ / Applications) işaret etmesi. SAF. Projenin KENDİ "Cannot find module"'ı (bare paket /
  * proje yolu) bundle işaretçisi taşımaz → yanlışlıkla skip edilmez (gerçek proje hatası fail kalır).
  */
-export function isMyclToolBroken(result: { code: number; stdout: string; stderr: string }): boolean {
+export function isMyclToolBroken(
+  result: { code: number; stdout: string; stderr: string },
+  cmd: string,
+): boolean {
+  // Yalnız MyCL'in KENDİ aracı koşturulduysa (orchestrator kökündeki .mjs betiği) sorulur. Projenin test ya da
+  // lint komutunun çıktısında "Cannot find module … Applications" geçmesi bu sınıfa SOKMAZ (çıktı serbest metindir).
+  if (result.code === 0 || !invokesMyclTool(cmd)) return false;
   const s = `${result.stderr}\n${result.stdout}`;
   const moduleNotFound = /Cannot find module/i.test(s) || /ERR_MODULE_NOT_FOUND/.test(s);
   const pointsAtMyclInstall = /(MyCL Studio\.app|\.app\/Contents|[/\\]_up_[/\\]|[/\\]Applications[/\\])/.test(s);
   return moduleNotFound && pointsAtMyclInstall;
+}
+
+/** SAF: komut MyCL'in kendi gömülü aracını mı çağırıyor (`node "<…>/x.mjs" …`). */
+export function invokesMyclTool(cmd: string): boolean {
+  // Tırnaklı yol boşluk içerebilir ("…/MyCL Studio.app/…/csp-check.mjs").
+  return /^\s*node\s+(?:"[^"]*\.mjs"|'[^']*\.mjs'|[^\s"']+\.mjs)(?=\s|$)/.test(cmd);
+}
+
+/** SAF: komutun ÇAĞIRDIĞI araç yalnız TypeScript'e özgü mü (ts-prune / ts-morph / tsc). */
+export function invokesTsOnlyTool(cmd: string): boolean {
+  return /(^|[\s/"'])(ts-prune|ts-morph|tsc)(?=$|[\s"'])/.test(cmd);
 }
 
 /**
@@ -433,7 +458,14 @@ export function isRedundantGateCommand(inp: {
   return { redundant: false };
 }
 
-export function isTsToolNotApplicable(result: { code: number; stdout: string; stderr: string }): boolean {
+export function isTsToolNotApplicable(
+  result: { code: number; stdout: string; stderr: string },
+  cmd: string,
+): boolean {
+  // "Uygulanamaz" kararı ancak koşturulan KOMUT bir TypeScript aracıysa verilir. Eski hâl araç adını da
+  // çıktıda arıyordu → başarısız bir test koşusunun çıktısında "tsc" ve "FileNotFoundError" sözcükleri
+  // geçince kapı nötr "uygulanamaz" sayılıp atlanıyordu (kaçış yolu avı, 2026-11-26, YÜKSEK).
+  if (result.code === 0 || !invokesTsOnlyTool(cmd)) return false;
   const s = `${result.stderr}\n${result.stdout}`;
   const tsTool = /ts-morph|ts-prune|\btsc\b/i.test(s);
   const configMiss =
@@ -640,7 +672,7 @@ export class MechanicalRunnerBase {
 
     // MyCL'in KENDİ aracı bozuk (bundle path module-not-found) → PROJE hatası DEĞİL → skip + dürüst rapor.
     // Proje koduna/bağımlılığına DOKUNMA (sqlite3-v6 felaketi buradan çıktı). Güvenlik açığı anlamına gelmez.
-    if (isMyclToolBroken(result)) {
+    if (isMyclToolBroken(result, effectiveCmd)) {
       await appendAudit(opts.state.project_root, {
         ts: Date.now(),
         phase: opts.phaseId,
@@ -656,7 +688,7 @@ export class MechanicalRunnerBase {
       return "skipped";
     }
     // TS-only araç JS projesinde (tsconfig yok) → uygulanamaz → skip (tsconfig oluştur saçmalığı yok).
-    if (isTsToolNotApplicable(result)) {
+    if (isTsToolNotApplicable(result, effectiveCmd)) {
       await appendAudit(opts.state.project_root, {
         ts: Date.now(),
         phase: opts.phaseId,
@@ -906,7 +938,7 @@ export class MechanicalRunnerBase {
         return { kind: "skipped", reason: "missing_command" };
       }
       // MyCL'in kendi aracı bozuk (bundle module-not-found) → proje hatası DEĞİL → skip.
-      if (isMyclToolBroken(scanResult)) {
+      if (isMyclToolBroken(scanResult, scanCmd)) {
         log.warn(opts.tag, "mycl tool broken — skipping (own packaging bug)", { cmd: scanCmd });
         await appendAudit(opts.state.project_root, {
           ts: Date.now(),
@@ -924,7 +956,7 @@ export class MechanicalRunnerBase {
       }
       // TS-only araç (ts-prune/ts-morph/tsc) JS projesinde (tsconfig yok) → uygulanamaz → skip.
       // YZLLM vakası: Faz 11 ts-prune JS projesinde çöküp "tsconfig oluştur + yeni iterasyon" saçmalığına yol açtı.
-      if (isTsToolNotApplicable(scanResult)) {
+      if (isTsToolNotApplicable(scanResult, scanCmd)) {
         log.warn(opts.tag, "TS tool not applicable (no tsconfig / JS project) — skipping", { cmd: scanCmd });
         await appendAudit(opts.state.project_root, {
           ts: Date.now(),

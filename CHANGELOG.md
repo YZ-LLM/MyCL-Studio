@@ -1,5 +1,15 @@
 ## 2026-11-26
 
+- **fix(kapı): "atlandı" kararı artık aracın serbest çıktısına değil başlatıcının sözüne dayanıyor.** Kaçış yolu avında
+  gösterildi: başarısız bir test koşusu, çıktısında "command not found" ya da "tsc … FileNotFoundError" geçtiği için
+  "atlandı / uygulanamaz" sayılıyor, faz tamamlanıyor, hüküm GEÇTİ çıkıyordu. `isMissingCommand`: çıkış kodu 127, ya da
+  sıfır dışı kod + satır başında paket yöneticisinin kendi hata satırı. `isTsToolNotApplicable` ve `isMyclToolBroken`:
+  yalnız koşturulan KOMUT gerçekten o araçsa (komut artık parametre). Çağıranlar aynı, yalnız yanlış atlama kalktı.
+  `headers-check.mjs`: yalnız devDependencies'teki helmet, test dosyaları ve yorum satırları artık kanıt sayılmıyor.
+  Yeni modül yok. **Bilerek dokunulmadı (karar gerekiyor):** web arayüzü var ama CSP yokken `csp-check` hâlâ çıkış 0
+  veriyor (mevcut testle sabitlenmiş "yanlış başarısızlık olmasın" kararı); semgrep `nosemgrep` bastırması.
+- **kural: mekanizma dondurması** (`CLAUDE.md` madde 15, danışman incelemesi).
+
 - **fix(güvenlik): yazma araçlarındaki `Edit(...)` reddi hiçbir dosyayla eşleşmiyordu (gerçek ortam denemesi):**
   Yukarıdaki "doğrulanmadı" maddesi gerçek `claude` 2.1.332 + macOS Seatbelt altında denendi (geçici proje, MyCL'in
   kendi `buildAgentSandboxSettings` çıktısıyla). **Çalışan:** Bash ile `CLAUDE.md` / `CLAUDE.local.md` / `.mcp.json` /

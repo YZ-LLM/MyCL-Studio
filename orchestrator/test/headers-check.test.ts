@@ -55,6 +55,35 @@ describe("headers-check · exit-kodu sözleşmesi", () => {
     expect(run(dir)).toBe(0);
   });
 
+  // KAÇIŞ YOLU AVI (2026-11-26): kapı "adı geçiyor" durumunu geçti sayıyordu.
+  it("helmet yalnız devDependencies'te → koruma sayılmaz, exit 1", async () => {
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "x", dependencies: { express: "^4" }, devDependencies: { helmet: "^7" } }),
+    );
+    expect(run(dir)).toBe(1);
+  });
+
+  it("başlık adı yalnız TEST dosyasında ya da YORUMDA geçiyor → kanıt değil, exit 1", async () => {
+    await pkg({ express: "^4" });
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "server.test.js"), "// strict-transport-security\nexpect(1).toBe(1);");
+    await writeFile(join(dir, "src", "app.js"), "// TODO: x-frame-options ekle\n/* referrer-policy\n   permissions-policy */\nexport const a = 1;");
+    await mkdir(join(dir, "tests"), { recursive: true });
+    await writeFile(join(dir, "tests", "h.js"), 'res.setHeader("X-Frame-Options", "DENY");');
+    expect(run(dir)).toBe(1);
+  });
+
+  it("gerçek kullanım yorumla AYNI dosyada olsa da geçer (yanlış engel yok)", async () => {
+    await pkg({ express: "^4" });
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(
+      join(dir, "src", "server.js"),
+      '// güvenlik başlıkları\nconst docs = "https://example.com/a"; res.setHeader("X-Content-Type-Options", "nosniff");',
+    );
+    expect(run(dir)).toBe(0);
+  });
+
   it("package.json yok → uygulanamaz, exit 0", async () => {
     expect(run(dir)).toBe(0);
   });

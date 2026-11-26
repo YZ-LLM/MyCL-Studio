@@ -53,6 +53,14 @@ Yeni bir katı kural konuşulduğunda buraya ekle (tek doğruluk kaynağı budur
     bilerek değiştiriyorsan yerine geçen mekanizmayı AYNI işte kur (boş bırakma). Mahkemeye her zaman
     "davranış regresyonu" merceği ver. Canlı ders: z.ai söküldü, üçüncü halkanın örttüğü "iki kanal da
     kapalı" durumuna otomatik devam konmadı → MyCL 2 saat dondu.
+15. **Mechanism freeze (2026-11-26, consultant review of MyCL's breadth).** When working on MyCL's own source,
+    do NOT add a new mechanism — a new LLM reviewer / judge / inspector role, a new memory or learning store, a
+    new gate type, a second implementation of something that already exists on the other backend, or a new stack
+    profile — unless the developer asks for that specific mechanism in the current conversation. When a problem
+    shows up in MyCL, first fix or tighten an EXISTING deterministic gate (exit code, file state, a pure check);
+    prefer deleting or merging over adding. A change to MyCL's source that still needs a new module must state
+    in its CHANGELOG entry which existing module it replaces, or why no existing module can carry it.
+    <!-- loc: TR: Mekanizma dondurması. MyCL'in kendi kaynağında çalışırken yeni mekanizma (yeni model tabanlı denetçi, yeni hafıza ya da öğrenme deposu, yeni kapı türü, öteki arka uçta zaten var olanın ikinci uygulaması, yeni stack profili) EKLEME; geliştirici o mekanizmayı o konuşmada açıkça isterse ekle. MyCL'de bir sorun çıkınca önce VAR OLAN kesin kapıyı düzelt ya da sıkılaştır; eklemek yerine silmeyi ve birleştirmeyi seç. Yine de yeni modül gerekiyorsa CHANGELOG girdisinde hangi modülün yerine geçtiğini ya da neden var olanın taşıyamadığını yaz. -->
 
 ## Geliştirme sonrası gate (DEĞİŞMEZ KURAL)
 
