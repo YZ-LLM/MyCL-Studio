@@ -289,7 +289,9 @@ export function Settings({
     setPlanModelSel(currentPlanModel ?? "");
   }, [currentPlanModel]);
 
-  const modelsValid = translatorSel && mainSel;
+  // Çevirmen modeli sabittir (aşağıda kilitli gösterilir) ve kullanıcı seçemez → kayıt için yalnız ana model gerekir;
+  // boş çevirmen alanını orkestratör sabit modelle doldurur.
+  const modelsValid = !!mainSel;
   // Kayıt bir PATCH (merge): en az bir alan doluysa kaydet aktif (kısmi güncelleme mümkün).
   // Yetkili merge-validasyon orkestratörde (hasUsableKeysAfterMerge); yetersizse görünür hata döner.
   const apiKeysValid = [apiKeyTranslator, apiKeyMain, apiKeyOrchestrator].some(
@@ -379,7 +381,8 @@ export function Settings({
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <p style={{ fontSize: 12, color: "var(--fg-dim)", margin: 0 }}>
                 Translator: Phase 1 (askq) + TR↔EN çeviri için kullanılır. Main: Phase 4/9
-                (production, codegen) için kullanılır. Liste Anthropic API'den çekilir.
+                (production, codegen) için kullanılır. Liste Anthropic API'den çekilir; API anahtarı
+                yoksa MyCL'in yerleşik model kataloğu gösterilir.
               </p>
               <div>
                 {/* YZLLM 2026-06-11: Translator modeli SABİT — değiştirilemez. Çeviri mekanik bir iş;
@@ -623,9 +626,9 @@ export function Settings({
           {tab === "api_keys" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <p style={{ fontSize: 12, color: "var(--fg-dim)", margin: 0 }}>
-                İki ayrı Anthropic API key. Translator hafif çağrılar için (Phase 1),
-                main üretim fazları için. <strong>~/.mycl/secrets.json</strong> chmod
-                600 olarak kaydedilir.
+                API anahtarı zorunlu değildir: anahtar yoksa bütün roller Claude Code aboneliğiyle
+                (<strong>claude</strong> komutu) çalışır. Anahtar girilirse çevirmen ve ana anahtarın ikisi
+                de gerekir; <strong>secrets.json</strong> dosyasına chmod 600 olarak kaydedilir.
               </p>
               <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <span style={{ fontSize: 11, color: "var(--fg-dim)", textTransform: "uppercase" }}>

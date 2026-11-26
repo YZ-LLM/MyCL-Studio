@@ -7,8 +7,9 @@
 import { App, type IncomingCommand } from "./app.js";
 import { IpcRouter } from "./ipc-router.js";
 import {
-  ApiKeyMissingError,
   ModelSelectionMissingError,
+  hasApiKeys,
+  rolesForcedToSubscription,
   loadConfig,
   persistApiKeys,
   hasUsableKeysAfterMerge,
@@ -170,6 +171,8 @@ import {
   auditConfiguredModels,
   computeTiersFromModels,
   modelChoiceLineIfChanged,
+  MODEL_CATALOG,
+  TRANSLATOR_MODEL,
   resetModelChoiceCache,
 } from "./model-catalog.js";
 import { predictPipelineCost } from "./cost-forecast.js";
@@ -1695,7 +1698,9 @@ async function failPhase(
   if (isApiAccountError(ctrl?.lastFailReason ?? "") || isApiAccountError(message)) {
     // YZLLM 2026-06-11: "API hata verince aboneliğe OTOMATİK geçmeli." Abonelik (claude CLI) varsa + şu an API'deysek
     // → tüm rolleri CLI'ye geçir (restart'sız) + kaldığı fazdan devam. Yoksa dur + net söyle.
-    const onApi = (runtime.config.agent_backends?.main ?? "api") !== "cli";
+    // Anahtar yoksa "API'deyiz" denemez (ayar "api" ya da "auto" olsa da rol abonelikte koşuyor) → aşağıdaki
+    // dürüst dur + bekle ve devam et dalına gidilir.
+    const onApi = hasApiKeys(runtime.config) && (runtime.config.agent_backends?.main ?? "api") !== "cli";
     if (onApi && isClaudeAvailable()) {
       await persistAgentBackends({ orchestrator: "cli", translator: "cli", main: "cli" });
       runtime.config = null;
@@ -2276,6 +2281,21 @@ function applyConfigDerivedSettings(config: MyclConfig): void {
 }
 
 /**
+ * API anahtarı yokken ayarı açıkça "API" olan roller abonelikle çalışır; bunu SESSİZ yapma (KATI #4).
+ * Aynı satır, ayar değişmedikçe bir kez yazılır (var olan model satırı tekilleştiricisiyle).
+ */
+function emitKeylessBackendNotice(config: MyclConfig): void {
+  const forced = rolesForcedToSubscription(config);
+  if (forced.length === 0) return;
+  const line = modelChoiceLineIfChanged(
+    "api-without-key",
+    `ℹ️ API anahtarı yok — sağlayıcısı "Claude API" seçili roller (${forced.join(", ")}) abonelikle (claude) çalışıyor. ` +
+      `API'yi kullanmak için Ayarlar → API Keys'ten anahtar gir; istemiyorsan sağlayıcıyı "Claude Abonelik" ya da "Otomatik" yap.`,
+  );
+  if (line) emitChatMessage("system", line);
+}
+
+/**
  * Katalog DIŞI model ayarlarını GÖRÜNÜR yapar (YZLLM 2026-08-04, KATI #4).
  *
  * Eskiden bu modeller sessizce katalog varsayılanıyla değiştiriliyordu — kullanıcının `claude-opus-5`
@@ -2301,13 +2321,11 @@ async function emitConfigStatus(): Promise<boolean> {
       selected_models: runtime.config.selected_models,
     });
     emitUnknownModelWarning(runtime.config.selected_models);
+    emitKeylessBackendNotice(runtime.config);
     emit("config_status", { ready: true });
     return true;
   } catch (err) {
-    if (err instanceof ApiKeyMissingError) {
-      log.warn("config", "api keys missing");
-      emit("config_status", { ready: false, reason: "api_keys_missing" });
-    } else if (err instanceof ModelSelectionMissingError) {
+    if (err instanceof ModelSelectionMissingError) {
       log.warn("config", "model selection missing");
       emit("config_status", { ready: false, reason: "model_selection_missing" });
     } else {
@@ -3342,7 +3360,7 @@ async function handleSaveApiKeys(keys: Partial<ApiKeys>): Promise<void> {
   // Merge sonrası claude translator+main varsa geçerli; yoksa reddet.
   if (!keys || !(await hasUsableKeysAfterMerge(keys))) {
     emitError(
-      "API anahtarları: en az çevirmen+ana anahtarları gerekli (kayıt boş bırakılamaz)",
+      "API anahtarı kaydı için çevirmen ve ana anahtarın ikisi de gerekli. Yalnız abonelikle çalışacaksan bu sekmeyi boş bırak; anahtar zorunlu değil.",
       null,
     );
     return;
@@ -3368,8 +3386,10 @@ async function handleSaveSelectedModels(
   },
 ): Promise<void> {
   log.info("orchestrator", "save_selected_models", payload);
-  if (!payload || !payload.translator || !payload.main) {
-    emitError("Ayarlar kaydedilemedi: çevirmen ve ana model gerekli", null);
+  // Çevirmen modeli sabittir ve arayüzde seçilemez → gelmediyse sabit model yazılır. Zorunlu olan ana modeldir.
+  if (payload && !payload.translator) payload = { ...payload, translator: TRANSLATOR_MODEL };
+  if (!payload || !payload.main) {
+    emitError("Ayarlar kaydedilemedi: ana model gerekli", null);
     return;
   }
   try {
@@ -3428,8 +3448,9 @@ async function handleSaveSelectedModels(
     const fresh = runtime.config as MyclConfig | null;
     if (ok && fresh) {
       const b = fresh.agent_backends;
+      const keyless = !hasApiKeys(fresh);
       const label = (v: string | undefined) =>
-        v === "cli" ? "Abonelik" : v === "auto" ? "Auto" : "API";
+        v === "cli" ? "Abonelik" : keyless ? "Abonelik (API anahtarı yok)" : v === "auto" ? "Auto" : "API";
       emitChatMessage(
         "system",
         `✅ Ayarlar uygulandı — yeniden başlatma GEREKMEZ. Bir sonraki iş şu ayarla koşar:\n` +
@@ -3551,12 +3572,15 @@ async function handleListModels(
       }
     }
     if (!apiKey) {
-      // v15.14: NON-kritik — abonelik modunda API anahtarı yok → model dropdown'ı boş kalır;
-      // kırmızı banner ile alarma sokma (yapılandırılmış modeller çalışmaya devam eder).
-      log.warn("orchestrator", "list_models: api key yok (dropdown boş, non-fatal)", { which });
-      // Terminal sinyal (kod-analiz 2026-06-07): frontend loading SADECE models_list event'iyle temizlenir;
-      // emit etmezsek dropdown + ↻ butonu sonsuza dek "yükleniyor"da/disabled takılır. Boş liste → unstick.
-      emit("models_list", { which, models: [], fetched_at: Date.now(), cached: false });
+      // API anahtarı yok (yalnız abonelik): canlı liste çekilemez → MyCL'in kendi model kataloğu gösterilir.
+      // Liste boş kalsaydı yeni kullanıcı ana modeli seçemez, "hazır" duruma hiç geçemezdi.
+      log.info("orchestrator", "list_models: api key yok — yerleşik katalog", { which });
+      emit("models_list", {
+        which,
+        models: MODEL_CATALOG.map((m) => ({ id: m.id, display_name: m.label, created_at: "" })),
+        fetched_at: Date.now(),
+        cached: true,
+      });
       return;
     }
     const result = await listModels(apiKey, force);

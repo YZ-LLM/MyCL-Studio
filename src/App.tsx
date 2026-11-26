@@ -1029,6 +1029,8 @@ function App() {
           // ÖNCE api_keys_missing emit ediliyor (index.ts) → yeni kullanıcı boş ekranda
           // kalıyordu. Settings render `initialTab`'ı reason'a göre seçer (api_keys vb.).
           setSettingsOpen(true);
+          // Eksik durumda da diskteki seçimleri oku: Ayarlar formu kayıtlı model ve sağlayıcıları göstersin.
+          void orch.send({ kind: "read_selected_models" });
         }
         setSavingKeys(false);
         setSavingModels(false);

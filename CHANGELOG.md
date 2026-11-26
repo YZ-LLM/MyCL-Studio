@@ -1,5 +1,15 @@
 ## 2026-11-26
 
+- **feat: API anahtarı olmadan, yalnız abonelikle çalışma.** `loadConfig` anahtar yokken hata atıyor, roller abonelikte
+  olsa bile proje açılamıyordu. Artık anahtar zorunlu değil: `resolveApiKeys` hata atmaz (eksik anahtar boş dizgi),
+  karar tek yerde `backendForRole` içinde verilir (anahtar yoksa her rol abonelik; "auto" limit doluyken de API'ye
+  dönmez), `isAutoMode` anahtarsızken yanlış döner (fabrikalar anahtarsız API yedeği kurmaz). Ayarı açıkça "api" olan
+  roller için açılışta görünür bildirim. Model listesi anahtar yokken yerleşik katalogdan gelir; çevirmen modeli sabit
+  olduğundan hazır sayılmak için yalnız ana model gerekir. Anahtar varken davranış aynı. Yeni modül yok; var olan
+  seçici ve `hasUsableKeys` ölçütü kullanıldı. **İnceleme akışı tamamlanmadan durduruldu (kullanıcı isteği); sınanmayan:**
+  abonelikle koşamayan kod üretim etiketlerinin anahtarsızken ne yaptığı, limit dolunca bekle ve devam et yolunun
+  anahtarsız kullanıcıda gerçekten devreye girmesi, tek anahtar girmiş kullanıcıya bildirim.
+
 - **docs: README baştan yazıldı.** Olay günlüğüne dönmüş 731 satırlık metin yerine kodun bugünkü hâlini anlatan 452
   satır. Her bölüm koddan yazıldı, ayrı bir doğrulayıcı cümle cümle koda karşı denetledi (74 düzeltme uygulandı).
   Eski README'nin kodla çelişen 32 noktası çıkarıldı. Eski metin git geçmişinde duruyor.

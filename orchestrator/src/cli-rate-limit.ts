@@ -97,7 +97,7 @@ function enterLimited(untilMs: number, rateLimitType?: string): void {
     const win = rateLimitType ? ` (${rateLimitType})` : "";
     emitChatMessage(
       "system",
-      `🔁 Claude Code aboneliği limiti doldu${win}. API'ye geçildi; limit ~${mins} dk sonra (${fmtClock(untilMs)}) açılacak — sonra otomatik CLI'ye dönülür.`,
+      `🔁 Claude Code aboneliği limiti doldu${win}; limit ~${mins} dk sonra (${fmtClock(untilMs)}) açılacak. Otomatik moddaki roller API anahtarı varsa o zamana kadar API ile sürer, sonra aboneliğe döner; anahtar yoksa MyCL bekler ve limit açılınca kaldığı yerden devam eder.`,
     );
     log.info("cli-rate-limit", "entered limited (auto → API)", { untilMs, rateLimitType });
   }

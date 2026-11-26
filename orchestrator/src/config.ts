@@ -12,14 +12,14 @@
 //   1. env MYCL_API_KEY_TRANSLATOR / MYCL_API_KEY_MAIN
 //   2. secrets.json api_keys.{translator,main}
 //   3. env ANTHROPIC_API_KEY (her ikisi için fallback)
-// İki key de yoksa ApiKeyMissingError.
+// Anahtar zorunlu değil: yoksa roller abonelikle (claude) çalışır (backendForRole).
 // selected_models yoksa ModelSelectionMissingError.
 
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { cliCurrentlyLimited, resolveAuto } from "./cli-rate-limit.js";
 import { globalConfigDir } from "./paths.js";
-import { modelForTier } from "./model-catalog.js";
+import { modelForTier, TRANSLATOR_MODEL } from "./model-catalog.js";
 
 export interface ClaudeCodeFlags {
   /**
@@ -349,10 +349,6 @@ export class ConfigError extends Error {
   override readonly name: string = "ConfigError";
 }
 
-export class ApiKeyMissingError extends ConfigError {
-  override readonly name: string = "ApiKeyMissingError";
-}
-
 export class ModelSelectionMissingError extends ConfigError {
   override readonly name: string = "ModelSelectionMissingError";
 }
@@ -420,14 +416,11 @@ function resolveApiKeys(secrets: SecretsFile): ApiKeys {
   // Orchestrator agent (v15.5) opsiyonel — set edilmezse main key fallback
   // (orchestratorApiKey() helper'ı ile).
   const orchestratorKey = envOrchestrator ?? secrets.api_keys?.orchestrator;
-  if (!translatorKey || !mainKey) {
-    throw new ApiKeyMissingError(
-      `API key eksik. Settings → API Keys'ten girin.`,
-    );
-  }
+  // Anahtar ZORUNLU DEĞİL: MyCL yalnız Claude Code aboneliğiyle (claude komutu) de çalışır. Eksik anahtar boş
+  // dizgidir; hangi yolun kullanılacağına tek yerde, backendForRole karar verir (anahtar yoksa her rol abonelik).
   return {
-    translator: translatorKey,
-    main: mainKey,
+    translator: translatorKey ?? "",
+    main: mainKey ?? "",
     ...(relevanceKey ? { relevance: relevanceKey } : {}),
     ...(orchestratorKey ? { orchestrator: orchestratorKey } : {}),
   };
@@ -528,15 +521,17 @@ export function subagentModelId(models: SelectedModels, role: SubagentRole): str
  */
 export function resolveSelectedModels(file: ConfigFile): SelectedModels {
   const sel = file.selected_models;
-  if (!sel || !sel.translator || !sel.main) {
+  // Çevirmen modeli sabittir ve arayüzde seçilemez (kilitli gösterilir) → kayıtlı değilse sabit model kullanılır.
+  // Kullanıcının seçmesi gereken tek model ana modeldir.
+  if (!sel || !sel.main) {
     throw new ModelSelectionMissingError(
-      `Model seçimi eksik. Settings → Modeller'den translator ve main için model seçin.`,
+      `Model seçimi eksik. Settings → Modeller'den main için model seçin.`,
     );
   }
   // Relevance + Orchestrator opsiyonel — Settings UI bu alanları opsiyonel
   // gösterir; yoksa runtime'da main fallback uygulanır (helper'lar üzerinden).
   return {
-    translator: sel.translator,
+    translator: sel.translator || TRANSLATOR_MODEL,
     main: sel.main,
     ...(sel.relevance ? { relevance: sel.relevance } : {}),
     ...(sel.orchestrator ? { orchestrator: sel.orchestrator } : {}),
@@ -573,6 +568,10 @@ export function resolveAgentBackends(file: ConfigFile): AgentBackends {
  * "auto" (YZLLM 2026-06-12: varsayılan auto). Tek çözüm-noktası: 9 dispatch yeri bunu çağırır.
  */
 export function backendForRole(config: MyclConfig, role: AgentRole): "api" | "cli" {
+  // API anahtarı yoksa API yolu yoktur: ayar "auto" da "api" da olsa rol abonelikle çalışır. "auto" abonelik
+  // limiti doluyken de API'ye DÖNMEZ; limit var olan bekle ve devam et yoluna düşer. Ayarı "api" olan rol için
+  // görünür bildirimi emitConfigStatus verir (sessiz geçiş yok).
+  if (!hasApiKeys(config)) return "cli";
   const configured = config.agent_backends?.[role] ?? "auto";
   return resolveAuto(configured, configured === "auto" ? cliCurrentlyLimited() : false);
 }
@@ -606,7 +605,22 @@ export function resolveProvider(config: MyclConfig, role: AgentRole): LlmTarget 
 
 /** Rol Auto Mode'da mı (factory'ler görünür CLI→API fallback'i yalnız auto'da uygular). */
 export function isAutoMode(config: MyclConfig, role: AgentRole): boolean {
-  return (config.agent_backends?.[role] ?? "auto") === "auto";
+  // Anahtar yokken geçilecek ikinci kanal da yoktur → auto sayılmaz; fabrikalar yalnız abonelik dalını kurar
+  // (anahtarsız bir API denemesi asıl abonelik hatasını örtüp altı kez boşuna dönerdi).
+  return hasApiKeys(config) && (config.agent_backends?.[role] ?? "auto") === "auto";
+}
+
+/** Kullanılabilir API anahtarı var mı (çevirmen VE ana; kayıt doğrulamasındaki ölçütün aynısı). */
+export function hasApiKeys(config: MyclConfig): boolean {
+  return hasUsableKeys(config.api_keys ?? {}, {});
+}
+
+/** Anahtar yokken ayarı açıkça "api" olan roller (görünür bildirim için). Anahtar varsa boş. */
+export function rolesForcedToSubscription(config: MyclConfig): AgentRole[] {
+  if (hasApiKeys(config)) return [];
+  return (["main", "translator", "orchestrator"] as AgentRole[]).filter(
+    (r) => config.agent_backends?.[r] === "api",
+  );
 }
 
 /**

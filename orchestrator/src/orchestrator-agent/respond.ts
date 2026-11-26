@@ -9,7 +9,7 @@
 // cli-orchestrator agent.ts'ten yalnız buildOrchestratorSystemPrompt alır;
 // respond.ts ikisini de import eder.
 
-import { backendForRole, isAutoMode, type MyclConfig } from "../config.js";
+import { backendForRole, isAutoMode, type MyclConfig, hasApiKeys } from "../config.js";
 import { isClaudeAvailable } from "../codegen/cli-backend.js";
 import { API_LABEL, CLI_LABEL } from "../cli-rate-limit.js";
 import { emitChatMessage, emitError, type ActiveAskqSnapshot } from "../ipc.js";
@@ -88,6 +88,9 @@ export async function respondAsOrchestrator(
       log.warn("orchestrator", "CLI backend başarısız — SDK fallback (görünür)", {
         error: String(err).slice(0, 200),
       });
+      // API anahtarı yoksa düşülecek SDK yolu da yoktur: asıl hatayı (ör. abonelik limiti) aynen yukarı ver ki
+      // çağıran var olan bekle ve devam et yoluna girsin; anahtarsız bir SDK denemesi onu örterdi.
+      if (!hasApiKeys(config)) throw err;
       emitChatMessage("system", `⚠️ ${m}`);
     }
   }
