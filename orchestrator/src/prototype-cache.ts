@@ -351,10 +351,26 @@ async function collectAllFiles(root: string, rel = ""): Promise<string[]> {
     if (e.isDirectory()) {
       out.push(...(await collectAllFiles(root, childRel)));
     } else if (e.isFile()) {
+      // Sır dosyaları prototipe GİRMEZ: prototipler repo içinde durur ve başka projelere kopyalanır.
+      if (isSecretFileName(e.name)) continue;
       out.push(childRel);
     }
   }
   return out;
+}
+
+/**
+ * SAF: dosya adı sır taşıyan türden mi. `.env` ailesi (örnek dosyalar hariç), özel anahtarlar, kimlik dosyaları.
+ * Ölçüt scripts/check.sh sızıntı taramasıyla aynı aileden. REGEX YOK.
+ */
+export function isSecretFileName(name: string): boolean {
+  const n = name.toLowerCase();
+  if (n === ".env" || n.startsWith(".env.")) {
+    return !(n.endsWith(".example") || n.endsWith(".sample") || n.endsWith(".template"));
+  }
+  if (n.endsWith(".pem") || n.endsWith(".key") || n.endsWith(".p12") || n.endsWith(".pfx")) return true;
+  // `.npmrc` bilerek dışarıda: belirteç taşıyabilir ama proje ayarı da taşır (kayıt adresi vb.); kaldırmak prototipi bozar.
+  return n === "secrets.json" || n === "auth.json" || n === "credentials.json" || n.startsWith("id_rsa") || n.startsWith("id_ed25519");
 }
 
 /**

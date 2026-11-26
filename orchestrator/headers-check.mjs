@@ -22,6 +22,8 @@ const projectDir = argVal("project") || process.cwd();
 const DENY = new Set([
   "node_modules", "dist", "build", ".git", ".mycl", "coverage", ".next", "out", "tmp",
 ]);
+// Üstte tanımlı olmalı: aşağıdaki ana akış scanForHints'i bu satırdan SONRA, fonksiyon tanımından ÖNCE çağırır.
+const TEST_DIRS = new Set(["test", "tests", "__tests__", "spec", "e2e", "__mocks__"]);
 const BACKEND = ["express", "fastify", "koa", "@nestjs/core", "hapi", "@hapi/hapi", "next"];
 const HELMET = ["helmet", "@fastify/helmet", "koa-helmet"];
 // Manuel header ayarı / helmet kullanımı işaretleri (kaynak taramada).
@@ -51,7 +53,9 @@ try {
     );
     process.exit(0);
   }
-  if (HELMET.some((h) => h in deps)) {
+  // Yalnız ÇALIŞMA ZAMANI bağımlılıkları: devDependencies'teki helmet üretimde yüklenmez → koruma sayılmaz.
+  const runtimeDeps = pkg.dependencies ?? {};
+  if (HELMET.some((h) => h in runtimeDeps)) {
     console.log("security-headers: helmet (güvenlik-header middleware) bağımlılığı bulundu — geçti.");
     process.exit(0);
   }
@@ -75,6 +79,34 @@ try {
   process.exit(2);
 }
 
+function isTestFile(name) {
+  const n = name.toLowerCase();
+  return n.includes(".test.") || n.includes(".spec.") || n.includes(".stories.");
+}
+/**
+ * Yalnız TAM SATIR yorumlarını at: "//" ile başlayan satır ve satır başında açılan blok yorum ("/*" … "*\/").
+ * Satır ORTASINDAKİ "/*" bilerek yok sayılır: "/static/*" ya da Accept: "*\/*" gibi dizgiler yorum başlangıcı
+ * sanılıp dosyanın geri kalanını siliyordu (inceleme bulgusu: eskiden geçen projeler FAIL oluyordu).
+ */
+function stripComments(src) {
+  let out = "";
+  let inBlock = false;
+  for (const line of src.split("\n")) {
+    const t = line.trim();
+    if (inBlock) {
+      if (t.includes("*/")) inBlock = false;
+      continue;
+    }
+    if (t.startsWith("//")) continue;
+    if (t.startsWith("/*")) {
+      if (!t.includes("*/")) inBlock = true;
+      continue;
+    }
+    out += line + "\n";
+  }
+  return out;
+}
+
 /** Kaynak dosyalarda güvenlik-header işareti var mı (bounded recursive, DENY atlar). */
 function scanForHints(dir, depth) {
   if (depth > 6) return false;
@@ -88,11 +120,15 @@ function scanForHints(dir, depth) {
     if (DENY.has(e.name)) continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) {
+      if (TEST_DIRS.has(e.name)) continue; // test ağacının TAMAMI kanıt dışı (tests/helpers/… dahil)
       if (scanForHints(p, depth + 1)) return true;
     } else if (e.isFile() && /\.(js|ts|mjs|cjs|jsx|tsx)$/.test(e.name)) {
+      // Test dosyaları ve yorum satırları KANIT değildir: bir test dosyasına yazılan
+      // "// strict-transport-security" yorumu eskiden kapıyı yeşile çeviriyordu.
+      if (isTestFile(e.name)) continue;
       try {
         if (statSync(p).size > 512 * 1024) continue; // çok büyük dosya atla
-        const lower = readFileSync(p, "utf8").toLowerCase();
+        const lower = stripComments(readFileSync(p, "utf8")).toLowerCase();
         if (HEADER_HINTS.some((h) => lower.includes(h))) return true;
       } catch {
         /* okunamadı → atla */

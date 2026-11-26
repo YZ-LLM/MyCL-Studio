@@ -217,6 +217,12 @@ try {
   } else {
     files = [];
     collectFiles(projectDir, 0, files);
+    // Taranacak kaynak dosyası YOKSA "ihlali yok" demek ölçmeden geçti demektir (ör. JS olmayan proje).
+    // Çıkış 3 = ölçülemedi → koşucu görünür atlama yazar. Kapsamlı (scoped) modda boş liste meşrudur.
+    if (files.length === 0) {
+      console.log("architecture: taranacak JS/TS/Vue/Svelte kaynak dosyası yok — bu boyut ölçülmedi.");
+      process.exit(3);
+    }
   }
 
   const violations = [];

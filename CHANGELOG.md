@@ -1,5 +1,32 @@
 ## 2026-11-26
 
+- **ci: MyCL kendi kural doğrulamasını CI'da gerçekten koşuyor.** `check.sh` 6. adım semgrep yokken atlanıyor ve ✓
+  basıyordu; CI'da semgrep hiç kurulmadığı için adım orada her zaman atlanıp yeşil geçiyordu. `check.yml` artık semgrep
+  kuruyor; CI'da semgrep yoksa adım BAŞARISIZ, yerelde ✓ yerine görünür ⏭. Yerelde semgrep 1.136 ile iki kural klasörü
+  de geçerli çıktı (8 + 4 kural).
+
+- **sadeleştirme (danışman incelemesi, kayıpsız adımlar).** Silindi: `agent-quality.ts` (üretimde çağıranı yoktu) ve
+  alaka motorundaki `user-guide` kaynağı (hiçbir enjektör istemiyordu). `arch-check.mjs`: taranacak kaynak dosyası yoksa
+  "ihlal yok, geçti" yerine çıkış 3 → görünür "ölçülmedi" (Faz 10; hükmü etkilemez). `prototype-cache`: yeşil koşuda
+  projenin tamamı kopyalanırken `.env` ailesi, özel anahtarlar ve kimlik dosyaları artık prototipe girmiyor.
+  Tek arka uç, hafızaların birleştirilmesi ve stack ayrımı YAPILMADI: harita akışı bunların senin açık isteklerinle
+  (her zaman otomatik arka uç, API desteği, modül stoku, projeler arası ders, stack bağımsızlık) çakıştığını gösterdi.
+
+- **fix(kapı): "atlandı" kararı artık aracın serbest çıktısına değil başlatıcının sözüne dayanıyor.** Kaçış yolu avında
+  gösterildi: başarısız bir test koşusu, çıktısında "command not found" ya da "tsc … FileNotFoundError" geçtiği için
+  "atlandı / uygulanamaz" sayılıyor, faz tamamlanıyor, hüküm GEÇTİ çıkıyordu. `isMissingCommand`: çıkış kodu 127, ya da
+  sıfır dışı kod + satır başında paket yöneticisinin kendi hata satırı. `isTsToolNotApplicable` ve `isMyclToolBroken`:
+  yalnız koşturulan KOMUT gerçekten o araçsa (komut artık parametre). Çağıranlar aynı, yalnız yanlış atlama kalktı.
+  `headers-check.mjs`: yalnız devDependencies'teki helmet, test dosyaları ve yorum satırları artık kanıt sayılmıyor.
+  Yeni modül yok. İnceleme turunun bulguları düzeltildi: yorum ayıklayıcı dizgi içindeki `/*` yüzünden dosyanın kalanını
+  siliyordu (eskiden geçen projeler başarısız oluyordu) → yalnız tam satır yorumları atılır; npm "betik yok" satırı
+  sütun 0'da ve araç çıktısı yokken sayılır (workspaces ve girintili alıntı durumları); araç kimliği biçime değil
+  konuma ve çalıştırılan programın adına bakar. **Bilerek dokunulmadı (karar gerekiyor):** web arayüzü var ama CSP
+  yokken `csp-check` çıkış 0 veriyor (mevcut testle sabitlenmiş karar); semgrep `nosemgrep` bastırması; `isSpawnEnvFailure`
+  hâlâ serbest çıktıda arıyor ve Full Test'te kırmızı paketi "atlandı" sayabiliyor (ana kapıda kapalı tarafa düşüyor);
+  başlık adının bir dizgide geçmesi kanıt sayılıyor.
+- **kural: mekanizma dondurması** (`CLAUDE.md` madde 15, danışman incelemesi).
+
 - **fix(güvenlik): yazma araçlarındaki `Edit(...)` reddi hiçbir dosyayla eşleşmiyordu (gerçek ortam denemesi):**
   Yukarıdaki "doğrulanmadı" maddesi gerçek `claude` 2.1.332 + macOS Seatbelt altında denendi (geçici proje, MyCL'in
   kendi `buildAgentSandboxSettings` çıktısıyla). **Çalışan:** Bash ile `CLAUDE.md` / `CLAUDE.local.md` / `.mcp.json` /
@@ -97,6 +124,10 @@
   **Dürüst sınır:** tanık süreçle doğar (yeniden başlatmada sıfırlanır); alt dizin `CLAUDE.md` kapsam dışı; MyCL'in
   koşturduğu proje komutları hâlâ işletim sistemi hapsinde değil (kayıt sahteciliği artık YAKALANIR ama `~/.mycl`
   altındaki diğer dosyalar o komutlara açık) — ayrı karar bekliyor.
+
+## 2026-07-14 – 2026-11-25
+
+Bu aralık için girdi yazılmadı; git'te 142 commit var. Kaynak: `git log --since=2026-07-14 --until=2026-11-25`.
 
 ## 2026-07-13
 

@@ -15,7 +15,6 @@ import {
   extractHistoryChunks,
   extractPatternsChunks,
   extractSpecChunks,
-  extractUserGuideChunks,
 } from "../../src/relevance/chunk-store.js";
 
 describe("relevance/chunk-store", () => {
@@ -241,24 +240,6 @@ Existing app has no theme provider.
       expect(chunks[0].id).toBe("features-Ürün CRUD");
       expect(chunks[0].metadata.heading).toBe("Ürün CRUD");
       expect(chunks[1].metadata.heading).toBe("Arama");
-    });
-  });
-
-  describe("extractUserGuideChunks (v15.11)", () => {
-    it("dosya yok → boş array", async () => {
-      expect(await extractUserGuideChunks(projectRoot)).toEqual([]);
-    });
-    it("## heading başına bir chunk", async () => {
-      await mkdir(join(projectRoot, ".mycl"), { recursive: true });
-      await writeFile(
-        join(projectRoot, ".mycl", "user-guide.md"),
-        "# Kılavuz\n## Nasıl ürün eklenir\n1. Forma gir 2. Kaydet\n",
-        "utf-8",
-      );
-      const chunks = await extractUserGuideChunks(projectRoot);
-      expect(chunks).toHaveLength(1);
-      expect(chunks[0].source).toBe("user-guide");
-      expect(chunks[0].metadata.heading).toBe("Nasıl ürün eklenir");
     });
   });
 });

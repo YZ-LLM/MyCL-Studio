@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 fail=0
 step() { printf '\n── %s ──\n' "$1"; }
 ok()   { printf '  ✓ %s\n' "$1"; }
+skip() { printf '  ⏭ %s\n' "$1"; }
 bad()  { printf '  ✗ %s\n' "$1"; fail=1; }
 
 step "1/8 Orchestrator build (tsc)"
@@ -60,8 +61,11 @@ if command -v semgrep >/dev/null 2>&1; then
   else
     bad "assets/quality-rules/ — geçersiz semgrep kuralı (Faz 10 kod-kalite gate'i sessizce düşer)"
   fi
+elif [ -n "${CI:-}" ]; then
+  # CI tek zorlayıcı kat: orada atlamak "doğrulandı" demek olurdu. Kurulum adımı check.yml'de.
+  bad "semgrep CI'da kurulu değil — kural doğrulaması koşamadı (check.yml 'Install semgrep' adımına bak)"
 else
-  ok "semgrep yok — kural validate atlandı (runtime Faz 10/13'te taranır)"
+  skip "semgrep yok — kural doğrulaması ATLANDI (CI'da koşar; yerelde: pipx install semgrep)"
 fi
 
 # setup.sh "kopyala/clone → çalışır" sözleşmesini taşır. Kod yeni bir dış araç eklerse

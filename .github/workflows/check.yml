@@ -26,6 +26,11 @@ jobs:
       - name: Install (orchestrator)
         run: npm --prefix orchestrator ci
 
+      # check.sh 6. adım MyCL'in kendi semgrep kurallarını doğrular. semgrep kurulu değilken o adım atlanıyordu →
+      # CI'da HER ZAMAN atlanıp yeşil geçiyordu (bozuk kural Faz 10/13 kapısını sessizce düşürür).
+      - name: Install semgrep
+        run: pipx install semgrep
+
       - name: Run gate
         run: npm run check
 

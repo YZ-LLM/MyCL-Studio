@@ -55,7 +55,7 @@ export async function extractAuditChunks(
  */
 function splitMarkdownByHeading(
   raw: string,
-  source: "spec" | "patterns" | "brief" | "features" | "user-guide",
+  source: "spec" | "patterns" | "brief" | "features",
 ): Chunk[] {
   const chunks: Chunk[] = [];
   const lines = raw.split("\n");
@@ -198,24 +198,6 @@ export async function extractFeatureChunks(
     throw err;
   }
   return splitMarkdownByHeading(raw, "features");
-}
-
-/**
- * v15.11: user-guide.md → ## heading split (her görev/bölüm 1 chunk). UI kullanma
- * kılavuzu. Dosya yoksa boş array.
- */
-export async function extractUserGuideChunks(
-  projectRoot: string,
-): Promise<Chunk[]> {
-  const p = join(projectRoot, MYCL_DIR, "user-guide.md");
-  let raw: string;
-  try {
-    raw = await fs.readFile(p, "utf-8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
-  return splitMarkdownByHeading(raw, "user-guide");
 }
 
 /**
