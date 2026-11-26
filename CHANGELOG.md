@@ -1,5 +1,15 @@
 ## 2026-11-26
 
+- **fix: model yükseltme sorusunu otomatik cevaplayan araç kullanıcının model ayarını değiştirmesin.** Ekransız koşu
+  betiği (`harness.mjs`) soruları `suggested_option ?? opts[0] ?? "Onayla"` ile cevaplıyordu; model yükseltme sorusu
+  öneri taşımadığı ve ilk seçeneği "Evet, geç" olduğu için betik ana modeli ve strong katmanı kalıcı olarak değiştirdi.
+  Soru artık güvenli varsayılanı kendisi taşıyor (`suggested_option: "Hayır, kalsın"`) ve var olan `protected` (yalnız
+  kullanıcı cevaplar) işaretini taşıyor. Betik `protected` soruyu ve önerisi olmayan soruyu cevaplamıyor; cevaplamadığı
+  soruları çıktısında `unansweredQuestions` altında yazıyor. İnsan akışı aynı: seçenekler ve sıra değişmedi, "Evet, geç"
+  eskisi gibi geçer. İnsan için tek fark: kartta "Hayır, kalsın" önerilen olarak vurgulanır (ön seçili değil, tıklama
+  yine gerekir). Yeni düzenek yok; soru ve cevap ölçütü `model-discovery.ts` içinde saf fonksiyonlara alındı.
+  **Test ve kontrol koşturulmadı, yalnız derlendi.**
+
 - **feat: API anahtarı olmadan, yalnız abonelikle çalışma.** `loadConfig` anahtar yokken hata atıyor, roller abonelikte
   olsa bile proje açılamıyordu. Artık anahtar zorunlu değil: `resolveApiKeys` hata atmaz (eksik anahtar boş dizgi),
   karar tek yerde `backendForRole` içinde verilir (anahtar yoksa her rol abonelik; "auto" limit doluyken de API'ye

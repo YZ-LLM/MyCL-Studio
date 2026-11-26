@@ -183,7 +183,12 @@ import { runRegressionGuard } from "./regression-guard.js";
 import { isApiAccountError, isEnvironmentError, environmentErrorAdvice, isTimeoutHangOnly } from "./claude-api.js";
 import { decideTimeoutDivert, runTimeoutMultiAngle, TIMEOUT_DIVERT_MAX } from "./timeout-diagnosis.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
-import { discoverModelsViaWeb, verifyModelCallable } from "./model-discovery.js";
+import {
+  buildModelUpgradeAskq,
+  discoverModelsViaWeb,
+  isModelUpgradeAccepted,
+  verifyModelCallable,
+} from "./model-discovery.js";
 import { ensureAgentSkills } from "./skills-setup.js";
 import { ensureCodebaseMemoryMcp } from "./codebase-memory-setup.js";
 import { ensureCognee } from "./cognee-setup.js";
@@ -3044,12 +3049,8 @@ async function handleOpenProjectInner(path: string, integrate = false): Promise<
               "system",
               `🆕 Güncel güçlü model bulundu: **${t.strong}** (şu an: ${currentStrong}). Geçmek istersen soruyorum — ayarların korunur, ben otomatik değiştirmiyorum.`,
             );
-            emitAskq({
-              id: askqId,
-              question: `Yeni güçlü model ${t.strong} çıkmış. Main ajan + strong (kalite açısından kritik) görevler için buna geçeyim mi?`,
-              options: ["Evet, geç", "Hayır, kalsın"],
-              allow_other: false,
-            });
+            // Soru güvenli varsayılanı ve "yalnız kullanıcı cevaplar" işaretini kendisi taşır (buildModelUpgradeAskq).
+            emitAskq(buildModelUpgradeAskq(askqId, t.strong));
           }
         })
         .catch((e: unknown) =>
@@ -8669,7 +8670,7 @@ export async function handleAskqAnswer(
   if (_pendingModelUpgrade && id === _pendingModelUpgrade.askqId) {
     const model = _pendingModelUpgrade.model;
     _pendingModelUpgrade = null;
-    const yes = /evet|geç|yes/i.test(selectedText);
+    const yes = isModelUpgradeAccepted(selectedText);
     if (yes && runtime.config) {
       // Fix 2 (YZLLM 2026-06-13): persist'ten ÖNCE modelin GERÇEKTEN çağrılabilir olduğunu doğrula —
       // keşif uydurma/var-olmayan id (örn. "claude-mythos-5") önerebilir; doğrulamadan ana model

@@ -188,3 +188,40 @@ async function discoverViaApi(config: MyclConfig, modelId: string): Promise<stri
     .map((c) => c.text)
     .join("\n");
 }
+
+// ───────────────────────── Model yükseltme sorusu ─────────────────────────
+
+export const MODEL_UPGRADE_YES = "Evet, geç";
+export const MODEL_UPGRADE_NO = "Hayır, kalsın";
+
+/**
+ * SAF: "yeni güçlü modele geçeyim mi?" sorusu. Model KALICI bir kullanıcı ayarıdır; bu soruyu insan cevaplamadıkça
+ * ayar değişmemelidir. Bu yüzden soru güvenli varsayılanı KENDİSİ taşır (önerilen = "Hayır, kalsın") ve yalnız
+ * kullanıcı cevaplar (`protected`) işaretlidir: otomatik cevaplayan bir araç tahmin etmek zorunda kalmaz.
+ * Seçeneklerin sırası ve metni değişmedi; insan "Evet, geç" derse eskisi gibi geçilir.
+ */
+export function buildModelUpgradeAskq(
+  askqId: string,
+  model: string,
+): {
+  id: string;
+  question: string;
+  options: string[];
+  allow_other: false;
+  suggested_option: string;
+  protected: true;
+} {
+  return {
+    id: askqId,
+    question: `Yeni güçlü model ${model} çıkmış. Main ajan + strong (kalite açısından kritik) görevler için buna geçeyim mi?`,
+    options: [MODEL_UPGRADE_YES, MODEL_UPGRADE_NO],
+    allow_other: false,
+    suggested_option: MODEL_UPGRADE_NO,
+    protected: true,
+  };
+}
+
+/** SAF: verilen cevap model yükseltmesini KABUL mü (eski satır içi ölçütün aynısı). Başka her metin ret sayılır. */
+export function isModelUpgradeAccepted(selectedText: string): boolean {
+  return /evet|geç|yes/i.test(selectedText);
+}

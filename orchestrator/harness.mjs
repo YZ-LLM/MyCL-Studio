@@ -19,6 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { computeVerdict } from "./dist/harness-verdict.js";
+import { pickHarnessAnswer } from "./harness-answer.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +68,8 @@ const child = spawn("node", [entry], { cwd: HERE, stdio: ["pipe", "pipe", "inher
 const send = (kind, data) => child.stdin.write(`${JSON.stringify({ kind, data })}\n`);
 
 const answered = new Set();
+// Betiğin bilerek CEVAPLAMADIĞI sorular (insan kararı). Koşu sonunda raporlanır: takılmanın nedeni görünür olsun.
+const unanswered = [];
 const rl = createInterface({ input: child.stdout });
 rl.on("line", (line) => {
   const t = line.trim();
@@ -79,10 +82,15 @@ rl.on("line", (line) => {
   }
   if (ev.kind === "askq" && ev.data?.id && !answered.has(ev.data.id)) {
     answered.add(ev.data.id);
-    const opts = ev.data.options ?? [];
-    const sel = ev.data.suggested_option ?? opts[0] ?? "Onayla";
-    console.error(`[harness] askq → "${String(ev.data.question ?? "").slice(0, 70)}" → "${sel}"`);
-    send("askq_answer", { id: ev.data.id, selected: sel });
+    const q = String(ev.data.question ?? "").slice(0, 110);
+    const pick = pickHarnessAnswer(ev.data);
+    if (pick.answer === null) {
+      unanswered.push({ id: ev.data.id, question: q, why: pick.why });
+      console.error(`[harness] askq CEVAPLANMADI → "${q}" — ${pick.why}`);
+    } else {
+      console.error(`[harness] askq → "${q}" → "${pick.answer}"`);
+      send("askq_answer", { id: ev.data.id, selected: pick.answer });
+    }
   } else if (ev.kind === "chat_message" && ev.data?.role === "error") {
     console.error(`[harness] ERROR: ${String(ev.data.text ?? "").slice(0, 200)}`);
   }
@@ -120,7 +128,7 @@ try {
 
 console.log(
   JSON.stringify(
-    { ...verdict, timedOut: !completed, auditEvents: events.length },
+    { ...verdict, timedOut: !completed, auditEvents: events.length, unansweredQuestions: unanswered },
     null,
     2,
   ),
