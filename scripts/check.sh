@@ -9,9 +9,10 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 fail=0
+skipped=0
 step() { printf '\n── %s ──\n' "$1"; }
 ok()   { printf '  ✓ %s\n' "$1"; }
-skip() { printf '  ⏭ %s\n' "$1"; }
+skip() { printf '  ⏭ %s\n' "$1"; skipped=$((skipped + 1)); }
 bad()  { printf '  ✗ %s\n' "$1"; fail=1; }
 
 step "1/8 Orchestrator build (tsc)"
@@ -113,7 +114,10 @@ else
 fi
 
 printf '\n'
-if [ "$fail" -eq 0 ]; then
+if [ "$fail" -eq 0 ] && [ "$skipped" -gt 0 ]; then
+  # Atlanan adım "geçti" DEĞİL: özet satırı bunu saklamasın (CI'da atlama yoktur, orada adım koşar ya da kırmızıdır).
+  echo "✅ check: GEÇTİ — ama $skipped adım ATLANDI (yukarıdaki ⏭ satırı); tam doğrulama CI'da"
+elif [ "$fail" -eq 0 ]; then
   echo "✅ check: HEPSİ GEÇTİ"
 else
   echo "❌ check: BAŞARISIZ — yukarıdaki ✗ satırlarını düzelt"
