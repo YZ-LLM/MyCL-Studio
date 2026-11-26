@@ -17,8 +17,10 @@
 // fallback yasağı — claude'un teknik çıktısına güvenmeyiz).
 
 import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { posix as pathPosix } from "node:path";
+import { dirname, posix as pathPosix, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { emitChatMessage } from "./ipc.js";
 
 export type SandboxPolicy = "enforce" | "warn" | "off";
@@ -189,6 +191,10 @@ export interface SandboxBuildResult {
   settings: Record<string, unknown>;
   /** denyRead girdisi sayısı (test + log). */
   denyCount: number;
+  /** Dolu ise ev dizini okuma reddi GENİŞ biçime düştü (proje dosya araçları kilitli) — çağıran görünür uyarır. */
+  readFallbackReason?: string;
+  /** Geniş ret nedeni MyCL kurulumundaysa true (uyarıdaki öneri buna göre seçilir). */
+  readFallbackInstallFault?: boolean;
 }
 
 /**
@@ -296,7 +302,10 @@ export function agentInstructionPaths(projectRoot: string): { files: string[]; d
  * Tüm Edit kuralları BURADAN üretilir ki biçim tek yerde doğru kurulsun.
  */
 export function editDenyRule(absPath: string, opts: { subtree?: boolean } = {}): string {
-  return `Edit(/${absPath}${opts.subtree ? "/**" : ""})`;
+  // Yol KAÇIRILIR (mahkeme 4. tur): "proj [v2]" gibi bir proje yolunda kaçışsız kural köşeli parantezi karakter
+  // sınıfı sayar ve `.mycl` / `CLAUDE.md` ile eşleşmez. Ev dizini altındaki projede geniş Read reddi artık
+  // olmadığından bu kurallar yazma araçları için TEK korumadır.
+  return `Edit(/${escapePermissionGlob(absPath)}${opts.subtree ? "/**" : ""})`;
 }
 
 /** SAF: talimat yüzeyi için `permissions.deny` girdileri (Edit tüm yazma araçlarını kapsar). */
@@ -306,6 +315,145 @@ export function agentInstructionPermDeny(projectRoot: string): string[] {
     ...files.map((f) => editDenyRule(f)),
     ...dirs.map((d) => editDenyRule(d, { subtree: true })),
   ];
+}
+
+/** Bir dizinin girdi adları; okunamazsa null (çağıran güvenli tarafa düşer). Enjekte edilir → saf test. */
+export type ListDir = (dir: string) => string[] | null;
+
+/**
+ * Ev dizini okuma reddi kurallarının toplam BAYT bütçesi. Ayar tek bir argv dizgisi olarak gidiyor; Linux tek
+ * argümanı 128 KB ile sınırlar (aşılırsa spawn E2BIG). Yol SAYISI değil bayt sayılır: derin ve Türkçe harfli
+ * yollar ortalamayı kolayca ikiye katlar (mahkeme bulgusu). 64 KB → ayarın geri kalanı için bol pay kalır.
+ */
+export const MAX_HOME_READ_DENY_BYTES = 64 * 1024;
+
+/**
+ * SAF: izin kuralı deseninde özel anlamı olan karakterleri ters eğik çizgiyle kaçır. REGEX YOK (düz döngü).
+ * Ampirik (gerçek claude 2.1.332): `Read(//…/d3 [koseli])` kuralı `d3 [koseli]` klasörüyle EŞLEŞMEDİ
+ * (köşeli parantez karakter sınıfı sayılıyor → içerik okundu); `\[x\]` biçimi reddetti. Boşluk, yuvarlak
+ * parantez, süslü parantez ve Türkçe harfler kaçışsız çalışıyor.
+ */
+export function escapePermissionGlob(path: string): string {
+  let out = "";
+  for (const ch of path) {
+    out += ch === "\\" || ch === "[" || ch === "]" || ch === "*" || ch === "?" ? `\\${ch}` : ch;
+  }
+  return out;
+}
+
+/** SAF: mutlak bir yol (dosya ya da dizin) için okuma reddi — kendisi + alt ağacı, mutlak (çift çizgili) biçimde. */
+export function readDenyRules(absPath: string): string[] {
+  const esc = escapePermissionGlob(absPath);
+  return [`Read(/${esc})`, `Read(/${esc}/**)`];
+}
+
+export interface HomeReadDeny {
+  rules: string[];
+  /** Dolu ise dar kural üretilemedi ve GENİŞ redde düşüldü (dosya araçları projede de kilitli). */
+  fallbackReason?: string;
+  /** Neden MyCL'in KENDİ kurulumundaysa true → kullanıcıya "projeyi taşı" değil "kurulumu onar" denir. */
+  installFault?: boolean;
+}
+
+/**
+ * SAF: proje ev dizini ALTINDAYKEN dosya araçları (Read/Glob/Grep/Write/Edit) için okuma reddi.
+ *
+ * NEDEN (gerçek ortam denemesi, claude 2.1.332 + macOS, 2026-11-26):
+ *  - Çekirdek kum havuzu (`denyRead`/`allowRead`) YALNIZ Bash'i kapsıyor. `Read(…)` izin kuralı olmadan Read
+ *    aracı ev dizinindeki başka bir klasördeki dosyayı okudu → araç katmanında ev dizinini koruyan tek şey bu kural.
+ *  - Eski kural `Read(//<ev>)` bu sürümde TÜM alt ağacı kapsıyor ve ret, izinden baskın → ev dizini altındaki
+ *    projede Read/Write/Edit HER dosyada reddediliyordu ("covered by a Read deny rule"); ajan yalnız Bash'le çalışabildi.
+ * ÇÖZÜM İKİ KATMAN:
+ *  (1) TABAN (bu fonksiyon): ev dizininden proje üst dizinine kadar her düzeyde, projeye giden bileşen DIŞINDAKİ
+ *      her girdi ayrı ayrı reddedilir. Çalışma zamanı girdileri (.claude, Library…) de reddedilir: o liste
+ *      çekirdek katmanda claude SÜRECİ içindir, ajanın dosya araçlarının oraya erişmesi gerekmez (ev dizini
+ *      dışındaki projede de zaten kapalıydı). Read reddi yazma araçlarını da kapatıyor (ampirik).
+ *  (2) YÜKLEM (home-guard.mjs kancası): liste spawn anında alındığı için henüz VAR OLMAYAN adlar bu kurallarla
+ *      kapanmaz (ör. `~/.zshenv`, `~/proj/CLAUDE.md` — mahkeme bulgusu). Kanca "ev dizininde ama projede değil"
+ *      yüklemiyle hepsini kapatır. Dar kurallar YALNIZ kanca eklenebiliyorsa üretilir (buildAgentSandboxSettings).
+ * SINIR (dürüst): kanca Claude tarafından hiç yüklenmezse (ayar şeması değişirse) geriye yalnız taban kalır →
+ * var olan veri kapalı, yeni adlar yazma araçlarına açık. Zincirdeki dizinlerin AD listesi kurallardan okunabilir.
+ * Proje ev dizininin KENDİSİ ise reddedilecek bir şey yoktur (kullanıcı ev dizinini proje yapmıştır).
+ * GÜVENLİ TARAF: liste okunamazsa, projeye giden ad listede aynen yoksa ya da bayt bütçesi aşılırsa geniş redde
+ * düşülür (ev dizini korunur, proje dosya araçları kilitlenir) ve `fallbackReason` döner → çağıran GÖRÜNÜR uyarır.
+ */
+export function buildHomeReadDeny(params: {
+  home: string;
+  projectRoot: string;
+  listDir: ListDir;
+}): HomeReadDeny {
+  const { listDir } = params;
+  const home = normalizeAbs(params.home);
+  const projectRoot = normalizeAbs(params.projectRoot);
+  const broad = (reason: string): HomeReadDeny => ({ rules: readDenyRules(home), fallbackReason: reason });
+  const chain = projectRoot === home ? [] : projectRoot.slice(home.length + 1).split("/");
+  const rules: string[] = [];
+  let bytes = 0;
+  let dir = home;
+  for (let level = 0; level < chain.length; level++) {
+    const names = listDir(dir);
+    if (names === null) return broad(`"${dir}" dizini listelenemedi`);
+    // Projeye giden bileşen listede BİREBİR yoksa (büyük küçük harf / Unicode yazım farkı) onu "kardeş" sanıp
+    // reddederdik → proje sessizce kilitlenirdi. Emin değilsek dar kural üretme: görünür geniş ret.
+    if (!names.includes(chain[level]!)) {
+      return broad(`"${dir}" içinde projeye giden "${chain[level]}" adı listede aynen bulunamadı`);
+    }
+    for (const name of names) {
+      if (name === chain[level]) continue; // projeye giden yol
+      for (const rule of readDenyRules(pathPosix.join(dir, name))) {
+        rules.push(rule);
+        bytes += Buffer.byteLength(rule, "utf-8") + 3; // JSON tırnakları + virgül
+      }
+    }
+    if (bytes > MAX_HOME_READ_DENY_BYTES) {
+      return broad(`projeye giden yoldaki girdiler ayar boyutu sınırını aşıyor (${bytes} bayt)`);
+    }
+    dir = pathPosix.join(dir, chain[level]!);
+  }
+  return { rules };
+}
+
+/** SAF: mutlak POSIX yolu sadeleştir (`//`, `.`, `..`, sondaki eğik çizgi) — zincir hesabı metne dayanıyor. */
+export function normalizeAbs(p: string): string {
+  const n = pathPosix.normalize(p);
+  return n.length > 1 && n.endsWith("/") ? n.slice(0, -1) : n;
+}
+
+/** SAF: yol, kabukta çift tırnak içine olduğu gibi yazılabilir mi (REGEX YOK — düz döngü). */
+export function isShellQuoteSafe(path: string): boolean {
+  for (const ch of path) {
+    if (ch === '"' || ch === "$" || ch === "`" || ch === "\\" || ch === "\n" || ch === "\r") return false;
+  }
+  return true;
+}
+
+/** Ev dizini muhafızının (home-guard.mjs) uygulandığı araçlar: yol alan tüm dosya araçları. */
+const HOME_GUARD_MATCHER = "Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Glob|Grep|LS";
+
+/** SAF: ev dizini muhafızı PreToolUse girdisi. Kurallar argv'de base64 (ajan değiştiremez). */
+export function buildHomeGuardHook(params: {
+  guardPath: string;
+  home: string;
+  projectRoot: string;
+  /** Kancayı koşturacak node ikilisi. Varsayılan "node" (PATH); gerçek çağıran `process.execPath` verir. */
+  nodePath?: string;
+}): unknown {
+  const rulesB64 = Buffer.from(
+    JSON.stringify({ home: params.home, project_root: params.projectRoot }),
+    "utf-8",
+  ).toString("base64");
+  return {
+    matcher: HOME_GUARD_MATCHER,
+    hooks: [
+      { type: "command", command: `"${params.nodePath ?? "node"}" "${params.guardPath}" --rules ${rulesB64}` },
+    ],
+  };
+}
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+/** Muhafız betiğinin mutlak yolu (__dirname = orchestrator/dist ya da orchestrator/src; bir üst = orchestrator kökü; `orchestrator/*.mjs` paketli). */
+export function homeGuardPath(): string {
+  return resolvePath(__dirname, "..", "home-guard.mjs");
 }
 
 /**
@@ -329,8 +477,24 @@ export function buildAgentSandboxSettings(params: {
    * overlay'siz çıktı JSON'u bugünkiyle birebir aynı).
    */
   overlay?: OverlayHooks;
+  /**
+   * Dizin listeleyici (yalnız proje ev dizini ALTINDAYKEN kullanılır — buildHomeReadDeny). Verilmezse liste
+   * "okunamadı" sayılır → güvenli geniş ret + `readFallbackReason` (sessiz değil).
+   */
+  listDir?: ListDir;
+  /**
+   * `home-guard.mjs` mutlak yolu. Proje ev dizini altındayken dar okuma kuralları YALNIZ bu verilirse üretilir
+   * (kanca olmadan dar kural yeni adları açık bırakır); verilmezse güvenli geniş ret + `readFallbackReason`.
+   */
+  homeGuardPath?: string;
+  /**
+   * Kancayı koşturacak node ikilisinin mutlak yolu. NEDEN: Claude Code 0 ve 2 dışındaki çıkış kodunu ENGEL
+   * saymıyor → `node` PATH'te yoksa (127) kanca sessizce atlanırdı. Gerçek çağıran MyCL'in kendi node'unu verir.
+   */
+  nodePath?: string;
 }): SandboxBuildResult {
-  const { projectRoot, ultracode, policy, platform, home, caps, overlay } = params;
+  const { projectRoot, ultracode, policy, platform, home, caps, overlay, listDir, homeGuardPath, nodePath } =
+    params;
   // Overlay KUM HAVUZUNDAN BAĞIMSIZ bir sözleşmedir: sandbox politikası "off" olsa bile
   // iterasyon gate'leri uygulanır (kullanıcı sandbox'ı kapatmakla gate'leri kapatmış olmaz).
   const hooksBlock: Record<string, unknown> = overlay
@@ -398,16 +562,38 @@ export function buildAgentSandboxSettings(params: {
   const subForms = (p: string): string[] => (platform === "darwin" ? [p] : [p, `${p}/**`]);
   const denyRead: string[] = subForms(home); // TÜM home deny — tek kural (argv küçük)
   const allowRead: string[] = [...subForms(projectRoot)]; // proje re-allow (deny home'dan istisna)
-  // EV-ALTI PROJE FIX (YZLLM cave5, çapraz-aile mahkeme): proje EV ALTINDA (ör. ~/cave5) ise broad PROMPT-deny
-  // `Read(~/**)` projeyi DE kapsar ve claude-code'da DENY > ALLOW → `permAllow:[Read(proje/**)]` EZİLEMEZ → ajan
-  // projeyi OKUYAMAZ ("izin reddedildi"; /tmp çalışır ama ~/proje çalışmaz → onboarding dökümanı üretilemez).
-  // ÇEKİRDEK filesystem katmanı (denyRead[home] + allowRead[proje], kernel-seviye allowRead-override) ev'i zaten
-  // korur + projeyi re-allow eder → ev-altı projede redundant `~/**` PROMPT-deny'i EKLEME (kapsadığı her şeyi
-  // kernel zaten koruyor; eklemek yalnız işlevi kırıyor). Home dizini listesini (`~` kendisi) yine reddet.
-  const projectUnderHome = projectRoot === home || projectRoot.startsWith(`${home}/`);
-  const permDeny: string[] = projectUnderHome
-    ? [`Read(/${home})`]
-    : [`Read(/${home})`, `Read(/${home}/**)`];
+  // EV DİZİNİ ALTINDAKİ PROJE (2026-11-26 yeniden kuruldu — gerekçe + ampirik kanıt: buildHomeReadDeny).
+  // Eski hâl `Read(//<ev>)` tek kuralıydı: yazıldığı sürümde yalnız dizinin kendisini kapsadığı varsayılmıştı;
+  // 2.1.332'de alt ağacı da kapsıyor → proje dosya araçlarına tümüyle kapanıyordu. Ev dizini DIŞINDAKİ projede
+  // geniş ret projeyi kapsamaz → orada davranış aynen korunur.
+  const normHome = normalizeAbs(home);
+  const normProject = normalizeAbs(projectRoot);
+  const projectUnderHome = normProject === normHome || normProject.startsWith(`${normHome}/`);
+  // Kanca komutu kabukta çift tırnak içinde koşar: yolda `"`, `$`, ters tırnak ya da ters eğik çizgi varsa komut
+  // bozulur ya da başka bir yola genişler → kanca başlatılamaz, Claude Code bunu engel saymaz (sessiz açık).
+  // Böyle bir kurulum yolunda dar kural üretilmez: görünür geniş ret (mahkeme 3. tur).
+  const unsafeHookPath = [homeGuardPath, nodePath].some((p) => p !== undefined && !isShellQuoteSafe(p));
+  const homeRead: HomeReadDeny = !projectUnderHome
+    ? { rules: readDenyRules(home) }
+    : !homeGuardPath
+      ? {
+          rules: readDenyRules(home),
+          fallbackReason: "ev dizini muhafızı betiği (home-guard.mjs) bulunamadı",
+          installFault: true,
+        }
+      : unsafeHookPath
+        ? {
+            rules: readDenyRules(home),
+            fallbackReason: "MyCL kurulum yolunda kabuk için özel karakter var",
+            installFault: true,
+          }
+        : buildHomeReadDeny({ home, projectRoot, listDir: listDir ?? (() => null) });
+  const permDeny: string[] = homeRead.rules;
+  // Kanca yalnız dar kurallar gerçekten üretildiyse eklenir (geniş rette her şey zaten kapalı).
+  const homeGuardHook =
+    projectUnderHome && homeGuardPath && !homeRead.fallbackReason
+      ? buildHomeGuardHook({ guardPath: homeGuardPath, home: normHome, projectRoot: normProject, nodePath })
+      : undefined;
   const permAllow: string[] = [`Read(${projectRoot}/**)`];
   for (const name of allow) {
     const entry = pathPosix.join(home, name);
@@ -443,8 +629,15 @@ export function buildAgentSandboxSettings(params: {
   for (const d of [".npm", ".cache"]) {
     allowWrite.push(...subForms(pathPosix.join(home, d)));
   }
+  // Kanca birleştirme: overlay kancaları (varsa) aynen kalır, ev dizini muhafızı PreToolUse listesine EKLENİR.
+  // Muhafız yoksa `hooks` anahtarına dokunulmaz → o durumda üretilen ayar eskisiyle birebir.
+  const overlayHooks = (hooksBlock.hooks ?? {}) as Record<string, unknown[]>;
+  const mergedHooks: Record<string, unknown> = homeGuardHook
+    ? { hooks: { ...overlayHooks, PreToolUse: [...(overlayHooks.PreToolUse ?? []), homeGuardHook] } }
+    : {};
   const settings: Record<string, unknown> = {
     ...base,
+    ...mergedHooks,
     sandbox: {
       enabled: true,
       allowUnsandboxedCommands: false, // bash kaçış kapısı kapalı
@@ -468,20 +661,62 @@ export function buildAgentSandboxSettings(params: {
       allow: permAllow,
     },
   };
-  return { settings, denyCount: denyRead.length };
+  return {
+    settings,
+    denyCount: denyRead.length,
+    ...(homeRead.fallbackReason ? { readFallbackReason: homeRead.fallbackReason } : {}),
+    ...(homeRead.installFault ? { readFallbackInstallFault: true } : {}),
+  };
 }
+
+/** İmpure: gerçek dizin listeleyici. Hata → null (buildHomeReadDeny güvenli geniş redde düşer). */
+function listDirSync(dir: string): string[] | null {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return null;
+  }
+}
+
+const _readFallbackEmitted = new Set<string>();
 
 /**
  * İmpure: home'u oku → settings üret → `["--settings", json]`. policy + platform
  * modülden/process'ten. policy="off" → eski davranış (yalnız ultracode).
  * home okunamazsa enforce/warn'da GÖRÜNÜR uyarı (sessiz read-koruma kaybı yasak).
  */
+/**
+ * sandboxSettingsArgs'ın dış dünyaya dokunan girdileri. Varsayılanlar gerçek ortamdır; test bunları enjekte eder
+ * (mahkeme 4. tur: betik varlık denetimi, MyCL'in kendi node'u ve "bir kez uyar" davranışı hiçbir testte yoktu →
+ * biri silinse tüm testler yeşil kalırdı).
+ */
+export interface SandboxArgsDeps {
+  home: string;
+  platform: NodeJS.Platform;
+  listDir: ListDir;
+  guardPath: string;
+  exists: (p: string) => boolean;
+  execPath: string;
+  emit: (text: string) => void;
+}
+
 export function sandboxSettingsArgs(
   projectRoot: string,
   ultracode: boolean,
   caps?: SandboxCaps,
   overlay?: OverlayHooks,
+  depsOverride?: Partial<SandboxArgsDeps>,
 ): string[] {
+  const deps: SandboxArgsDeps = {
+    home: homedir(),
+    platform: process.platform,
+    listDir: listDirSync,
+    guardPath: homeGuardPath(),
+    exists: existsSync,
+    execPath: process.execPath,
+    emit: (text) => emitChatMessage("system", text),
+    ...depsOverride,
+  };
   if (_policy === "off") {
     // Sandbox kapalı olsa DA overlay kancaları ve kanıt/talimat yazma reddi eklenir (ayrı sözleşmeler).
     // (2026-11-26, mahkeme O3) Eskiden ultracode de overlay de yoksa buradan `[]` dönülüyordu → yukarıdaki
@@ -491,19 +726,19 @@ export function sandboxSettingsArgs(
       projectRoot,
       ultracode,
       policy: "off",
-      platform: process.platform,
-      home: homedir(),
+      platform: deps.platform,
+      home: deps.home,
       caps,
       overlay,
     });
     return ["--settings", JSON.stringify(settings)];
   }
-  const platform = process.platform;
-  const home = homedir();
-  // Yeni yaklaşım home'u TEK kuralla deny ettiği için home'u readdir ETMEYE GEREK YOK: eski kod her girdiyi tek tek
-  // denyRead'e koyuyordu → readdir gerekiyordu, readdir-fail → denyRead BOŞ → okuma koruması eksik (güvenlik açığı).
-  // Artık home-deny readdir'den BAĞIMSIZ üretilir → hem daha sağlam hem readdir-fail uyarısına gerek kalmadı.
-  const { settings } = buildAgentSandboxSettings({
+  const platform = deps.platform;
+  const home = deps.home;
+  // ÇEKİRDEK katman (denyRead) ev dizinini TEK kuralla kapatır → dizin listesine bağlı DEĞİL. Dizin listesi yalnız
+  // ARAÇ katmanındaki dar okuma kuralları için alınır (proje ev dizini altındaysa — buildHomeReadDeny); liste
+  // okunamazsa geniş redde düşülür ve aşağıda GÖRÜNÜR uyarı verilir (koruma hiçbir durumda boş kalmaz).
+  const { settings, readFallbackReason, readFallbackInstallFault } = buildAgentSandboxSettings({
     projectRoot,
     ultracode,
     policy: _policy,
@@ -511,6 +746,27 @@ export function sandboxSettingsArgs(
     home,
     caps,
     overlay,
+    listDir: deps.listDir,
+    // Betik diskte YOKSA (bozuk paket) yol verilmez → dar kural üretilmez, geniş ret + görünür uyarı. Aksi hâlde
+    // kanca başlatılamaz, Claude Code bunu engel saymaz ve yeni adlar sessizce açık kalırdı (mahkeme bulgusu).
+    homeGuardPath: deps.exists(deps.guardPath) ? deps.guardPath : undefined,
+    nodePath: deps.execPath,
   });
+  // SESSİZ DÜŞÜŞ YOK (KATI #4): geniş redde düşüldüyse ajan proje dosyalarını araçla okuyup yazamaz —
+  // kullanıcı bunu proje hatası sanmasın. Proje + neden başına BİR kez (her spawn'da tekrar gürültü olur;
+  // süreç başına tek bayrak ikinci projeyi sessiz bırakırdı — mahkeme bulgusu).
+  const fallbackKey = `${projectRoot}\n${readFallbackReason ?? ""}`;
+  if (readFallbackReason && !_readFallbackEmitted.has(fallbackKey)) {
+    _readFallbackEmitted.add(fallbackKey);
+    deps.emit(
+      `⚠️ Ev dizini okuma koruması dar kurala çevrilemedi: ${readFallbackReason}. Güvenli tarafta kalındı: ` +
+        `ajan bu projede dosya okuma ve yazma araçlarını kullanamaz, yalnız kabuk komutlarıyla çalışır ` +
+        `(yavaş ve hataya açık). ` +
+        // Öneri nedene göre: kurulum kaynaklı nedende projeyi başka klasöre taşımak hiçbir şeyi değiştirmez.
+        (readFallbackInstallFault
+          ? `Sorun MyCL kurulumunda: kurulumu onarmak (ya da özel karakter içermeyen bir yola kurmak) bunu çözer.`
+          : `Projeyi daha az girdili bir klasöre ya da ev dizini dışına taşımak bunu çözer.`),
+    );
+  }
   return ["--settings", JSON.stringify(settings)];
 }

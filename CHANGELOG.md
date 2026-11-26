@@ -12,11 +12,49 @@
   yolun hepsi reddedildi, normal dosya yazıldı, `README.md` düzenlendi. Regresyon testi: "her Edit yazma reddi mutlak
   yol biçiminde". Davranış regresyonu taraması: ajana `.mycl` içine yazdıran bir talimat yok; `.mycl/plans`, spec ve
   kayıt yazımları orkestratör sürecinde (kural onları etkilemez).
-  **AÇIK KALAN, ÖNCEDEN VAR OLAN (bu dalda düzeltilmedi, karar bekliyor):** proje ev dizini ALTINDAYKEN
-  `Read(//<ev>)` reddi bu `claude` sürümünde tüm alt ağacı kapsıyor → Read / Write / Edit araçları projedeki HER
-  dosyada reddediliyor ("covered by a Read deny rule"); ajan yalnız Bash ile çalışabiliyor. Kural kaldırılınca Read
-  aracı ev dizinindeki başka bir klasörü okuyabildi (çekirdek `denyRead` yalnız Bash'i kapsıyor) → kuralı silmek
-  çözüm değil; ev dizini girdilerini tek tek reddetmek gibi bir tasarım kararı gerekiyor.
+
+- **fix(güvenlik): ev dizini altındaki projede dosya araçları tümüyle kilitliydi (önceden var olan; gerçek ortam denemesi):**
+  `Read(//<ev>)` reddi `claude` 2.1.332'de tüm alt ağacı kapsıyor ve ret izinden baskın → proje ev dizini altındayken
+  Read / Write / Edit HER proje dosyasında reddediliyordu ("covered by a Read deny rule"); ajan yalnız Bash ile
+  çalışabiliyordu. Kuralı silmek çözüm değil: silince Read aracı ev dizinindeki başka bir klasörü okudu (çekirdek kum
+  havuzu yalnız Bash'i kapsıyor). **Fix, iki katman:** (1) taban — `buildHomeReadDeny`: ev dizininden proje üst dizinine
+  kadar her düzeyde, projeye giden bileşen dışındaki her girdi ayrı ayrı reddedilir (köşeli parantez gibi desen
+  karakterleri kaçırılır; kaçışsız kural gerçek `claude`da eşleşmedi). (2) yüklem — yeni `orchestrator/home-guard.mjs`
+  PreToolUse kancası: hedef ev dizininde ama projede değilse engel (gerçek yol, büyük küçük harf, Unicode, var olmayan
+  hedef). **İlk taslağı mahkeme (Sonnet) reddetti; bulgular düzeltildi:** çalışma zamanı girdileri (`~/.claude`,
+  `Library`…) araç katmanında açık kalıyordu → artık reddediliyor; henüz var olmayan adlar (`~/.zshenv`,
+  `~/proj/CLAUDE.md`) yazmaya açıktı → kanca kapatıyor; sondaki eğik çizgili proje yolu projeyi kilitliyordu →
+  yol sadeleştirilir; projeye giden ad listede aynen yoksa sessiz kilit yerine görünür geniş ret; uyarı süreç başına
+  değil proje ve neden başına; sınır yol sayısı değil bayt (64 KB). **Güvenli taraf:** liste okunamaz, bütçe aşılır ya
+  da kanca yolu yoksa eski geniş ret + sohbette görünür uyarı. **Gerçek `claude` ile doğrulandı** (`~/…/proj/app`):
+  proje içinde okuma, yazma, düzenleme, Glob çalıştı; kardeş klasör, `~/.zprofile`, `~/.claude` içine yazma, var
+  olmayan `~/…/proj/CLAUDE.md` ve `~/yeni.txt` yazımı, ev dizininde Glob ve Grep reddedildi. Ev dizini DIŞINDAKİ
+  projede ve politika "off" iken üretilen ayar değişmedi. **Sınır:** kanca hiç yüklenmezse yalnız taban kalır; proje ev
+  dizininin kendisiyse araç katmanında koruma yok; sert bağlantı ayırt edilemez; MCP araçları kapsam dışı; Linux'ta
+  denenmedi (yalnız birim testleri). **Mahkeme ikinci tur düzeltildi (kaçışlar muhafız BETİĞİ üzerinde kanıtlandı; gerçek Glob aracı göreli deseni arama kökü içinde süzgeç olarak kullandığından ilki gerçek araçta büyük olasılıkla gerçekleşmiyordu — yine de kapatıldı):** göreli
+  Glob deseni `../../**/*.txt` hiç denetlenmiyordu → sabit önek arama köküne göre çözülür, jokerden sonra `..` içeren
+  desen reddedilir; boşta sembolik bağlantı (`proje/x -> ~/olmayan`) proje içi sayılıyordu → bağlantı hedefi izlenir;
+  betik diskte yoksa ya da `node` PATH'te değilse kanca sessizce atlanırdı (Claude Code 0 ve 2 dışındaki çıkış kodunu
+  engel saymıyor) → betik yoksa görünür geniş ret, kanca MyCL'in kendi node ikilisiyle (`process.execPath`) koşar;
+  paketleme testi muhafız betiklerini kilitler. **Mahkeme üçüncü tur (Opus) düzeltildi:** muhafız Grep'in düzenli
+  ifadesini yol sanıp `../components`, `//.*eslint-disable`, `{...props} />` gibi gündelik aramaları engelliyordu →
+  `pattern` yalnız dosya deseni olan araçlarda yol sayılır (Grep'in arama yeri `path` yine denetlenir); yol önce metin
+  olarak sadeleştiriliyordu, `proje/baglanti/../a.txt` proje içi görünüyordu (betikte ve ham işletim sistemi yol
+  çözümünde gösterildi; gerçek `claude` 2.1.332'de Write yolu kendisi sadeleştirdi ve dosya projede kaldı, diğer
+  araçlar ölçülmedi) → muhafız bilerek katı okumayı seçer: yol kökten parça parça, bağlantılar izlenerek FİZİKSEL çözülür; kanca komutundaki yol çift tırnakla yazıldığından
+  kurulum yolunda `$` ya da `"` varsa kanca sessizce devre dışı kalıyordu → böyle yolda görünür geniş ret; desen
+  sözdizimiyle gizlenmiş `..` (`.{.,}/x`) reddedilir. **Dördüncü tur (çok ajanlı akış: dört mercek, her bulgu ayrı ajanla
+  yeniden üretildi; 8 doğrulandı, 3 çürütüldü) düzeltildi:** (YÜKSEK) macOS'ta `/System/Volumes/Data/Users/<ben>/…`
+  ev dizininin kendisidir (firmlink, sembolik bağlantı değil) ve muhafızı metin farkıyla geçiyordu; `/.nofollow`,
+  `/.resolve`, `/.vol` çekirdek önekleri de öyle (betikte gösterildi) → metne EK olarak dosya kimliği (aygıt + inode)
+  karşılaştırması, takma yolun atası üzerinde arama engeli, sihirli öneklerde koşulsuz engel. (ORTA) Edit kuralları
+  kaçışsızdı: `proj [v2]` gibi yolda `.mycl` / `CLAUDE.md` kuralı eşleşmezdi ve ev dizini altında geniş ret artık
+  olmadığından yazma araçlarına açık kalırdı → `editDenyRule` yolu kaçırır. (DÜŞÜK) `*.*.*` ve `.*.*` desenleri
+  haksız yere reddediliyordu; proje yolunda köşeli parantez varken mutlak Glob deseni reddediliyordu; uyarıdaki öneri
+  kurulum kaynaklı nedende yanlıştı; betik varlık denetimi, MyCL'in kendi node'u ve "bir kez uyar" davranışının testi
+  yoktu → `sandboxSettingsArgs` girdileri enjekte edilebilir, üçü de testli. **Kapatılamayan, belgelenen sınır:**
+  denetimle dosyanın açılması arasındaki yarış (ajan Bash ile proje içi bir bağlantıyı arka planda sürekli değiştirir);
+  paralel modül işçisi ana projenin `node_modules` dizinini dosya araçlarıyla okuyamaz (çekirdek katmanda da böyleydi).
 
 - **fix(güvenlik): harness kaçış denetimi — hükmün üretildiği satırlar korumasızdı + ajan kendi talimatını yazabiliyordu:**
   İki açık, tek soru: "model söyleneni gözden kaçırır ya da tersini mantıklı bulursa harness'tan çıkabilir mi?"

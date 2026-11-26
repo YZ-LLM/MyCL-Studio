@@ -27,6 +27,18 @@ describe("tauri bundle resources — MyCL öz-araçları + kural dosyaları pake
     expect(resources).toContain("../orchestrator/*.mjs");
   });
 
+  // Araç anı muhafızları: paketli uygulamada YOKSA kanca başlatılamaz ve Claude Code bunu engel saymaz (sessiz açık).
+  // home-guard için çalışma anında da varlık denetimi var (yoksa görünür geniş ret); bu test paketi kilitler.
+  it("araç anı muhafız betikleri (overlay-guard, home-guard) orchestrator kökünde ve resources globunda", async () => {
+    const mjs = readdirSync(orchRoot).filter((f) => f.endsWith(".mjs"));
+    expect(mjs).toContain("overlay-guard.mjs");
+    expect(mjs).toContain("home-guard.mjs");
+    expect(resources).toContain("../orchestrator/*.mjs");
+    // Kodun hesapladığı yol gerçekten o dosyayı gösteriyor (dist ya da src'den bir üst = orchestrator kökü).
+    const { homeGuardPath } = await import("../src/agent-sandbox.js");
+    expect(homeGuardPath()).toBe(resolve(orchRoot, "home-guard.mjs"));
+  });
+
   it("güvenlik + kalite semgrep kural dizinleri resources'ta", () => {
     // securityRulePath/qualityRulePath bunları MUTLAK yolla semgrep --config'e verir; bundle'da yoksa exit-7.
     expect(resources).toContain("../assets/security-rules/**/*");
