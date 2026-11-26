@@ -15,7 +15,7 @@
 // Phase 6 context'inde işlenir (classifier currentPhase=6 ile çağrılır).
 
 import { formatA11yReport, runAccessibilityScan } from "./accessibility-scan.js";
-import { captureAndCompare, formatVisualReport } from "./visual-regression.js";
+import { blankScreenDetail, captureAndCompare, formatVisualReport } from "./visual-regression.js";
 import { join } from "node:path";
 import { appendAudit } from "./audit.js";
 import type { MyclConfig } from "./config.js";
@@ -37,7 +37,7 @@ import type { State } from "./types.js";
 async function buildVisualReport(
   state: State,
   port: number | undefined,
-): Promise<{ text: string; nearlyBlank: boolean }> {
+): Promise<{ text: string; nearlyBlank: boolean; blankDetail: string }> {
   try {
     const url = `http://localhost:${port ?? 5173}`;
     const result = await captureAndCompare(url, state.project_root);
@@ -47,7 +47,7 @@ async function buildVisualReport(
       event: result.ran ? "visual-diff" : "visual-diff-skipped",
       caller: "mycl-orchestrator",
       detail: result.ran
-        ? `baseline=${result.baselineExisted} routes=${result.diffs.length} changed=${result.diffs.filter((d) => d.status !== "unchanged").length}`
+        ? `baseline=${result.baselineExisted} routes=${result.diffs.length} changed=${result.diffs.filter((d) => d.status !== "unchanged").length} page_errors=${result.diffs.reduce((n, d) => n + (d.pageErrorCount ?? 0), 0)}`
         : (result.skippedReason ?? "").slice(0, 120),
     }).catch(() => {});
     return {
@@ -57,12 +57,16 @@ async function buildVisualReport(
       // olmuyordu çünkü giriş dosyası yazılmamıştı — ve inceleme yine de onaylandı. Bayrak artık
       // state'e taşınıyor ve onay kapısı onu görüyor.
       nearlyBlank: result.diffs.some((d) => d.nearlyBlank),
+      // NEDEN (2026-11-27): boş ekran kaydı artık aynı açılışta tarayıcının bildirdiği ilk birkaç
+      // hatayı taşır. Ekran boş değilse boş dizgi (eski davranış).
+      blankDetail: blankScreenDetail(result.diffs),
     };
   } catch (err) {
     log.warn("phase-6", "görsel karşılaştırma raporu kurulamadı (non-fatal)", { error: String(err) });
     return {
       text: "🖼️ **Görsel karşılaştırma:** yapılamadı (beklenmedik hata; incelemeyi engellemez).",
       nearlyBlank: false, // ölçülemedi → "boş" İDDİA EDİLMEZ (yanlış alarm yasağı)
+      blankDetail: "",
     };
   }
 }
@@ -183,7 +187,7 @@ export class Phase6Controller {
       phase: 6,
       event: "phase-6-deferred",
       caller: "mycl-orchestrator",
-      detail: visual.nearlyBlank ? "blank_screen" : "",
+      detail: visual.blankDetail,
     });
 
     return "deferred";

@@ -35,6 +35,13 @@ const TOTAL_BUDGET_MS = 45_000;
 const SETTLE_MS = 400;
 /** Bu oranın üstü "değişti" satırı olarak tek tek listelenir (altı toplamda özetlenir). */
 const NOTABLE_DIFF_RATIO = 0.01;
+/** Rota başına saklanan en çok hata satırı ve satır başına en çok karakter (kayıt ve mesaj şişmesin). */
+const MAX_ROUTE_ERRORS = 5;
+const ROUTE_ERROR_MAX_CHARS = 240;
+/** Boş ekran kaydında ve Faz 6 mesajında gösterilen "ilk birkaç" hata. */
+const BLANK_ERRORS_SHOWN = 3;
+/** Boş ekran denetim kaydı ayrıntısının üst sınırı (tek satırlık kayıt küçük kalsın). */
+const BLANK_DETAIL_MAX_CHARS = 700;
 
 export type RouteShotStatus = "unchanged" | "changed" | "new" | "dim-changed" | "error";
 
@@ -47,6 +54,47 @@ export interface RouteShotDiff {
   nearlyBlank?: boolean;
   /** status=error ise görünür neden. */
   errorReason?: string;
+  /**
+   * Bu rotanın AYNI açılışında görülen konsol hataları ve yakalanmamış sayfa hataları (ilk
+   * MAX_ROUTE_ERRORS tanesi, tekrarsız, kırpılmış). Rota açıldıysa hep doludur (hata yoksa `[]`);
+   * rota hiç açılmadıysa (süre bütçesi) yoktur → "hata yok" ile "ölçülmedi" karışmaz.
+   */
+  pageErrors?: string[];
+  /** Aynı açılışta görülen tekrarsız hata sayısı (saklananlardan fazla olabilir). */
+  pageErrorCount?: number;
+}
+
+/**
+ * SAF: tarayıcıdan gelen tek bir hatayı kayda uygun tek satıra çevir (boşluklar tek boşluk, uzunluk
+ * sınırlı). `where` metinde zaten geçmiyorsa sona eklenir — "Failed to load resource" gibi iletiler
+ * hangi dosya olduğunu yalnız konumda taşır.
+ */
+export function clipPageError(kind: "konsol" | "sayfa", text: string, where?: string): string {
+  const flat = text.replace(/\s+/g, " ").trim() || "(boş ileti)";
+  const tail = where && !flat.includes(where) ? ` @ ${where}` : "";
+  const line = `${kind}: ${flat}${tail}`;
+  return line.length > ROUTE_ERROR_MAX_CHARS ? `${line.slice(0, ROUTE_ERROR_MAX_CHARS - 1)}…` : line;
+}
+
+/**
+ * SAF: Faz 6 `phase-6-deferred` denetim kaydının ayrıntısı. Ekran boş değilse boş dizgi (eski davranış).
+ * Boşsa `blank_screen` ile başlar (hüküm bu sözcüğü arar) ve boş görünen rotaların açılışında görülen
+ * ilk birkaç hatayı taşır — eskiden yalnız `blank_screen` yazılıyordu, neden kayıtta yoktu.
+ */
+export function blankScreenDetail(diffs: readonly RouteShotDiff[]): string {
+  const blanks = diffs.filter((d) => d.nearlyBlank);
+  if (blanks.length === 0) return "";
+  // Hata dinlemesi hiç yapılmadıysa (alan yok) sayı İDDİA ETME — yalnız eski sözcük.
+  if (!blanks.some((d) => d.pageErrors !== undefined)) return "blank_screen";
+  const errors = [...new Set(blanks.flatMap((d) => d.pageErrors ?? []))];
+  // errors=N: boş görünen rotaların açılışlarında görülen hataların TOPLAMI (rota başına tekrarsız sayım).
+  const total = blanks.reduce((n, d) => n + (d.pageErrorCount ?? 0), 0);
+  const routes = blanks.map((d) => d.route).join(",");
+  if (errors.length === 0) return `blank_screen routes=${routes} errors=0`.slice(0, BLANK_DETAIL_MAX_CHARS);
+  return `blank_screen routes=${routes} errors=${total} | ${errors.slice(0, BLANK_ERRORS_SHOWN).join(" | ")}`.slice(
+    0,
+    BLANK_DETAIL_MAX_CHARS,
+  );
 }
 
 export interface VisualRegressionResult {
@@ -156,6 +204,28 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
   try {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: VIEWPORT });
+    // BOŞ EKRANIN NEDENİ (2026-11-27, ekransız deneme koşusu): sayfa boş göründüğünde kayıtta yalnız
+    // `blank_screen` vardı; tarayıcının o açılışta ne dediği hiç dinlenmiyordu. Dinleyiciler aynı
+    // sayfaya, ilk açılıştan ÖNCE bağlanır: ekran görüntüsünü alan açılış ile hatayı gören açılış aynıdır.
+    // Sayfanın politikası atlatılmaz — kullanıcının gördüğü neyse o görülür, yalnız dinlenir.
+    let routeErrors: string[] = [];
+    let seenErrors = new Set<string>();
+    // Pencere yalnız "açılış başladı → ekran görüntüsü alındı" arasında açıktır: önceki sayfanın geç
+    // gelen hatası bir sonraki rotaya yazılmasın, görüntüden sonra gelen de boş kararına karışmasın.
+    let listening = false;
+    const noteError = (line: string): void => {
+      if (!listening || seenErrors.has(line)) return;
+      seenErrors.add(line);
+      if (routeErrors.length < MAX_ROUTE_ERRORS) routeErrors.push(line);
+    };
+    page.on("pageerror", (err) => noteError(clipPageError("sayfa", err.message)));
+    page.on("console", (msg) => {
+      if (msg.type() === "error") noteError(clipPageError("konsol", msg.text(), msg.location().url));
+    });
+    const seenSoFar = (): { pageErrors: string[]; pageErrorCount: number } => ({
+      pageErrors: [...routeErrors],
+      pageErrorCount: seenErrors.size,
+    });
     await fs.rm(pendingDir, { recursive: true, force: true });
     await fs.mkdir(pendingDir, { recursive: true });
     const startedAt = Date.now();
@@ -165,6 +235,10 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
         diffs.push({ route, status: "error", errorReason: "süre bütçesi aşıldı — bu tur atlandı" });
         continue;
       }
+      // Her rota kendi hatalarını taşır (önceki rotanınkiler karışmasın).
+      routeErrors = [];
+      seenErrors = new Set<string>();
+      listening = true;
       try {
         await page.goto(new URL(route, url).toString(), {
           waitUntil: "domcontentloaded",
@@ -172,25 +246,29 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
         });
         await page.waitForTimeout(SETTLE_MS);
         const shot = await page.screenshot({ fullPage: false });
+        // Ekran görüntüsü anına kadar görülenler — boş kararıyla aynı pencere.
+        const seen = seenSoFar();
+        listening = false;
         const file = sanitizeRouteForFile(route);
         await fs.writeFile(join(pendingDir, file), shot);
         const nearlyBlank = isNearlyBlank(shot);
         if (!baselineExisted) {
-          diffs.push({ route, status: "new", nearlyBlank });
+          diffs.push({ route, status: "new", nearlyBlank, ...seen });
           continue;
         }
         let base: Buffer;
         try {
           base = await fs.readFile(join(baselineDir, file));
         } catch {
-          diffs.push({ route, status: "new", nearlyBlank });
+          diffs.push({ route, status: "new", nearlyBlank, ...seen });
           continue;
         }
         const cmp = comparePngBuffers(base, shot);
-        diffs.push({ route, status: cmp.status, diffRatio: cmp.diffRatio, nearlyBlank });
+        diffs.push({ route, status: cmp.status, diffRatio: cmp.diffRatio, nearlyBlank, ...seen });
       } catch (err) {
         // Rota bazlı hata görünür kalır (sessiz "değişmedi" sanılmasın).
-        diffs.push({ route, status: "error", errorReason: String(err).slice(0, 120) });
+        diffs.push({ route, status: "error", errorReason: String(err).slice(0, 120), ...seenSoFar() });
+        listening = false;
       }
     }
     return { ran: true, url, baselineExisted, diffs };
@@ -240,6 +318,27 @@ export async function promoteVisualBaseline(projectRoot: string): Promise<void> 
 }
 
 /**
+ * SAF: boş görünen rotaların açılışında tarayıcının bildirdiği hataları rapora ekle (ilk birkaçı).
+ * Hata dinlenmediyse (alan yok) satır eklenmez; dinlendi ama hata yoksa bu da açıkça yazılır —
+ * "neden boş?" sorusunda "tarayıcı hata vermedi" de bir bilgidir.
+ */
+function blankErrorLines(blanks: readonly RouteShotDiff[]): string {
+  const lines: string[] = [];
+  for (const d of blanks) {
+    if (d.pageErrors === undefined) continue;
+    if (d.pageErrors.length === 0) {
+      lines.push(`   • \`${d.route}\` açılışında tarayıcı konsol ya da sayfa hatası bildirmedi.`);
+      continue;
+    }
+    const total = d.pageErrorCount ?? d.pageErrors.length;
+    lines.push(`   • \`${d.route}\` açılışında tarayıcının bildirdiği hatalar (${total}):`);
+    for (const e of d.pageErrors.slice(0, BLANK_ERRORS_SHOWN)) lines.push(`      - ${e}`);
+    if (total > BLANK_ERRORS_SHOWN) lines.push(`      - … +${total - BLANK_ERRORS_SHOWN} daha`);
+  }
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
+/**
  * SAF (test edilebilir): sonucu Faz 6 incelemesi için TR rapora çevir. SALT-RAPOR dili —
  * bloklama yok, kullanıcıya bilgi (a11y raporu deseni). Kayda değer değişim (>%1) tek tek,
  * gerisi özet; boş görünen sayfa ⚠️ ile öne çıkar.
@@ -252,7 +351,7 @@ export function formatVisualReport(r: VisualRegressionResult): string {
   const blanks = r.diffs.filter((d) => d.nearlyBlank);
   const blankLine =
     blanks.length > 0
-      ? `\n⚠️ **Boş görünen sayfa:** ${blanks.map((d) => `\`${d.route}\``).join(", ")} — neredeyse tek renk; sayfa boş/kırık olabilir, göz at.`
+      ? `\n⚠️ **Boş görünen sayfa:** ${blanks.map((d) => `\`${d.route}\``).join(", ")} — neredeyse tek renk; sayfa boş/kırık olabilir, göz at.${blankErrorLines(blanks)}`
       : "";
   if (!r.baselineExisted) {
     return `${head} ilk görüntüler kaydedildi (${r.diffs.length} rota) — karşılaştırma bir sonraki iterasyonda başlar.${blankLine}`;

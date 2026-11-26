@@ -1,5 +1,23 @@
 ## 2026-11-27
 
+- **fix(faz 6): katı güvenlik politikası (CSP) altında erişilebilirlik taraması koşsun, boş ekran kaydı nedenini
+  taşısın.** Ekransız deneme koşusunda (Vite + React, MyCL'in kendi istediği katı politika) tarama
+  `page.addScriptTag` ile sayfaya satır içi betik eklediği için engellendi (`a11y-scan-skipped`) ve Faz 6 yalnız
+  `blank_screen` yazdı; sayfayı açan kod tarayıcının konsolunu ve sayfa hatalarını dinlemiyordu. Artık axe kaynağı
+  `page.evaluate` ile veriliyor: sayfaya betik etiketi eklenmiyor, politika atlatılmıyor (`bypassCSP` yok). Görsel
+  karşılaştırmanın var olan sayfa açılışına konsol hatası ve sayfa hatası dinleyicisi eklendi; rota başına ilk beş
+  tekrarsız hata tutuluyor. Sayfa boş görünüyorsa `phase-6-deferred` kaydı `blank_screen routes=… errors=N | …` biçiminde
+  ilk üç hatayı taşıyor (hüküm `blank_screen` sözcüğünü aradığı için okuyucu etkilenmiyor) ve Faz 6 mesajındaki boş
+  sayfa uyarısının altına aynı hatalar yazılıyor; tarayıcı hata bildirmediyse bu da yazılıyor. `visual-diff` kaydına
+  `page_errors=N` eklendi. Tarama ile boş ekran denetimi zaten ayrı tarayıcı açıyordu; biri ötekini etkilemiyor. Yeni
+  modül yok: var olan sayfa açılışına dinleyici, var olan kayda ayrıntı.
+  **Koddan okundu, gözlemlenmedi:** MyCL'in hata toplayan Vite eklentisi satır içi betik ekliyor ve başka bir porta
+  gönderiyor; katı politikada (`script-src` satır içi betiğe, `connect-src 'self'` başka porta izin vermiyor) tarayıcı
+  tarafındaki hatalar Faz 6'nın hata sayısına ulaşmaz. Geliştirme sunucusunun çıktısını okuyan kol etkilenmiyor. Nasıl
+  ele alınacağı karar bekliyor; dokunulmadı.
+  **Test ve kontrol koşturulmadı, yalnız derlendi.** Gerçek tarayıcı açan iki yeni test Playwright chromium kurulu
+  değilse görünür biçimde atlanır (CI tarayıcı kurmuyor).
+
 - **fix(kaplama): boş projede `forbid_dependency_change` ilk bağımlılık dosyasının yazılmasını engellemesin.** Ekransız
   deneme koşusunda model boş projede bu kapıyı seçti; kilitlenecek dosya yoktu ama muhafız ada baktığı için ajan
   `package.json` dosyasını hiç yazamadı, Faz 5 ve Faz 8 başarısız oldu. Bu kapının bağlam kuralı boştu (kardeşleri var

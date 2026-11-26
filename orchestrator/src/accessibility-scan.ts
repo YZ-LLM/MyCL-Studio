@@ -81,7 +81,15 @@ export async function runAccessibilityScan(url: string): Promise<A11yResult> {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: SCAN_TIMEOUT_MS });
-    await page.addScriptTag({ content: axeSource });
+    // KATI CSP (2026-11-27, ekransız deneme koşusu): eskiden `page.addScriptTag({ content })` sayfaya
+    // SATIR İÇİ bir <script> ekliyordu. `script-src` içinde 'unsafe-inline' olmayan her politika bunu
+    // engeller; MyCL her arayüzden tam da böyle bir politika istediği için (phase-05-ui şablonu) tarama
+    // politikaya uyan hiçbir sayfada koşamıyordu ("Executing inline script violates ... 'script-src 'self''").
+    // Artık kaynak hata ayıklama kanalından değerlendiriliyor (`page.evaluate`): DOM'a betik etiketi
+    // eklenmez, sayfanın politikası ATLATILMAZ (`bypassCSP` yok) — sayfanın kendi içeriği kullanıcının
+    // gördüğü kısıtlarla yüklenmeye devam eder, yalnız MyCL'in kendi aracı o kanaldan girer.
+    // Sondaki `undefined`: değerlendirme sonucu sayfadan geri taşınır; axe nesnesinin kendisi taşınmasın.
+    await page.evaluate(`${axeSource}\n;undefined`);
     // WCAG 2.1 A + AA etiketli kurallar — yaygın, anlamlı kapsam (deneysel/best-practice gürültüsü hariç).
     const raw = (await page.evaluate(async () => {
       // @ts-expect-error — axe sayfa bağlamına inject edildi (global).

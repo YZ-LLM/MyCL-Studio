@@ -392,6 +392,19 @@ describe("collectRunEvidence", () => {
     expect(r.screenNotBlank).toBe(false);
   });
 
+  it("boş ekran kaydı hata ayrıntısı taşısa da kanıt YOK (kayıt `blank_screen` ile başlar)", () => {
+    const r = collectRunEvidence([
+      e("visual-diff", "baseline=false routes=1 changed=1 page_errors=2"),
+      e("phase-6-deferred", "blank_screen routes=/ errors=2 | sayfa: x is not defined | konsol: y"),
+    ]);
+    expect(r.screenNotBlank).toBe(false);
+  });
+
+  it("görsel tarama kaydındaki hata sayısı tek başına 'boş' sayılmaz", () => {
+    const r = collectRunEvidence([e("visual-diff", "baseline=true routes=1 changed=0 page_errors=3"), e("phase-6-deferred", "")]);
+    expect(r.screenNotBlank).toBe(true);
+  });
+
   it("giriş zinciri taraması geçtiyse kanıt var", () => {
     expect(collectRunEvidence([e("entry-graph-pass")]).entryGraphOk).toBe(true);
   });

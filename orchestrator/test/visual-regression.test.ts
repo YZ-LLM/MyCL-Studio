@@ -1,11 +1,19 @@
-// visual-regression — saf yardımcılar + taban terfi testleri (tarayıcı AÇILMAZ; sentetik PNG).
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+// visual-regression — saf yardımcılar + taban terfi testleri (sentetik PNG, tarayıcı açılmaz) ve en
+// sonda boş ekranın nedenini yakalayan GERÇEK açılış (Playwright chromium + yerel http sunucusu;
+// tarayıcı kurulu değilse o testler görünür biçimde atlanır).
+import { describe, expect, it, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
+import { chromium } from "playwright";
 import { PNG } from "pngjs";
 import {
+  blankScreenDetail,
+  captureAndCompare,
+  clipPageError,
   comparePngBuffers,
   formatVisualReport,
   isNearlyBlank,
@@ -127,6 +135,104 @@ describe("formatVisualReport — SALT-RAPOR dili", () => {
     });
     expect(msg).toContain("⚠️");
     expect(msg).toContain("Boş görünen sayfa");
+    // REGRESYON KİLİDİ: hata dinlenmemiş sonuçta (alan yok) hata satırı uydurulmaz.
+    expect(msg).not.toContain("tarayıcı");
+  });
+
+  it("boş sayfanın açılışında görülen ilk birkaç hata mesaja girer, fazlası sayılır", () => {
+    const msg = formatVisualReport({
+      ...base,
+      diffs: [
+        {
+          route: "/",
+          status: "new",
+          nearlyBlank: true,
+          pageErrors: ["sayfa: a is not defined", "konsol: b", "konsol: c", "konsol: d"],
+          pageErrorCount: 6,
+        },
+      ],
+    });
+    expect(msg).toContain("tarayıcının bildirdiği hatalar (6)");
+    expect(msg).toContain("sayfa: a is not defined");
+    expect(msg).toContain("konsol: c");
+    expect(msg).not.toContain("konsol: d"); // yalnız ilk üçü
+    expect(msg).toContain("+3 daha");
+  });
+
+  it("boş sayfa ama tarayıcı hata bildirmediyse bu da açıkça yazılır", () => {
+    const msg = formatVisualReport({
+      ...base,
+      diffs: [{ route: "/", status: "new", nearlyBlank: true, pageErrors: [], pageErrorCount: 0 }],
+    });
+    expect(msg).toContain("konsol ya da sayfa hatası bildirmedi");
+  });
+
+  it("boş OLMAYAN sayfanın hataları boş ekran satırına karışmaz", () => {
+    const msg = formatVisualReport({
+      ...base,
+      diffs: [{ route: "/", status: "unchanged", diffRatio: 0, nearlyBlank: false, pageErrors: ["konsol: x"], pageErrorCount: 1 }],
+    });
+    expect(msg).not.toContain("konsol: x");
+    expect(msg).not.toContain("Boş görünen sayfa");
+  });
+});
+
+describe("clipPageError — tek satır, sınırlı uzunluk", () => {
+  it("satır sonlarını ve fazla boşluğu tek boşluğa indirir", () => {
+    expect(clipPageError("sayfa", "a\n   b\t c")).toBe("sayfa: a b c");
+  });
+  it("konum metinde yoksa sona eklenir, varsa yinelenmez", () => {
+    expect(clipPageError("konsol", "Failed to load resource", "http://x/src/main.jsx")).toBe(
+      "konsol: Failed to load resource @ http://x/src/main.jsx",
+    );
+    expect(clipPageError("konsol", "hata http://x/a.js içinde", "http://x/a.js")).toBe("konsol: hata http://x/a.js içinde");
+  });
+  it("çok uzun ileti kırpılır", () => {
+    const out = clipPageError("sayfa", "x".repeat(5000));
+    expect(out.length).toBeLessThanOrEqual(240);
+    expect(out.endsWith("…")).toBe(true);
+  });
+});
+
+describe("blankScreenDetail — Faz 6 kaydının ayrıntısı", () => {
+  it("ekran boş değilse boş dizgi (eski davranış)", () => {
+    expect(blankScreenDetail([{ route: "/", status: "new", nearlyBlank: false, pageErrors: ["konsol: x"], pageErrorCount: 1 }])).toBe("");
+    expect(blankScreenDetail([])).toBe("");
+  });
+
+  it("boş ama hata dinlenmemişse yalnız eski sözcük (sayı iddia edilmez)", () => {
+    expect(blankScreenDetail([{ route: "/", status: "new", nearlyBlank: true }])).toBe("blank_screen");
+  });
+
+  it("boş ve tarayıcı hata bildirmediyse errors=0 yazar", () => {
+    expect(blankScreenDetail([{ route: "/", status: "new", nearlyBlank: true, pageErrors: [], pageErrorCount: 0 }])).toBe(
+      "blank_screen routes=/ errors=0",
+    );
+  });
+
+  it("boş ve hata varsa `blank_screen` ile başlar, hatanın metnini taşır (ilk üçü)", () => {
+    const d = blankScreenDetail([
+      {
+        route: "/",
+        status: "new",
+        nearlyBlank: true,
+        pageErrors: ["sayfa: main is not defined", "konsol: b", "konsol: c", "konsol: d"],
+        pageErrorCount: 4,
+      },
+      { route: "/dolu", status: "new", nearlyBlank: false, pageErrors: ["konsol: başka rota"], pageErrorCount: 1 },
+    ]);
+    expect(d.startsWith("blank_screen routes=/ errors=4 | ")).toBe(true);
+    expect(d).toContain("sayfa: main is not defined");
+    expect(d).toContain("konsol: c");
+    expect(d).not.toContain("konsol: d");
+    expect(d).not.toContain("başka rota"); // boş olmayan rotanın hatası karışmaz
+  });
+
+  it("kayıt uzunluğu sınırlıdır", () => {
+    const uzun = Array.from({ length: 5 }, (_, i) => `konsol: ${String(i).repeat(239)}`);
+    const d = blankScreenDetail([{ route: "/", status: "new", nearlyBlank: true, pageErrors: uzun, pageErrorCount: 5 }]);
+    expect(d.length).toBeLessThanOrEqual(700);
+    expect(d.startsWith("blank_screen")).toBe(true);
   });
 });
 
@@ -167,4 +273,87 @@ describe("promoteVisualBaseline — taban terfi yaşam döngüsü", () => {
     // baseline oluşmadı
     await expect(fs.readdir(join(root, ".mycl", "visual-baseline"))).rejects.toThrow();
   });
+});
+
+// CANLI KANIT (ekransız deneme koşusu, 2026-11-27): Faz 6 `blank_screen` yazdı ama neden yoktu —
+// sayfayı açan kod tarayıcının konsolunu ve sayfa hatalarını hiç dinlemiyordu.
+describe("captureAndCompare — boş ekranın nedenini aynı açılışta yakalar (gerçek tarayıcı)", () => {
+  const KATI_POLITIKA =
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
+    "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+  let server: Server;
+  let url = "";
+  let root: string;
+  let tarayiciVar = false;
+
+  beforeAll(async () => {
+    try {
+      const b = await chromium.launch({ headless: true });
+      await b.close();
+      tarayiciVar = true;
+    } catch {
+      tarayiciVar = false;
+    }
+    const html = (body: string, head = ""): string =>
+      `<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Deneme</title>${head}</head><body>${body}</body></html>`;
+    server = createServer((req, res) => {
+      const sayfa = (icerik: string): void => {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": KATI_POLITIKA });
+        res.end(icerik);
+      };
+      if (req.url === "/") {
+        // Satır içi betik politikaya takılır (konsol hatası); dış betik yüklenir ve hata fırlatır
+        // (sayfa hatası). Gövde boş kalır → ekran tek renk.
+        return sayfa(html("", `<script>window.__satirIci = 1;</script><script src="/patla.js"></script>`));
+      }
+      if (req.url === "/dolu") {
+        return sayfa(html(`<div class="yarim"></div>`, `<link rel="stylesheet" href="/stil.css">`));
+      }
+      if (req.url === "/patla.js") {
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+        res.end(`throw new Error("mycl-deneme-hatasi");`);
+        return;
+      }
+      if (req.url === "/stil.css") {
+        res.writeHead(200, { "content-type": "text/css; charset=utf-8" });
+        res.end("body{margin:0}.yarim{width:50vw;height:100vh;background:#000}");
+        return;
+      }
+      res.writeHead(204);
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    root = await mkdtemp(join(tmpdir(), "mycl-visual-gercek-"));
+    await fs.mkdir(join(root, ".mycl"), { recursive: true });
+    await fs.writeFile(join(root, ".mycl", "help-pages.json"), JSON.stringify([{ route: "/" }, { route: "/dolu" }]));
+  }, 60_000);
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("sayfa hata verip boş kaldığında kayıt ve mesaj hatanın metnini içerir; öteki rotaya karışmaz", async (ctx) => {
+    if (!tarayiciVar) return ctx.skip("Playwright chromium kurulu değil");
+    const r = await captureAndCompare(url, root);
+    expect(r.ran).toBe(true);
+    const kok = r.diffs.find((d) => d.route === "/");
+    const dolu = r.diffs.find((d) => d.route === "/dolu");
+
+    expect(kok?.nearlyBlank).toBe(true);
+    const gorulen = (kok?.pageErrors ?? []).join("\n");
+    expect(gorulen).toContain("mycl-deneme-hatasi"); // yakalanmamış sayfa hatası
+    expect(gorulen).toContain("Content Security Policy"); // politikanın engellediği satır içi betik
+
+    // Politika atlatılmadı: satır içi betik gerçekten çalışmadıysa hata konsola düşmüştür (üstte) ve
+    // dolu sayfa boş sayılmaz, hata da taşımaz (rotalar birbirine karışmaz).
+    expect(dolu?.nearlyBlank).toBe(false);
+    expect(dolu?.pageErrors).toEqual([]);
+
+    const kayit = blankScreenDetail(r.diffs);
+    expect(kayit.startsWith("blank_screen routes=/ ")).toBe(true);
+    expect(kayit).toContain("mycl-deneme-hatasi");
+    expect(formatVisualReport(r)).toContain("mycl-deneme-hatasi");
+  }, 90_000);
 });
