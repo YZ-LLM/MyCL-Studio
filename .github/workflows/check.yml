@@ -28,8 +28,10 @@ jobs:
 
       # check.sh 6. adım MyCL'in kendi semgrep kurallarını doğrular. semgrep kurulu değilken o adım atlanıyordu →
       # CI'da HER ZAMAN atlanıp yeşil geçiyordu (bozuk kural Faz 10/13 kapısını sessizce düşürür).
+      # Sürüm SABİT: sabitlenmemiş kurulumda yeni bir semgrep sürümü, kod değişmeden CI'ı kırabilir.
+      # 1.187.0 bu depodaki iki kural klasörünü CI'da doğruladı (2026-11-26). Yükseltme bilinçli bir commit olsun.
       - name: Install semgrep
-        run: pipx install semgrep
+        run: pipx install semgrep==1.187.0
 
       - name: Run gate
         run: npm run check
