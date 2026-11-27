@@ -1,5 +1,22 @@
 ## 2026-11-27
 
+- **fix(kod haritası): yeni (boş) projede de çalışsın — kayıt anında stack yeniden belirlensin, arama stack bilinmeden de
+  yapılabilsin.** Ekransız deneme koşusu 23 (`aa6e094`, yeni arayüzlü proje): Faz 5 başında arama ve Faz 5 sonunda kayıt
+  "projenin stack'i bilinmiyor" diye atlandı; `state.stack` proje açılırken boş klasörden "unknown" alınıyor ve ancak faz
+  bittikten sonra yenileniyor (`index.ts`, `detectStack`), oysa Faz 5 sonunda dosyalar yerindeydi.
+  1. **Kayıt (`recordCodeMapAfterGate`):** `state.stack` biliniyorsa o (değişmedi); bilinmiyorsa kayıt anında projenin o
+     anki hâlinden `detectStack`. Hâlâ bilinmiyorsa görünür ileti ve kayıt yok (eskisi gibi).
+  2. **Arama (`prepareFromCodeMap`):** stack biliniyorsa yalnız aynı stack (değişmedi). Stack bilinmiyor ve projede kod
+     yoksa (`isExistingProject` ölçütü) bu fazın BÜTÜN stack'lerdeki, başka projelerden gelen senaryoları aranır;
+     puanlayıcı her adayın stack'ini ve çatılarını görür; isabet varsa yerleştirme aynı akış. Stack bilinmiyor ama projede
+     kod varsa aranmaz, görünür yazılır.
+  3. **İletiler** izlenen yolu söylüyor ("stack bilinmiyor, proje boş: bütün stack'lerde", "stack node-npm"); isabet
+     iletisi bulunan senaryonun stack'ini de yazıyor.
+  **Değişmeyenler (kural 14):** stack bilinen projede arama ve kayıt aynen (puanlayıcı metnine stack satırı yalnız bütün
+  stack'lerde aranırken eklenir). **Not:** `isExistingProject` `.mycl/spec.md`'yi de kod sayar; ilk iterasyonda bu dosya
+  yoktur. Golden prototipteki aynı koruma bilerek değişmedi (kapsam dışı). Yeni modül yok.
+  Testler `test/code-map.test.ts` içinde. Test ve kontrol koşturulmadı, yalnız derlendi.
+
 - **feat(kod haritası, ilk sürüm): MyCL kod yazma fazlarında yazdığı kodu yeniden kullanılabilir kayıtlar olarak
   saklasın; yeni işte kod yazmadan önce haritaya baksın, bulduğunu yerleştirip toplu inceletsin, bulamadığını yazsın.**
   Geliştiricinin açık isteği (Ümit, 2026-11-27; kural 15'in aradığı istek): "aynı kodları tekrar yazmak yerine …

@@ -32,6 +32,8 @@ import { computeVerdict } from "./harness-verdict.js";
 import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { globalConfigDir, globalConfigFile } from "./paths.js";
+import { detectStack } from "./intent-router/handlers/command.js";
+import { isExistingProject } from "./phase-1-codebase-probe.js";
 import { DENY_SEGMENTS } from "./prototype-cache.js";
 import { scoreChunks, scoreChunksViaCli } from "./relevance/classifier.js";
 import { keywordPreFilter } from "./relevance/relevance-engine.js";
@@ -544,11 +546,15 @@ export async function recordCodeMapAfterGate(opts: {
   if (!opts.gatePassed) return out; // kapı geçmeden kayıt YOK
   try {
     const project = basename(state.project_root);
-    const stack = state.stack ?? "unknown";
-    // Stack bilinmiyorsa kayıt alınmaz (module-stock'taki koruma aynen): "unknown" altında farklı dillerin kayıtları
+    // Stack: proje açılırken belirlenen değer biliniyorsa o (kural 14: bilinen projede aynen); bilinmiyorsa KAYIT
+    // ANINDA projenin o anki hâlinden (`detectStack`). Koşu 23: yeni projede açılışta "unknown" idi, Faz 5 sonunda
+    // dosyalar yerindeydi ama kayıt yine "unknown" görüp atlanıyordu (state.stack ancak faz bitince yenileniyor).
+    const known = state.stack && state.stack !== "unknown" ? state.stack : null;
+    const stack: string = known ?? String(detectStack(state.project_root));
+    // Hâlâ bilinmiyorsa kayıt alınmaz (module-stock'taki koruma): "unknown" altında farklı dillerin kayıtları
     // birbirine yerleştirilirdi.
     if (stack === "unknown") {
-      await visible(state, phase, "code-map-skipped", "🗺️ Kod haritası: projenin stack'i bilinmiyor — kayıt alınmadı.");
+      await visible(state, phase, "code-map-skipped", "🗺️ Kod haritası: projenin stack'i bilinmiyor (kayıt anında da belirlenemedi) — kayıt alınmadı.");
       return out;
     }
     const placed = opts.placed ?? [];
@@ -789,12 +795,18 @@ export interface PlacementResult {
 }
 
 /** SAF: senaryo kayıtlarını puanlanacak parçalara çevir. */
-export function scenarioChunks(scenarios: CodeMapRecord[], byId: Map<string, CodeMapRecord>): Chunk[] {
+export function scenarioChunks(
+  scenarios: CodeMapRecord[],
+  byId: Map<string, CodeMapRecord>,
+  /** Bütün stack'lerde aranırken adayın stack'i puanlayıcıya gösterilir. */
+  showStack = false,
+): Chunk[] {
   return scenarios.map((s) => ({
     id: s.id,
     source: "code-map",
     text: [
       s.name,
+      showStack ? `Stack: ${s.stack}` : "",
       s.description,
       s.acceptance_criteria?.length ? `Acceptance: ${s.acceptance_criteria.join(", ")}` : "",
       `Parts: ${(s.steps ?? []).map((id) => byId.get(id)?.name ?? id).join(", ")}`,
@@ -989,21 +1001,30 @@ export async function prepareFromCodeMap(state: State, config: MyclConfig, phase
     const stack = state.stack ?? "unknown";
     const current = currentRecords(await listRecords());
     const byId = new Map(current.map((r) => [r.id, r]));
-    if (stack === "unknown") {
-      await visible(state, phase, "code-map-search", "🗺️ Kod haritası: projenin stack'i bilinmiyor — haritasız devam (bugünkü akış).");
+    // Stack bilinmiyorsa: proje henüz boşsa (yeni proje; `isExistingProject` ölçütü) bu fazın BÜTÜN stack'lerdeki
+    // senaryoları aranır, puanlayıcı adayın stack'ini ve çatılarını görür (koşu 23: yeni projede açılışta stack
+    // "unknown"). Projede kod varsa aranmaz: o kodun stack'i belirlenemediği için başka dilin dosyaları yerleşebilirdi.
+    const allStacks = stack === "unknown";
+    if (allStacks && (await isExistingProject(state.project_root))) {
+      await visible(state, phase, "code-map-search", "🗺️ Kod haritası: projenin stack'i bilinmiyor ve projede kod var — aranmadı, haritasız devam (bugünkü akış).");
       return none;
     }
-    // Yalnız aynı stack + AYNI FAZIN kayıtları (Faz 5 arayüz, Faz 8 arka uç/test: Faz 5'in yasak yollarına arka uç
-    // dosyası yerleşmesin) + başka projelerin kayıtları (projenin kendi az önceki kaydı yeniden aranmasın).
+    const where = allStacks ? "stack bilinmiyor, proje boş: bütün stack'lerde" : `stack ${stack}`;
+    // Aynı stack (ya da boş projede bütün stack'ler) + AYNI FAZIN kayıtları (Faz 5 arayüz, Faz 8 arka uç/test: Faz 5'in
+    // yasak yollarına arka uç dosyası yerleşmesin) + başka projelerin kayıtları (projenin kendi kaydı yeniden aranmasın).
     const rootSha = sha256(state.project_root).slice(0, 16);
     const scenarios = current.filter(
-      (r) => r.level === "scenario" && r.stack === stack && r.provenance.phase === phase && r.provenance.project_root_sha !== rootSha,
+      (r) =>
+        r.level === "scenario" &&
+        (allStacks || r.stack === stack) &&
+        r.provenance.phase === phase &&
+        r.provenance.project_root_sha !== rootSha,
     );
     if (scenarios.length === 0) {
-      await visible(state, phase, "code-map-search", `🗺️ Kod haritası: bu stack (${stack}) ve Faz ${phase} için başka projeden senaryo kaydı yok — haritasız devam (bugünkü akış).`);
+      await visible(state, phase, "code-map-search", `🗺️ Kod haritası (${where}): Faz ${phase} için başka projeden senaryo kaydı yok — haritasız devam (bugünkü akış).`);
       return none;
     }
-    const candidates = keywordPreFilter(intent, scenarioChunks(scenarios, byId), 20);
+    const candidates = keywordPreFilter(intent, scenarioChunks(scenarios, byId, allStacks), 20);
     let best: { id: string; score: number } | null = null;
     try {
       const scored = isSubscriptionMode(config)
@@ -1015,7 +1036,7 @@ export async function prepareFromCodeMap(state: State, config: MyclConfig, phase
       return none;
     }
     if (!best) {
-      await visible(state, phase, "code-map-search", `🗺️ Kod haritası: ${scenarios.length} senaryo kaydı arandı, isabet yok — haritasız devam (bugünkü akış).`);
+      await visible(state, phase, "code-map-search", `🗺️ Kod haritası (${where}): ${scenarios.length} senaryo kaydı arandı, isabet yok — haritasız devam (bugünkü akış).`);
       return none;
     }
     const scenario = byId.get(best.id)!;
@@ -1037,7 +1058,7 @@ export async function prepareFromCodeMap(state: State, config: MyclConfig, phase
       state,
       phase,
       "code-map-placed",
-      `🗺️ Kod haritası: ${scenarios.length} senaryo arandı, '${scenario.name}' bulundu (puan ${best.score}). ${res.placed.length} dosya yerleştirildi${res.placed.length ? `: ${res.placed.map((p) => p.path).join(", ")}` : ""}${res.present.length ? `; ${res.present.length} dosya aynı içerikle zaten vardı` : ""}; ${res.parts.length} küçük parça ajana hazır parça olarak verildi.${skipped}`,
+      `🗺️ Kod haritası (${where}): ${scenarios.length} senaryo arandı, '${scenario.name}' bulundu (stack ${scenario.stack}, puan ${best.score}). ${res.placed.length} dosya yerleştirildi${res.placed.length ? `: ${res.placed.map((p) => p.path).join(", ")}` : ""}${res.present.length ? `; ${res.present.length} dosya aynı içerikle zaten vardı` : ""}; ${res.parts.length} küçük parça ajana hazır parça olarak verildi.${skipped}`,
     );
     if (res.placed.length === 0 && res.present.length === 0 && res.parts.length === 0) return none;
     let budget = INLINE_PARTS_BUDGET;

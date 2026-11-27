@@ -67,8 +67,8 @@ afterEach(async () => {
   else process.env.MYCL_HOME = origHome;
 });
 
-function state(root = proj): State {
-  return { project_root: root, stack: "node-npm", iteration_count: 1, intent_summary: "todo list" } as unknown as State;
+function state(root = proj, stack = "node-npm"): State {
+  return { project_root: root, stack, iteration_count: 1, intent_summary: "todo list" } as unknown as State;
 }
 
 const TODO_STORE = [
@@ -101,6 +101,24 @@ const STORE_UNIT = {
 async function seedProject(): Promise<void> {
   await mkdir(join(proj, "src"), { recursive: true });
   await writeFile(join(proj, "src", "todoStore.js"), TODO_STORE);
+}
+
+/** Kaynak projede (A) kayıt al (varsayılan Faz 5). */
+async function seedMapFromProjectA(phase = 5, stack = "node-npm", name = "Persist list in browser"): Promise<void> {
+  const a = await mkdtemp(join(tmpdir(), "mycl-codemap-A-"));
+  try {
+    await mkdir(join(a, "src"), { recursive: true });
+    await writeFile(join(a, "src", "todoStore.js"), TODO_STORE);
+    await recordCodeMapAfterGate({
+      state: state(a, stack),
+      phase,
+      gatePassed: true,
+      gatesPassed: [`phase-${phase}-complete`],
+      agentText: agentText({ units: [STORE_UNIT], scenarios: [{ key: "s1", name, steps: ["u1"] }] }),
+    });
+  } finally {
+    await rm(a, { recursive: true, force: true });
+  }
 }
 
 describe("kayıt doğrulaması — kaynak değerleriyle birebir geri çıkma", () => {
@@ -221,24 +239,6 @@ describe("faz kapısı koşulu", () => {
 });
 
 describe("kod yazmadan önce — haritadan yerleştirme", () => {
-  /** Kaynak projede (A) kayıt al (varsayılan Faz 5). */
-  async function seedMapFromProjectA(phase = 5): Promise<void> {
-    const a = await mkdtemp(join(tmpdir(), "mycl-codemap-A-"));
-    try {
-      await mkdir(join(a, "src"), { recursive: true });
-      await writeFile(join(a, "src", "todoStore.js"), TODO_STORE);
-      await recordCodeMapAfterGate({
-        state: state(a),
-        phase,
-        gatePassed: true,
-        gatesPassed: [`phase-${phase}-complete`],
-        agentText: agentText({ units: [STORE_UNIT], scenarios: [{ key: "s1", name: "Persist list in browser", steps: ["u1"] }] }),
-      });
-    } finally {
-      await rm(a, { recursive: true, force: true });
-    }
-  }
-
   it("isabet varken dosya yerleştiriliyor (bağlama değerleriyle), ajana toplu inceleme talimatı veriliyor", async () => {
     await seedMapFromProjectA();
     scoreCliMock.mockImplementation(async (_m: string, _i: string, chunks: Array<{ id: string }>) =>
@@ -331,5 +331,65 @@ describe("kod yazmadan önce — haritadan yerleştirme", () => {
     expect(res).toEqual({ promptAddition: "", placed: [] });
     expect(runCliMock).not.toHaveBeenCalled();
     expect(existsSync(join(proj, "src"))).toBe(false);
+  });
+});
+
+// CANLI KANIT (ekransız deneme koşusu 23, 2026-11-27): yeni projede açılışta stack "unknown"; Faz 5 başında arama ve Faz 5
+// sonunda kayıt "stack bilinmiyor" diye atlandı, oysa Faz 5 sonunda dosyalar yerindeydi (saniyeler sonra node-npm tespit edildi).
+describe("stack bilinmeyen (yeni) proje", () => {
+  const hit = async (_m: string, _i: string, chunks: Array<{ id: string }>) => chunks.map((c) => ({ ...c, score: 9, reason: "x" }));
+  const bindingReply = {
+    ok: true,
+    text: JSON.stringify({ kind: "binding_values", values: { entity: "task", Entity: "Task", storageKey: "tasks" } }),
+    toolUses: [],
+    turns: 1,
+  };
+
+  it("açılışta stack 'unknown', kayıt anında bildirim dosyası var → kayıt gerçek stack ile yazılır", async () => {
+    await seedProject();
+    await writeFile(join(proj, "package.json"), JSON.stringify({ name: "x" }));
+    const out = await recordCodeMapAfterGate({
+      state: state(proj, "unknown"),
+      phase: 5,
+      gatePassed: true,
+      gatesPassed: ["phase-5-complete"],
+      agentText: agentText({ units: [STORE_UNIT], scenarios: [] }),
+    });
+    expect(out.recorded).toHaveLength(1);
+    expect((await listRecords())[0]!.stack).toBe("node-npm");
+  });
+
+  it("boş proje, stack 'unknown', başka projeden senaryo var → bütün stack'lerde aranır, isabet yerleştirilir", async () => {
+    await seedMapFromProjectA(5, "node-npm");
+    scoreCliMock.mockImplementation(hit);
+    runCliMock.mockResolvedValue(bindingReply);
+    const res = await prepareFromCodeMap(state(proj, "unknown"), config, 5, "A task list stored in the browser");
+    expect(res.placed.map((p) => p.path)).toEqual(["src/taskStore.js"]);
+    // Puanlayıcı adayın stack'ini görür.
+    const chunks = scoreCliMock.mock.calls[0]![2] as Array<{ text: string }>;
+    expect(chunks[0]!.text).toContain("Stack: node-npm");
+    expect(chatMock.mock.calls.some((c) => String(c[1]).includes("stack bilinmiyor, proje boş: bütün stack'lerde"))).toBe(true);
+  });
+
+  it("stack 'unknown' ama projede kod var → aranmaz, görünür ileti", async () => {
+    await seedMapFromProjectA(5, "node-npm");
+    await seedProject(); // src/ var → isExistingProject true
+    const res = await prepareFromCodeMap(state(proj, "unknown"), config, 5, "task list");
+    expect(res).toEqual({ promptAddition: "", placed: [] });
+    expect(scoreCliMock).not.toHaveBeenCalled();
+    expect(chatMock.mock.calls.some((c) => String(c[1]).includes("stack'i bilinmiyor ve projede kod var — aranmadı"))).toBe(true);
+  });
+
+  it("REGRESYON: stack bilinen projede yalnız aynı stack'in kayıtları aranır", async () => {
+    await seedMapFromProjectA(5, "python-pip", "Python store");
+    await seedMapFromProjectA(5, "node-npm", "Node store");
+    scoreCliMock.mockImplementation(async (_m: string, _i: string, chunks: Array<{ id: string }>) =>
+      chunks.map((c) => ({ ...c, score: 2, reason: "x" })),
+    );
+    await prepareFromCodeMap(state(proj, "node-npm"), config, 5, "store");
+    const chunks = scoreCliMock.mock.calls[0]![2] as Array<{ text: string }>;
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.text).toContain("Node store");
+    expect(chunks[0]!.text).not.toContain("Stack:");
   });
 });
