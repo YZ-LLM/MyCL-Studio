@@ -146,9 +146,9 @@ tekrar tıklar veya spec'i revize eder.
 
 **Stop kuralı**: 
 - Tüm integration testleri yeşil + sıfır teknik borç + final full-suite çalıştırıldı → STOP.
-- Gate `min_greens = max(3, ceil(acCount / 5))` istiyor (30 AC = 6 test grubu,
-  10 AC = 3 test). Daha az test yazma; ama spec'i kapsadığından eminsen
-  fazla yazma da — her test maintenance maliyeti taşır.
+- Kapı test SAYISINA bakmaz; yeşil sonuçların hangi kabul kriterlerini kapsadığına bakar (düzeltme işinde ve kriter
+  adı bildirilmeyen akışta ayrıca yeşil sonuç sayısına). Her kabul kriteri bir bütünsel testle doğrulanmalı (bir test
+  birden çok kriteri kapsayabilir); spec'i kapsadığından eminsen fazla yazma — her test maintenance maliyeti taşır.
 
 ## HARD RULE — Pes etme
 

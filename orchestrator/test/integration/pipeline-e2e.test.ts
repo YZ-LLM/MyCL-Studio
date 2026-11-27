@@ -373,7 +373,8 @@ describe("pipeline e2e (Faz 2→17, mock LLM + oto-askq)", () => {
     // Phase 5 KOŞTU (skip değil) + ui-file-write doğrulaması geçti (bug fix kanıtı).
     expect(hasIn(events, "ui-file-write"), "ui-file-write (Phase 5 yazdı)").toBe(true);
     expect(hasComplete(events, 5), "phase-5-complete (fix sonrası geçer)").toBe(true);
-    // Phase 8 (TDD codegen) KOŞTU: ≥3 tdd-green.
+    // Phase 8 (TDD codegen) KOŞTU: ≥3 tdd-green. API kipi: yeşil olaylar ölçüt adı taşımıyor (gözlemci komutu yazar)
+    // → yeşil ölçüsü sayım eşiğidir (decideTddGate; ölçüt adı taşıyan akışta ölçü ölçüt kapsaması olurdu).
     const greens = events.filter((e) => e.event === "tdd-green").length;
     expect(greens, "≥3 tdd-green").toBeGreaterThanOrEqual(3);
     expect(hasComplete(events, 8), "phase-8-complete").toBe(true);

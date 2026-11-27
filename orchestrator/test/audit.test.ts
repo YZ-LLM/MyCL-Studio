@@ -305,7 +305,7 @@ describe("audit", () => {
         phase: 8,
         iteration: 2,
         status: "fail",
-        summary: "AC coverage yetersiz: 2/3 green",
+        summary: "yeşil sonuç bildirimi yetersiz: 2/3",
         discovered: ["testsiz kabul kriterleri: AC3"],
       };
       await appendHandoff(projectRoot, rec);

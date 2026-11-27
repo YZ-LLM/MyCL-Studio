@@ -1,7 +1,9 @@
 // phase-8 — TDD Implementation (codegen).
 //
 // Faz-spesifik: spec.md zorunlu, audit observer test/prod path + bash test cmd
-// pattern'lerini izler. Gate: greens >= 1 && son event "tdd-green" → complete.
+// pattern'lerini izler. Gate (decideTddGate): son sonuç "tdd-green" + MyCL'in son tam koşusu yeşil + sıfır teknik
+// borç + (düzeltme kipinde) kırmızı önce; yeşil ölçüsü düzeltme kipi dışında ölçüt adı taşıyan akışta ölçüt
+// kapsaması, öteki durumlarda yeşil sonuç olayı sayısı (`greens >= minGreens`).
 // tdd_compliance_score state'e patch olarak verilir.
 //
 // v15.7 (2026-05-27): Dosya header rot düzeltildi (eski "phase-9" yazıyordu).
@@ -99,6 +101,272 @@ export function acCoverage(
     covered: acIds.filter((id) => found.has(id)),
     uncovered: acIds.filter((id) => !found.has(id)),
   };
+}
+
+/** Kapının yeşil ölçüsü: bildirilen kabul ölçütü kapsaması mı, yeşil sonuç olayı sayısı mı. */
+export type TddGreenMeasure = "ac-kapsama" | "yeşil-sayısı";
+
+export interface TddGateInput {
+  isFixMode: boolean;
+  /** Spec'teki kabul ölçütü adları (boş olabilir). */
+  acIds: string[];
+  acCov: { tagged: boolean; covered: string[]; uncovered: string[] };
+  greens: number;
+  minGreens: number;
+  reds: number;
+  lastEvent: string | null;
+  finalSuiteRun: boolean;
+  techDebtCount: number;
+  techDebtPaths: string[];
+  reproOk: boolean;
+}
+
+export interface TddGateDecision {
+  pass: boolean;
+  measure: TddGreenMeasure;
+  /** Yeşil ölçüsü tuttu mu (sayım eşiği ya da ölçüt kapsaması — `measure`e göre). */
+  greensOk: boolean;
+  tddOk: boolean;
+  acCoverageOk: boolean;
+  /** Kullanıcıya ve `lastFailReason`a giden nedenler (geçerse boş). */
+  reasons: string[];
+  /** Model gücüyle düzelebilecek kod hatası mı (eskalasyon kararının girdisi; tekrar eden regresyon çağıranda). */
+  codeQualityFail: boolean;
+  /** Testler gerçekten yeşil ve "kırmızı önce" tatmin mi (oto-kabul güvenliği). */
+  suiteGreen: boolean;
+  /** 0-100 (yalnız geçişte anlamlı). */
+  score: number;
+  /** `phase-8-complete` ayrıntısı ve devir özeti için ölçü metni. */
+  measureText: string;
+}
+
+/**
+ * SAF (2026-11-27, ekransız deneme koşusu 18): Faz 8 kapısının son kararı.
+ *
+ * KANIT: altı kabul ölçütünün altısı tek bir `MYCL_TEST_RESULT: green: AC1,…,AC6` satırıyla bildirildi, MyCL'in
+ * kendi son koşusu yeşildi; kapı `greens=2 < minGreens=3` diye "AC coverage yetersiz: 2/3 green" ile düştü.
+ * `greens` test sayısı değil, yeşil SONUÇ OLAYI sayısıdır (CLI kipinde: ajanın sonuç satırları + MyCL'in son koşusu);
+ * talimat tek koşuda bütün ölçütleri tek satırda bildirmeye izin veriyordu.
+ *
+ * KURAL: düzeltme kipi DIŞINDA, ölçüt listesi boş değilken ve yeşil olaylar ölçüt adı taşıyorken (`acCov.tagged`),
+ * yeşil ölçüsü sayım değil ÖLÇÜT KAPSAMASIDIR: sayım eşiği kapıyı düşürmez; kapsanmayan ölçüt varsa kapıyı
+ * `acCoverageOk` düşürür ("testsiz kabul kriterleri" iletisi). Ölçüt adı yoksa, ölçüt listesi boşsa ya da düzeltme
+ * kipindeyse sayım eşiği AYNEN (`greens >= minGreens`).
+ * BİLİNEN SINIR: ölçüt adları da yeşil sayısı da ajanın kendi bildirimidir; bu kural kapıyı güçlendirmez, yalnız
+ * talimata uyan ajanın biçim yüzünden düşmesini kaldırır. Gerçek kanıt MyCL'in kendi son koşusudur (`finalSuiteRun`,
+ * son olayın yeşil olması).
+ */
+export function decideTddGate(i: TddGateInput): TddGateDecision {
+  const byCoverage = !i.isFixMode && i.acIds.length > 0 && i.acCov.tagged;
+  const measure: TddGreenMeasure = byCoverage ? "ac-kapsama" : "yeşil-sayısı";
+  const greensOk = byCoverage ? true : i.greens >= i.minGreens;
+  const tddOk = greensOk && i.lastEvent === "tdd-green";
+  const debtOk = i.techDebtCount === 0;
+  // YZLLM 2026-06-12: FIX modunda tüm-spec AC kapsama ZORUNLU DEĞİL (bkz. çağıran).
+  const acCoverageOk = i.isFixMode || !i.acCov.tagged || i.acCov.uncovered.length === 0;
+  const pass = tddOk && debtOk && i.finalSuiteRun && i.reproOk && acCoverageOk;
+  const measureText = byCoverage
+    ? `ölçü=ac-kapsama ${i.acCov.covered.length}/${i.acIds.length}`
+    : `ölçü=yeşil-sayısı ${i.greens}/${i.minGreens}`;
+
+  const reasons: string[] = [];
+  if (!pass) {
+    // Sayım eşiği yalnız ölçü sayımken düşürür; ileti NEYİN sayıldığını söyler (eskiden "AC coverage" diyordu).
+    if (!greensOk) reasons.push(`yeşil sonuç bildirimi yetersiz: ${i.greens}/${i.minGreens}`);
+    if (i.lastEvent !== "tdd-green" || !i.finalSuiteRun) {
+      reasons.push(
+        i.lastEvent === "tdd-red" || i.reds > 0
+          ? "final tam-suite KIRMIZI — son doğrulama (npm test) geçmedi"
+          : "final tam-suite doğrulaması yapılamadı (yeşil sonuç yok)",
+      );
+    }
+    if (!debtOk)
+      reasons.push(
+        `${i.techDebtCount} dosyada tech debt: ${i.techDebtPaths.slice(0, 3).join(", ")}${
+          i.techDebtPaths.length > 3 ? "..." : ""
+        }`,
+      );
+    if (!i.reproOk) reasons.push("repro-first ihlali: bug'ı yeniden üreten failing test (kırmızı→yeşil) yok");
+    if (!acCoverageOk)
+      reasons.push(
+        `testsiz kabul kriterleri (AC→test): ${i.acCov.uncovered.join(", ")} — ilgili testi yaz veya bütünsel testi AC ile etiketle (MYCL_TEST_RESULT: green: ACx)`,
+      );
+  }
+  const codeQualityFail = !greensOk || i.lastEvent !== "tdd-green" || !i.finalSuiteRun || !debtOk || !i.reproOk;
+  const suiteGreen = i.finalSuiteRun && i.lastEvent === "tdd-green" && greensOk && i.reproOk;
+  // Puan: ölçü × 100 − teknik borç cezası (5 puan/bulgu). Min 0.
+  const ratio = byCoverage ? i.acCov.covered.length / i.acIds.length : i.greens / Math.max(1, i.minGreens);
+  const score = Math.max(0, Math.min(100, Math.round(ratio * 100)) - i.techDebtCount * 5);
+  return { pass, measure, greensOk, tddOk, acCoverageOk, reasons, codeQualityFail, suiteGreen, score, measureText };
+}
+
+/**
+ * SAF (2026-11-27): ajanın `MYCL_TEST_RESULT` satırının denetime yazılacak ayrıntısı. Eskiden `detail.slice(0, 100)`
+ * idi: yirmiden fazla ölçüt tek satırda bildirilince sondaki adlar kesiliyor ve kapsanmamış sayılıyordu. Artık ölçüt
+ * adları (`ACn`) KESİLMEDEN başta tutulur; serbest metin 100 karakterde kesilir, kesme sözcük ortasına düşerse
+ * yarım sözcük atılır.
+ */
+export function testResultAuditDetail(detail: string): string {
+  const full = detail ?? "";
+  const ids = [...new Set(full.match(/\bAC\d+\b/g) ?? [])];
+  let text = full.slice(0, 100);
+  // Kesme bir sözcüğün ortasına düştüyse yarım sözcük atılır: `… AC12` → `… AC1` başka bir ölçütü YANLIŞLIKLA
+  // kapsanmış gösterirdi (inceleme bulgusu; eski `slice(0, 100)`te de vardı).
+  if (full.length > 100 && /\w$/.test(text) && /\w/.test(full[100] ?? "")) text = text.replace(/\w+$/, "");
+  // Kesilen metin bütün adları taşıyorsa eskisiyle birebir aynı ayrıntı (≤100 karakterlik bildirimde değişiklik yok).
+  if (ids.every((id) => new RegExp(`\\b${id}\\b`).test(text))) return text;
+  return `${ids.join(",")} | ${text}`;
+}
+
+/** `evaluateReproFirst` girdisi — denetim olayları bu iterasyonun Faz 8 olaylarıdır. */
+export interface ReproFirstInput {
+  projectRoot: string;
+  isFixMode: boolean;
+  pendingBackendFix: boolean;
+  checkpointRef: string | null;
+  fixSnapshot: FixSnapshot | null;
+  events: Array<{ event: string }>;
+}
+
+/** Değişen dosya listesinin durumu (`gate repro` izinde ayrı ayrı). */
+export type ReproListState =
+  | "kipte-değil"
+  | "yedek-yok"
+  | "git-okunamadı"
+  | "kopya-okunamadı"
+  | "liste-boş"
+  | "liste-güvenilir";
+
+export interface ReproFirstResult {
+  reproRequired: boolean;
+  reproOk: boolean;
+  exemptCategory: string | null;
+  changed: string[] | null;
+  listState: ReproListState;
+  /** Git yolunda statik kanıt denemesi: "denenmedi" | "tuttu" | "kanıt tutmadı ya da yeni dosya var" | "okunamadı". */
+  staticProof: string;
+}
+
+/** SAF: `gate repro` iz satırının alanları (en çok 20 yol; fazlası sayıyla). */
+export function reproTraceFields(isFixMode: boolean, r: ReproFirstResult): Record<string, unknown> {
+  const changed = r.changed ?? [];
+  const runtime = changed.filter((f) => isRuntimeProdFile(f));
+  const cap = (list: string[]) =>
+    list.length > 20 ? [...list.slice(0, 20), `… +${list.length - 20} dosya daha`] : list;
+  return {
+    fix_mode: isFixMode,
+    repro_required: r.reproRequired,
+    repro_ok: r.reproOk,
+    exempt_category: r.exemptCategory,
+    list_state: r.listState,
+    static_proof: r.staticProof,
+    changed_count: r.changed === null ? null : changed.length,
+    changed: cap(changed),
+    runtime_prod_count: runtime.length,
+    runtime_prod: cap(runtime),
+  };
+}
+
+/**
+ * Fix modu "kırmızı önce" (repro-first) kararı. 2026-11-27'de `evaluateGate` içinden DAVRANIŞ DEĞİŞMEDEN çıkarıldı
+ * (testlenebilsin ve kararın girdileri kayda geçsin — koşu 18'de muafiyetin neden uygulanmadığı hiçbir kayıtta yoktu).
+ * Muafiyet varsa `repro-exempt` denetim satırını yazar; sonunda `gate repro` iz satırını yazar. Kapının kararını
+ * DEĞİŞTİRMEZ.
+ */
+export async function evaluateReproFirst(i: ReproFirstInput): Promise<ReproFirstResult> {
+  // Fix modu: repro-first ZORUNLU — kırmızı (repro) önce, sonra yeşil sırası
+  // (YZLLM prensip 1: repro yazmadan dokundurma). v15.10: yalnız MANTIK
+  // değişikliklerinde zorunlu — backend fix her zaman; UI fix'te değişen
+  // dosyalarda stil/markup dışı kod varsa. Salt-kozmetik tweak → muaf (repro
+  // testi anlamsız). Fix dışı: muaf.
+  let reproRequired = i.isFixMode && i.pendingBackendFix;
+  let changedForRepro: string[] | null = null;
+  let listState: ReproListState = i.isFixMode ? "yedek-yok" : "kipte-değil";
+  let staticProof = "denenmedi";
+  if (i.isFixMode && i.checkpointRef) {
+    try {
+      changedForRepro = await getChangedFiles(i.projectRoot, i.checkpointRef);
+      listState = changedForRepro.length > 0 ? "liste-güvenilir" : "liste-boş";
+      if (!reproRequired) reproRequired = changedForRepro.some((f) => !isCosmeticFile(f));
+    } catch {
+      listState = "git-okunamadı";
+      reproRequired = true; // belirsizse güvenli taraf: repro iste
+    }
+  } else if (i.isFixMode && i.fixSnapshot?.method === "copy") {
+    // KÖK FIX (YZLLM 2026-07-15, cave döngüsü): git-checkpoint YOK (foreign/copy/non-git → checkpointRef=null) ama
+    // copy-yedek VAR → değişen dosyaları İÇERİK-farkıyla türet → repro-first muafiyetleri (test-only/config-only)
+    // git ile AYNI çalışsın (parity; imkansız-repro döngüsü kırılır). changedFilesVsSnapshot null (okuma güvenilmez)
+    // → changedForRepro null kalır + reproRequired DOKUNULMAZ (fail-safe = repro zorunlu; muafiyet yalnız GÜVENİLİR
+    // değişiklik-listesinde düşer, eksik listeyle yanlış "test-only" YOK).
+    try {
+      changedForRepro = await changedFilesVsSnapshot(i.fixSnapshot, i.projectRoot);
+      listState =
+        changedForRepro === null ? "kopya-okunamadı" : changedForRepro.length > 0 ? "liste-güvenilir" : "liste-boş";
+      if (changedForRepro && !reproRequired) reproRequired = changedForRepro.some((f) => !isCosmeticFile(f));
+    } catch {
+      listState = "kopya-okunamadı";
+      reproRequired = true; // belirsizse güvenli taraf: repro iste
+    }
+  }
+  // TEK GENERIC MUAFİYET (YZLLM 2026-07-16, "çözümler her zaman generic"): eski üç reaktif
+  // görev-sınıfı bloğu (static-only 06-19, test-only samsung 06-20, config-only Vestel 06-21)
+  // tek kurala indi — repro zorunlu ⇔ değişenler içinde static olduğu KANITLANAMAYAN en az bir
+  // RUNTIME PROD dosyası var (isRuntimeProdFile = kaynak uzantı + !test + !kök-build-config).
+  //  - runtime prod YOK (test/config/kozmetik/manifest/feature karışımı dahil) → repro imkansız/anlamsız → muaf.
+  //  - runtime prod VAR + git checkpoint → static-only kanıtı denenir. MAHKEME FIX (A2): kanıt diff'i
+  //    yalnız runtime-prod'a DEĞİL, test+kozmetik DIŞINDAKİ TÜM değişen dosyalara bakar (staticProofPaths) —
+  //    kaynak-uzantısız ama davranış taşıyan dosya (data.json/.sql/.sh…) kanıtı bozar, muafiyet düşmez.
+  //    (Kasıtlı delta korunur: test dosyasına eklenen runtime satır prod kanıtını bozmaz; kozmetik tanımı
+  //    gereği mantık taşımaz.) Untracked yeni dosya diff'te görünmez → static sayılmaz (güvenli taraf;
+  //    MAHKEME FIX A3: kontrol substring değil, diff dosya-başlıklarının parse'ı — filesInUnifiedDiff).
+  //  - copy yolunda satır-diff kanıtı yok → runtime prod değiştiyse repro AYNEN zorunlu (fail-safe).
+  // changedForRepro null (tespit güvenilmez) → HİÇ muafiyet yok (fail-safe). Suite-green (tddOk) +
+  // tech-debt + AC-coverage kontrolleri AYNEN kalır → gate ZAYIFLAMAZ.
+  let exemptCategory: string | null = null;
+  if (reproRequired && changedForRepro && changedForRepro.length > 0) {
+    if (nonRuntimeProdExempt(changedForRepro)) {
+      exemptCategory = "runtime-prod-değişikliği-yok";
+    } else if (i.checkpointRef) {
+      try {
+        const evidencePaths = staticProofPaths(changedForRepro);
+        const diff = await getDiffSinceRef(i.projectRoot, i.checkpointRef, evidencePaths);
+        const diffFiles = filesInUnifiedDiff(diff);
+        // Kanıt kümesindeki dosya diff'te YOKSA yeni (untracked) dosyadır → olası runtime kod, static sayma.
+        const hasNewFile = evidencePaths.some((f) => !diffFiles.has(f));
+        if (diff && !hasNewFile && isStaticOnlyChange(diff)) {
+          exemptCategory = "static-only";
+          staticProof = "tuttu";
+        } else {
+          staticProof = "kanıt tutmadı ya da yeni dosya var";
+        }
+      } catch {
+        staticProof = "okunamadı";
+        /* belirsizse reproRequired aynı kalır (güvenli taraf) */
+      }
+    }
+    if (exemptCategory) {
+      reproRequired = false;
+      await appendAudit(i.projectRoot, {
+        ts: Date.now(),
+        phase: 8,
+        event: "repro-exempt",
+        caller: "mycl-orchestrator",
+        detail: `kategori=${exemptCategory} dosya=${changedForRepro.length} — runtime kırmızı→yeşil imkansız/anlamsız; suite-green+AC-coverage+tech-debt guard'ları AYNEN kalır`,
+      }).catch((e) => log.error("phase-8", "repro-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
+    }
+  }
+  const reproOk = !reproRequired || hasReproRedThenGreen(i.events);
+  const result: ReproFirstResult = {
+    reproRequired,
+    reproOk,
+    exemptCategory,
+    changed: changedForRepro,
+    listState,
+    staticProof,
+  };
+  // İz satırı (kapının kararını değiştirmez): `gate evaluate` satırına dokunulmadı, bu ikinci satırdır.
+  log.info("phase-8", "gate repro", reproTraceFields(i.isFixMode, result));
+  return result;
 }
 
 /**
@@ -494,6 +762,9 @@ export class Phase8Controller {
         "koşumundan (`npm test` vb.) SONRA, gördüğün gerçek çıktıya göre TEK satır yaz:\n" +
         "- Testler GEÇTİYSE (exit 0, PASS): `MYCL_TEST_RESULT: green: <kapsanan AC-id'ler; örn. AC3 veya AC3,AC4>`\n" +
         "  (AC→test izlenebilirliği: hangi kabul kriterini doğruladığını yaz; bütünsel test birden çok AC kapsıyorsa virgülle.)\n" +
+        "- Spec'teki HER kabul kriteri en az bir yeşil sonuç satırında adıyla geçmeli. Kapsama için satır sayısı önemli " +
+        "değil: tek koşuda hepsi geçtiyse tek satırda virgülle yaz; kriter çoksa birden çok satıra bölebilirsin. Yine de " +
+        "HER test koşumundan sonra bir satır yaz — düzeltme işinde kapı yeşil sonuç satırlarının SAYISINA da bakar.\n" +
         "- Testler BAŞARISIZSA: `MYCL_TEST_RESULT: red: <kısa neden>`\n" +
         "Test çıktısında PASS görmeden ASLA green deme. MyCL son testi KENDİ de koşup " +
         "doğrular — yanlış green gate'i geçirmez, sadece teknik borç gizler.";
@@ -642,7 +913,8 @@ export class Phase8Controller {
     await this.runIntegrityAnchor();
 
     // Gate evaluation (v15.2.4 "ASLA TEKNİK BORÇ BIRAKMA" enforcement):
-    //   1. AC sayısı kadar tdd-green (spec'in her AC'si yeşil olmalı)
+    //   1. Yeşil ölçüsü: düzeltme kipi dışında ölçüt adı taşıyan akışta her ölçüt bir yeşil sonuçta adıyla geçmeli
+    //      (ölçüt kapsaması); öteki durumlarda yeşil sonuç OLAYI sayısı ≥ minGreens (test sayısı değil — 2026-11-27)
     //   2. Son event tdd-green
     //   3. Tech debt sıfır — her tdd-tech-debt-detected sonrası aynı path
     //      için tdd-tech-debt-clean event'i gelmiş olmalı (temizlendi)
@@ -729,10 +1001,11 @@ export class Phase8Controller {
     // AC sayısı — spec.md'den çıkar (v15.7: cache'li).
     const acCount = await this.getAcCount();
     // v15.7 (2026-05-25): Integration-first TDD — her AC için ayrı test
-    // ZORUNLU değil. Gate `min_greens = max(3, ceil(acCount/5))` — 30 AC için
-    // 6 grup test yeterli (uçtan uca senaryolar). Kullanıcı talebi: "TDD
-    // sürecinde gereksiz testler yazmasın, bütünsel testler yapsın".
-    // AC sayısı bilinmiyorsa 1'e fallback.
+    // ZORUNLU değil. Kullanıcı talebi: "TDD sürecinde gereksiz testler yazmasın, bütünsel testler yapsın".
+    // `min_greens = max(3, ceil(acCount/5))` yeşil sonuç OLAYI sayısıdır (CLI kipinde ajanın `MYCL_TEST_RESULT`
+    // satırları + MyCL'in son koşusu), test sayısı DEĞİL. 2026-11-27 (koşu 18): düzeltme kipi dışında ölçüt adı
+    // taşıyan akışta bu eşik kapıyı düşürmez — yeşil ölçüsü ölçüt kapsamasıdır (decideTddGate). AC sayısı
+    // bilinmiyorsa 1'e fallback.
     const minGreens =
       acCount > 0 ? Math.max(3, Math.ceil(acCount / 5)) : 1;
 
@@ -745,9 +1018,11 @@ export class Phase8Controller {
       covered: [],
       uncovered: [],
     };
+    let acIds: string[] = [];
     try {
+      acIds = await this.getAcIds();
       acCov = acCoverage(
-        await this.getAcIds(),
+        acIds,
         p9.filter((e) => e.event === "tdd-green").map((e) => e.detail ?? ""),
       );
     } catch (e) {
@@ -758,7 +1033,7 @@ export class Phase8Controller {
     // AC2..AC15'e test istemek küçük fix'i koca spec'le yargılamaktı (yanlış-fail → boş eskalasyon). Fix'in KENDİ
     // davranışını repro-first (reproRequired) test eder; regresyonu final anchor (npm test) yakalar. Greenfield
     // (fix-dışı) codegen'de tam AC izlenebilirliği aynen zorunlu kalır.
-    const acCoverageOk = this.isFixMode || !acCov.tagged || acCov.uncovered.length === 0;
+    // (acCoverageOk artık decideTddGate içinde hesaplanır — aynı ifade.)
 
     // Final full-suite: son 10 event içinde en az 1 tdd-green olmalı
     // (Bash test komutu + Claude'un final run'ı). Daha sıkı versiyon
@@ -794,78 +1069,34 @@ export class Phase8Controller {
       return "fail"; // rollback YOK (rollbackFixIfNeeded çağrılmaz): fix doğru olabilir, suite ortam yüzünden koşmadı.
     }
 
-    const tddOk = greens >= minGreens && lastEvent === "tdd-green";
-    const debtOk = techDebtCount === 0;
-    // Fix modu: repro-first ZORUNLU — kırmızı (repro) önce, sonra yeşil sırası
-    // (YZLLM prensip 1: repro yazmadan dokundurma). v15.10: yalnız MANTIK
-    // değişikliklerinde zorunlu — backend fix her zaman; UI fix'te değişen
-    // dosyalarda stil/markup dışı kod varsa. Salt-kozmetik tweak → muaf (repro
-    // testi anlamsız). Fix dışı: muaf.
-    let reproRequired = this.isFixMode && Boolean(this.state.pending_backend_fix);
-    let changedForRepro: string[] | null = null;
-    if (this.isFixMode && this.checkpointRef) {
-      try {
-        changedForRepro = await getChangedFiles(this.state.project_root, this.checkpointRef);
-        if (!reproRequired) reproRequired = changedForRepro.some((f) => !isCosmeticFile(f));
-      } catch {
-        reproRequired = true; // belirsizse güvenli taraf: repro iste
-      }
-    } else if (this.isFixMode && this.fixSnapshot?.method === "copy") {
-      // KÖK FIX (YZLLM 2026-07-15, cave döngüsü): git-checkpoint YOK (foreign/copy/non-git → checkpointRef=null) ama
-      // copy-yedek VAR → değişen dosyaları İÇERİK-farkıyla türet → repro-first muafiyetleri (test-only/config-only)
-      // git ile AYNI çalışsın (parity; imkansız-repro döngüsü kırılır). changedFilesVsSnapshot null (okuma güvenilmez)
-      // → changedForRepro null kalır + reproRequired DOKUNULMAZ (fail-safe = repro zorunlu; muafiyet yalnız GÜVENİLİR
-      // değişiklik-listesinde düşer, eksik listeyle yanlış "test-only" YOK).
-      try {
-        changedForRepro = await changedFilesVsSnapshot(this.fixSnapshot, this.state.project_root);
-        if (changedForRepro && !reproRequired) reproRequired = changedForRepro.some((f) => !isCosmeticFile(f));
-      } catch {
-        reproRequired = true; // belirsizse güvenli taraf: repro iste
-      }
-    }
-    // TEK GENERIC MUAFİYET (YZLLM 2026-07-16, "çözümler her zaman generic"): eski üç reaktif
-    // görev-sınıfı bloğu (static-only 06-19, test-only samsung 06-20, config-only Vestel 06-21)
-    // tek kurala indi — repro zorunlu ⇔ değişenler içinde static olduğu KANITLANAMAYAN en az bir
-    // RUNTIME PROD dosyası var (isRuntimeProdFile = kaynak uzantı + !test + !kök-build-config).
-    //  - runtime prod YOK (test/config/kozmetik/manifest/feature karışımı dahil) → repro imkansız/anlamsız → muaf.
-    //  - runtime prod VAR + git checkpoint → static-only kanıtı denenir. MAHKEME FIX (A2): kanıt diff'i
-    //    yalnız runtime-prod'a DEĞİL, test+kozmetik DIŞINDAKİ TÜM değişen dosyalara bakar (staticProofPaths) —
-    //    kaynak-uzantısız ama davranış taşıyan dosya (data.json/.sql/.sh…) kanıtı bozar, muafiyet düşmez.
-    //    (Kasıtlı delta korunur: test dosyasına eklenen runtime satır prod kanıtını bozmaz; kozmetik tanımı
-    //    gereği mantık taşımaz.) Untracked yeni dosya diff'te görünmez → static sayılmaz (güvenli taraf;
-    //    MAHKEME FIX A3: kontrol substring değil, diff dosya-başlıklarının parse'ı — filesInUnifiedDiff).
-    //  - copy yolunda satır-diff kanıtı yok → runtime prod değiştiyse repro AYNEN zorunlu (fail-safe).
-    // changedForRepro null (tespit güvenilmez) → HİÇ muafiyet yok (fail-safe). Suite-green (tddOk) +
-    // tech-debt + AC-coverage kontrolleri AYNEN kalır → gate ZAYIFLAMAZ.
-    if (reproRequired && changedForRepro && changedForRepro.length > 0) {
-      let exemptCategory: string | null = null;
-      if (nonRuntimeProdExempt(changedForRepro)) {
-        exemptCategory = "runtime-prod-değişikliği-yok";
-      } else if (this.checkpointRef) {
-        try {
-          const evidencePaths = staticProofPaths(changedForRepro);
-          const diff = await getDiffSinceRef(this.state.project_root, this.checkpointRef, evidencePaths);
-          const diffFiles = filesInUnifiedDiff(diff);
-          // Kanıt kümesindeki dosya diff'te YOKSA yeni (untracked) dosyadır → olası runtime kod, static sayma.
-          const hasNewFile = evidencePaths.some((f) => !diffFiles.has(f));
-          if (diff && !hasNewFile && isStaticOnlyChange(diff)) exemptCategory = "static-only";
-        } catch {
-          /* belirsizse reproRequired aynı kalır (güvenli taraf) */
-        }
-      }
-      if (exemptCategory) {
-        reproRequired = false;
-        await appendAudit(this.state.project_root, {
-          ts: Date.now(),
-          phase: 8,
-          event: "repro-exempt",
-          caller: "mycl-orchestrator",
-          detail: `kategori=${exemptCategory} dosya=${changedForRepro.length} — runtime kırmızı→yeşil imkansız/anlamsız; suite-green+AC-coverage+tech-debt guard'ları AYNEN kalır`,
-        }).catch((e) => log.error("phase-8", "repro-exempt audit yazılamadı (denetim izi eksik)", { error: String(e) }));
-      }
-    }
-    const reproOk = !reproRequired || hasReproRedThenGreen(p9);
-    if (tddOk && debtOk && finalSuiteRun && reproOk && acCoverageOk) {
+    // "Kırmızı önce" (repro-first) kararı — davranış eskisiyle aynı; 2026-11-27'den beri kararın girdileri
+    // `gate repro` iz satırına yazılır (koşu 18: muafiyetin neden uygulanmadığı hiçbir kayıtta yoktu).
+    const repro = await evaluateReproFirst({
+      projectRoot: this.state.project_root,
+      isFixMode: this.isFixMode,
+      pendingBackendFix: Boolean(this.state.pending_backend_fix),
+      checkpointRef: this.checkpointRef,
+      fixSnapshot: this.fixSnapshot,
+      events: p9,
+    });
+    const reproOk = repro.reproOk;
+    // Son karar SAF işlevde (decideTddGate): düzeltme kipi dışında ölçüt adı taşıyan akışta yeşil ölçüsü ölçüt
+    // kapsamasıdır, sayım eşiği düşürmez (koşu 18); öteki durumlarda sayım eşiği aynen.
+    const gate = decideTddGate({
+      isFixMode: this.isFixMode,
+      acIds,
+      acCov,
+      greens,
+      minGreens,
+      reds,
+      lastEvent,
+      finalSuiteRun,
+      techDebtCount,
+      techDebtPaths,
+      reproOk,
+    });
+    const { tddOk, acCoverageOk } = gate;
+    if (gate.pass) {
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 8,
@@ -873,12 +1104,10 @@ export class Phase8Controller {
         // açıklaması yok" yanlış-negatifi → faz tekrar-tekrar koşar (döngü).
         event: "phase-8-complete",
         caller: "mycl-orchestrator",
-        detail: `green=${greens}/${minGreens} debt=${techDebtCount} tdd=${tddOk} suite=${finalSuiteRun} repro=${reproOk} ac=${acCoverageOk}`,
+        detail: `green=${greens}/${minGreens} debt=${techDebtCount} tdd=${tddOk} suite=${finalSuiteRun} repro=${reproOk} ac=${acCoverageOk} ${gate.measureText}`,
       });
-      // Score: AC coverage × 100 − tech debt penalty (5 puan/bulgu). Min 0.
-      const acCovRatio = greens / Math.max(1, minGreens);
-      const baseScore = Math.min(100, Math.round(acCovRatio * 100));
-      const score = Math.max(0, baseScore - techDebtCount * 5);
+      // Puan: ölçü × 100 − teknik borç cezası (decideTddGate; ölçü kapsamaysa kapsanan/toplam ölçüt).
+      const score = gate.score;
       // v15.9: önceki patch'i koru (pending_backend_fix:undefined kaybolmasın) +
       // fix checkpoint ref'ini köprüle (advanceToNextPhase scoped kapsamı bu
       // commit'ten itibaren hesaplar = tam fix diff'i). Checkpoint yoksa undefined.
@@ -894,7 +1123,7 @@ export class Phase8Controller {
           phase: 8,
           iteration: this.state.iteration_count ?? 1,
           status: "complete",
-          summary: `green=${greens} red=${reds} tech_debt=${techDebtCount} score=${score}`,
+          summary: `green=${greens} red=${reds} tech_debt=${techDebtCount} score=${score} ${gate.measureText}`,
         });
       } catch (e) {
         log.warn("phase-8", "handoff write failed (non-blocking)", e);
@@ -905,49 +1134,35 @@ export class Phase8Controller {
     }
     // Fail nedenini kullanıcıya görünür yap. YZLLM 2026-06-12: mesajlar DÜRÜST — eski hali yanıltıcıydı
     // ("3/3 green" gösterip "yetersiz" diyordu; "çalıştırılmadı" derken aslında KOŞUP kırmızıya dönmüştü).
-    const reasons: string[] = [];
-    // Yeşil sayısı GERÇEKTEN azsa kapsam-yetersiz; aksi halde sorun yeşil sayısı değil.
-    if (greens < minGreens) reasons.push(`AC coverage yetersiz: ${greens}/${minGreens} green`);
-    // Final tam-suite: koştu ama yeşil değil = KIRMIZI ("çalıştırılmadı" değil). Hiç yeşil yoksa + kırmızı da
-    // yoksa gerçekten doğrulanamadı. tddOk son olayın yeşil olmasını da ister → ikisini tek dürüst mesaja topla.
-    if (lastEvent !== "tdd-green" || !finalSuiteRun) {
-      reasons.push(
-        lastEvent === "tdd-red" || reds > 0
-          ? "final tam-suite KIRMIZI — son doğrulama (npm test) geçmedi"
-          : "final tam-suite doğrulaması yapılamadı (yeşil sonuç yok)",
-      );
-    }
-    if (!debtOk)
-      reasons.push(
-        `${techDebtCount} dosyada tech debt: ${techDebtPaths.slice(0, 3).join(", ")}${
-          techDebtPaths.length > 3 ? "..." : ""
-        }`,
-      );
-    if (!reproOk) reasons.push("repro-first ihlali: bug'ı yeniden üreten failing test (kırmızı→yeşil) yok");
-    if (!acCoverageOk)
-      reasons.push(
-        `testsiz kabul kriterleri (AC→test): ${acCov.uncovered.join(", ")} — ilgili testi yaz veya bütünsel testi AC ile etiketle (MYCL_TEST_RESULT: green: ACx)`,
-      );
+    // Nedenler decideTddGate'te (sıra ve metinler eskisiyle aynı; yalnız sayım iletisi NEYİN sayıldığını söylüyor —
+    // eskiden "AC coverage yetersiz: 2/3 green" idi, oysa ölçüt kapsaması tamdı).
+    const reasons = gate.reasons;
+    // "Kırmızı önce" yüzünden düşüldüyse kararın girdileri sohbette kısaca (lastFailReason'a GİRMEZ: döngü kırıcıların
+    // imzası `lastFailReason`ın başından üretilir, metin değişirse kayar).
+    const reproNote = reproOk
+      ? ""
+      : ` (kırmızı önce: değişen dosya listesi=${repro.listState}` +
+        (repro.changed ? `, ${repro.changed.length} dosya, çalışan üretim dosyası ${repro.changed.filter((f) => isRuntimeProdFile(f)).length}` : "") +
+        (repro.staticProof !== "denenmedi" ? `, statik kanıt: ${repro.staticProof}` : "") +
+        ")";
     emitChatMessage(
       "system",
-      `❌ Faz 8 gate fail: ${reasons.join("; ")}. sıfır teknik borç ilkesi: "ASLA TEKNİK BORÇ BIRAKMA".`,
+      `❌ Faz 8 gate fail: ${reasons.join("; ")}${reproNote}. sıfır teknik borç ilkesi: "ASLA TEKNİK BORÇ BIRAKMA".`,
     );
     this.lastFailReason = `gate fail: ${reasons.join("; ")}`;
     // Eskalasyon kararı: model+efor tırmanması YALNIZ model-gücüyle düzelebilecek kod-fail'inde anlamlı
     // (kırmızı suite / tech debt / repro yok / yetersiz yeşil). SAF AC-etiketleme/kapsama fail'i (kod doğru,
     // acCoverageOk false ve geri kalan TEMİZ) model gücüyle çözülmez → escalatable=false → failPhase tırmanmaz.
-    const codeQualityFail =
-      greens < minGreens || lastEvent !== "tdd-green" || !finalSuiteRun || !debtOk || !reproOk;
+    // (codeQualityFail: decideTddGate; "yetersiz yeşil" yalnız ölçü sayımken.)
     // YZLLM 2026-06-12 (#2): kod-fail olsa bile AYNI regresyon tekrar ettiyse model gücü çözmüyor →
     // escalatable=false → failPhase tırmanmaz (7-basamak boş yakma yerine durup yaklaşımı sorgulatır).
-    this.lastFailEscalatable = codeQualityFail && !this.regressionRepeated;
+    this.lastFailEscalatable = gate.codeQualityFail && !this.regressionRepeated;
     // YZLLM 2026-07-15 (döngü-kırıcı, MAHKEME CRITICAL fix): oto-kabul GÜVENLİ mi? = testler GERÇEKTEN yeşil
-    // (final suite koştu + son olay yeşil + yeterli yeşil) VE repro-first TATMİN (reproOk). reproOk ŞART:
+    // (final suite koştu + son olay yeşil + yeşil ölçüsü tuttu) VE repro-first TATMİN (reproOk). reproOk ŞART:
     // repro-testsiz gerçek backend fix'i (worker kırmızı→yeşil yazmadan doğrudan geçen test yazdı) oto-kabul
     // edilirse tam da gate'in önlediği sahte-yeşil olur → o durumda lastFailSuiteGreen=false → never-ask PARK eder.
     // true kalınca fail YALNIZ debt/AC-etiketleme gate'idir (kabul-edilebilir, accepted-findings/PARTIAL ile görünür).
-    this.lastFailSuiteGreen =
-      finalSuiteRun && lastEvent === "tdd-green" && greens >= minGreens && reproOk;
+    this.lastFailSuiteGreen = gate.suiteGreen;
     await this.rollbackFixIfNeeded();
     // ③ Structured handoff (Missions): başarısız devir — durum + neden + keşfedilen (takip zemini).
     try {
@@ -1043,7 +1258,7 @@ export class Phase8Controller {
 
   /**
    * CLI: ajanın MYCL_TEST_RESULT marker'ından gelen test sonucunu tdd-green/red
-   * audit'ine yaz (gate'in per-AC green sayımı için). caller=mycl-bridge.
+   * audit'ine yaz (gate'in yeşil ölçüsü için: ölçüt kapsaması ya da yeşil sonuç olayı sayısı). caller=mycl-bridge.
    */
   private async recordTestResult(green: boolean, detail: string): Promise<void> {
     await appendAudit(this.state.project_root, {
@@ -1051,7 +1266,8 @@ export class Phase8Controller {
       phase: 8,
       event: green ? "tdd-green" : "tdd-red",
       caller: "mycl-bridge",
-      detail: detail.slice(0, 100),
+      // Ölçüt adları kesilmez (testResultAuditDetail); serbest metin 100 karakterde kesilir.
+      detail: testResultAuditDetail(detail),
     });
     log.info("phase-8", "cli test self-report", { green, detail: detail.slice(0, 60) });
   }

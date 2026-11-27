@@ -1,5 +1,53 @@
 ## 2026-11-27
 
+- **fix(Faz 8 kapısı): bütün kabul ölçütleri yeşil bildirilmiş ve MyCL'in kendi son koşusu yeşilken "yeşil sayısı az"
+  diye düşmesin; düzeltme kipinde "kırmızı önce" kuralının neden uygulandığı kayda geçsin.** Ekransız deneme koşusu 18
+  (`00b3270`, arayüzsüz Node.js komut satırı, 6 kabul ölçütü): ajan altı ölçütü tek satırda bildirdi
+  (`tdd-green | green: AC1,…,AC6`), MyCL'in son koşusu yeşildi; kapı `greens=2 < minGreens=3` diye "AC coverage
+  yetersiz: 2/3 green" ile düştü. `greens` test sayısı değil, yeşil sonuç OLAYI sayısıdır (CLI kipinde ajanın
+  `MYCL_TEST_RESULT` satırları + MyCL'in son koşusu); talimat tek koşuda bütün ölçütleri tek satırda bildirmeye izin
+  veriyordu. Düzeltme kipindeki ikinci denemede kapı "kırmızı önce" ile düştü; hangi dosyaların değiştiği, listenin
+  okunup okunmadığı hiçbir kayıtta yoktu.
+  1. **Kural (`decideTddGate`, `phase-8.ts`):** düzeltme kipi DIŞINDA, ölçüt listesi boş değilken ve yeşil olaylar
+     ölçüt adı taşıyorken yeşil ölçüsü ölçüt KAPSAMASIDIR: sayım eşiği kapıyı düşürmez, kapsanmayan ölçüt varsa var
+     olan `testsiz kabul kriterleri` iletisi düşürür. Ölçüt adı yoksa, liste boşsa ya da düzeltme kipindeyse sayım
+     eşiği aynen. `tddOk`, eskalasyon kararı (`codeQualityFail`) ve oto kabul güvenliği (`lastFailSuiteGreen`) aynı
+     kuralı kullanıyor. Kapının son kararı davranış değişmeden saf bir işleve taşındı (testlenebilsin; yeni modül yok).
+  2. **İleti:** sayım eşiği yüzünden düşülürse `yeşil sonuç bildirimi yetersiz: 2/3` (eskiden "AC coverage
+     yetersiz: 2/3 green").
+  3. **Kesme (`testResultAuditDetail`):** ölçüt adları kesilmeden başta tutulur, serbest metin 100 karakterde kesilir
+     (eskiden yirmiden fazla ölçüt tek satırda bildirilince sondakiler kayboluyordu). 100 karakteri aşmayan ya da
+     bütün adları ilk 100 karakterde taşıyan bildirim eskisiyle birebir aynı yazılır.
+  4. **Talimat:** CLI bloğu "her kabul kriteri en az bir yeşil sonuç satırında adıyla geçmeli; kapsama için satır
+     sayısı önemli değil; yine de her koşumdan sonra bir satır yaz, düzeltme işinde kapı satır sayısına da bakar".
+     Ortak şablonun (`phase-08-tdd.md`) eşik cümlesi ("30 AC = 6 test grubu, 10 AC = 3 test") iki kipte de yanlıştı,
+     kaldırıldı; "bütünsel test" ilkesi kaldı.
+  5. **Puan:** ölçü kapsamaysa `tdd_compliance_score` = kapsanan ölçüt / toplam ölçüt; öteki durumlarda eskisi gibi
+     (`greens/minGreens`). `phase-8-complete` ayrıntısı ve devir özeti `ölçü=ac-kapsama 6/6` ya da
+     `ölçü=yeşil-sayısı 3/3` taşıyor (sona eklendi).
+  6. **Kayıt (`evaluateReproFirst`, `gate repro` iz satırı):** "kırmızı önce" kararı davranış değişmeden dışarı alındı
+     ve kararın girdileri ikinci bir iz satırına yazılıyor: düzeltme kipi mi, `reproRequired`, `reproOk`, muafiyet
+     kategorisi, değişen dosyalar (en çok 20 yol, fazlası sayıyla), içlerindeki çalışan üretim dosyaları, listenin
+     durumu (kipte değil, yedek yok, git okunamadı, kopya karşılaştırması okunamadı, liste boş, liste güvenilir) ve
+     git yolundaki statik kanıt ("tuttu", "kanıt tutmadı ya da yeni dosya var", "okunamadı", "denenmedi"). "Kırmızı
+     önce" yüzünden düşüldüğünde sohbet iletisi bunu kısaca söylüyor. `gate evaluate` satırına dokunulmadı;
+     `lastFailReason` metni değişmedi (döngü kırıcıların imzası ondan üretiliyor).
+  **Değişmeyenler (kural 14):** (a) ölçüt adı taşımayan akışta eşik, sonuç ve puan aynı; (b) ölçüt adı taşıyan akışta
+  kapsanmayan ölçüt varsa kapı yine düşer;
+  (c) son tam koşu kırmızıysa, teknik borç varsa, son sonuç yeşil değilse kapı yine düşer; (d) düzeltme kipinde sayım
+  eşiği, "kırmızı önce" kuralı ve muafiyetleri aynen; (e) `lastFailReason` metinleri sayım iletisi dışında aynı, nedenlerin
+  sırası aynı. **Değişen davranış:** (1) koşu 18'deki durum (adlar tam, olay sayısı eşiğin altında, düzeltme kipi dışı)
+  artık geçer. (2) Ad taşıyan akışta kapsanmayan ölçüt VAR ve olay sayısı eşiğin altındaysa: eskiden eskalasyon açıktı ve
+  suite yeşil sayılmıyordu (hiç sormama kipinde iş park ediliyordu); artık bu yalnız kapsama hatasıdır — eskalasyon yok,
+  suite yeşil sayılır, hiç sormama kipinde KISMÎ olarak kabul edilir (görevin istediği "üç yerde aynı kural"). Olay
+  sayısı eşiğin üstündeyken bu durum eskiden de böyleydi. (3) Ajan satırı 100 karakteri aşıp sözcük ortasında kesilirse
+  yarım sözcük atılıyor (`… AC12` eskiden `… AC1` olup AC1'i yanlışlıkla kapsanmış gösterebiliyordu). Bu iletiye bakan döngü kırıcı imzası (`failSignature`, ilk 160 karakter) sayım iletisinde değişir; aynı koşu
+  içinde ileti sabit olduğu için tekrar tespiti etkilenmez.
+  **Bilinen sınır (çözülmedi):** ölçüt adları da yeşil sayısı da ajanın kendi bildirimi. Bu iş kapıyı güçlendirmez;
+  yalnız talimata uyan bir ajanın biçim yüzünden düşmesini kaldırır. Gerçek kanıtlar MyCL'in kendi son koşusu (çıkış
+  kodu), mutasyon denemesi (bugün yalnız uyarı) ve bağımsız test yazarı (kapı değil).
+  Testler `test/phase-8-gate.test.ts` içinde. Test ve kontrol koşturulmadı, yalnız derlendi.
+
 - **fix(Faz 5 şablonu): statik uygulamada stiller geliştirme sunucusunda da yüklensin.** Ekransız deneme koşuları 6 ve
   19'da (`yapilacaklar-5`, Vite + React, statik, `style-src 'self'`) Faz 6 kaydı `Applying inline style violates the
   following Content Security Policy directive 'style-src 'self''` diyordu; ekran görüntüsünde uygulama çalışıyor ama

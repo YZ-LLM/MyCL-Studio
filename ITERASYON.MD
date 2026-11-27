@@ -285,7 +285,8 @@ bağımsız düşman-test yazarı** ile sahte-yeşil avlanır.
 - **Çıktı:** `features/*.feature` + prod/test kodu. Audit: `tdd-test-write`, `tdd-prod-write`,
   `bdd-scenario-write`, `tdd-green/red`, `tdd-tech-debt-detected/clean`, `tdd-tests-weak`, `tdd-unverified`,
   `phase-8-complete`, `behavior-consent-violation`. `.mycl/handoffs.jsonl`. `tdd_compliance_score`.
-- **Kapı & denetim (hepsi gerekir):** `greens ≥ minGreens` (AC'ye orantılı) VE son event `tdd-green` VE
+- **Kapı & denetim (hepsi gerekir):** yeşil ölçüsü (`decideTddGate`: düzeltme kipi dışında ölçüt adı taşıyan akışta
+  ölçüt kapsaması; öteki durumlarda yeşil sonuç OLAYI sayısı `greens ≥ minGreens`, AC'ye orantılı) VE son event `tdd-green` VE
   `techDebtCount===0` VE bütünlük çapası son 10 event'te tdd-green VE (fix modunda) **repro kırmızı-önce-yeşil**
   VE AC-kapsama tam. Suite koşamadıysa (E2BIG/ortam) → `tdd-unverified` + fail (rollback yok, `escalatable=false`).
 - **Model & eskalasyon:** `escalatedModelEffort(…, 'tdd-codegen')`; **retry KALDIRILDI** (tek deneme, token
