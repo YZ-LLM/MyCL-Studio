@@ -32,7 +32,7 @@ import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js"
 import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
-import { effectiveDisallowedTools } from "./tool-policy.js";
+import { effectiveDisallowedTools, zeroToolLaunchArgs } from "./tool-policy.js";
 
 export interface CliSessionTurnOpts {
   /** Sabit oturum kimliği (faz-instance başına bir uuid, tüm turlar aynı). */
@@ -137,6 +137,8 @@ export function buildCliSessionArgs(opts: CliSessionTurnOpts, overlay: OverlayIn
   // Bash tümden yasaksa zararsız-fazlalık). Bkz tool-policy.DANGEROUS_BASH_DENY.
   // Politika verilmediyse (undefined) tur ARAÇSIZ sayılır — tam yetkiyle koşamaz (cli-run.ts ile aynı).
   args.push("--disallowedTools", ...effectiveDisallowedTools(opts.disallowedTools));
+  // Sıfır araç politikası → hiç yerleşik araç ve MCP sunucusu yok (cli-run.ts ile aynı; öteki politikalarda boş).
+  args.push(...zeroToolLaunchArgs(opts.disallowedTools));
   if (opts.maxBudgetUsd !== undefined) {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }

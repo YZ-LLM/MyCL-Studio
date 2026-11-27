@@ -98,3 +98,53 @@ describe("buildCliSessionArgs — araç politikası", () => {
     }
   });
 });
+
+// CANLI KANIT (ekransız deneme koşuları 9, 10, 11; 2026-11-27): sıfır araç ret listesiyle koşan ilgililik
+// sınıflandırıcısı `ListAgents`, `ToolSearch`, `SendMessage` çağırdı; bunlar ret listesinde yoktu. Sıfır araç
+// politikalı çağrı artık `--tools ""` (hiç yerleşik araç yok) ve `--strict-mcp-config` (hiç MCP sunucusu yok)
+// ile başlar. Öteki politikaların komut satırı değişmez.
+describe("sıfır araç politikası — izin listesi de boş", () => {
+  /** argv'de `--tools` ve hemen ardından boş değer var mı? */
+  function hasEmptyTools(args: string[]): boolean {
+    const i = args.indexOf("--tools");
+    return i >= 0 && args[i + 1] === "";
+  }
+
+  it("cli-run: sıfır araç politikası → `--tools \"\"` ve `--strict-mcp-config`", () => {
+    const args = buildCliRunArgs({ ...runBase, disallowedTools: ZERO_TOOLS_DISALLOWED }, null);
+    expect(hasEmptyTools(args)).toBe(true);
+    expect(args).toContain("--strict-mcp-config");
+    // Ret listesi ikinci kat olarak duruyor ve `--tools` onun değerleri arasına karışmıyor.
+    expect(denyList(args)).toEqual(withDangerousBashDeny(ZERO_TOOLS_DISALLOWED));
+  });
+
+  it("cli-run: politika verilmeyen çağrı da aynı bayrakları alır", () => {
+    const args = buildCliRunArgs(runBase as unknown as CliRunOpts, null);
+    expect(hasEmptyTools(args)).toBe(true);
+    expect(args).toContain("--strict-mcp-config");
+  });
+
+  it("cli-session: sıfır araç politikası → aynı bayraklar", () => {
+    const args = buildCliSessionArgs({ ...sessionBase, disallowedTools: ZERO_TOOLS_DISALLOWED }, null);
+    expect(hasEmptyTools(args)).toBe(true);
+    expect(args).toContain("--strict-mcp-config");
+  });
+
+  it("REGRESYON: öteki politikaların komut satırında bu bayraklar YOK (argv eskisiyle aynı)", () => {
+    for (const policy of [
+      READ_ONLY_DISALLOWED_TOOLS,
+      PURE_REASONING_DISALLOWED_TOOLS,
+      ["Bash", "Agent", "Task"],
+      ["Write", "Edit", "NotebookEdit"],
+      [],
+    ]) {
+      const run = buildCliRunArgs({ ...runBase, disallowedTools: policy }, null);
+      const ses = buildCliSessionArgs({ ...sessionBase, disallowedTools: policy }, null);
+      for (const args of [run, ses]) {
+        expect(args).not.toContain("--tools");
+        expect(args).not.toContain("--strict-mcp-config");
+        expect(denyList(args)).toEqual(withDangerousBashDeny(policy));
+      }
+    }
+  });
+});

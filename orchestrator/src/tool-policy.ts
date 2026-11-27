@@ -13,6 +13,9 @@
 //      üst-stream'e yansımadığı için 200+ sn "yeni komut yok" = donma.
 //
 // Bu yüzden her salt-okunur/saf faz, gerektirmediği tehlikeli araçları AÇIKÇA deny-list'e koymalı.
+// İSTİSNA (2026-11-27): sıfır araç politikasında ret listesi eksik kalıyordu (listede olmayan yerleşik araçlar
+// ve MCP araçları açıktı); orada asıl engel izin listesidir: `--tools ""` + `--strict-mcp-config`
+// (bkz. zeroToolLaunchArgs). Ret listesi ikinci kat olarak kalır.
 // Kullanım: yalnız spread (`[...SABIT]`) — bu paylaşılan dizilere in-place `.push()` YAPMA.
 
 /** Alt-ajan doğuran araçlar — salt-okunur/saf fazlarda ASLA gerekmez; kaçış + donma vektörü. */
@@ -100,4 +103,28 @@ export function withDangerousBashDeny(disallowed: string[] | undefined): string[
  */
 export function effectiveDisallowedTools(disallowed: string[] | undefined): string[] {
   return withDangerousBashDeny(disallowed ?? ZERO_TOOLS_DISALLOWED);
+}
+
+/**
+ * SAF: bu çağrının politikası "sıfır araç" mı? Ölçüt tek yerde: uygulanan ret listesi
+ * `ZERO_TOOLS_DISALLOWED`'ın tamamını içeriyor (politika verilmeyen çağrı da buraya düşer).
+ */
+export function isZeroToolPolicy(disallowed: string[] | undefined): boolean {
+  const deny = effectiveDisallowedTools(disallowed);
+  return ZERO_TOOLS_DISALLOWED.every((t) => deny.includes(t));
+}
+
+/**
+ * SAF: sıfır araç politikalı çağrının `claude` sürecine EK bayrakları; öteki politikalarda boş.
+ *
+ * CANLI KANIT (ekransız deneme koşuları 9, 10, 11; 2026-11-27): ilgililik sınıflandırıcısı sıfır araç ret
+ * listesiyle koştuğu hâlde `ListAgents`, `ToolSearch`, `SendMessage` araçlarını çağırdı. Ret listesi yalnız
+ * adını bildiği yerleşik araçları kapatır; CLI'ın sunduğu öteki yerleşik araçlar ve kullanıcının kendi MCP
+ * sunucularının araçları (`mcp__…`) açık kalıyordu (`bypassPermissions`).
+ *   • `--tools ""`: hiçbir yerleşik araç sunulmaz (izin listesi; ret listesi gibi eksik kalamaz).
+ *   • `--strict-mcp-config`: `--mcp-config` verilmediği için hiçbir MCP sunucusu yüklenmez.
+ * Ret listesi ikinci kat olarak kalır. Çağıranlar bu bayrakları YAZMAZ; başlatıcılar politikadan türetir.
+ */
+export function zeroToolLaunchArgs(disallowed: string[] | undefined): string[] {
+  return isZeroToolPolicy(disallowed) ? ["--tools", "", "--strict-mcp-config"] : [];
 }

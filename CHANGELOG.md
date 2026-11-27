@@ -1,5 +1,22 @@
 ## 2026-11-27
 
+- **fix(araç politikası): araçsız koşması gereken yardımcı çağrılarda modelin elinde hiç araç kalmasın.** Ekransız
+  deneme koşuları 9, 10 ve 11'de ilgililik sınıflandırıcısı sıfır araç ret listesiyle koştuğu hâlde `ListAgents`,
+  `ToolSearch`, `SendMessage` ve `Glob` çağırdı (iz: `araçsız çağrıda model araç çağırmayı denedi`). Ret listesi yalnız
+  adını bildiği araçları kapatır; listede olmayan yerleşik araçlar ve kullanıcının MCP sunucularının araçları açıktı.
+  Artık sıfır araç politikalı çağrı `claude` sürecine `--tools ""` (hiç yerleşik araç yok) ve `--strict-mcp-config`
+  (`--mcp-config` verilmediği için hiç MCP sunucusu yok) ile başlıyor; ret listesi ikinci kat olarak kalıyor. "Sıfır
+  araç" tek yerde tanımlı (`tool-policy.ts` `isZeroToolPolicy`, `zeroToolLaunchArgs`); çağıranlar bayrak yazmıyor,
+  iki başlatıcı (`cli-run.ts`, `cli-session.ts`) politikadan türetiyor. Bu CHANGELOG'da daha önce açık kalan "ret
+  listesi yalnız yerleşik araç adlarını kapatır, MCP araçları listede yok" maddesinin cevabıdır.
+  **Değişen çağrılar:** yalnız sıfır araç politikalı beşi (ilgililik sınıflandırıcısı, konuşma özeti, sohbet özeti,
+  proje tipi, ders damıtma) ve politika vermeyen her çağrı. **Değişmeyen (kural 14):** öteki bütün çağrıların komut
+  satırı birebir aynı (salt okunur, saf akıl yürütme ve kendi listesini veren çağrıların hiçbiri sıfır araç listesinin
+  tamamını içermiyor; tek tek okundu). İz satırı kalıyor; satır yine düşerse süreçte hâlâ bir araç sunuluyor demektir.
+  **Doğrulanmadı (deneme koşusunda bakılacak):** `--tools ""` verildiğinde `ListAgents`, `ToolSearch`, `SendMessage`'ın
+  da kalkıp kalkmadığı ve CLI'ın `--tools ""` ile `--disallowedTools`'u birlikte kabul edip etmediği.
+  **Test ve kontrol koşturulmadı, yalnız derlendi.**
+
 - **fix(dev sunucu): açılamayan sunucunun gerçek çıktısı kayda ve kullanıcı iletisine girsin; asıl hata satırı
   kesilmesin.** Ekransız deneme koşusu 11'de `npm run dev` ve `npx vite` bir saniyede öldü. Çıktı yalnız son 4000
   karakterlik halkada tutuluyordu; esbuild'in uzun yığın izi halkayı doldurunca ilk hata satırı atıldı. İze yığının son

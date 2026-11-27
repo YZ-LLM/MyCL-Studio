@@ -28,7 +28,7 @@ import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js"
 import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
-import { effectiveDisallowedTools, ZERO_TOOLS_DISALLOWED } from "./tool-policy.js";
+import { effectiveDisallowedTools, isZeroToolPolicy, zeroToolLaunchArgs } from "./tool-policy.js";
 
 export interface CliRunOpts {
   systemPrompt: string;
@@ -43,6 +43,8 @@ export interface CliRunOpts {
    * altında tek gerçek engel budur (bkz. tool-policy.ts). Her çağrı politikasını açıkça yazar; girdisi
    * zaten prompt'ta olan çağrı `ZERO_TOOLS_DISALLOWED` verir. Tipin göremediği bir yoldan `undefined`
    * gelirse çağrı tam yetkiyle DEĞİL araçsız koşar (tool-policy.effectiveDisallowedTools).
+   * Sıfır araç politikasında asıl engel `--tools ""` + `--strict-mcp-config`'tir (tool-policy.zeroToolLaunchArgs);
+   * ret listesi orada ikinci kattır.
    */
   disallowedTools: string[];
   /** "ultracode" → --settings; diğerleri → --effort. */
@@ -150,6 +152,9 @@ export function buildCliRunArgs(opts: CliRunOpts, overlay: OverlayInjection | nu
   // rm-deny'siz açıyordu; baseline o boşluğu kapatır. Bkz tool-policy.withDangerousBashDeny.
   // Politika verilmediyse (undefined) çağrı ARAÇSIZ sayılır — tam yetkiyle koşamaz.
   args.push("--disallowedTools", ...effectiveDisallowedTools(opts.disallowedTools));
+  // Sıfır araç politikası → hiç yerleşik araç ve hiç MCP sunucusu yok (ret listesi ikinci kat). Öteki
+  // politikalarda boş dizi: argv birebir eski.
+  args.push(...zeroToolLaunchArgs(opts.disallowedTools));
   if (opts.maxBudgetUsd !== undefined) {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }
@@ -359,13 +364,13 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     });
   });
 
-  // GÖRÜNÜRLÜK (2026-11-27, deneme koşusu 6): araçsız koşan bir çağrıda model yine de araç çağırmayı
-  // denediyse izde görünsün. O koşuda yazılan 10 dosya ne denetim kaydında ne izde vardı; artık
-  // araçlar reddediliyor, ama "model girdiyi görev sandı" belirtisi kaybolmasın. Yalnız iz satırı:
-  // sonucu değiştirmez (reddedilen çağrı zaten etkisizdir), çağıranın akışı aynı kalır.
+  // GÖRÜNÜRLÜK (2026-11-27, deneme koşusu 6): araçsız koşan bir çağrıda model yine de araç çağırdıysa
+  // izde görünsün. Koşular 9-11'de bu satır ret listesinde OLMAYAN araçları gösterdi (`ListAgents`,
+  // `ToolSearch`, `SendMessage`): o çağrılar reddedilmemişti. Artık bu çağrılar `--tools ""` ve
+  // `--strict-mcp-config` ile başlıyor; satır yine düşerse süreçte hâlâ bir araç sunuluyor demektir.
+  // Yalnız iz satırı: sonucu değiştirmez, çağıranın akışı aynı kalır.
   if (result.toolUses.length > 0) {
-    const deny = effectiveDisallowedTools(opts.disallowedTools);
-    if (ZERO_TOOLS_DISALLOWED.every((t) => deny.includes(t))) {
+    if (isZeroToolPolicy(opts.disallowedTools)) {
       log.warn("cli-run", "araçsız çağrıda model araç çağırmayı denedi", {
         model: opts.modelId,
         attempts: result.toolUses.length,
