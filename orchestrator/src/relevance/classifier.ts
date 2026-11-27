@@ -20,6 +20,8 @@ import { extractKindBlock, extractLastJsonObject } from "../cli-json.js";
 import type { MyclConfig } from "../config.js";
 import { emitClaudeStream, withClaudeStreamBanner } from "../ipc.js";
 import { log } from "../logger.js";
+import { globalConfigDir } from "../paths.js";
+import { ZERO_TOOLS_DISALLOWED } from "../tool-policy.js";
 import type { Chunk, ScoredChunk } from "./types.js";
 import { RelevanceError } from "./types.js";
 
@@ -292,6 +294,13 @@ export function parseCliScores(text: string, chunks: Chunk[]): ScoredChunk[] {
   throw new RelevanceError("cli classifier: no valid relevance_scores block");
 }
 
+// YALNIZ METİN İŞLEYEN ÇAĞRI (2026-11-27, ekransız deneme koşusu 6): girdisi tümüyle prompt'ta.
+// Eskiden araç kısıtı verilmiyordu ve `cwd: process.cwd()` idi → `bypassPermissions` altında
+// Write/Edit/Bash açıktı, kum havuzu MyCL'in BAŞLATILDIĞI klasöre kuruluyordu. İlgililik
+// sınıflandırıcısı parça metinlerini görev sanıp o klasöre 10 dosya yazdı; iki deneme 4 dakika sürdü.
+// Artık: SIFIR araç (prompt cümlesi değil, deny-list), tarafsız klasör (lesson-distill ile aynı
+// kalıp; açılışta `log.setSinkHome` oluşturur) ve sert toplam süre tavanı (`timeoutMs` yalnız
+// sessizlik süresidir; tavan verilmezse varsayılan 30 dakikaydı).
 /** Tek batch'i CLI ile skorla (runClaudeCli + text-JSON parse). */
 async function scoreBatchViaCli(
   modelId: string,
@@ -315,8 +324,12 @@ async function scoreBatchViaCli(
         systemPrompt: SYSTEM_PROMPT_BASE + CLI_JSON_INSTRUCTION,
         userMessage,
         modelId,
-        cwd: process.cwd(), // skorlama yalnız intent+chunks metninden — proje erişimi gerekmez
+        cwd: globalConfigDir(), // skorlama yalnız intent+chunks metninden — tarafsız klasör
+        disallowedTools: ZERO_TOOLS_DISALLOWED,
         timeoutMs: 120_000,
+        // Danışmanın önceki deneme koşularında bir parti (20 parça) 10-45 sn sürdü (bu oturumda
+        // ölçülmedi); 3 dk bunun üstünde pay bırakır, sessizlik süresinin (120 sn) de üstündedir.
+        wallClockMs: 180_000,
         }),
       );
     } catch (err) {

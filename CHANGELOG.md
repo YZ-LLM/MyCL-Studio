@@ -1,5 +1,33 @@
 ## 2026-11-27
 
+- **fix(araç politikası): yalnız metin işleyen yardımcı çağrılar araçsız koşsun; politika vermeyen çağrı tam yetkiyle
+  koşamasın.** Ekransız deneme koşusu 6'da ilgililik sınıflandırıcısı parça metinlerini görev sandı ve MyCL'in
+  başlatıldığı klasöre 10 dosya yazdı; iki deneme 147 ve 93 saniye sürdü. Çağrı ret listesi vermiyordu: tek seferlik
+  `claude` başlatıcısı `--permission-mode bypassPermissions` ile koştuğu için Write, Edit ve Bash açıktı, tek engel
+  istemdeki "araç çağırma" cümlesiydi. Aynı açık konuşma özetinde ve proje tipi sınıflandırıcısında da vardı; 28 tek
+  seferlik çağrının öteki 25'i ve oturumlu üç çağrının hepsi liste veriyordu (tek tek okundu). Kaynağında çözüm:
+  `disallowedTools` iki başlatıcıda da (`cli-run.ts`, `cli-session.ts`) zorunlu alan oldu, unutan çağrı derlenmez; tipin
+  göremediği bir yoldan liste gelmezse çağrı araçsız sayılır ve ize uyarı düşer (`tool-policy.ts`
+  `effectiveDisallowedTools`). Liste veren çağrıların komut satırı birebir aynı; kod üretim yolu (`codegen/cli-backend.ts`)
+  bilerek dokunulmadan bırakıldı. Üç çağrı artık sıfır araç listesiyle (`ZERO_TOOLS_DISALLOWED`), 3 dakikalık toplam
+  süre tavanıyla (eskiden varsayılan 30 dakika; `timeoutMs` yalnız sessizlik süresidir) ve MyCL'in başlatıldığı klasörde
+  değil genel ayar klasöründe koşuyor (ders damıtmadaki `neutralCwd` kalıbı). Tavan dolarsa çağrı var olan hata yoluna
+  düşer: sınıflandırıcı bir kez yeniden dener, sonra "geçmiş bağlam alınamadı" ile bağlamsız sürer; özet boş kalır; proje
+  tipi bir kez yeniden dener, sonra `unknown` olur. Araçsız koşan bir çağrıda model yine de araç çağırmayı denerse artık
+  ize yazılıyor (`araçsız çağrıda model araç çağırmayı denedi`); o koşuda yazılan dosyalar hiçbir kayıtta yoktu. Yeni
+  modül yok: var olan liste, var olan alanlar, `tool-policy.ts` içine tek işlev.
+  **Koddan okundu, gözlemlenmedi:** paketlenmiş uygulamada orkestratör çalışma klasörü verilmeden başlatılıyor
+  (`src-tauri/src/orchestrator.rs`), yani uygulamanın kendi çalışma klasörünü devralıyor; geliştirme kipinde bu
+  `src-tauri/` klasörüdür. `claude` başlatan başka yol yok (`advisor.ts` yalnız sürüm soruyor).
+  **Açık kalan (karar bekliyor), dokunulmadı:** (1) ret listesi yalnız yerleşik araç adlarını kapatır; kullanıcının
+  kendi Claude Code ayarındaki MCP sunucularının araçları (`mcp__…`) listede yok ve bu başlatıcı MCP'yi kısıtlamıyor.
+  (2) İş bölme çağrısı (`task-queue/intake.ts`, kendi yorumu "salt sınıflandırma") ve tasarım çağrıları
+  (`design-fanout.ts`, kendi yorumu "yazma kesin engellenir") Bash'i açık bırakıyor; kabuk yönlendirmesiyle proje
+  klasörüne dosya yazabilirler. (3) Çevirmen hâlâ MyCL'in başlatıldığı klasörde koşuyor; yazma aracı yok, okuma
+  araçları açık. (4) Genel ayar klasöründe anahtar dosyası ve bütünlük kayıtları duruyor; araçsız çağrı bunlara
+  erişemez, ama (1) üzerinden bir araç geçerse boş bir klasöre göre daha değerli bir hedef.
+  **Test ve kontrol koşturulmadı, yalnız derlendi.**
+
 - **fix(faz 6): katı güvenlik politikası (CSP) altında erişilebilirlik taraması koşsun, boş ekran kaydı nedenini
   taşısın.** Ekransız deneme koşusunda (Vite + React, MyCL'in kendi istediği katı politika) tarama
   `page.addScriptTag` ile sayfaya satır içi betik eklediği için engellendi (`a11y-scan-skipped`) ve Faz 6 yalnız

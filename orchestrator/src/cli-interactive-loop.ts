@@ -25,7 +25,8 @@ export interface InteractiveCliOpts {
   systemPrompt: string;
   initialUserMessage: string;
   allowedTools?: string[];
-  disallowedTools?: string[];
+  /** ZORUNLU — runClaudeCliSession'a aynen geçer (bkz. cli-session.ts). */
+  disallowedTools: string[];
   effort?: string;
   maxBudgetUsd?: number;
   timeoutMs?: number;

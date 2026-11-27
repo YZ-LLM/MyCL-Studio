@@ -21,6 +21,8 @@ import type { MyclConfig } from "./config.js";
 import { isSubscriptionMode } from "./subscription-mode.js";
 import { runClaudeCli } from "./cli-run.js";
 import { loadMessages } from "./history-loader.js";
+import { globalConfigDir } from "./paths.js";
+import { ZERO_TOOLS_DISALLOWED } from "./tool-policy.js";
 import { log } from "./logger.js";
 import { translate } from "./translator.js";
 import type { State } from "./types.js";
@@ -107,8 +109,12 @@ async function generateSummaryViaCli(
     systemPrompt: SUMMARY_SYSTEM,
     userMessage: summaryUserMessage(olderMessages),
     modelId: config.selected_models.translator,
-    cwd: process.cwd(), // özet yalnız mesaj metninden — proje erişimi gerekmez
+    // YALNIZ METİN İŞLEYEN ÇAĞRI (2026-11-27): bkz. relevance/classifier.ts — aynı açık buradaydı
+    // (kısıt yok + `cwd: process.cwd()`). Sıfır araç, tarafsız klasör, sert toplam süre tavanı.
+    cwd: globalConfigDir(), // özet yalnız mesaj metninden — tarafsız klasör
+    disallowedTools: ZERO_TOOLS_DISALLOWED,
     timeoutMs: 120_000,
+    wallClockMs: 180_000,
   });
   if (!res.ok) throw new Error(res.error ?? "cli summary failed");
   return res.text.trim() || "(summary unavailable)";

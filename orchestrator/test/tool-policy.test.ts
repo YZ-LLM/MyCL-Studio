@@ -8,6 +8,8 @@ import {
   withDangerousBashDeny,
   READ_ONLY_DISALLOWED_TOOLS,
   PURE_REASONING_DISALLOWED_TOOLS,
+  ZERO_TOOLS_DISALLOWED,
+  effectiveDisallowedTools,
 } from "../src/tool-policy.js";
 
 describe("withDangerousBashDeny (bypassPermissions güvenlik baseline'ı)", () => {
@@ -34,5 +36,32 @@ describe("withDangerousBashDeny (bypassPermissions güvenlik baseline'ı)", () =
     const merged = withDangerousBashDeny(PURE_REASONING_DISALLOWED_TOOLS);
     expect(merged).toContain("Bash");
     expect(merged).toContain("Bash(rm *)");
+  });
+});
+
+// 2026-11-27 (ekransız deneme koşusu 6): politika vermeyen yardımcı çağrı tam yetkiyle koşup
+// MyCL'in başlatıldığı klasöre dosya yazdı. Verilmeyen politika artık "araçsız" demektir.
+describe("effectiveDisallowedTools (verilmeyen politika = araçsız)", () => {
+  it("undefined → sıfır araç listesi + tehlikeli Bash tabanı", () => {
+    const eff = effectiveDisallowedTools(undefined);
+    expect(eff).toEqual(withDangerousBashDeny(ZERO_TOOLS_DISALLOWED));
+    for (const tool of ["Write", "Edit", "NotebookEdit", "Bash", "Agent", "Task", "Read", "Grep", "Glob"]) {
+      expect(eff).toContain(tool);
+    }
+  });
+
+  it("verilen liste aynen uygulanır (genişlemez): eski davranışla birebir", () => {
+    for (const policy of [READ_ONLY_DISALLOWED_TOOLS, PURE_REASONING_DISALLOWED_TOOLS, ["Bash", "Agent", "Task"]]) {
+      expect(effectiveDisallowedTools(policy)).toEqual(withDangerousBashDeny(policy));
+    }
+    expect(effectiveDisallowedTools(READ_ONLY_DISALLOWED_TOOLS)).not.toContain("Bash");
+  });
+
+  it("açıkça verilen boş liste çağıranın kararıdır: yalnız taban", () => {
+    expect(effectiveDisallowedTools([])).toEqual(DANGEROUS_BASH_DENY);
+  });
+
+  it("kod üretim yolunun sabiti değişmedi: withDangerousBashDeny(undefined) yalnız tabandır", () => {
+    expect(withDangerousBashDeny(undefined)).toEqual(DANGEROUS_BASH_DENY);
   });
 });

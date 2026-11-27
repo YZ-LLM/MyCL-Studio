@@ -1,8 +1,9 @@
 // tool-policy — claude CLI araç-izin politikası (tek doğruluk kaynağı).
 //
 // KÖK NEDEN (YZLLM 2026-06-13, gerçek trace): cli-session/cli-run/persistent-cli-session
-// claude'u `--permission-mode acceptEdits` ile başlatır → `--allowedTools` bir KISITLAMA
-// DEĞİL (yalnız oto-onay listesi). Tek gerçek engel `--disallowedTools`. Yani deny-list'te
+// claude'u izin sormayan bir kiple başlatır (o gün `acceptEdits`, v15.14'ten beri
+// `bypassPermissions`) → `--allowedTools` bir KISITLAMA DEĞİL (yalnız oto-onay listesi).
+// Tek gerçek engel `--disallowedTools`. Yani deny-list'te
 // OLMAYAN her tehlikeli araç koşabilir — `allowedTools: ["Read","Grep","Glob"]` olsa bile.
 //
 // İki kanıtlı kaçış aynı sınıftandı:
@@ -79,4 +80,24 @@ export const DANGEROUS_BASH_DENY: string[] = [
  */
 export function withDangerousBashDeny(disallowed: string[] | undefined): string[] {
   return Array.from(new Set([...(disallowed ?? []), ...DANGEROUS_BASH_DENY]));
+}
+
+/**
+ * `runClaudeCli` / `runClaudeCliSession` çağrısının GERÇEKTE uygulanan deny-list'i.
+ *
+ * CANLI KANIT (ekransız deneme koşusu 6, 2026-11-27): ilgililik sınıflandırıcısı `disallowedTools`
+ * VERMEDEN çağrılıyordu → `bypassPermissions` altında Write/Edit/Bash açıktı; tek engel prompt'taki
+ * "Do NOT call any tool." cümlesiydi. Model parça metinlerini görev sandı ve MyCL'in başlatıldığı
+ * klasöre 10 dosya yazdı. Aynı açık iki çağrıda daha vardı (konuşma özeti, proje tipi).
+ *
+ * Kaynağında çözüm (KATI #6): politika VERİLMEYEN çağrı tam yetkili DEĞİL, ARAÇSIZ sayılır.
+ * `disallowedTools` iki başlatıcıda da zorunlu alandır (unutan çağrı derlenmez); bu işlev, tipin
+ * göremediği yolları (cast, düz JS) da kapalı tarafa düşürür. Açıkça verilen liste — boş dizi dahil —
+ * çağıranın bilinçli kararıdır ve aynen uygulanır (yalnız tehlikeli Bash tabanı eklenir).
+ *
+ * Kod üretim yolu (`codegen/cli-backend.ts`) bunu KULLANMAZ: orada tam yazma yetkisi işin kendisidir
+ * ve `withDangerousBashDeny(undefined)` bilinçli sabittir.
+ */
+export function effectiveDisallowedTools(disallowed: string[] | undefined): string[] {
+  return withDangerousBashDeny(disallowed ?? ZERO_TOOLS_DISALLOWED);
 }

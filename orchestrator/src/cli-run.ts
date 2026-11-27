@@ -28,7 +28,7 @@ import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js"
 import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
-import { withDangerousBashDeny } from "./tool-policy.js";
+import { effectiveDisallowedTools, ZERO_TOOLS_DISALLOWED } from "./tool-policy.js";
 
 export interface CliRunOpts {
   systemPrompt: string;
@@ -38,8 +38,13 @@ export interface CliRunOpts {
   cwd: string;
   /** İzinli built-in tool'lar (örn. ["Read","Grep","Bash","Glob"]). Boş/undefined → araç bayrağı yok. */
   allowedTools?: string[];
-  /** Reddedilen tool kalıpları (örn. ["Write","Edit","Bash(rm *)"]). */
-  disallowedTools?: string[];
+  /**
+   * Reddedilen tool kalıpları (örn. ["Write","Edit","Bash(rm *)"]) — ZORUNLU: `bypassPermissions`
+   * altında tek gerçek engel budur (bkz. tool-policy.ts). Her çağrı politikasını açıkça yazar; girdisi
+   * zaten prompt'ta olan çağrı `ZERO_TOOLS_DISALLOWED` verir. Tipin göremediği bir yoldan `undefined`
+   * gelirse çağrı tam yetkiyle DEĞİL araçsız koşar (tool-policy.effectiveDisallowedTools).
+   */
+  disallowedTools: string[];
   /** "ultracode" → --settings; diğerleri → --effort. */
   effort?: string;
   /** Advisor (YZLLM 2026-07-11): verilirse `--advisor <modelId>` — executor karar anlarında bu güçlü modele danışır.
@@ -79,8 +84,10 @@ export interface CliRunOpts {
    *
    * YALNIZ iterasyon içinde koşan YAZMA YETENEKLİ çağrılar verir (Faz 5 görsel tasarım ajanı,
    * Faz 8 düşman testi). Salt-okunur roller (çevirmen, müfettiş, plan modu, keşif, sınıflandırıcı)
-   * VERMEZ: yazma araçları zaten deny-list'te olduğu için kanca hiç tetiklenmez, ama argv değişir
+   * VERMEZ: yazma araçları deny-list'te olduğu için kanca hiç tetiklenmez, ama argv değişir
    * ve gereksiz bir başarısızlık yolu (kanarya) açılırdı — davranış regresyonu (KATI #14).
+   * (2026-11-27: sınıflandırıcı için "deny-list'te" iddiası o güne kadar YANLIŞTI — çağrı hiç liste
+   * vermiyordu. Artık `disallowedTools` zorunlu ve verilmeyen çağrı araçsız sayılıyor.)
    */
   gateOverlayPhase?: PhaseId;
 }
@@ -104,7 +111,8 @@ const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öld
 // idle-timer "sürekli akıtan ama bitmeyen" runaway'i kaçırıyordu (Faz 5 rung'ları 133 dk). 30 dk tavan.
 const WALL_CLOCK_MAX_MS = 1_800_000; // 30 dk
 
-function buildArgs(opts: CliRunOpts, overlay: OverlayInjection | null): string[] {
+/** Dışa açık: argv'nin araç politikası testle korunur (test/cli-tool-policy.test.ts). */
+export function buildCliRunArgs(opts: CliRunOpts, overlay: OverlayInjection | null): string[] {
   const args: string[] = [
     "-p",
     opts.userMessage,
@@ -140,7 +148,8 @@ function buildArgs(opts: CliRunOpts, overlay: OverlayInjection | null): string[]
   // bypassPermissions ile: tehlikeli-Bash baseline'ı HER ZAMAN ekle (rm/sudo/git-push/chmod/
   // publish deny — mode'dan önce değerlendirilir → bloklu kalır). READ_ONLY fazları Bash'i
   // rm-deny'siz açıyordu; baseline o boşluğu kapatır. Bkz tool-policy.withDangerousBashDeny.
-  args.push("--disallowedTools", ...withDangerousBashDeny(opts.disallowedTools));
+  // Politika verilmediyse (undefined) çağrı ARAÇSIZ sayılır — tam yetkiyle koşamaz.
+  args.push("--disallowedTools", ...effectiveDisallowedTools(opts.disallowedTools));
   if (opts.maxBudgetUsd !== undefined) {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }
@@ -182,7 +191,14 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
     opts.gateOverlayPhase !== undefined
       ? await overlaySettingsFor({ projectRoot: opts.cwd, phase: opts.gateOverlayPhase })
       : null;
-  const args = buildArgs(opts, overlay);
+  // Tip bunu zorunlu kılar; yine de `undefined` geldiyse (cast, düz JS) SESSİZ kalma (KATI #4):
+  // çağrı araçsız koşacak, araca ihtiyacı olan bir rol bunu izden görebilsin.
+  if (opts.disallowedTools === undefined) {
+    log.warn("cli-run", "araç politikası verilmedi — çağrı araçsız koşuyor (ZERO_TOOLS_DISALLOWED)", {
+      model: opts.modelId,
+    });
+  }
+  const args = buildCliRunArgs(opts, overlay);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const result = await new Promise<CliRunResult>((resolve) => {
@@ -342,6 +358,21 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       });
     });
   });
+
+  // GÖRÜNÜRLÜK (2026-11-27, deneme koşusu 6): araçsız koşan bir çağrıda model yine de araç çağırmayı
+  // denediyse izde görünsün. O koşuda yazılan 10 dosya ne denetim kaydında ne izde vardı; artık
+  // araçlar reddediliyor, ama "model girdiyi görev sandı" belirtisi kaybolmasın. Yalnız iz satırı:
+  // sonucu değiştirmez (reddedilen çağrı zaten etkisizdir), çağıranın akışı aynı kalır.
+  if (result.toolUses.length > 0) {
+    const deny = effectiveDisallowedTools(opts.disallowedTools);
+    if (ZERO_TOOLS_DISALLOWED.every((t) => deny.includes(t))) {
+      log.warn("cli-run", "araçsız çağrıda model araç çağırmayı denedi", {
+        model: opts.modelId,
+        attempts: result.toolUses.length,
+        tools: [...new Set(result.toolUses.map((t) => t.name))].slice(0, 5),
+      });
+    }
+  }
 
   // KANARYA: kanca enjekte edildiyse SessionStart işareti gelmiş olmalı. Gelmediyse bu koşu
   // gate'siz koşmuştur → sonucu başarısız say (sahte yeşil yasak). Kanca yoksa kontrol de yok.

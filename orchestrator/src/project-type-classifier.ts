@@ -15,6 +15,8 @@ import { runClaudeCli } from "./cli-run.js";
 import type { MyclConfig } from "./config.js";
 import { isSubscriptionMode } from "./subscription-mode.js";
 import { log } from "./logger.js";
+import { globalConfigDir } from "./paths.js";
+import { ZERO_TOOLS_DISALLOWED } from "./tool-policy.js";
 import type { ProjectType, UiComplexity } from "./types.js";
 
 const VALID_UI_COMPLEXITY: readonly UiComplexity[] = ["simple", "moderate", "complex"] as const;
@@ -134,8 +136,12 @@ async function classifyViaCli(
       systemPrompt: SYSTEM_PROMPT + CLI_JSON_INSTRUCTION,
       userMessage: summary,
       modelId: model,
-      cwd: process.cwd(), // sınıflandırma sadece özetten — proje erişimi gerekmez
+      // YALNIZ METİN İŞLEYEN ÇAĞRI (2026-11-27): bkz. relevance/classifier.ts — aynı açık buradaydı
+      // (kısıt yok + `cwd: process.cwd()`). Sıfır araç, tarafsız klasör, sert toplam süre tavanı.
+      cwd: globalConfigDir(), // sınıflandırma sadece özetten — tarafsız klasör
+      disallowedTools: ZERO_TOOLS_DISALLOWED,
       timeoutMs: 120_000,
+      wallClockMs: 180_000,
     });
     if (!res.ok) {
       log.warn("project-type-classifier", "cli failed (retry edilebilir)", { error: res.error });

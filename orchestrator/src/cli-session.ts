@@ -32,7 +32,7 @@ import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js"
 import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
-import { withDangerousBashDeny } from "./tool-policy.js";
+import { effectiveDisallowedTools } from "./tool-policy.js";
 
 export interface CliSessionTurnOpts {
   /** Sabit oturum kimliği (faz-instance başına bir uuid, tüm turlar aynı). */
@@ -46,7 +46,9 @@ export interface CliSessionTurnOpts {
   modelId: string;
   cwd: string;
   allowedTools?: string[];
-  disallowedTools?: string[];
+  /** ZORUNLU (cli-run.ts ile aynı gerekçe): `bypassPermissions` altında tek gerçek engel budur.
+   *  `undefined` gelirse tur tam yetkiyle DEĞİL araçsız koşar (tool-policy.effectiveDisallowedTools). */
+  disallowedTools: string[];
   effort?: string;
   maxBudgetUsd?: number;
   /** IDLE-timeout: bu süre boyunca HİÇ çıktı gelmezse öldür (her olayda sıfırlanır). */
@@ -94,7 +96,8 @@ const DEFAULT_TIMEOUT_MS = 600_000; // 10 dk hiç çıktı yok → hung → öld
 // 30 dk: meşru uzun codegen'e (Faz 8) cömert, ama 79/133-dk pataolojiyi bounded yapar.
 const WALL_CLOCK_MAX_MS = 1_800_000; // 30 dk
 
-function buildArgs(opts: CliSessionTurnOpts, overlay: OverlayInjection | null): string[] {
+/** Dışa açık: argv'nin araç politikası testle korunur (test/cli-tool-policy.test.ts). */
+export function buildCliSessionArgs(opts: CliSessionTurnOpts, overlay: OverlayInjection | null): string[] {
   // v15.12: her main-ajan user mesajına İngilizce-çıktı hatırlatması (ilk + resume
   // + nudge). Recency: resume turlarında sistem prompt'u yeniden gönderilmez → tek
   // garanti bu. Çevirmen runClaudeCli kullanır (bunu DEĞİL) → yalnız main-ajan etkilenir.
@@ -132,7 +135,8 @@ function buildArgs(opts: CliSessionTurnOpts, overlay: OverlayInjection | null): 
   // bypassPermissions ile birlikte: tehlikeli-Bash baseline'ı HER ZAMAN ekle (deny kuralı
   // mode'dan önce → rm/sudo/git-push/chmod/publish bloklu kalır; salt-okunur fazlarda zaten
   // Bash tümden yasaksa zararsız-fazlalık). Bkz tool-policy.DANGEROUS_BASH_DENY.
-  args.push("--disallowedTools", ...withDangerousBashDeny(opts.disallowedTools));
+  // Politika verilmediyse (undefined) tur ARAÇSIZ sayılır — tam yetkiyle koşamaz (cli-run.ts ile aynı).
+  args.push("--disallowedTools", ...effectiveDisallowedTools(opts.disallowedTools));
   if (opts.maxBudgetUsd !== undefined) {
     args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   }
@@ -173,7 +177,12 @@ export async function runClaudeCliSession(
     opts.gateOverlayPhase !== undefined
       ? await overlaySettingsFor({ projectRoot: opts.cwd, phase: opts.gateOverlayPhase })
       : null;
-  const args = buildArgs(opts, overlay);
+  if (opts.disallowedTools === undefined) {
+    log.warn("cli-session", "araç politikası verilmedi — tur araçsız koşuyor (ZERO_TOOLS_DISALLOWED)", {
+      model: opts.modelId,
+    });
+  }
+  const args = buildCliSessionArgs(opts, overlay);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const claudeBin = resolveClaudePath() ?? "claude";
   // YZLLM 2026-06-12 (TCC penceresi kökü): cli-session ATLANMIŞTI — folder-guard yalnız cli-run +
