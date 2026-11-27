@@ -53,6 +53,9 @@ interface Provenance {
   phase: number;
   mycl_commit: string;
   gates_passed: string[];
+  /** Kayıt anında fazın kendi kapısı geçti mi (2026-11-27: kapı geçmese de kayıt alınır). Eski kayıtlarda yok → geçti
+   *  sayılır (o zaman yalnız kapı geçince kayıt alınıyordu). */
+  gate_passed?: boolean;
   created_at: number;
 }
 
@@ -108,6 +111,10 @@ function recordsDir(): string {
 }
 function recordPath(id: string): string {
   return join(recordsDir(), `${id}.json`);
+}
+/** Kullanım sayıları — kayıt dosyalarının DIŞINDA tek küçük dosya (kayıtlar değişmez kalır). */
+function usageFile(): string {
+  return join(mapRoot(), "usage.json");
 }
 
 const TOKEN_PREFIX = "{{mycl:";
@@ -384,7 +391,9 @@ async function verifyFile(
 }
 
 /**
- * Fazın KENDİ kapısı geçince ajanın bildirimini kayda dönüştür. `gatePassed` false → hiçbir şey yazılmaz. Her senaryo:
+ * Kod yazma fazı (Faz 5 rötuş dışı, Faz 8) bitince ajanın bildirimini kayda dönüştür — fazın kapısı geçmese de
+ * (Ümit, 2026-11-27: "kapı çok zor olmamalı … kodu kaydedeceğiz sadece, projeyi etkilemeyecek"). Kapının geçip
+ * geçmediği kayıtta alan olarak durur (`provenance.gate_passed`) ve seçim sırasında kullanılır. Her senaryo:
  * bağlamaları denetlenir, dosyaları tek tek doğrulanır (geçemeyen dosya reddedilir, nedeni yazılır), en az bir dosyası
  * kalan senaryo kaydedilir.
  */
@@ -397,7 +406,6 @@ export async function recordCodeMapAfterGate(opts: {
 }): Promise<RecordOutcome> {
   const out: RecordOutcome = { recorded: [], reused: [], rejected: [], noReport: false };
   const { state, phase } = opts;
-  if (!opts.gatePassed) return out; // kapı geçmeden kayıt YOK
   try {
     const project = basename(state.project_root);
     // Stack: açılışta bilinen değer; bilinmiyorsa KAYIT ANINDA projenin o anki hâlinden (koşu 23).
@@ -420,6 +428,7 @@ export async function recordCodeMapAfterGate(opts: {
       phase,
       mycl_commit: await myclCommit(),
       gates_passed: opts.gatesPassed,
+      gate_passed: opts.gatePassed,
       created_at: Date.now(),
     };
     const write = async (rec: CodeMapRecord) => {
@@ -477,7 +486,9 @@ export async function recordCodeMapAfterGate(opts: {
       }
       const fileIds = fileRecs.map((f) => f.id);
       const scenario: ScenarioRecord = {
-        id: `scenario-${slugName(s.name) || "scenario"}-${sha256([stack, s.name, fileIds.join(","), s.bindings.map((b) => `${b.name}=${b.value}`).join(","), s.acceptance_criteria.join(",")].join("|")).slice(0, 12)}`,
+        // Kimlikte kayıt zamanı var: aynı senaryo yeniden kaydedilince eski kayıt silinmez, YENİ kayıt tarihiyle eklenir
+        // (Ümit: "önceki kaydı silmeden yeni kaydı açar ve tarih yazar"). Dosya kayıtları içerikten türer (paylaşılır).
+        id: `scenario-${slugName(s.name) || "scenario"}-${sha256([stack, s.name, fileIds.join(","), s.bindings.map((b) => `${b.name}=${b.value}`).join(","), s.acceptance_criteria.join(","), provenance.created_at, provenance.project_root_sha].join("|")).slice(0, 12)}`,
         level: "scenario",
         name: s.name,
         description: s.description,
@@ -532,6 +543,71 @@ export interface PlacementResult {
   /** Kod yazan ajanın ilk mesajına eklenecek metin ("" → bugünkü akış). */
   promptAddition: string;
   placed: PlacedFile[];
+  /** Haritadan kullanılan senaryo (yerleştirme ya da "mevcut" dosya varsa). Faz kapısı geçince kullanım sayılır. */
+  scenarioId?: string;
+}
+
+// ───────── Kullanım sayısı ─────────
+
+interface UsageData {
+  counts: Record<string, number>;
+  /** Sayılmış (senaryo, proje, faz) üçlüleri — aynı projede yeniden denemede ikinci kez sayılmasın. */
+  seen: string[];
+}
+
+async function readUsage(): Promise<UsageData> {
+  try {
+    const d = JSON.parse(await fs.readFile(usageFile(), "utf-8")) as Partial<UsageData>;
+    return { counts: d.counts ?? {}, seen: Array.isArray(d.seen) ? d.seen : [] };
+  } catch {
+    return { counts: {}, seen: [] };
+  }
+}
+
+/** Bir senaryonun kullanım sayısı (yoksa 0). */
+export async function usageCount(scenarioId: string): Promise<number> {
+  return (await readUsage()).counts[scenarioId] ?? 0;
+}
+
+/**
+ * Haritadan yerleştirilen senaryo, yerleştirildiği projede o fazın kapısı geçince BİR KEZ sayılır ("çok kullanıldıysa
+ * sağlamlığı ispatlanır zamanla"). `gatePassed` false → sayılmaz. ASLA throw etmez.
+ */
+export async function countCodeMapUse(state: State, phase: number, scenarioId: string | undefined, gatePassed: boolean): Promise<boolean> {
+  if (!scenarioId || !gatePassed) return false;
+  try {
+    const d = await readUsage();
+    const key = `${scenarioId}|${sha256(state.project_root).slice(0, 16)}|${phase}`;
+    if (d.seen.includes(key)) return false;
+    d.seen.push(key);
+    d.counts[scenarioId] = (d.counts[scenarioId] ?? 0) + 1;
+    await fs.mkdir(mapRoot(), { recursive: true });
+    const tmp = `${usageFile()}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(d, null, 2), "utf-8");
+    await fs.rename(tmp, usageFile());
+    await visible(state, phase, "code-map-used", `🗺️ Kod haritası: kullanılan senaryonun kullanım sayısı ${d.counts[scenarioId]} oldu (Faz ${phase} kapısı geçti).`);
+    return true;
+  } catch (e) {
+    log.warn("code-map", "kullanım sayısı yazılamadı (non-fatal)", { error: String(e) });
+    return false;
+  }
+}
+
+/**
+ * SAF: isabetler arasında seçim — önce ilgililik puanı; eşitlikte kapısı geçmiş olan, sonra kullanım sayısı yüksek olan,
+ * sonra tarihi yeni olan.
+ */
+export function rankHits(
+  hits: Array<{ record: ScenarioRecord; score: number; uses: number }>,
+): Array<{ record: ScenarioRecord; score: number; uses: number }> {
+  const passed = (r: ScenarioRecord) => (r.provenance.gate_passed === false ? 0 : 1);
+  return [...hits].sort(
+    (a, b) =>
+      b.score - a.score ||
+      passed(b.record) - passed(a.record) ||
+      b.uses - a.uses ||
+      b.record.provenance.created_at - a.record.provenance.created_at,
+  );
 }
 
 /** SAF: senaryo kayıtlarını puanlanacak parçalara çevir. */
@@ -554,7 +630,7 @@ export function scenarioChunks(scenarios: ScenarioRecord[], showStack = false): 
 }
 
 /**
- * SAF: aynı adlı senaryolardan en yenisi — YALNIZ aynı proje + aynı faz + aynı stack içinde (aynı proje yeniden kayıt
+ * SAF: aynı adlı senaryolardan kapısı geçmiş en yenisi (hiçbiri geçmediyse en yenisi) — YALNIZ aynı proje + aynı faz + aynı stack içinde (aynı proje yeniden kayıt
  * alınca yeni kayıt eklenir). Başka projenin ya da başka fazın aynı adlı kaydı ayrı kalır (aramadaki faz ve "başka proje"
  * süzgeçleri onu düşürmesin).
  */
@@ -564,7 +640,12 @@ export function latestScenarios(all: CodeMapRecord[]): ScenarioRecord[] {
     if (r.level !== "scenario") continue;
     const key = [r.provenance.project_root_sha, r.provenance.phase, r.stack, r.name].join("\u0000");
     const prev = byName.get(key);
-    if (!prev || r.provenance.created_at > prev.provenance.created_at) byName.set(key, r);
+    // Kapısı geçmiş sürüm, geçmemiş daha yeni sürümün önündedir (inceleme bulgusu: başarısız bir yeniden kayıt iyi sürümü
+    // gizliyordu); aynı kapı durumunda yenisi.
+    const passed = (x: ScenarioRecord) => (x.provenance.gate_passed === false ? 0 : 1);
+    if (!prev || passed(r) > passed(prev) || (passed(r) === passed(prev) && r.provenance.created_at > prev.provenance.created_at)) {
+      byName.set(key, r);
+    }
   }
   return [...byName.values()];
 }
@@ -700,12 +781,17 @@ export async function prepareFromCodeMap(state: State, config: MyclConfig, phase
       return none;
     }
     const candidates = keywordPreFilter(intent, scenarioChunks(scenarios, allStacks), 20);
-    let best: { id: string; score: number } | null = null;
+    let best: { id: string; score: number; uses: number } | null = null;
     try {
       const scored = isSubscriptionMode(config)
         ? await scoreChunksViaCli(relevanceModelId(config.selected_models), intent, candidates)
         : await scoreChunks(config, relevanceApiKey(config.api_keys), relevanceModelId(config.selected_models), intent, candidates);
-      for (const c of scored) if (c.score >= HIT_MIN_SCORE && (!best || c.score > best.score)) best = { id: c.id, score: c.score };
+      const usage = await readUsage();
+      const hits = scored
+        .filter((c) => c.score >= HIT_MIN_SCORE && byId.get(c.id)?.level === "scenario")
+        .map((c) => ({ record: byId.get(c.id) as ScenarioRecord, score: c.score, uses: usage.counts[c.id] ?? 0 }));
+      const top = rankHits(hits)[0];
+      if (top) best = { id: top.record.id, score: top.score, uses: top.uses };
     } catch (e) {
       await visible(state, phase, "code-map-search", `🗺️ Kod haritası: arama puanlanamadı (${String(e).slice(0, 100)}) — haritasız devam.`);
       return none;
@@ -734,7 +820,7 @@ export async function prepareFromCodeMap(state: State, config: MyclConfig, phase
       state,
       phase,
       "code-map-placed",
-      `🗺️ Kod haritası (${where}): ${scenarios.length} senaryo arandı, '${scenario.name}' bulundu (stack ${scenario.stack}, puan ${best.score}). ${res.placed.length} dosya yerleştirildi${res.placed.length ? `: ${res.placed.map((p) => p.path).join(", ")}` : ""}${res.present.length ? `; ${res.present.length} dosya aynı içerikle zaten vardı` : ""}.${skipped}`,
+      `🗺️ Kod haritası (${where}): ${scenarios.length} senaryo arandı, '${scenario.name}' bulundu (stack ${scenario.stack}, puan ${best.score}, kayıt tarihi ${new Date(scenario.provenance.created_at).toISOString().slice(0, 10)}, kapı ${scenario.provenance.gate_passed === false ? "geçmemişti" : "geçmişti"}, ${best.uses} kez kullanıldı). ${res.placed.length} dosya yerleştirildi${res.placed.length ? `: ${res.placed.map((p) => p.path).join(", ")}` : ""}${res.present.length ? `; ${res.present.length} dosya aynı içerikle zaten vardı` : ""}.${skipped}`,
     );
     if (res.placed.length === 0 && res.present.length === 0) return none;
     const promptAddition = [
@@ -749,7 +835,7 @@ export async function prepareFromCodeMap(state: State, config: MyclConfig, phase
     ]
       .filter(Boolean)
       .join("\n");
-    return { promptAddition, placed: res.placed };
+    return { promptAddition, placed: res.placed, scenarioId: scenario.id };
   } catch (e) {
     log.error("code-map", "harita araması başarısız (non-fatal)", { error: String(e) });
     await visible(state, phase, "code-map-error", `⚠️ Kod haritası araması hata verdi (${String(e).slice(0, 120)}) — haritasız devam.`);

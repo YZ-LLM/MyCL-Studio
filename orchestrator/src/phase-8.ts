@@ -44,7 +44,7 @@ import {
   changedFilesVsSnapshot,
   type FixSnapshot,
 } from "./fix-snapshot.js";
-import { CODE_MAP_REPORT_INSTRUCTION, prepareFromCodeMap, recordCodeMapAfterGate } from "./code-map.js";
+import { CODE_MAP_REPORT_INSTRUCTION, countCodeMapUse, prepareFromCodeMap, recordCodeMapAfterGate } from "./code-map.js";
 import { decideRevertOrKeep } from "./revert-decision.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
 import {
@@ -569,6 +569,7 @@ export class Phase8Controller {
   public lastFailSuiteGreen?: boolean;
   /** Kod haritası (2026-11-27): ajanın metni (iş sonu code_map bildirimi). */
   private agentText = "";
+  private mapScenarioId: string | undefined;
   /** v15.7 (2026-05-27): Faz 7'den gelen pending migration not — initialMessage'a eklenir. */
   private pendingMigrationNote = "";
   /** v15.7 (2026-05-27): Phase 0 D2 backend-only fix routing'ten gelen plan. */
@@ -815,7 +816,7 @@ export class Phase8Controller {
       // Davranış-onay kapısı (behavior-consent-gate, Faz 8 KURULMADAN önce koştu): ONAYLANAN değişiklikler
       // "feature+test+kod birlikte güncelle", REDDEDİLEN davranışlar "dokunma" olarak gömülü. Boşsa "" (no-op).
       (this.state.pending_behavior_consent_note ?? "");
-    // Kod haritası (2026-11-27): ajan iş sonunda kod haritası bildirimini yapar (her kipte; kayıt kapı geçince). Düzeltme
+    // Kod haritası (2026-11-27): ajan iş sonunda kod haritası bildirimini yapar (her kipte; kayıt kapı değerlendirmesinden sonra, geçse de geçmese de). Düzeltme
     // kipi DIŞINDA kod yazmadan ÖNCE haritaya bakılır: isabet yoksa ek "" → bugünkü akış birebir.
     systemPrompt += CODE_MAP_REPORT_INSTRUCTION;
     if (!this.isFixMode) {
@@ -827,6 +828,7 @@ export class Phase8Controller {
         `${this.state.intent_summary ?? ""}\n\n${specText.slice(0, 3000)}`,
       );
       initialMessage += prep.promptAddition;
+      this.mapScenarioId = prep.scenarioId;
     }
 
     // YZLLM 2026-06-10: "silme kararı → önce yedek." TDD codegen ajanı dosya silebilir/üstüne yazabilir. Fix modu
@@ -1143,7 +1145,7 @@ export class Phase8Controller {
         caller: "mycl-orchestrator",
         detail: `green=${greens}/${minGreens} debt=${techDebtCount} tdd=${tddOk} suite=${finalSuiteRun} repro=${reproOk} ac=${acCoverageOk} ${gate.measureText}`,
       });
-      // Kod haritası: Faz 8'in KENDİ kapısı geçti → ajanın iş sonu bildirimi kayda dönüşür (throw etmez, görünür yazar).
+      // Kod haritası: Faz 8'in kapısı geçti → kayıt (kapı geçti) + haritadan kullanılan senaryonun kullanım sayısı.
       await recordCodeMapAfterGate({
         state: this.state,
         phase: 8,
@@ -1151,6 +1153,7 @@ export class Phase8Controller {
         gatesPassed: [`phase-8-complete: tdd=${tddOk} suite=${finalSuiteRun} debt=${techDebtCount} repro=${reproOk} ac=${acCoverageOk} ${gate.measureText}`],
         agentText: this.agentText,
       });
+      await countCodeMapUse(this.state, 8, this.mapScenarioId, true);
       // Puan: ölçü × 100 − teknik borç cezası (decideTddGate; ölçü kapsamaysa kapsanan/toplam ölçüt).
       const score = gate.score;
       // v15.9: önceki patch'i koru (pending_backend_fix:undefined kaybolmasın) +
@@ -1195,6 +1198,8 @@ export class Phase8Controller {
       `❌ Faz 8 gate fail: ${reasons.join("; ")}${reproNote}. sıfır teknik borç ilkesi: "ASLA TEKNİK BORÇ BIRAKMA".`,
     );
     this.lastFailReason = `gate fail: ${reasons.join("; ")}`;
+    // Kod haritası: kapı geçmese de kayıt alınır, kapı durumu kayıtta "geçmedi" (Ümit 2026-11-27). Kullanım sayılmaz.
+    await recordCodeMapAfterGate({ state: this.state, phase: 8, gatePassed: false, gatesPassed: [], agentText: this.agentText });
     // Eskalasyon kararı: model+efor tırmanması YALNIZ model-gücüyle düzelebilecek kod-fail'inde anlamlı
     // (kırmızı suite / tech debt / repro yok / yetersiz yeşil). SAF AC-etiketleme/kapsama fail'i (kod doğru,
     // acCoverageOk false ve geri kalan TEMİZ) model gücüyle çözülmez → escalatable=false → failPhase tırmanmaz.

@@ -12,7 +12,7 @@ import { basename, join } from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { appendAudit, readAuditLog, readAuditLogTail } from "./audit.js";
-import { CODE_MAP_REPORT_INSTRUCTION, prepareFromCodeMap, recordCodeMapAfterGate } from "./code-map.js";
+import { CODE_MAP_REPORT_INSTRUCTION, countCodeMapUse, prepareFromCodeMap, recordCodeMapAfterGate } from "./code-map.js";
 import { currentSpecPath, currentSpecRelPath } from "./devs-paths.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { scanCspViolations, ensureCspMeta } from "./csp-compliance.js";
@@ -186,6 +186,7 @@ export class Phase5Controller {
   /** Kod haritası (2026-11-27): bu koşu harita kapsamında mı (rötuş dışı) ve ajanın metni. */
   private codeMapEligible = false;
   private agentText = "";
+  private mapScenarioId: string | undefined;
 
   private base: CodegenBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
@@ -214,18 +215,22 @@ export class Phase5Controller {
   async run(): Promise<"complete" | "fail" | "no_change"> {
     try {
       const result = await this.runInner();
-      // Kod haritası: Faz 5'in KENDİ kapısı geçince (complete) ajanın iş sonu bildirimi kayda dönüşür. Rötuşta yok.
-      // Hızlandırıcıdır, kapı değil: hatası fazı düşürmez (recordCodeMapAfterGate throw etmez, görünür yazar).
-      if (this.codeMapEligible) {
+      // Kod haritası: Faz 5 bitince (kapı geçmese de; kapı durumu kayıtta alan) ajanın iş sonu bildirimi kayda dönüşür.
+      // Rötuşta yok. Haritadan senaryo kullanıldıysa kapı geçince kullanım sayısı bir artar. Hızlandırıcıdır, kapı
+      // değil: hatası fazı düşürmez (bu işlevler throw etmez, görünür yazar).
+      // Kapı geçmediyse yalnız ajan bildirim yaptıysa kaydedilir: iptal ya da kod üretim hatasında bildirim olmaz, "bildirim
+      // yok" iletisi gürültü olurdu (Faz 8 de yalnız kapı değerlendirmesine varan koşuda kaydeder).
+      if (this.codeMapEligible && (result === "complete" || this.agentText.includes('"code_map"'))) {
         const tail = await readAuditLogTail(this.state.project_root, 200).catch(() => []);
         const done = [...tail].reverse().find((e) => e.phase === 5 && e.event === "phase-5-complete");
         await recordCodeMapAfterGate({
           state: this.state,
           phase: 5,
           gatePassed: result === "complete",
-          gatesPassed: [`phase-5-complete${done?.detail ? `: ${done.detail}` : ""}`],
+          gatesPassed: result === "complete" ? [`phase-5-complete${done?.detail ? `: ${done.detail}` : ""}`] : [],
           agentText: this.agentText,
         });
+        await countCodeMapUse(this.state, 5, this.mapScenarioId, result === "complete");
       }
       return result;
     } finally {
@@ -500,6 +505,7 @@ export class Phase5Controller {
         `${this.state.intent_summary ?? ""}\n\n${specText.slice(0, 3000)}`,
       );
       codeMapAddition = prep.promptAddition;
+      this.mapScenarioId = prep.scenarioId;
     }
     const initialUserMessage = isTweakMode
       ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. Backend paths are denied. Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`

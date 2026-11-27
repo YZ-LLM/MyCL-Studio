@@ -1,5 +1,28 @@
 ## 2026-11-27
 
+- **feat(kod haritası): kayıt koşulu gevşedi, senaryolara kullanım sayısı eklendi.** Geliştiricinin isteği (Ümit,
+  2026-11-27): "kapı çok zor olmamalı … kodu kaydedeceğiz sadece, projeyi etkilemeyecek. hatta kayıtlara kullanım sayısı
+  ekleriz. o kayıt çok kullanıldıysa sağlamlığı ispatlanır zamanla" ve "kodun yeni versiyonu … önceki kaydı silmeden yeni
+  kaydı açar ve tarih yazar".
+  1. **Kayıt:** Faz 5 (rötuş dışı) ve Faz 8 bitince alınıyor, fazın kapısı geçmese de. Kayıt `provenance.gate_passed`
+     taşıyor (eski kayıtlarda alan yok → geçti sayılır; o zaman yalnız kapı geçince kayıt alınıyordu). Faz 8'de kapı düşme
+     dalında da kayıt alınıyor; Faz 8'in kapıya varmadan dönen erken dalları (claude yok, iptal, kod üretim hatası, test
+     takımı koşamadı) kayıt almıyor. Faz 5 kapı geçmediyse yalnız ajan bildirim yaptıysa kaydediyor (iptal ya da kod üretim
+     hatasında "bildirim yok" iletisi gürültü olurdu). Bildirim yoksa ya da stack bilinmiyorsa ileti aynı.
+  2. **Kullanım sayısı:** haritadan kullanılan senaryo (yerleştirme ya da aynı içerikle "mevcut" dosya), yerleştirildiği
+     projede o fazın kapısı geçince BİR KEZ sayılır (aynı senaryo + proje + faz ikinci kez sayılmaz). Sayılar kayıt
+     dosyalarının dışında `~/.mycl/modules/map/usage.json`'da; kayıt dosyaları değişmez. Sayı senaryo KAYDINA bağlı: yeni
+     sürüm sıfırdan başlar (temkinli: farklı içeriğin sağlamlığını eskisinden devralmaz).
+  3. **Seçim sırası (`rankHits`):** önce ilgililik puanı (eşik 7, aynı); eşitlikte kapısı geçmiş olan, sonra kullanım sayısı
+     yüksek olan, sonra tarihi yeni olan. İsabet iletisi kaydın tarihini, kapı durumunu ve kullanım sayısını söylüyor.
+  4. **Sürüm:** senaryo kimliğinde kayıt zamanı var; aynı senaryo yeniden kaydedilince eski kayıt silinmez, yeni kayıt
+     tarihiyle eklenir; aramada aynı proje + faz + stack + adlı senaryolardan KAPISI GEÇMİŞ en yenisi kullanılır, hiçbiri
+     geçmediyse en yenisi (inceleme bulgusu: 3. ve 4. madde çatışıyordu — başarısız bir yeniden kayıt kapısı geçmiş eski
+     sürümü gizliyordu; temkinli seçenek). Dosya kayıtları içerikten türer, paylaşılır.
+  **Değişmeyenler (kural 14):** yerleştirme, güvenlik denetimleri, arama süzgeçleri (stack, faz, başka proje, boş proje),
+  bağlama çağrısı, görünür iletiler, harita hatasında bugünkü akış. Yeni modül yok.
+  Testler `test/code-map.test.ts` içinde. Test ve kontrol koşturulmadı, yalnız derlendi.
+
 - **refactor(kod haritası): ilk sürüm için sadeleştirildi — yalnız DOSYA ve SENARYO kaydı kaldı.** Neden (Ümit,
   2026-11-27: "sen de çalışırken over engineering kontrolü yapmalısın"): ilk prompt ilk sürüm için fazlasını istedi;
   `code-map.ts` 1177 satıra çıktı, iki inceleme turu tam fazla kısımlarda (kimlik ve sürüm zinciri, faz karışması) hata

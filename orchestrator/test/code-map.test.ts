@@ -29,7 +29,11 @@ vi.mock("../src/ipc.js", async (orig) => ({
 vi.mock("../src/logger.js", () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 import {
+  countCodeMapUse,
+  latestScenarios,
   listRecords,
+  rankHits,
+  usageCount,
   placeScenarioFiles,
   prepareFromCodeMap,
   recordCodeMapAfterGate,
@@ -154,11 +158,12 @@ describe("kayıt — senaryo, dosyaları ve bağlamalarıyla", () => {
     expect(store.path_template).toBe("src/{{mycl:entity}}Store.js");
   });
 
-  it("kapı geçmeden kayıt alınmıyor", async () => {
+  it("kapı geçmeden de kayıt alınıyor ve kayıt kapının geçmediğini söylüyor", async () => {
     await seedFiles(proj);
     const out = await recordCodeMapAfterGate({ state: state(), phase: 8, gatePassed: false, gatesPassed: [], agentText: agentText({ scenarios: [SCENARIO] }) });
-    expect(out.recorded).toEqual([]);
-    expect(await listRecords()).toEqual([]);
+    expect(out.recorded).toHaveLength(3);
+    const scen = (await listRecords()).find((r) => r.level === "scenario") as ScenarioRecord;
+    expect(scen.provenance.gate_passed).toBe(false);
   });
 
   it("güvensiz yol ve gizli dosya reddediliyor, nedeni yazılıyor; geçerli dosya yine kaydediliyor", async () => {
@@ -192,6 +197,68 @@ describe("kayıt — senaryo, dosyaları ve bağlamalarıyla", () => {
     const out = await recordCodeMapAfterGate({ state: state(proj, "unknown"), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: agentText({ scenarios: [SCENARIO] }) });
     expect(out.recorded.length).toBeGreaterThan(0);
     expect((await listRecords()).every((r) => r.stack === "node-npm")).toBe(true);
+  });
+});
+
+describe("kullanım sayısı ve seçim sırası", () => {
+  it("yerleştirilen senaryonun sayısı kapı geçince 1 artıyor (aynı projede ikinci kez değil), geçmezse artmıyor", async () => {
+    await seedMapFromProjectA();
+    scoreCliMock.mockImplementation(hit);
+    runCliMock.mockResolvedValue(bindingReply);
+    const res = await prepareFromCodeMap(state(), config, 5, "A task list stored in the browser");
+    expect(res.scenarioId).toBeDefined();
+    expect(await countCodeMapUse(state(), 5, res.scenarioId, false)).toBe(false);
+    expect(await usageCount(res.scenarioId!)).toBe(0);
+    expect(await countCodeMapUse(state(), 5, res.scenarioId, true)).toBe(true);
+    expect(await usageCount(res.scenarioId!)).toBe(1);
+    expect(await countCodeMapUse(state(), 5, res.scenarioId, true)).toBe(false); // aynı proje + faz: bir kez
+    expect(await usageCount(res.scenarioId!)).toBe(1);
+    // Kayıt dosyası değişmedi (sayı ayrı dosyada).
+    const rec = (await listRecords()).find((r) => r.id === res.scenarioId) as ScenarioRecord;
+    expect(rec).not.toHaveProperty("uses");
+  });
+
+  it("eşit puanda: önce kapısı geçmiş, sonra kullanımı çok olan, sonra tarihi yeni olan", () => {
+    const mk = (id: string, gate: boolean | undefined, created: number) =>
+      ({ id, level: "scenario", provenance: { gate_passed: gate, created_at: created } }) as unknown as ScenarioRecord;
+    const ranked = rankHits([
+      { record: mk("fail-new", false, 300), score: 9, uses: 9 },
+      { record: mk("pass-old-few", true, 100), score: 9, uses: 1 },
+      { record: mk("pass-new-few", true, 200), score: 9, uses: 1 },
+      { record: mk("pass-many", true, 50), score: 9, uses: 5 },
+      { record: mk("legacy", undefined, 10), score: 9, uses: 0 }, // eski kayıt: kapı geçti sayılır
+      { record: mk("higher-score", false, 1), score: 10, uses: 0 },
+    ]);
+    expect(ranked.map((h) => h.record.id)).toEqual(["higher-score", "pass-many", "pass-new-few", "pass-old-few", "legacy", "fail-new"]);
+  });
+
+  it("aynı projenin aynı senaryosunda kapısı geçmemiş yeni kayıt, kapısı geçmiş eskisini gizlemez", () => {
+    const mk = (id: string, gate: boolean, created: number) =>
+      ({ id, level: "scenario", name: "X", stack: "node-npm", provenance: { project_root_sha: "p", phase: 5, gate_passed: gate, created_at: created } }) as unknown as ScenarioRecord;
+    expect(latestScenarios([mk("pass-old", true, 1), mk("fail-new", false, 2)]).map((r) => r.id)).toEqual(["pass-old"]);
+    expect(latestScenarios([mk("pass-old", true, 1), mk("pass-new", true, 3), mk("fail-new", false, 4)]).map((r) => r.id)).toEqual(["pass-new"]);
+    expect(latestScenarios([mk("fail-old", false, 1), mk("fail-new", false, 2)]).map((r) => r.id)).toEqual(["fail-new"]);
+  });
+
+  it("aynı senaryo ikinci kez kaydedilince iki kayıt da duruyor, yenisi seçiliyor", async () => {
+    const a = await mkdtemp(join(tmpdir(), "mycl-codemap-A-"));
+    try {
+      await seedFiles(a);
+      const rec = () => recordCodeMapAfterGate({ state: state(a), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: agentText({ scenarios: [SCENARIO] }) });
+      const first = (await rec()).recorded.find((id) => id.startsWith("scenario-"))!;
+      await new Promise((r) => setTimeout(r, 5));
+      const second = (await rec()).recorded.find((id) => id.startsWith("scenario-"))!;
+      expect(second).not.toBe(first);
+      const ids = (await listRecords()).map((r) => r.id);
+      expect(ids).toContain(first);
+      expect(ids).toContain(second);
+      scoreCliMock.mockImplementation(hit);
+      runCliMock.mockResolvedValue(bindingReply);
+      const res = await prepareFromCodeMap(state(), config, 5, "A task list stored in the browser");
+      expect(res.scenarioId).toBe(second);
+    } finally {
+      await rm(a, { recursive: true, force: true });
+    }
   });
 });
 
