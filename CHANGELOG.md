@@ -1,5 +1,48 @@
 ## 2026-11-28
 
+- **fix(Faz 5): kırmızıyken "kabul edip" Faz 6'ya geçilmesin; bağımlılık kurulumu düşünce uygulama başlatılmasın.**
+  Ekransız deneme koşusu 33 (yeni proje `alisveris-sunucu-33`, `4e53226`): Faz 5 CSP ihlaliyle düştü (`ErrorBoundary.jsx`
+  inline stil), ileti "Faz 5 yeniden çalışacak" dedi. Mahkeme "escalate" verdi; otomatik kipte `mahkeme-escalate-accept-
+  continue` ile Faz 6 başladı. Faz 6'da `npm install` ERESOLVE ile düştü, yine de üç kez başlatma denendi; kullanıcıya
+  "vite: command not found" gösterildi ve "elle `npm install`" dendi. Sürümleri kodu yazan ajan koymuştu.
+  1. **Faz 5 kanıt taşıyan fazlara eklendi** (`PROOF_BEARING_PHASES` = 5, 8, 14, 15, 16): "escalate" kabul-devam etmez,
+     gerçek çözüm yoluna düşer (hata analizi → Faz 0); o da tükenirse iş kuyruğa yazılır ve akış durur. "suppress"
+     (yanlış alarm kanıtlandı) yine geçer; otomatik cevap kapalıyken kullanıcıya sorulur. Döngü kırıcı Faz 5'i kabul
+     etmez, çünkü yalnız test takımı yeşil bildirilmiş fazı kabul eder (`lastFailSuiteGreen`, Faz 5 bildirmez).
+  2. **Düzeltme Faz 5'i yeniden koşar (doğrulandı, koddan):**
+     - `ui-only` rötuş kipi Faz 5'i koşar. CSP taraması iki kipte de koşar; sunucu ayakta değilse başlatma ve
+       kurulum `launchWithProvision` ile yeniden koşar.
+     - Tam yineleme Faz 1'den başlar.
+     - **Açık bulunan yol:** D1'in `backend-only` etiketi Faz 8'den başlıyordu; Faz 5'in kapısı ve Faz 6 incelemesi
+       hiç yeniden koşmuyordu. Düşen faz error-analysis'ten Faz 0'a taşınıyor (`failed_phase` → `pending_diagnostic.
+       from_failed_phase`). Faz 5 düşüşünde `backend-only` rötuş kipine çevriliyor (`fixRouteKind`, `resume-decision.ts`)
+       ve bu sohbete yazılıyor.
+     - Rötuş kipi normalde arka uç klasörlerine yazamaz; arka uç planı rötuşa çevrildiğinde bu yasak YALNIZ o istek
+       için kalkar (`ui_tweak_allow_backend_for` = isteğin metni; API kipinde araç bağlamı, CLI kipinde istem cümlesi).
+       İnceleme bulgusu: aksi hâlde arka uç düzeltmesi hiç uygulanamazdı.
+  3. **Kurulum düşünce başlatma yok** (`launchWithProvision` → `installFailed`; Faz 5'in kendi kurulumu):
+     - Düşüş nedeni kurulum komutu ve çıktının son satırları (`installOutputTail`, `installFailureReason`); Faz 5'in
+       `lastFailReason`'ı ile düzeltme yoluna giden budur.
+     - "elle `npm install` çalıştırıp tekrar deneyin" iletisi kaldırıldı.
+     - Faz 6 incelemesi ve Çalıştır komutu kurulum düşüşünü kendi nedeni olarak gösteriyor.
+     - Kurulum komutu profilden gelmeye devam ediyor; profilsiz projede Faz 5'in bugünkü `npm install` yedeği
+       değişmedi.
+  4. **İletiler:** CSP iletisi artık "Faz 5 yeniden çalışacak" demiyor, yalnız "Faz 5 başarısız sayıldı" diyor
+     ("suppress" ya da kullanıcının kabulüyle yine geçilebildiği için "geçilmez" de denmiyor). Yönlendirme iletisi
+     yalnız gerçekten koşanı söylüyor: CSP taraması ve uygulamanın yanıt verip vermediği. Faz 6'nın yeniden sorma
+     iletisindeki sabit "Terminalde `npm run dev`" (kural 1 ihlali) "`▶ Çalıştır` ile başlat" oldu.
+  - Bilinen sınırlar:
+    - Faz 6 incelemesinde kurulum düşerse düzeltme yoluna gidilmez, Faz 6 bugünkü gibi incelemeye park eder. Faz 5 artık
+      kurulum düşükken geçmediği için bu yalnız Faz 5'siz girişte olur (ör. açılışta kaldığı yerden devam).
+    - Hipotez, koşturulmadı: 2. ve sonraki yinelemelerde Faz 5 kurulumu kendisi koşturmaz; `package.json` düzeltilse de
+      bağımlılık dizini doluysa yeniden kurulum yapılmayabilir (önceden de böyleydi).
+    - Faz 5'in kendi kurulumu sıfır olmayan her çıkış kodunda artık düşer. Eskiden yine de başlatma deneniyordu;
+      kurulum düşük ama uygulamanın açılabildiği nadir durumda artık düşüş görülür (npm uyarılarda 0 döner).
+  - Değişmeyenler: Faz 5 dışındaki fazlar, rötuş kipi akışı (`pending_ui_tweak`).
+  - Yeni modül yok (kural 15); saf karar `resume-decision.ts` içinde.
+  - Testler eklendi (`install-failure.test.ts`), koşturulmadı (yalnız derlendi). Akışın kendisi (`index.ts`) içe
+    aktarılınca uygulamayı başlattığı için birim testinde koşturulamaz.
+
 - **fix(regresyon guard): yalnız YENİ kırılan testte düşsün. + fix(durdurma bayrağı): başka bir fazın düşüşüne
   taşınmasın.** Ekransız deneme koşusu 32 (`yapilacaklar-sunucu-28`, `54f4fe2`): takım bağımsız test yazarının bıraktığı 4
   kırık testle düzeltmeden ÖNCE de kırmızıydı. Faz 10 lint düzeltmesinden sonra regresyon guard "bu fix BAŞKA testleri

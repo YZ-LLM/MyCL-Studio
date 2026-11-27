@@ -38,7 +38,7 @@ import {
 } from "./intent-router/handlers/command.js";
 import { devServerCandidates } from "./dev-server-command.js";
 import { isNeverAsk } from "./auto-answer.js";
-import { launchWithProvision } from "./service-provision.js";
+import { installFailureReason, installOutputTail, launchWithProvision } from "./service-provision.js";
 import { emitChatMessage, emitError, emitPhaseRunning } from "./ipc.js";
 import { loadProfile, resolveCommand } from "./profile-loader.js";
 import { applyPrototype, surfacePrototypeModuleSearch } from "./prototype-cache.js";
@@ -315,11 +315,14 @@ export class Phase5Controller {
       return "fail";
     }
     const escMe = escalatedModelEffort(this.state, this.config, "ui-codegen");
+    const backendFixTweak =
+      isUiTweakRun(this.state) && this.state.ui_tweak_allow_backend_for === this.state.pending_ui_tweak;
     const toolCtx: ToolContext = {
       project_root: this.state.project_root,
       // Backend yolları registry'deki spec.denied_paths'ten gelir — proje
       // tipine göre PhaseSpec'te ayarlanabilir.
-      extra_denied_paths: this.spec.denied_paths,
+      // 2026-11-28: Faz 5 düşüşünün arka uç planlı düzeltmesi (rötuş kipine çevrildi) → bu rötuşta yasak kalkar.
+      extra_denied_paths: backendFixTweak ? [] : this.spec.denied_paths,
       // LOGIN-İSTİSNASI (YZLLM 2026-06-18, tavuk-yumurta): backend genelde denied AMA review için
       // MİNİMAL dev-login'in (auth endpoint + session + seed kullanıcı) backend'i yazılabilsin →
       // reviewer Faz 6'da giriş yapıp authenticated UI'yi görebilsin. Yalnız auth/login/session
@@ -508,7 +511,7 @@ export class Phase5Controller {
       this.mapScenarioId = prep.scenarioId;
     }
     const initialUserMessage = isTweakMode
-      ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. Backend paths are denied. Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`
+      ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. ${backendFixTweak ? "This fix plan targets backend code: backend paths are allowed for THIS fix only." : "Backend paths are denied."} Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`
       : `Begin Phase 5: build the UI. Backend paths are denied. Write all UI files AND a complete package.json — EVERY library you import MUST be listed in "dependencies" (or "devDependencies"), with the pipeline scripts from the spec. Do NOT run \`${installCmd}\`, do NOT run a build, do NOT start the dev server, do NOT touch node_modules — MyCL installs dependencies and launches the dev server itself after you stop. Stop when every file is written and package.json is complete.${designInjection}${codeMapAddition}`;
 
     // YZLLM 2026-06-10: "silme kararı verirse önce yedek al." Codegen ajanı dosya silebilir/üstüne yazabilir
@@ -758,7 +761,7 @@ export class Phase5Controller {
         "error",
         `🔒 Faz 5: CSP ihlali (${cspViolations.length}) — üretilen kod \`unsafe-inline\`/\`unsafe-eval\` ` +
           `gerektiren yapı içeriyor (inline event handler / eval / inline style / javascript:). %100 CSP için ` +
-          `bunlar düzeltilmeli (JSX onClick, harici CSS-class, CSS değişkeni). Faz 5 yeniden çalışacak.`,
+          `bunlar düzeltilmeli (JSX onClick, harici CSS-class, CSS değişkeni). Faz 5 başarısız sayıldı.`,
       );
       this.lastFailReason = `CSP ihlali (${cspViolations.length}): ${summary.slice(0, 200)}`;
       await appendAudit(this.state.project_root, {
@@ -956,10 +959,13 @@ export class Phase5Controller {
             detail: installCmd,
           });
         } else {
-          installFailOutput = inst.out.slice(-1500);
+          installFailOutput = installOutputTail(inst.out);
+          // 2026-11-28 (koşu 33): kurulum düşünce uygulama BAŞLATILMAZ — başlatma hataları ("vite: command not found")
+          // asıl nedenin sonucudur. Düşüş nedeni kurulum komutu + çıktının son satırları; düzeltme yoluna bu gider.
           emitChatMessage(
             "error",
-            `📦 Bağımlılık kurulumu başarısız (\`${installCmd}\`, exit ${inst.code}). Asıl çıktı:\n\`\`\`\n${installFailOutput}\n\`\`\`\nYine de dev server denenecek; eksik bağımlılık varsa tanı bunu yüzeye çıkarır.`,
+            `📦 Bağımlılık kurulumu başarısız (\`${installCmd}\`, exit ${inst.code}) — uygulamayı başlatmayı denemiyorum. ` +
+              `Kurulum çıktısının son satırları:\n\`\`\`\n${installFailOutput}\n\`\`\``,
           );
           await appendAudit(this.state.project_root, {
             ts: Date.now(),
@@ -968,6 +974,8 @@ export class Phase5Controller {
             caller: "mycl-orchestrator",
             detail: `${installCmd} exit=${inst.code} ${installFailOutput.slice(-300)}`,
           });
+          this.lastFailReason = installFailureReason({ cmd: installCmd, outputTail: installFailOutput });
+          return "fail";
         }
       }
     }
@@ -979,7 +987,7 @@ export class Phase5Controller {
     // app bir servise (DB/cache) bağlanamayıp çöktüyse (ECONNREFUSED) → launchWithProvision eksik servisi tespit eder +
     // TAMAMLAMAYA çalışır (docker-compose) + dev-server'ı BİR KEZ retry eder. TEK KAYNAK helper — "projeyi çalıştır"
     // komutu da (intent-router) AYNI helper'ı kullanır (drift yok). Başarılı retry → aşağıdaki success yoluna düşer.
-    const { result: chainResult, provisionAudit } = await launchWithProvision(
+    const { result: chainResult, provisionAudit, installFailed } = await launchWithProvision(
       this.state.project_root,
       candidates,
       DEV_SERVER_TIMEOUT_MS,
@@ -996,6 +1004,18 @@ export class Phase5Controller {
         caller: "mycl-orchestrator",
         detail: provisionAudit,
       });
+    }
+    if (installFailed) {
+      // 2026-11-28 (koşu 33): yardımcının kurulumu düştü → uygulama başlatılmadı; ileti yardımcıda verildi.
+      await appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 5,
+        event: "phase-5-install-fail",
+        caller: "mycl-orchestrator",
+        detail: `${installFailed.cmd} ${installFailed.outputTail.slice(-300)}`,
+      });
+      this.lastFailReason = installFailureReason(installFailed);
+      return "fail";
     }
     if (!chainResult.ok || !chainResult.handle || !chainResult.cmd) {
       const lastAttempt =

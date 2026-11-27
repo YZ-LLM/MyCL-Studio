@@ -34,7 +34,7 @@ export async function launchWithProvision(
   candidates: Array<{ cmd: string; ports: number[] }>,
   timeoutMs: number,
   opts: { stackId?: StackId | null; depsOnly?: boolean } = {},
-): Promise<{ result: DevServerChainResult; provisionAudit?: string }> {
+): Promise<{ result: DevServerChainResult; provisionAudit?: string; installFailed?: InstallFailure }> {
   const crashOf = (r: DevServerChainResult): string =>
     r.attempts.map((a) => a.output).filter((o): o is string => !!o).join("\n---\n");
   const pkgDeps = await fs.readFile(join(projectRoot, "package.json"), "utf-8").catch(() => "");
@@ -45,6 +45,7 @@ export async function launchWithProvision(
   const profile = opts.stackId ? await loadProfile(opts.stackId) : null;
   const installCmd = resolveCommand(profile, "install");
   const depsDir = profile?.deps_dir ?? null;
+  let installFailed: InstallFailure | undefined;
   const runInstall = async (startMsg: string): Promise<boolean> => {
     if (!installCmd) return false;
     emitChatMessage("system", startMsg); // kullanıcı beklerken NE olduğunu ANINDA görsün (başlarken + bitince).
@@ -52,16 +53,25 @@ export async function launchWithProvision(
     const inst = await tryInstallDeps(projectRoot, installCmd, { depsDir });
     if (inst.message) emitChatMessage("system", inst.message);
     auditParts.push(`deps-install attempted=${inst.attempted} ok=${inst.ok}`);
+    if (inst.attempted && !inst.ok) installFailed = { cmd: installCmd, outputTail: inst.outputTail ?? "" };
     return inst.ok;
   };
+  // 2026-11-28 (koşu 33): kurulum DÜŞTÜYSE uygulama başlatılmaz — başlatma hataları ("vite: command not found") asıl
+  // nedenin sonucudur ve kullanıcıya/düzeltmeye yanlış ipucu verir. Çağıran `installFailed`'ı düşüş nedeni yapar.
+  const failedInstall = (attempts: DevServerChainResult["attempts"]) => ({
+    result: { ok: false, attempts } as DevServerChainResult,
+    provisionAudit: auditParts.join("; "),
+    installFailed,
+  });
 
   // PROAKTİF (KATI #6 correct-by-construction, YZLLM: "bunu MyCL tespit etmeliydi" + "stack-bağımsız olmalı"):
   // app'i çalıştırmadan ÖNCE deps kurulu mu diye BAK — profilin deps_dir'i (node_modules/vendor/.dart_tool…) yok
   // ya da boşsa KUR. Crash'i BEKLEME. Dizin ADI profilden gelir (stack-bağımsız); dizin yoksa deps hiç kurulmamıştır.
   let depsHandled = false;
   if (installCmd && depsDir && (await depsDirNeedsInstall(projectRoot, depsDir))) {
-    await runInstall(`📦 Bağımlılıklar kurulu değil (\`${depsDir}\` yok/boş) — \`${installCmd}\` ile kuruyorum…`);
+    const ok = await runInstall(`📦 Bağımlılıklar kurulu değil (\`${depsDir}\` yok/boş) — \`${installCmd}\` ile kuruyorum…`);
     depsHandled = true; // kurulum denendi (başarılı ya da değil) → aşağıdaki reaktif tur TEKRAR kurmasın.
+    if (!ok && installFailed) return failedInstall([]);
   }
 
   let result = await tryDevServerChain(projectRoot, candidates, timeoutMs);
@@ -78,6 +88,7 @@ export async function launchWithProvision(
     : await allMissingDepsSignatures();
   if (!depsHandled && detectMissingDeps(crashOut, pkgDeps, depSigs)) {
     const ok = await runInstall(`📦 Uygulama başlamadı: bağımlılıklar kurulu değil. \`${installCmd}\` ile kuruluyor…`);
+    if (!ok && installFailed) return failedInstall(result.attempts);
     if (ok) {
       const retry = await tryDevServerChain(projectRoot, candidates, timeoutMs);
       result = { ...retry, attempts: [...result.attempts, ...retry.attempts] };
@@ -307,6 +318,32 @@ export interface InstallResult {
   ok: boolean;
   /** Kullanıcıya görünür mesaj (boşsa emit edilmez). */
   message: string;
+  /** Başarısızlıkta kurulum çıktısının son satırları (çakışan paket adları orada) — düşüş nedeni ve düzeltme girdisi. */
+  outputTail?: string;
+}
+
+/** Kurulum düştü: komut + çıktının son satırları (2026-11-28, koşu 33). */
+export interface InstallFailure {
+  cmd: string;
+  outputTail: string;
+}
+
+/** SAF: kurulum çıktısının son anlamlı satırları (boşlar atılır; en çok `maxLines` satır, `maxChars` karakter). */
+export function installOutputTail(out: string, maxLines = 25, maxChars = 1500): string {
+  const lines = out.split(/\r?\n/).map((l) => l.replace(/\s+$/, "")).filter((l) => l.trim() !== "");
+  return lines.slice(-maxLines).join("\n").slice(-maxChars);
+}
+
+/**
+ * SAF: kurulum düşüşünün düzeltme yoluna giden metni (Faz 5 `lastFailReason`). Başlatma denenmediği için asıl neden
+ * budur; "command not found" gibi sonuç satırları DEĞİL.
+ */
+export function installFailureReason(f: InstallFailure): string {
+  return (
+    `dependency install failed: \`${f.cmd}\` exited non-zero — the app was NOT started (its errors would only be ` +
+    `consequences). Fix the dependency declarations (versions/peer conflicts) so the install succeeds.\n\n` +
+    `Install output (last lines — diagnose THIS):\n${f.outputTail}`
+  );
 }
 
 /** Kurulum çok uzun sürebilir (büyük dep ağacı, native derleme, puppeteer→Chromium indirmesi) — üst sınır
@@ -448,7 +485,10 @@ export async function tryInstallDeps(
     message:
       r.code === 0
         ? `📦 Eksik bağımlılıkları \`${installCmd}\` ile kurdum. Dev server'ı yeniden deniyorum.`
-        : `⚠️ \`${installCmd}\` başarısız oldu (${salientInstallError(r.out)}). Bağımlılıklar kurulamadı — elle \`${installCmd}\` çalıştırıp tekrar deneyin.`,
+        : // 2026-11-28 (koşu 33): "elle çalıştır" denmez — MyCL önce kendi düzeltmesini dener (düşüş nedeni bu çıktı).
+          `⚠️ \`${installCmd}\` başarısız oldu (${salientInstallError(r.out)}). Bağımlılıklar kurulamadı — uygulamayı başlatmayı denemiyorum; ` +
+          `kurulum çıktısının son satırları:\n\`\`\`\n${installOutputTail(r.out, 12, 900)}\n\`\`\``,
+    ...(r.code === 0 ? {} : { outputTail: installOutputTail(r.out) }),
   };
 }
 

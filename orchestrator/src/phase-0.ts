@@ -189,11 +189,11 @@ export class Phase0Controller {
    *  user_selected: kullanıcının error-analysis'te SEÇTİĞİ çözüm → D1 bu yönü onurladıysa
    *  D2 tekrar SORMAZ, doğrudan uygular (çift-soru fix'i, YZLLM 2026-07-03). */
   /** ANA KURAL (2026-07-18): bu alan YALNIZ İNGİLİZCE taşır — D1 (main) promptuna gömülür. */
-  private readonly priorAnalysis?: { solutions: string[]; user_selected?: string };
+  private readonly priorAnalysis?: { solutions: string[]; user_selected?: string; failed_phase?: number };
   constructor(
     deps: PhaseDeps & {
       bugReport: string;
-      priorAnalysis?: { solutions: string[]; user_selected?: string };
+      priorAnalysis?: { solutions: string[]; user_selected?: string; failed_phase?: number };
     },
   ) {
     this.state = deps.state;
@@ -789,6 +789,7 @@ export class Phase0Controller {
           rootCauseTR,
           bug_report_tr: this.bugReport, // gerçek-app doğrulama repro hedefi (kullanıcının orijinal şikayeti)
           from_error_analysis: !!this.priorAnalysis, // error-analysis gate-fix → gerçek-app kapısı kurulmasın
+          ...(this.priorAnalysis?.failed_phase !== undefined ? { from_failed_phase: this.priorAnalysis.failed_phase } : {}),
           options: optionsTR,
           affected,
           ts: Date.now(),
@@ -824,6 +825,7 @@ export class Phase0Controller {
         rootCauseTR,
         bug_report_tr: this.bugReport, // gerçek-app doğrulama repro hedefi (kullanıcının orijinal şikayeti)
         from_error_analysis: !!this.priorAnalysis, // error-analysis gate-fix → gerçek-app kapısı kurulmasın
+        ...(this.priorAnalysis?.failed_phase !== undefined ? { from_failed_phase: this.priorAnalysis.failed_phase } : {}),
         options: optionsTR,
         affected,
         auto_selected_label: chosen.label,

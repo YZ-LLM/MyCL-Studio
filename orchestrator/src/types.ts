@@ -473,6 +473,12 @@ export interface State {
    */
   pending_ui_tweak?: string;
   /**
+   * 2026-11-28 (koşu 33, inceleme): Faz 5 düşüşünün düzeltmesi D1'de `backend-only` planlandı ve rötuş kipine çevrildi
+   * → BU rötuş isteği için Faz 5'in arka uç yol yasağı kalkar (plan arka uç dosyasını düzeltiyor). Değer isteğin metnidir;
+   * yalnız `pending_ui_tweak` aynı metinken geçerlidir (başka bir rötuşa sızmaz, temizlenmesi gerekmez).
+   */
+  ui_tweak_allow_backend_for?: string;
+  /**
    * YZLLM 2026-06-15 (canlı test #2): bu iterasyon iş-listesindeki TEK işi işliyor
    * (intake-böl sonrası). true iken `buildConversationContext` BOŞ döner → HİÇBİR faz
    * (1,2,3,4,7,9) orijinal çok-bug'lı kullanıcı mesajını konuşma geçmişinden çekip iki işi
@@ -598,6 +604,11 @@ export interface State {
          * koşup doğrular; anlamsız repro hedefiyle iş gereksiz bloklanmasın). MAHKEME v2 HIGH regresyon fix'i.
          */
         from_error_analysis?: boolean;
+        /**
+         * Error-analysis akışında düşen fazın numarası (2026-11-28, koşu 33). Faz 5 düşüşünün düzeltmesi D1'in kapsam
+         * etiketinden bağımsız olarak Faz 5'ten yeniden koşar (kapı: CSP taraması, kurulum, uygulamanın açılması).
+         */
+        from_failed_phase?: number;
         options: Array<{
           label: string;
           description: string;

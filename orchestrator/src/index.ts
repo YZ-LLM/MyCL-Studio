@@ -107,6 +107,7 @@ import {
   shouldPreserveIterationState,
   decideUserAbortOnFail,
   userAbortOutlivedPhase,
+  fixRouteKind,
   decideIterationStart,
   resumeEntryPoint,
   resumeWasStale,
@@ -832,8 +833,13 @@ const MANUAL_LOOP_MAX = 3;
  * (advanceToNextPhase YOK → sahte "tamamlandı" yok, kullanıcı görünür şekilde bilgilendirilir).
  *
  * "suppress" (iki bağımsız değerlendirme KANITLA false-positive dedi) bu fazlarda da geçerli kalır — orada kanıt var.
+ *
+ * 2026-11-28 (ekransız deneme koşusu 33): 5 = arayüz (CSP taraması + bağımlılık kurulumu + uygulamanın açılması).
+ * Faz 5 kırmızıyken "escalate" kabul-devam etti; Faz 6 açılmayan uygulamayı incelemeye sundu. Faz 5'in gerçek çözüm
+ * yolu Faz 5'i yeniden koşar: `ui-only` rötuş kipi (CSP taraması + başlatma iki kipte de koşar), tam yineleme Faz 1'den;
+ * `backend-only` etiketi Faz 5 düşüşünde rötuş kipine çevrilir (aşağıda, `from_failed_phase`).
  */
-const PROOF_BEARING_PHASES: ReadonlySet<number> = new Set([8, 14, 15, 16]);
+const PROOF_BEARING_PHASES: ReadonlySet<number> = new Set([5, 8, 14, 15, 16]);
 const autoSolveSig = new Map<number, { sig: string; count: number; priorSolutions: string[] }>();
 // YZLLM 2026-07-09 (gate-timeout "atlama yok → çöz → orkestra → dürüst dur"): bir faz için timeout-divert deneme sayacı
 // — sonsuz-döngü emniyeti. TIMEOUT_DIVERT_MAX aşılınca gerçek-çözüm/orkestra denemesi durur → dürüst görünür-dur. MODÜL-
@@ -4563,7 +4569,7 @@ async function executeAgentDecision(
             "system",
             dev.ok
               ? "👀 Bildirdiklerin kuyruğa eklendi. Bu işin UI'sini onaylıyor musun → `tamam` (Faz 7'e geçeriz) · düzeltme istersen yaz · `iptal` ile durdur."
-              : "⚠️ Bildirdiklerin kuyruğa eklendi AMA dev-server otomatik başlatılamadı — UI'yi inceleyemezsin. Terminalde `npm run dev` ile başlat, sonra `tamam`/`iptal` yaz (ya da düzeltme iste).",
+              : "⚠️ Bildirdiklerin kuyruğa eklendi AMA dev-server otomatik başlatılamadı — UI'yi inceleyemezsin. `▶ Çalıştır` ile başlat, sonra `tamam`/`iptal` yaz (ya da düzeltme iste).",
           );
         }
         return;
@@ -4901,7 +4907,7 @@ async function executeDispatchedIntent(
   // user_selected (YZLLM 2026-07-03 "aynı şeyi 2 kere sordu"): kullanıcının error-analysis'te SEÇTİĞİ çözüm →
   // Faz 0 D2 tekrar SORMAZ, D1 bu yönü onurladıysa doğrudan uygular (çift-soru kesilir).
   // ANA KURAL: priorAnalysis YALNIZ İNGİLİZCE taşır (main'e gider — Faz 0 D1 promptuna gömülür).
-  priorAnalysis?: { solutions: string[]; user_selected?: string },
+  priorAnalysis?: { solutions: string[]; user_selected?: string; failed_phase?: number },
 ): Promise<void> {
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
@@ -9605,6 +9611,7 @@ export async function handleAskqAnswer(
     await executeDispatchedIntent(bugReport, fakeOutcome, {
       solutions: solutionsEn,
       user_selected: selEn,
+      failed_phase: cached.phase,
     });
     return;
   }
@@ -9870,7 +9877,16 @@ export async function handleAskqAnswer(
     //   full-stack    → develop_new_or_iter (Phase 1'den fresh)
     //   new-iteration → develop_new_or_iter (D1 sentinel)
     const planKindMissing = selected.planKind === undefined;
-    const kind = selected.planKind ?? "full-stack";
+    const plannedKind = selected.planKind ?? "full-stack";
+    // 2026-11-28 (koşu 33): Faz 5 düşüşünün düzeltmesi Faz 5'i yeniden koşmalı (kapı + Faz 6 incelemesi).
+    const kind = fixRouteKind(plannedKind, pending.from_failed_phase);
+    if (kind !== plannedKind) {
+      emitChatMessage(
+        "system",
+        `ℹ️ Düzeltme Faz 5'in düşüşü için: "${plannedKind}" planını Faz 5 rötuş kipinde uyguluyorum (bu düzeltmede arka uç ` +
+          `yollarına yazılabilir); ardından Faz 5'in CSP taraması ve uygulamanın yanıt verip vermediği yeniden denetlenecek.`,
+      );
+    }
     if (planKindMissing) {
       // Eski state.json'dan resume: D1 ajanı plan_kind set etmediği bir
       // dönemde kaydedilmiş. Kullanıcıya görünür uyarı + audit trail bırak ki
@@ -9926,6 +9942,8 @@ export async function handleAskqAnswer(
       runtime.state = {
         ...runtime.state,
         pending_ui_tweak: fixPayload,
+        // 2026-11-28: arka uç planı rötuşa çevrildiyse bu istek için Faz 5'in arka uç yasağı kalkar (yalnız bu metinle).
+        ui_tweak_allow_backend_for: kind !== plannedKind ? fixPayload : undefined,
         fix_checkpoint_ref: fixCheckpointRef,
         // GERÇEK-APP DOĞRULAMA MARKER'ı (YZLLM 2026-07-21): pipeline sonunda bu fix'in gerçek çalışan uygulamada
         // bug'ı çözdüğünü doğrula (birim-yeşil ≠ app-yeşil). checkpoint marker'da taşınır (fix_checkpoint_ref

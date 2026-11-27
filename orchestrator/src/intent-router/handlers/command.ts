@@ -534,7 +534,7 @@ async function runDevServer(
     // Eksik bağımlılık (kurulmamış paket) crash'inde helper stack'in PROFİL install komutunu (npm/yarn/pip/cargo…)
     // çözüp kurar. stackId TAZE detectStack'ten (yukarıda) → foreign projede deps çoğu kez kurulu değildir → app
     // "Cannot find module" ile anında çöker; bu komutla tamamlanır. (KATI #1: komut profilden, hardcode yok.)
-    const { result: chainResult, provisionAudit } = await launchWithProvision(
+    const { result: chainResult, provisionAudit, installFailed } = await launchWithProvision(
       state.project_root,
       candidates,
       DEV_SERVER_TIMEOUT_MS,
@@ -550,6 +550,22 @@ async function runDevServer(
       });
     }
 
+    if (installFailed) {
+      // 2026-11-28 (koşu 33): kurulum düştü → uygulama başlatılmadı; çıktı yardımcıda sohbete yazıldı.
+      await appendAudit(state.project_root, {
+        ts: Date.now(),
+        phase: 5,
+        event: "command-dev-server-fail",
+        caller: "user",
+        detail: `cmd="${cmd}" install-failed=${installFailed.cmd} ${installFailed.outputTail.slice(-200)}`,
+      });
+      emitChatMessage(
+        "error",
+        `❌ Proje başlatılmadı: bağımlılık kurulumu (\`${installFailed.cmd}\`) başarısız. Asıl neden kurulum çıktısında (yukarıda); ` +
+          `bağımlılık bildirimleri (sürümler, çakışan paketler) düzeltilmeli.`,
+      );
+      return;
+    }
     if (!chainResult.ok || !chainResult.handle || !chainResult.cmd) {
       const last = chainResult.attempts[chainResult.attempts.length - 1];
       const diagnostic = await buildDevServerFailMessage(

@@ -121,10 +121,24 @@ export async function restartDevServerSimple(
   // kullanıcı günlerce çalışan bir uygulama göremedi. Artık dev server'ı başlatan bu yol da
   // kurulumu kendi garanti ediyor — "Faz 5 koşmadı → kurulum yok" boşluğu yapısal olarak kapandı.
   // `depsOnly`: yalnız bağımlılık; servis (docker-compose) tamamlama BU yolda yapılmaz.
-  const { result } = await launchWithProvision(state.project_root, candidates, 20_000, {
+  const { result, installFailed } = await launchWithProvision(state.project_root, candidates, 20_000, {
     stackId: stack,
     depsOnly: true,
   });
+  if (installFailed) {
+    // 2026-11-28 (koşu 33): kurulum düştü → uygulama başlatılmadı (yardımcı çıktıyı sohbete yazdı). Tanı, başlatma
+    // hatası değil kurulum düşüşüdür; "command not found" satırları asıl neden değildi.
+    const last = installFailed.outputTail.split("\n").filter((l) => l.trim()).slice(-1)[0];
+    emitChatMessage(
+      "error",
+      `❌ Dev server başlatılmadı: bağımlılık kurulumu (\`${installFailed.cmd}\`) başarısız. Asıl neden kurulum çıktısında (yukarıda).`,
+    );
+    return {
+      ok: false,
+      reason: `dependency install failed: ${installFailed.cmd}`,
+      firstError: last ? `${installFailed.cmd}: ${last}` : `${installFailed.cmd} başarısız`,
+    };
+  }
   if (result.ok && result.handle) {
     state.dev_server_pid = result.handle.pid;
     replaceActiveWatcher({

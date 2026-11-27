@@ -152,3 +152,16 @@ export function decideUserAbortOnFail(p: {
 export function userAbortOutlivedPhase(p: { flag: boolean; abortedPhase: number | null; completedPhase: number }): boolean {
   return p.flag && p.abortedPhase !== null && p.abortedPhase === p.completedPhase;
 }
+
+/**
+ * SAF (2026-11-28, ekransız deneme koşusu 33): Faz 0 düzeltmesinin hangi yoldan uygulanacağı.
+ *
+ * KURAL: düşen faz Faz 5 ise (error-analysis akışı) `backend-only` etiketi rötuş kipine (`ui-only`) çevrilir.
+ * `backend-only` Faz 8'den başlar; Faz 5'in kapısı (CSP taraması, bağımlılık kurulumu, uygulamanın açılması) ve Faz 6
+ * incelemesi hiç yeniden koşmazdı. Rötuş kipi Faz 5'i koşar ve paket bildirimi (ör. `package.json`) Faz 5'in kapsamındadır.
+ * Öteki etiketler ve öteki fazlar değişmez (`full-stack` zaten Faz 1'den başlar).
+ */
+export function fixRouteKind<K extends string>(planned: K, fromFailedPhase: number | undefined): K | "ui-only" {
+  if (fromFailedPhase === 5 && planned === "backend-only") return "ui-only";
+  return planned;
+}
