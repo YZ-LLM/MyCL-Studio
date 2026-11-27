@@ -245,7 +245,14 @@ import {
 import { randomUUID } from "node:crypto";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
-import { snapshotBeforeAutofix, takeRollback, restoreSnapshot, disarmRollback } from "./fix-snapshot.js";
+import {
+  snapshotBeforeAutofix,
+  takeRollback,
+  restoreSnapshotWithReport,
+  describeSnapshot,
+  disarmRollback,
+  armFixSeriesRollback,
+} from "./fix-snapshot.js";
 import {
   armLlmOutageWait,
   cancelLlmOutageWait,
@@ -2180,11 +2187,13 @@ async function failPhase(
   if (exhausted) {
     const rb = takeRollback();
     if (rb) {
-      const ok = await restoreSnapshot(rb, runtime.state.project_root);
-      emitChatMessage(
+      // 2026-11-27: rapor hangi yedeğe dönüldüğünü ve sayıları söyler; toplu silme emniyeti reddederse görünür ileti
+      // fix-snapshot'ta verildi (burada ikinci, yanıltıcı "tam başarılı olamadı" iletisi basılmaz).
+      const rep = await restoreSnapshotWithReport(rb, runtime.state.project_root);
+      if (!rep.refused) emitChatMessage(
         "system",
-        ok
-          ? `↩️ Otomatik düzeltmeler bu hatayı çözmedi — başarısız değişiklikleri **geri aldım** (${rb.method === "git" ? "git checkpoint" : "yedek"}; ilk denemeden önceki temiz hale).`
+        rep.ok
+          ? `↩️ Otomatik düzeltmeler bu hatayı çözmedi — başarısız değişiklikleri **geri aldım** (${rb.method === "git" ? "git checkpoint" : "yedek"}; ilk denemeden önceki temiz hale: ${describeSnapshot(rb)}; ${rep.deleted} dosya silindi, ${rep.rewritten} dosya geri yazıldı).`
           : `⚠️ Geri alma denedim ama tam başarılı olamadı (${rb.method}). Değişiklikleri elle kontrol etmen gerekebilir.`,
       );
     } else {
@@ -9785,6 +9794,10 @@ export async function handleAskqAnswer(
       const cp = await createCheckpoint(runtime.state.project_root);
       if (cp.ok && cp.ref) {
         fixCheckpointRef = cp.ref;
+        // 2026-11-27: bu checkpoint düzeltme dizisinin geri dönüş noktası (ilk kurulan kazanır). Eskiden yalnız state'e
+        // yazılıyordu; tükenmedeki geri alma, faz başında (kod yokken) kurulan noktaya dönüyordu. Faz başı noktası
+        // kalkınca git'li projede hedefsiz kalmasın diye burada kurulur (alınma saati iletiye geçer).
+        armFixSeriesRollback({ method: "git", ref: cp.ref, takenAt: Date.now() });
         emitChatMessage(
           "system",
           "📌 Fix öncesi checkpoint alındı — regresyonda otomatik geri alınabilir; mekanik kalite gate'leri değişen dosyalara odaklanacak (scoped).",

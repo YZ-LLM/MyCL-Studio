@@ -18,7 +18,7 @@ import { scanCspViolations, ensureCspMeta } from "./csp-compliance.js";
 import { runVisualDesignAgent } from "./visual-design-agent.js";
 import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
 import { designPanelDecision, designSynthesizedInCurrentIteration } from "./design-panel-gate.js";
-import { changedFilesVsSnapshot, copySourceTree, snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
+import { changedFilesVsSnapshot, copySourceTree, snapshotAttemptStart, disarmRollback } from "./fix-snapshot.js";
 import { escalatedModelEffort } from "./escalation.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
@@ -475,7 +475,9 @@ export class Phase5Controller {
     // YZLLM 2026-06-10: "silme kararı verirse önce yedek al." Codegen ajanı dosya silebilir/üstüne yazabilir
     // (supersession). Tweak modu zaten debug-fix yolunda snapshot'landı; normal codegen'de burada snapshot al →
     // ajan ne silerse silsin geri alınabilir (git checkpoint / git yoksa ~/.mycl/backups).
-    if (!isTweakMode) await snapshotBeforeAutofix(this.state.project_root, Date.now());
+    // 2026-11-27 (koşu 22, Faz 8'deki aynı kök): faz başı yedeği geri alma NOKTASI KURMAZ — sonraki bir düzeltmenin
+    // geri alma hedefi olup arayüz kodunu silmesin. Yalnız elle dönüş için (snapshotAttemptStart).
+    if (!isTweakMode) await snapshotAttemptStart(this.state.project_root, Date.now());
     // Tasarım paneli/müzakere bittiyse banner'ı codegen'e geri al (staleness yok — her adım kendi etiketi).
     emitPhaseRunning(isTweakMode ? "UI rötuşu yazılıyor" : "UI kodu yazılıyor");
     // KULLANICI RÖTUŞU: koşu yazma kanıtı bırakmadan biterse "hiçbir kaynak dosya değişmedi" hükmü dosya

@@ -1,5 +1,65 @@
 ## 2026-11-27
 
+- **fix(geri alma): başarısız düzeltmeden sonra geri alma düzeltmenin başındaki duruma dönsün; fazın başında (kod
+  yokken) alınmış yedeğe dönüp projenin bütün kaynağını silmesin.** Ekransız deneme koşusu 22 (`0fa98d1`, arayüzsüz
+  Node.js, git yok): Faz 8 başında proje kodsuzken kopya yedek alındı ve geri alma noktası olarak kuruldu ("ilk kurulan
+  kazanır"); ilk deneme kapıda düştü, nokta kurulu kaldı. Düzeltme yönlendirmesinin aldığı ikinci (13 dosyalık) yedek
+  nokta dolu olduğu için kurulamadı. Düzeltme kipi `peekRollback()` ile kodsuz yedeği aldı: `gate repro` izi ikinci
+  yedekte olup birincide olmayan 11 dosyayı "değişmiş" gösterdi ve geri alma ayna geri yüklemesiyle bütün kaynağı sildi
+  (`bin/todo.js`, `lib/*.js`…). Koşu 18'deki "repro-first ihlali" de aynı köktü.
+  1. **Faz başı yedeği nokta kurmaz:** `snapshotAttemptStart` (`fix-snapshot.ts`) yedeği alır ama geri alma noktası
+     kurmaz; Faz 8 (düzeltme dışı) ve Faz 5 (rötuş dışı) başlangıcı bunu kullanıyor. Yedek diskte kalır, elle dönüş
+     içindir (ileti bunu söylüyor). Görevin "deneme bitince bırakılsın" kararı, noktayı hiç kurmayarak uygulandı:
+     sonradan bırakmak, aynı turda daha önce kurulmuş bir düzeltme dizisinin noktasını da düşürürdü (temkinli seçenek).
+  2. **Düzeltme dizisi:** "ilk kurulan kazanır" kuralı aynen; düzeltme kipi `snapshotForFixAttempt` ile dizinin
+     noktasını (yoksa yeni yedeği) kullanıyor. Faz başı yedekleri nokta kurmadığı için bu her zaman kod yazıldıktan
+     sonra alınmış bir düzeltme yedeği. `gate-autofix` ve düzeltme yönlendirmesi (`index.ts`) zaten kod varken yedek
+     alıyor; denetlendi, değişmedi.
+  3. **Toplu silme emniyeti (kesin denetim, son çare):** `restoreSnapshotWithReport` geri yüklemeden önce projede bugün
+     var olan çalışan üretim dosyalarına (`isRuntimeProdFile`) bakar; geri yükleme HEPSİNİ silecekse ve yedek hiç
+     çalışan üretim dosyası geri getirmiyorsa yapılmaz: proje olduğu gibi kalır, sohbete görünür hata ve yedeğin
+     yeri/alınma saati yazılır. Kopya yolunda dosya yedekte yoksa, git yolunda `git clean -fdn` kuru koşusu onu
+     siliyorsa "silinecek" sayılır (git'te de faz başı noktası kodsuzsa `git clean` aynı silmeyi yapardı; git çıktısı
+     `core.quotepath=off` ile okunuyor). Hesaplanamazsa da geri yüklenmez (kuşkuda veri silinmez). Düzeltme bütün
+     çalışan dosyaları yeniden adlandırdıysa (yedekte eski adlarıyla kod var) geri yükleme eskisi gibi yapılır
+     (incelemenin bulduğu yanlış ret). Tükenmedeki geri alma (`index.ts`) da aynı emniyetten geçiyor.
+     **"İşi durdur" UYGULANMADI (açık karar):** ret olursa proje korunur, görünür ileti yedeğin yerini söyler, Faz 8 o
+     yedeği bırakır; ama akış her zamanki gibi sürer (hata analizi, otomatik düzeltme). Veri yine güvende: sonraki her
+     geri yükleme aynı emniyetten geçer, hiçbir yol bütün kaynağı silemez. Akışı gerçekten durdurmak denendi ve geri
+     alındı: bellekteki bir bayrağı canlılık bekçisi 3 dakikada aşıyordu; "kullanıcı bekleniyor" park listesine
+     eklenen alan ise yeniden açılışta kayboluyor (iş kendiliğinden sürüyor), kuyruk dışı başlatılan işlerde ve
+     "Çalıştır" düğmesinde delinmiyordu, üstelik sonraki bir koşuyu Faz 9'da açıklamasız durduruyordu (sessiz duruş).
+     Kalıcı ve delinmez bir duruş; durumun diske yazılmasını, yeniden açılış, kuyruk, "Çalıştır" ve "hiçbir şey sorma"
+     yollarının ele alınmasını gerektiren yeni bir mekanizma (kural 15). Danışmanın kararına bırakıldı.
+  4. **Görünürlük:** geri alma iletisi ve `revert-decision-revert` denetim satırı dönülen yedeği (klasör ya da git ref,
+     alınma saati), silinen ve geri yazılan dosya sayısını söylüyor; ret ya da başarısızlık da satıra yazılıyor. Bu satır
+     artık geri yüklemeden SONRA yazılıyor (sayılar ancak o zaman belli). `FixSnapshot` alınma zamanını taşıyor.
+  5. **Budama:** faz başı yedekleri nokta kurmadığı için yedek sıklaştı; `pruneProjectBackups` kurulu noktanın
+     klasörünü artık silmiyor (yoksa düzeltme dizisinin dönüş hedefi budanabilirdi).
+  6. **Git'li projede dizinin noktası (kural 14: yerine geçen mekanizma):** eskiden git'li projede tükenmedeki geri
+     alma faz başında kurulan noktaya dönüyordu (o da kodsuz olabilirdi); düzeltme yönlendirmesinin git checkpoint'i
+     hiç kurulmuyordu. Faz başı noktası kalkınca hedef kalmayacaktı: yönlendirmenin checkpoint'i artık
+     `armFixSeriesRollback` ile dizinin noktası olarak kuruluyor; Faz 8 düzeltme kipi aynı ref'i görünce kurulu
+     noktayı (alınma saatiyle) kullanıyor.
+  7. **Sonraki yedek alınamazsa:** `snapshotBeforeAutofix` başarısız olunca eskiden koşulsuz `disarmRollback()` yapıyordu;
+     dizinin SONRAKİ bir yedeği alınamayınca ilk (en temiz) noktası da düşüyordu. Artık kurulu nokta korunur ve ileti
+     ona dönülebileceğini söyler.
+  8. **Sayım:** silinen dosya sayısı, git'te tek satırla yazılan izlenmeyen dizinlerin ve kopya yolunda silinen
+     dizinlerin içindeki dosyaları sayıyor.
+  **Değişmeyenler (kural 14):** düzeltmenin eklediği dosyaların geri almada silinmesi (ayna geri yükleme), "tut" kararı
+  ve iletisi, git yolundaki geri alma (`restoreCheckpoint`), başarıda noktanın bırakılması, `restoreSnapshot` boolean
+  arayüzü. **Değişen davranış:** (1) düzeltme dışı Faz 8/Faz 5 denemesi düşüp düzeltme yönlendirmesi yedek almadan
+  tükenmeye gidilirse, tükenmedeki geri alma artık faz başına dönmüyor ("Geri alınacak snapshot yok."); eskiden bu
+  dönüş kod yazılmadan önceki duruma gidip yazılan her şeyi siliyordu. (2) Bir düzeltme dizisi kodsuz bir projede
+  başlayıp bütün çalışan kodu kendisi yazdıysa, geri alma artık o kodu silmiyor (emniyet), görünür hata veriyor.
+  **Bilinen sınır:** arayüz düzeltmesinde (ui-only) Faz 5 rötuşu başarıyla bitince dizinin noktası bırakılır; aynı
+  düzeltme Faz 8'e de giderse Faz 8 git ref'ini kurulu nokta olmadan kullanır, iletide alınma saati "bilinmiyor" yazar
+  (geri alma çalışır). **Bilinen sınır (önceden vardı, çözülmedi):** mahkemenin "kabul et, devam et" kararı (`advanceToNextPhase`) düzeltme
+  dizisinin noktasını bırakmıyor; aynı turda sonraki bir düzeltme dizisi eski noktayı görür ("ilk kurulan kazanır"),
+  karşılaştırma ve geri alma aradaki fazların yazdığını da kapsar. Toplu silme emniyeti yalnız HEPSİ silinecekse
+  devreye girer.
+  Testler `test/fix-snapshot.test.ts` içinde. Test ve kontrol koşturulmadı, yalnız derlendi.
+
 - **fix(Faz 8 kapısı): bütün kabul ölçütleri yeşil bildirilmiş ve MyCL'in kendi son koşusu yeşilken "yeşil sayısı az"
   diye düşmesin; düzeltme kipinde "kırmızı önce" kuralının neden uygulandığı kayda geçsin.** Ekransız deneme koşusu 18
   (`00b3270`, arayüzsüz Node.js komut satırı, 6 kabul ölçütü): ajan altı ölçütü tek satırda bildirdi

@@ -34,7 +34,16 @@ import { safeEnv } from "./safe-env.js";
 
 const execAsync = promisify(exec);
 import { emitChatMessage, emitError } from "./ipc.js";
-import { snapshotBeforeAutofix, restoreSnapshot, peekRollback, disarmRollback, changedFilesVsSnapshot, type FixSnapshot } from "./fix-snapshot.js";
+import {
+  snapshotAttemptStart,
+  snapshotForFixAttempt,
+  restoreSnapshotWithReport,
+  describeSnapshot,
+  peekRollback,
+  disarmRollback,
+  changedFilesVsSnapshot,
+  type FixSnapshot,
+} from "./fix-snapshot.js";
 import { decideRevertOrKeep } from "./revert-decision.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
 import {
@@ -806,7 +815,9 @@ export class Phase8Controller {
 
     // YZLLM 2026-06-10: "silme kararı → önce yedek." TDD codegen ajanı dosya silebilir/üstüne yazabilir. Fix modu
     // zaten debug-fix yolunda snapshot'landı; normal TDD'de burada snapshot al → silinen geri alınabilir.
-    if (!this.isFixMode) await snapshotBeforeAutofix(this.state.project_root, Date.now());
+    // 2026-11-27 (koşu 22): bu faz başı yedeği geri alma NOKTASI KURMAZ (snapshotAttemptStart) — kodsuz anın yedeği
+    // sonraki bir düzeltmenin geri alma hedefi/karşılaştırma tabanı olup bütün kaynağı silmiyordu. Yalnız elle dönüş için.
+    if (!this.isFixMode) await snapshotAttemptStart(this.state.project_root, Date.now());
     // Escalation (YZLLM 2026-06-11): model+efor PER-DOMAIN merdivenden — bu domain'in (tdd-codegen) öğrenilmiş
     // basamağından başlar, sorun çıktıkça failPhase tırmandırır (monotonik). Config kral: tier→model config'ten.
     const me = escalatedModelEffort(this.state, this.config, "tdd-codegen");
@@ -851,14 +862,20 @@ export class Phase8Controller {
         // v15.10: D2 routing'de (ilk kod değişiminden ÖNCE) git checkpoint alındı — onu kullan.
         // ui fix'lerde ilk değişim Faz 5'te olduğu için checkpoint orada erken
         // alınmış olmalı; burada yeniden almak fix sonrası state'i yakalardı.
-        this.fixSnapshot = { method: "git", ref: this.state.fix_checkpoint_ref };
+        // Yönlendirme bu checkpoint'i dizinin noktası olarak kurduysa onu al (alınma saati iletiye geçsin).
+        const armed = peekRollback();
+        this.fixSnapshot =
+          armed?.method === "git" && armed.ref === this.state.fix_checkpoint_ref
+            ? armed
+            : { method: "git", ref: this.state.fix_checkpoint_ref };
         this.checkpointRef = this.state.fix_checkpoint_ref;
       } else {
         // YZLLM 2026-06-12: git-only checkpoint YERİNE snapshot — git temizse checkpoint, git YOKSA
         // ~/.mycl/backups kaynak-kopyası → non-git projede de OTOMATİK geri alma ("elle yap" YOK).
         // index.ts fix-routing (3895) bu turda zaten bir snapshot armed etmiş olabilir (non-git) → GÖZ AT +
         // yeniden kullan (çift yedek + çift mesaj olmasın); yoksa (doğrudan Faz 8 fix) yeni al.
-        const snap = peekRollback() ?? (await snapshotBeforeAutofix(this.state.project_root, Date.now()));
+        // 2026-11-27: faz başı yedekleri nokta kurmadığı için kurulu nokta her zaman düzeltme dizisinin yedeğidir.
+        const snap = await snapshotForFixAttempt(this.state.project_root, Date.now());
         this.fixSnapshot = snap;
         // checkpointRef yalnız git'te set (getChangedFiles + scoped-scope köprüsü git-ref ister); copy'de null.
         this.checkpointRef = snap.method === "git" ? (snap.ref ?? null) : null;
@@ -1210,14 +1227,16 @@ export class Phase8Controller {
       }
     }
     const decision = decideRevertOrKeep({ anchor: this.anchorEvidence, deletedTestFiles });
-    await appendAudit(this.state.project_root, {
-      ts: Date.now(),
-      phase: 8,
-      event: `revert-decision-${decision.action}`,
-      caller: "mycl-orchestrator",
-      detail: decision.reason_tr.slice(0, 300),
-    }).catch(() => {});
+    const decisionAudit = (detail: string) =>
+      appendAudit(this.state.project_root, {
+        ts: Date.now(),
+        phase: 8,
+        event: `revert-decision-${decision.action}`,
+        caller: "mycl-orchestrator",
+        detail,
+      }).catch(() => {});
     if (decision.action === "keep") {
+      await decisionAudit(decision.reason_tr.slice(0, 300));
       // TUT: restore yok. Snapshot tek seferlik tüketilir + global rollback noktası da düşürülür —
       // yoksa sonraki bir tükenme/rollback bu KANITLA-TEMİZ ilerlemeyi de silerdi (kararla çelişki).
       this.fixSnapshot = null;
@@ -1232,20 +1251,33 @@ export class Phase8Controller {
     const via = snap.method === "git" ? "checkpoint (git)" : "yedek (`~/.mycl/backups`)";
     // Snapshot ref'ini restore'dan ÖNCE temizleme (sessiz-fallback denetimi): eski kod restore başarısız
     // olsa bile ref'i null'lıyordu → "sonraki koşuda yeniden denenecek" YALANDI + repo regresyonlu kalıyordu.
-    let restored = false;
+    // 2026-11-27 (koşu 22): rapor hangi yedeğe dönüldüğünü ve kaç dosyanın silinip geri yazıldığını söyler; toplu
+    // silme emniyeti (bütün çalışan üretim dosyaları silinecekse) geri yüklemeyi reddeder.
+    let report = { ok: false, refused: false, deleted: 0, rewritten: 0 };
     try {
-      restored = await restoreSnapshot(snap, this.state.project_root);
+      report = await restoreSnapshotWithReport(snap, this.state.project_root);
     } catch (err) {
       log.error("phase-8", "rollback failed (exception) — repo regresyonlu durumda kaldı", err);
     }
-    if (restored) {
+    const which = `yedek=${describeSnapshot(snap)}`;
+    const counts = `silinen=${report.deleted} geri yazılan=${report.rewritten}`;
+    if (report.ok) {
+      await decisionAudit(`${decision.reason_tr.slice(0, 300)} | ${which} ${counts}`);
       this.fixSnapshot = null; // YALNIZ başarıda tek-seferlik temizle
       this.checkpointRef = null;
       emitChatMessage(
         "system",
-        `↩️ Geri alma kararı: GERİ ALIYORUM — ${decision.reason_tr}. Değişiklikler ${via} üzerinden geri alındı (MyCL state ve hata kataloğu korundu).`,
+        `↩️ Geri alma kararı: GERİ ALIYORUM — ${decision.reason_tr}. Değişiklikler ${via} üzerinden geri alındı: ${describeSnapshot(snap)}; ${report.deleted} dosya silindi, ${report.rewritten} dosya geri yazıldı (MyCL state ve hata kataloğu korundu).`,
       );
+    } else if (report.refused) {
+      // Toplu silme emniyeti: proje OLDUĞU GİBİ kaldı, görünür ileti fix-snapshot'ta verildi. Bu yedek bir daha
+      // denenmesin (aynı sonucu verir; tükenmedeki geri alma da onu kullanmasın).
+      await decisionAudit(`${decision.reason_tr.slice(0, 300)} | ${which} REDDEDİLDİ: bütün çalışan üretim dosyaları silinecekti, proje olduğu gibi bırakıldı`);
+      this.fixSnapshot = null;
+      this.checkpointRef = null;
+      disarmRollback();
     } else {
+      await decisionAudit(`${decision.reason_tr.slice(0, 300)} | ${which} BAŞARISIZ`);
       // Geri alma BAŞARISIZ → repo bozuk/regresyonlu fix'le KALDI. Sessizce "temiz" sanma: LOUD uyarı +
       // ref'i KORU (sonraki koşu gerçekten yeniden deneyebilsin).
       log.error("phase-8", "rollback FAILED — repo başarısız fix'le kaldı (ref korundu, yeniden denenebilir)", { method: snap.method });

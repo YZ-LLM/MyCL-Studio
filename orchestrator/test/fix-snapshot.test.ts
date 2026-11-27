@@ -1,11 +1,22 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Görünür iletiler yakalanır (toplu silme emniyeti iletisi sınanır); öteki ipc işlevleri gerçek kalır.
+const { emitChatMock } = vi.hoisted(() => ({ emitChatMock: vi.fn() }));
+vi.mock("../src/ipc.js", async (orig) => ({
+  ...(await orig<typeof import("../src/ipc.js")>()),
+  emitChatMessage: emitChatMock,
+}));
+
 import {
   snapshotBeforeAutofix,
+  snapshotAttemptStart,
+  snapshotForFixAttempt,
   restoreSnapshot,
+  restoreSnapshotWithReport,
   peekRollback,
   disarmRollback,
   pruneProjectBackups,
@@ -222,5 +233,120 @@ describe("changedFilesVsSnapshot — git'siz kopya-diff (repro-first muafiyet ch
     const changed = await changedFilesVsSnapshot({ method: "copy", dir: backup }, proj);
     // link.js symlink → 'changed' say (isProdPath değerlendirmesi çağırana kalır; sessizce atlanmaz).
     expect(changed).toContain("link.js");
+  });
+});
+
+// CANLI KANIT (ekransız deneme koşusu 22, 2026-11-27; arayüzsüz Node.js, git yok): Faz 8 başında proje kodsuzken alınan
+// yedek geri alma noktası kuruldu ("ilk kurulan kazanır"), deneme kapıda düştü ve nokta kurulu kaldı. Düzeltme
+// yönlendirmesinin kodlu yedeği kurulamadı; düzeltme kipi kodsuz yedeği aldı, "kırmızı önce" karşılaştırması bütün
+// kaynağı "değişmiş" gördü ve geri alma projenin BÜTÜN kaynağını sildi.
+describe("deneme yedeği ömrü + toplu silme emniyeti (koşu 22)", () => {
+  let dir: string;
+  let home: string;
+  const origHome = process.env.MYCL_HOME;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "mycl-attempt-"));
+    home = await mkdtemp(join(tmpdir(), "mycl-home-"));
+    process.env.MYCL_HOME = home;
+    disarmRollback();
+    emitChatMock.mockClear();
+  });
+  afterEach(async () => {
+    disarmRollback();
+    await rm(dir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true }).catch(() => {});
+    if (origHome === undefined) delete process.env.MYCL_HOME;
+    else process.env.MYCL_HOME = origHome;
+  });
+
+  /** Koşu 22: faz başında kodsuz proje → ilk deneme kodu yazar → kapıda düşer → düzeltme yönlendirmesi yedek alır. */
+  async function kosu22() {
+    await writeFile(join(dir, ".gitignore"), "node_modules\n");
+    const fazBasi = await snapshotAttemptStart(dir, 1795793249095); // düzeltme dışı deneme başı
+    expect(fazBasi.method).toBe("copy");
+    expect(peekRollback()).toBeNull(); // nokta KURULMADI
+    // İlk deneme kodu yazdı ve kapıda düştü (yazılan kod yerinde kaldı).
+    await mkdir(join(dir, "bin"), { recursive: true });
+    await mkdir(join(dir, "lib"), { recursive: true });
+    await mkdir(join(dir, "tests"), { recursive: true });
+    await writeFile(join(dir, "bin", "todo.js"), "#!/usr/bin/env node\nrequire('../lib/tasks');\n");
+    await writeFile(join(dir, "lib", "tasks.js"), "module.exports = { add() {} };\n");
+    await writeFile(join(dir, "tests", "cli.test.js"), "test('a', () => {});\n");
+    // Düzeltme yönlendirmesi (index.ts, git yok): yedek alır ve noktayı kurar.
+    const yonlendirme = await snapshotBeforeAutofix(dir, 1795794335444);
+    // Düzeltme kipi (phase-8.ts): dizinin noktası varsa onu kullanır.
+    const duzeltme = await snapshotForFixAttempt(dir, 1795794340000);
+    return { fazBasi, yonlendirme, duzeltme };
+  }
+
+  it("düzeltme kipinin yedeği ikinci (kodlu) yedektir; yalnız test dosyası değiştiyse liste yalnız onu taşır", async () => {
+    const { fazBasi, yonlendirme, duzeltme } = await kosu22();
+    expect(duzeltme.dir).toBe(yonlendirme.dir);
+    expect(duzeltme.dir).not.toBe(fazBasi.dir);
+    // Düzeltme yalnız test dosyasına dokundu.
+    await writeFile(join(dir, "tests", "cli.test.js"), "test('a', () => {});\ntest('b', () => {});\n");
+    expect(await changedFilesVsSnapshot(duzeltme, dir)).toEqual([join("tests", "cli.test.js")]);
+  });
+
+  it("düzeltme geri alınır → ilk denemenin kaynak dosyaları yerinde, düzeltmenin eklediği dosya silinmiş; rapor sayıları", async () => {
+    const { duzeltme } = await kosu22();
+    await writeFile(join(dir, "lib", "extra.js"), "module.exports = 1;\n"); // düzeltmenin eklediği
+    await writeFile(join(dir, "lib", "tasks.js"), "BROKEN\n"); // düzeltmenin bozduğu
+    const rep = await restoreSnapshotWithReport(duzeltme, dir);
+    expect(rep.ok).toBe(true);
+    expect(rep.refused).toBe(false);
+    expect(existsSync(join(dir, "bin", "todo.js"))).toBe(true);
+    expect(await readFile(join(dir, "lib", "tasks.js"), "utf8")).toBe("module.exports = { add() {} };\n");
+    expect(existsSync(join(dir, "lib", "extra.js"))).toBe(false);
+    expect(rep.deleted).toBe(1);
+    expect(rep.rewritten).toBe(4); // .gitignore + bin/todo.js + lib/tasks.js + tests/cli.test.js
+    expect(rep.target).toBe(duzeltme.dir);
+    expect(rep.takenAt).toBe(1795794335444);
+  });
+
+  it("geri alma projedeki BÜTÜN çalışan üretim dosyalarını silecekse yapılmaz: dosyalar yerinde, görünür hata", async () => {
+    const { fazBasi } = await kosu22();
+    const rep = await restoreSnapshotWithReport(fazBasi, dir); // kodsuz faz başı yedeğine dönmek
+    expect(rep.ok).toBe(false);
+    expect(rep.refused).toBe(true);
+    expect(existsSync(join(dir, "bin", "todo.js"))).toBe(true);
+    expect(existsSync(join(dir, "lib", "tasks.js"))).toBe(true);
+    const ileti = emitChatMock.mock.calls.map((c) => String(c[1])).find((t) => t.includes("Geri alma YAPILMADI"));
+    expect(ileti, "görünür ret iletisi yok").toBeDefined();
+    expect(ileti).toContain(fazBasi.dir!); // yedek nerede
+    // Boolean API de reddi başarısızlık olarak döner (tükenmedeki geri alma da korunur).
+    expect(await restoreSnapshot(fazBasi, dir)).toBe(false);
+    expect(existsSync(join(dir, "bin", "todo.js"))).toBe(true);
+  });
+
+  it("REGRESYON: çalışan üretim dosyalarının bir kısmı yedekte varsa geri alma yapılır (eklenenler silinir)", async () => {
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "app.js"), "orig\n");
+    const snap = await snapshotBeforeAutofix(dir, 1781000000020);
+    await writeFile(join(dir, "src", "added.js"), "x\n");
+    const rep = await restoreSnapshotWithReport(snap, dir);
+    expect(rep.ok).toBe(true);
+    expect(existsSync(join(dir, "src", "added.js"))).toBe(false);
+  });
+
+  it("REGRESYON (inceleme bulgusu): düzeltme bütün çalışan dosyaları yeniden adlandırdıysa geri alma yapılır (yedekte kod var)", async () => {
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "app.js"), "orig\n");
+    const snap = await snapshotBeforeAutofix(dir, 1781000000030);
+    await rm(join(dir, "src", "app.js"));
+    await writeFile(join(dir, "src", "server.js"), "renamed\n"); // projedeki tek çalışan dosya, yedekte yok
+    const rep = await restoreSnapshotWithReport(snap, dir);
+    expect(rep.refused).toBe(false);
+    expect(rep.ok).toBe(true);
+    expect(existsSync(join(dir, "src", "app.js"))).toBe(true);
+    expect(existsSync(join(dir, "src", "server.js"))).toBe(false);
+  });
+
+  it("budama kurulu geri alma noktasının klasörünü silmez", async () => {
+    const root = join(home, "backups");
+    for (const ts of [1, 2, 3, 4, 5]) await mkdir(join(root, `p-autofix-${ts}`), { recursive: true });
+    const removed = await pruneProjectBackups(root, "p", 3, join(root, "p-autofix-1"));
+    expect(removed).toEqual(["p-autofix-2"]);
+    expect(existsSync(join(root, "p-autofix-1"))).toBe(true);
   });
 });

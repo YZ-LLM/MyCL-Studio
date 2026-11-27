@@ -492,6 +492,40 @@ export async function restoreCheckpoint(projectRoot: string, ref: string): Promi
   return ok;
 }
 
+/**
+ * SALT OKUR (2026-11-27): `restoreCheckpoint(ref)` koşsaydı ne olurdu? `git clean -fdn` (aynı hariçlerle, KURU koşu)
+ * silinecek izlenmeyen yolları verir (dizinler `/` ile biter); `git diff --name-only ref` geri yazılacak izlenen
+ * dosyaları, `git ls-tree -r ref` ref'teki dosyaları verir. Toplu silme emniyeti ve geri alma raporu için. Okunamazsa null (çağıran kuşkuda geri almaz).
+ */
+export async function previewRestoreCheckpoint(
+  projectRoot: string,
+  ref: string,
+): Promise<{ removed: string[]; rewritten: string[]; atRef: string[] } | null> {
+  if (!/^[0-9a-f]{4,40}$/i.test(ref)) return null;
+  try {
+    // core.quotepath=off: ASCII dışı adlar tırnaklı/kaçışlı yazılmasın (proje dosya listesiyle karşılaştırılıyor).
+    const cleanArgs = ["-c", "core.quotepath=off", "clean", "-fdn"];
+    for (const p of ROLLBACK_EXCLUDES) cleanArgs.push("-e", p);
+    const cl = await runGit(projectRoot, cleanArgs);
+    if (cl.code !== 0) return null;
+    const removed = cl.stdout
+      .split("\n")
+      .map((l) => /^Would remove (.+)$/.exec(l.trim())?.[1])
+      .filter((p): p is string => Boolean(p));
+    const excludePathspecs = ROLLBACK_EXCLUDES.map((p) => `:(exclude)${p}`);
+    const df = await runGit(projectRoot, ["-c", "core.quotepath=off", "diff", "--name-only", "--relative", ref, "--", ".", ...excludePathspecs]);
+    if (df.code !== 0) return null;
+    const rewritten = df.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+    // ref'te izlenen dosyalar: geri yükleme bunları geri getirir (toplu silme emniyeti "yedekte kod var mı" diye bakar).
+    const ls = await runGit(projectRoot, ["-c", "core.quotepath=off", "ls-tree", "-r", "--name-only", ref]);
+    if (ls.code !== 0) return null;
+    const atRef = ls.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+    return { removed, rewritten, atRef };
+  } catch {
+    return null;
+  }
+}
+
 /** Bir yolun `.mycl`/`error_folder` (MyCL state + hata kataloğu) altında mı. */
 function isExcludedScopePath(file: string): boolean {
   return ROLLBACK_EXCLUDES.some((ex) => file === ex || file.startsWith(`${ex}/`));
