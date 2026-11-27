@@ -7423,6 +7423,31 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         await recordPhaseComplete(5);
         cur = 5;
         continue;
+      } else if (r === "no_change") {
+        // SONUÇSUZ KULLANICI İSTEĞİ (2026-11-27, deneme koşusu 9): kullanıcının Faz 6'da yazdığı rötuş
+        // isteğinden değişiklik çıkmadı; ajanın bütün araç çağrıları kanıtlanabilir biçimde salt okunurdu.
+        // Bu bir faz hatası DEĞİL → failPhase çağrılmaz (mahkeme ve hata analizi koşmaz). İstek tüketilir
+        // (statePatch) ve akış Faz 6'ya geçer: Faz 6 uygulamayı açık tutup yeniden park eder
+        // (`pending_ui_review`). Faz tamamlanmış sayılmaz (recordPhaseComplete yok); hüküm phase-5.ts
+        // classifyEmptyTweak'te.
+        const askedFor = state.pending_ui_tweak ?? "";
+        state = { ...state, ...p5.statePatch, updated_at: Date.now() };
+        runtime.state = state;
+        await saveState(state);
+        await appendAuditModule(state.project_root, {
+          ts: Date.now(),
+          phase: 5,
+          event: "ui-tweak-no-change",
+          caller: "mycl-orchestrator",
+          detail: `istekten değişiklik çıkmadı, yalnız okuma yapıldı — "${askedFor.slice(0, 120)}"`,
+        }).catch(() => {});
+        emitChatMessage(
+          "system",
+          `ℹ️ Bu istekten yapılacak bir değişiklik çıkmadı: _"${askedFor.slice(0, 100)}"_ — arayüze dokunulmadı. ` +
+            "Ne değişsin, somut yaz (hangi ekranda ne farklı olsun). UI incelemesine dönüyorum.",
+        );
+        cur = 5;
+        continue;
       } else {
         await failPhase(5, p5);
         return;
@@ -10289,7 +10314,11 @@ async function runPhaseOnce(
       const p = new Phase5Controller({ state, config: cfg, spec });
       runtime.controller = p;
       try {
-        result = String(await p.run());
+        const r5 = await p.run();
+        // Tek seferlik koşuda Faz 6 beklemesine dönüş yok (statePatch burada uygulanmaz) → sonuçsuz
+        // rötuş eskisi gibi "başarısız" raporlanır; kullanıcı mesajı da eski metinle verilir.
+        if (r5 === "no_change") emitError("Faz 5 rötuş: değişiklik uygulanmadı — Claude yazmadı", null);
+        result = r5 === "no_change" ? "fail" : r5;
       } finally {
         runtime.controller = null;
       }

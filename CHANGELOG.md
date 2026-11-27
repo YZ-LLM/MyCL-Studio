@@ -1,5 +1,41 @@
 ## 2026-11-27
 
+- **fix(faz 5): hiçbir şey yazmadan biten kullanıcı rötuşu "başarısız faz" sayılmasın; Faz 6 beklemesine dönülsün.**
+  Ekransız deneme koşusu 9'da kullanıcının Faz 6'da yazdığı cümle rötuş isteği sayıldı; ajan yalnız `git status`,
+  `git log`, `find`, `cat` çağırdı, yazmayı hiç denemedi. Faz iki kez başarısız döndü; her seferinde mahkeme (yaklaşık
+  2 dakika) ve hata analizi (16-17 araç çağrısı) koştu. Ortada hata yoktu: istekten yapılacak bir değişiklik
+  çıkmamıştı. Artık Faz 5 rötuşu hiç yazma kanıtı bırakmadan biterse hüküm saf işlevlerle verilir (`phase-5.ts`
+  `classifyEmptyTweak`). Sonuç `no_change` olması için dört koşulun hepsi gerekir: isteği **kullanıcı** yazdı;
+  engellenen ya da hata veren hiçbir çağrı yok; koşudaki **her** araç çağrısı kanıtlanabilir biçimde salt okunur;
+  koşu süre ya da tur tavanına takılmadı. O zaman istek tüketilir, denetim kaydına `ui-tweak-no-change` düşer, sohbete
+  "bu istekten yapılacak bir değişiklik çıkmadı; ne değişsin, somut yaz" yazılır, akış Faz 6'ya geçer ve Faz 6
+  uygulamayı açık tutup yeniden bekler. Mahkeme ve hata analizi çalışmaz; Faz 5 tamamlanmış da sayılmaz.
+  **"Salt okunur" kanıtı** yeni bir ayrıştırıcı değil: okuma araçları (Read, Grep, Glob, LS, TodoWrite) ve karar
+  ajanının var olan güvenli komut denetiminden (`validateBashCommand`) geçen kabuk komutları; boru ve `&&` zincirinin
+  her parçası ayrı denetlenir. O denetim okuma yapan bir ajanı sınırlamak için yazılmıştı, "dosyaya dokunulmadı" kanıtı
+  için değil; bu yüzden burada daraltıldı: satır sonu, tek `&`, `--output`, `find`'ın yazan ya da komut çalıştıran
+  eylemleri ve `status`, `log`, `diff`, `show` dışındaki git alt komutları reddedilir. Sayım çağrının hata verip
+  vermediğinden bağımsızdır. İlk tasarımda bu koşul yoktu; inceleme, kabukta `sed -i` ile yapılan bir değişikliğin kanıt
+  bırakmadığını ve "dokunulmadı" diye raporlanacağını, ikinci turda da tabandaki denetimden geçen yazan komutları
+  (`git diff --output=…`, çok satırlı komut, tırnaklı `'-delete'`) gösterdi.
+  **İsteğin kaynağı** durumda tutulmuyor (alanı üç yol dolduruyor); denetim kaydından okunuyor: yalnız kullanıcının Faz
+  6 isteği `ui-tweak-request` olayını yazar, son olayın ayrıntısı durumdaki istekle birebir eşleşiyorsa istek
+  kullanıcınındır. Kuşkuda eski yol.
+  **"Denemedi" ile "denedi, engellendi" ayrımı:** API yolunda gözlemcinin gördüğü hatalı yazma çağrıları sayılır. CLI
+  yolunda engellenen çağrı gözlemciye hiç ulaşmıyor; arka uç bunu denetim kaydına yazıyor
+  (`overlay_gate_triggered`, `tool-permission-denied`), Faz 5 bu koşunun başından beri düşenleri sayıyor. Bu kayıtlar
+  eskiden beklenmeden yazılıyordu; artık arka uç kapanmadan önce diske inmeleri bekleniyor (engel yoksa değişiklik yok).
+  **Değişmeyen (kural 14):** ajan yazmayı deneyip engellendiyse, ya da istek bir düzeltmeyse (Faz 0'ın arayüz çözümü,
+  Faz 9 risk düzeltmesi), faz eskisi gibi aynı iletiyle başarısız döner ve istek durur. 2026-06-13 notundaki "rötuş
+  zaten uygulanmış" durumu: kullanıcı isteğinde artık Faz 6 beklemesine dönülür (kullanıcı arayüzde değişikliği görür ve
+  onaylar); düzeltme isteğinde eski yol. Elle tek faz koşturmada sonuçsuz rötuş eskisi gibi "başarısız" raporlanır.
+  **Sınır (bilerek temkinli):** ajan salt okunur olduğu kanıtlanamayan tek bir komut çalıştırırsa (ör. `grep`, `cd`,
+  `npm run build`) ya da tek bir çağrısı engellenirse hüküm eski yoldur; o koşuda mahkeme ve hata analizi yine koşar.
+  CLI yolunda kapı kancası kapalıyken engellenen bir yazma eskiden olduğu gibi "yazıldı" kanıtı üretir (bu daldan
+  önce, değişmedi).
+  **Test ve kontrol koşturulmadı, yalnız derlendi.** Hükmü veren saf işlevler testli; denetleyicinin `no_change`
+  dönüşü ve ana döngünün onu Faz 6 beklemesine çevirmesi testle değil kod okumasıyla incelendi.
+
 - **fix(açılış, faz 5): sonuçsuz kalan arayüz rötuş isteği bayat kalmasın; uygulama yeniden açılınca iş Faz 1'den
   başlamasın.** Ekransız deneme koşusu 6'da Faz 6'da bekleyen projeye yazılan cümle rötuş isteği sayıldı, Faz 5 rötuş
   ajanı hiçbir şey yazmadı ve faz başarısız oldu; mahkeme "devam" deyince akış Faz 6'ya geçti ama `pending_ui_tweak`

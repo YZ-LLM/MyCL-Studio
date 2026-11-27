@@ -635,19 +635,22 @@ export class CliCodegenBackend implements CodegenBackend {
       // atıf ARACIN TÜRÜNE göre ayrılıyor; engel bilgisi kaybolmuyor, yalnız doğru adla yazılıyor.
       const denials = parsePermissionDenials(ev);
       let overlayDenials = 0;
+      const denialWrites: Array<Promise<unknown>> = [];
       for (const d of denials) {
         // Kanıt süzgeci TÜM engelleri kapsar (engellenen çağrı, hangi mekanizma engellerse
         // engellesin, "yazdı" kanıtı sayılmamalı) — bu ayrım yalnız DENETİM ADINI etkiler.
         if (d.tool_use_id) this.deniedToolUseIds.add(d.tool_use_id);
         const fromOverlay = isWriteTool(d.tool_name);
         if (fromOverlay) overlayDenials++;
-        void appendAudit(this.opts.state.project_root, {
-          ts: Date.now(),
-          phase: this.opts.state.current_phase,
-          event: fromOverlay ? "overlay_gate_triggered" : "tool-permission-denied",
-          caller: "mycl-orchestrator",
-          detail: `${d.tool_name || "?"} ${d.target.slice(-80)}`.trim(),
-        }).catch((e) => log.warn("cli-backend", "engel kaydi yazilamadi", e));
+        denialWrites.push(
+          appendAudit(this.opts.state.project_root, {
+            ts: Date.now(),
+            phase: this.opts.state.current_phase,
+            event: fromOverlay ? "overlay_gate_triggered" : "tool-permission-denied",
+            caller: "mycl-orchestrator",
+            detail: `${d.tool_name || "?"} ${d.target.slice(-80)}`.trim(),
+          }).catch((e) => log.warn("cli-backend", "engel kaydi yazilamadi", e)),
+        );
       }
       if (overlayDenials > 0) {
         emitChatMessage(
@@ -657,6 +660,16 @@ export class CliCodegenBackend implements CodegenBackend {
       }
       // Engel kümesi artık kesin → bekleyen yazma kanıtlarını süzüp gözlemciye ver.
       this.flushWriteEvidence();
+      // ENGEL KAYITLARI DA BEKLENİR (2026-11-27): eskiden ateşle ve unut biçiminde yazılıyordu. Faz 5
+      // rötuşu "ajan yazmayı hiç denemedi mi, denedi de engellendi mi" ayrımını bu kayıtlardan okur
+      // (phase-5.ts classifyEmptyTweak); kayıt diske inmeden faz denetim kaydını okursa engellenmiş bir
+      // rötuş "deneme yok" sanılırdı. Engel yoksa bu dal çalışmaz → çözümleme bugünkü gibi kalır.
+      if (denialWrites.length > 0) {
+        const prior = this.evidenceFlushPromise;
+        this.evidenceFlushPromise = Promise.all([prior ?? Promise.resolve(), ...denialWrites]).then(
+          () => undefined,
+        );
+      }
       const isError = ev.is_error === true || ev.subtype === "error";
       const turns = typeof ev.num_turns === "number" ? ev.num_turns : undefined;
       const cost = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : undefined;
