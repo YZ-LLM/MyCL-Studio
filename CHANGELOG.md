@@ -1,5 +1,37 @@
 ## 2026-11-27
 
+- **fix(Faz 5 şablonu): statik uygulamada stiller geliştirme sunucusunda da yüklensin.** Ekransız deneme koşuları 6 ve
+  19'da (`yapilacaklar-5`, Vite + React, statik, `style-src 'self'`) Faz 6 kaydı `Applying inline style violates the
+  following Content Security Policy directive 'style-src 'self''` diyordu; ekran görüntüsünde uygulama çalışıyor ama
+  hiç stil yoktu ve MyCL "boş ekran" yazdı. Şablonun stil maddesi JS'ten içe aktarılan CSS'i ve CSS Modules'u "All
+  CSP-safe" diye öneriyordu. Oysa Vite belgesine göre JS'ten içe aktarılan `.css` sayfaya `<style>` öğesiyle eklenir
+  ve `style-src 'self'` bu öğeyi engeller. Ajanın stil dosyasını JS'ten içe aktardığı bir hipotez; hedef projenin
+  kaynağına bakılmadı.
+  `assets/templates/phase-05-ui.md` 5. madde yeniden yazıldı:
+  - **Yığından bağımsız ilke:** her stil aynı kaynaktan gelen bir stil DOSYASI olarak (`<link rel="stylesheet">`)
+    ulaşmalı. `<style>` ve `style=` engellenir; paketleyicinin geliştirme sunucusunun JS içe aktarımı için oluşturduğu
+    `<style>` de buna dahildir ve sayfa stilsiz açılır.
+  - **Statik uygulama** (1. maddedeki tanımla aynı): stil dosyaları giriş sayfasından, paketleyicinin işlediği kaynak
+    dosyaya bağlanır; CSS JS'ten içe aktarılmaz. İskelet genel stil dosyasını JS girişinden içe aktarıyorsa o satır
+    kaldırılıp dosya giriş sayfasına bağlanır. CSS Modules ve çalışma anında stil üreten kütüphaneler bu politikayla
+    kullanılamaz.
+  - **Vite alıntıları:** yalnız belgeden doğrulanmış üç ifade (vite.dev/guide/features ve vite.dev/guide, bu oturumda
+    okundu: `.css` içe aktarımı `<style>` ekler; `<link href>` ile verilen CSS Vite özelliklerinden yararlanır ve
+    uygulamayla birlikte işlenir; CSS Modules içe aktarımı modül nesnesi döner).
+  - **Öteki paketleyiciler ve kendi sunucusu olan uygulamalar:** paketleyici için yalnız ilke yazıldı ("belgesindeki,
+    geliştirmede de dosya olarak sunan yolu kullan"). Kendi sunucusu olan uygulamada çatının belgelenmiş yolu
+    kullanılır, çatı `<style>` ekliyorsa nonce verilir.
+  - **Denetim:** Faz 6 tarayıcı konsolunu okur; "Applying inline style violates" iletisi kuralın çiğnendiği ve sayfanın
+    stilsiz olduğu anlamına gelir (bu iletiyi ayrıca sınıflandıran bir kod yok; ileti Faz 6 raporunda görünür).
+
+  "All CSP-safe" ifadesi kalktı. CSS değişkeni maddesinin son yan cümlesi ("prefer the zero-config CSP-safe options
+  above") stil dosyası yoluna bağlandı ve nonce'un yalnız kendi sunucusu olan uygulamada bulunduğu eklendi; maddenin
+  geri kalanı ve satır içi stil maddesi aynı kaldı. **Değişmeyenler (kural 14):** iki politika örneği, `'self'` kuralı, satır içi betik yasağı, geliştirmede
+  gevşetme yasağı. Kod, README ve test değişmedi: şablon ajana giden iç talimat, README'de stil kuralı anlatılmıyor.
+  **Açık kalan (kapsam dışı):** `visual-design-agent.ts` stil dosyası ararken `*.module.css` dosyalarını da listeliyor
+  (yalnız arama, öneri değil). İncelemenin gördüğü eski metin: şablonun rötuş kipi bölümü "HMR will reflect your
+  changes" diyor (1. maddedeki elle yenileme kuralıyla çelişiyor) ve `npm run build` yazıyor (kural 1).
+
 - **fix(Faz 13 CSP): politika denetimi giriş sayfasındaki politikayı TAM okusun; statik uygulamada `script-src 'self'`
   serbest (karar: Ümit, 2026-11-27, "statik uygulamalarda kalksın").** Danışman `00b3270` üzerinde denetimi örnek
   sayfalarla elle çalıştırdı: meta değeri `content=["']([^"']+)["']` ile okunuyordu, değer ilk tırnakta kesiliyordu

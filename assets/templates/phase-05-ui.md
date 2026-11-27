@@ -457,14 +457,38 @@ the user requires 100% compliance with zero unsafe tokens.
 4. **No `javascript:` URLs** in `href`/`src`/router links — use a `<button>` + handler instead.
 
 5. **Styling without `unsafe-inline` (`style-src 'self'`)** — the easiest directive to break:
-   - Prefer external/bundled CSS, CSS Modules, Tailwind, or `<link rel="stylesheet">`. All CSP-safe.
+   - **Principle (any stack):** under `style-src 'self'` every style must reach the browser as a same-origin
+     stylesheet FILE (`<link rel="stylesheet">`). A `<style>` element and a `style=` attribute are blocked —
+     and so is the `<style>` element a bundler's dev server creates for CSS imported from JavaScript: the
+     browser refuses it and the page opens UNSTYLED. The policy is identical on the dev server (item 1), so this
+     must hold in development too, where the user reviews the design.
+   - **Static app** (same definition as in item 1): link every stylesheet from the entry page with
+     `<link rel="stylesheet" href="…">`, pointing at the SOURCE file the bundler processes (preprocessors and
+     Tailwind keep working). Do NOT import CSS from JavaScript modules. If the scaffold's default imports the
+     global stylesheet from the JS entry file, delete that import line and link the same file from the entry
+     page instead. CSS Modules cannot be used in a static app under this policy (their class names arrive only
+     through a JS import, which injects `<style>`), nor can runtime style libraries (they inject `<style>` while
+     the page runs); use plain class names, or a utility-class library compiled into the linked file.
+     - Vite (from its docs): "Importing `.css` files will inject its content to the page via a `<style>` tag"
+       → blocked. "CSS referenced via `<link href>` also enjoy Vite-specific features" and such files "are
+       processed and bundled as part of the app" → use this. For CSS Modules, "Importing such a file will
+       return the corresponding module object" → a linked file has no such mapping, so do not use them here.
+     - Any other bundler: use the way its documentation gives for serving CSS as a FILE in development too.
+       Do not assume a bundler's default is a file.
+   - **App with a server program of its own** (item 1): use the framework's own documented way of serving
+     stylesheets as files, in development too. If the framework injects `<style>` elements, give them the
+     per-request nonce (`'nonce-<value>'` in `style-src`). Check the framework's documentation; do not guess.
    - The HTML `style="…"` attribute and React's `style={{…}}` prop compile to inline styles that
      require `style-src 'unsafe-inline'` → **avoid them for static styling**; move fixed styles to a CSS class.
    - For genuinely dynamic values (computed width, theme color), set a **CSS custom property** and
      consume it in a class: `el.style.setProperty('--w', x)` + `.bar{ width: var(--w) }` (the CSSOM
      property route is allowed; a literal `style=` attribute in markup is not). AVOID runtime CSS-in-JS
      that injects `<style>`/inline styles (styled-components/emotion default mode) unless configured for
-     nonce/hash — prefer the zero-config CSP-safe options above.
+     nonce/hash (a per-request nonce exists only in an app with a server of its own) — use the
+     stylesheet-file route above instead.
+   - **How it is checked:** Phase 6 opens the app on the dev server and reads the browser console. A message
+     "Applying inline style violates the following Content Security Policy directive" means this rule was
+     broken and the page is unstyled.
 
 6. **Assets.** `data:` is allowed only where the policy lists it (`img-src data:`); never introduce
    `data:`/`blob:` **script or style**. An SVG used as an `<img>` is fine; an SVG carrying an inline
