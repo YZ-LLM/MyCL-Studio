@@ -29,22 +29,24 @@ export async function respondAsOrchestrator(
   config: MyclConfig,
   state: State,
   userText: string,
-  opts?: { questionMode?: boolean; activeAskq?: ActiveAskqSnapshot | null },
+  opts?: { questionMode?: boolean; activeAskq?: ActiveAskqSnapshot | null; hideActiveAskq?: boolean },
 ): Promise<AgentDecision> {
   // YZLLM 2026-06-16: SORU modu — salt-okunur danışma talimatı tüm backend yollarına geçer
   // (CLI/SDK/Auto pariteli). Faz tetikleme garantisi handler'da (executeAgentDecision çağrılmaz).
   const qm = opts?.questionMode === true;
   // YZLLM 2026-07-10: otonom-cevap — cevaplanmakta olan askq (bağlam bölümü doğru askq'yi göstersin). Omit → getActiveAskq().
   const aq = opts?.activeAskq ?? null;
+  // 2026-11-27: korumalı soru açıkken kullanıcının serbest metni (seçenek değil) soru YOKMUŞ gibi yeniden değerlendirilir.
+  const hide = opts?.hideActiveAskq === true;
   // Auto Mode: simetrik çift-yön. Çözülen birincil backend (limit yokken CLI,
   // limitliyse API) denenir; THROW ederse görünür mesajla diğerine geçilir.
   // claude yoksa → SDK (CLI tarafı kullanılamaz).
   if (isAutoMode(config, "orchestrator")) {
     const claudeOk = isClaudeAvailable();
     const tryCli = (): Promise<AgentDecision> =>
-      new CliOrchestratorBackend(config, state, qm, aq).respond(userText);
+      new CliOrchestratorBackend(config, state, qm, aq, hide).respond(userText);
     const trySdk = (): Promise<AgentDecision> =>
-      new OrchestratorAgent({ config, state, questionMode: qm, activeAskq: aq }).respond(userText);
+      new OrchestratorAgent({ config, state, questionMode: qm, activeAskq: aq, hideActiveAskq: hide }).respond(userText);
     if (!claudeOk) {
       emitChatMessage("system", "ℹ️ Auto Mode: `claude` bulunamadı → API (SDK) kullanılıyor.");
       return trySdk();
@@ -82,7 +84,7 @@ export async function respondAsOrchestrator(
     // hatası) güvenlik ağı SDK'dır — ama GÖRÜNÜR (sessiz değil): kullanıcı
     // hangi backend'e düşüldüğünü görür.
     try {
-      return await new CliOrchestratorBackend(config, state, qm, aq).respond(userText);
+      return await new CliOrchestratorBackend(config, state, qm, aq, hide).respond(userText);
     } catch (err) {
       const m = `CLI orkestratör karar veremedi (${String(err).slice(0, 160)}) — bu sefer SDK'ya düşülüyor.`;
       log.warn("orchestrator", "CLI backend başarısız — SDK fallback (görünür)", {
@@ -94,5 +96,5 @@ export async function respondAsOrchestrator(
       emitChatMessage("system", `⚠️ ${m}`);
     }
   }
-  return new OrchestratorAgent({ config, state, questionMode: qm, activeAskq: aq }).respond(userText);
+  return new OrchestratorAgent({ config, state, questionMode: qm, activeAskq: aq, hideActiveAskq: hide }).respond(userText);
 }

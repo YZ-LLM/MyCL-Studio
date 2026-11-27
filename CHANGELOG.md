@@ -1,5 +1,33 @@
 ## 2026-11-27
 
+- **fix(korumalı soru): kullanıcının serbest metniyle cevaplanmasın; Faz 6'da "tamam" arayüz onayı sayılsın. + fix(kod
+  haritası): bağlama adını MyCL düzeltsin.** Ekransız deneme koşusu 29 (`334d5d0`): sunuculu proje Faz 6'da beklerken
+  açılışta korumalı model geçişi sorusu çıktı ("Evet, geç" / "Hayır, kalsın"); kullanıcı Faz 6 için "tamam" yazdı,
+  orkestratör `answer_askq` ile "Evet, geç" dedi, `~/.mycl/config.json`'da `main` ve `model_tiers.strong` değişti, arayüz
+  onaylanmadı. Aynı koşuda Faz 5'in iki senaryosu "geçersiz bağlama adı" ('tasks endpoint') diye reddedildi.
+  1. **Kesin kural (`answer_askq`, `routeComposerAskqAnswer`):** korumalı soru (`protected` ya da korunan kimlik öneki;
+     `isAutonomouslyAnswerableAskq` ölçütü) yalnız kullanıcının mesajı bir seçenekle (baş ve son boşluk, büyük küçük harf
+     hariç) AYNI ise cevaplanır — o zaman orkestratörün önerdiği değil, kullanıcının yazdığı seçenek iletilir. Değilse cevap
+     iletilmez, soru açık kalır, sohbete yazılır (`protected-askq-not-answered` denetim satırı) ve mesaj soru YOKMUŞ gibi
+     yeniden değerlendirilir (orkestratöre soru bölümü gösterilmeden, `hideActiveAskq`); yeniden değerlendirme yine soru
+     cevabı ya da karar vermezse gerekçe (yoksa "Anlayamadım…") gösterilir, döngüye girilmez. Karşılaştırma Türkçe ve dil
+     bağımsız küçültmeyle yapılır (İngilizce "I" Türkçe kuralda "ı" olurdu); seçenek `{label, value}` ise tıklamayla aynı
+     biçimde değer iletilir. **Bilinçli sonuç:** iptal onayı (`agent_decision_*`, "✅ Evet" / "❌ Hayır") da korumalıdır;
+     composer'a "evet" yazmak artık onu onaylamaz (seçenek emoji içerdiği için pratikte yalnız tıklanarak cevaplanır).
+  2. **Kaynakta:** orkestratör istemi korumalı soruyu gösterirken "`answer_askq` KULLANMA, mesajı fazın bağlamında
+     değerlendir (Faz 6'da 'tamam' arayüz onayıdır), soruyu iptal etme" diyor (`renderActiveAskqSection`).
+  3. **Kod haritası (`normalizeBindingNames`):** bağlama adındaki geçersiz karakter dizileri (boşluk dahil) alt çizgi
+     olur, rakamla başlayan ada `b_` eklenir, çakışan ada sayı eklenir; yalnız düzeltilince boş kalan ad ya da boş değer
+     reddedilir.
+  **Değişmeyenler (kural 14):** korumasız sorularda orkestratörün cevabı aynen iletilir ve istem bölümü aynı; korumalı
+  soruya tıklayarak cevap vermek (`handleAskqAnswer` doğrudan) ve seçenek metnini aynen yazmak aynen çalışır; "hiçbir
+  şey sorma" kipinin korumalı soru davranışı değişmedi. Yeni modül yok.
+  **Test sınırı:** `index.ts` içe aktarılınca uygulamayı başlattığı için "tamam → Faz 6 onayı" tam akışı birim testinde
+  koşturulamıyor; karar saf işlevde (`routeComposerAskqAnswer`) ve istem bölümü sınanıyor. Faz 6 onayının işlenmesi
+  orkestratörün yeniden değerlendirmesine bağlı; deneme koşusunda görülmeli.
+  Testler `test/protected-askq-composer.test.ts` ve `test/code-map.test.ts` içinde. Test ve kontrol koşturulmadı, yalnız
+  derlendi.
+
 - **feat(kod haritası): kayıt koşulu gevşedi, senaryolara kullanım sayısı eklendi.** Geliştiricinin isteği (Ümit,
   2026-11-27): "kapı çok zor olmamalı … kodu kaydedeceğiz sadece, projeyi etkilemeyecek. hatta kayıtlara kullanım sayısı
   ekleriz. o kayıt çok kullanıldıysa sağlamlığı ispatlanır zamanla" ve "kodun yeni versiyonu … önceki kaydı silmeden yeni

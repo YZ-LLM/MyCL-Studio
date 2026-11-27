@@ -95,14 +95,17 @@ export async function buildOrchestratorSystemPrompt(
   config: MyclConfig,
   state: State,
   userText: string,
-  opts?: { questionMode?: boolean; activeAskq?: ActiveAskqSnapshot | null },
+  opts?: { questionMode?: boolean; activeAskq?: ActiveAskqSnapshot | null; hideActiveAskq?: boolean },
 ): Promise<string> {
   // v15.6: Pre-call recurring topic detection. agent-decisions.jsonl semantic
   // karşılaştırma → 2. confirmation tetikleyici notu sistem prompt'una eklenir.
   const recurring = await detectRecurringTopic(config, state.project_root, userText);
   // Doğru-karar/recall: userText'i geçir → relevance-tabanlı "en ilgili geçmiş" recall.
   // activeAskq (otonom-cevap): cevaplanmakta olan askq'yi bağlam bölümüne geçir (getActiveAskq top-of-stack yerine).
-  let systemPrompt = await buildAgentSystemPrompt(state, config, userText, { activeAskq: opts?.activeAskq });
+  let systemPrompt = await buildAgentSystemPrompt(state, config, userText, {
+    activeAskq: opts?.activeAskq,
+    hideActiveAskq: opts?.hideActiveAskq,
+  });
   // YZLLM 2026-06-12: orkestratör BEYİN de "önce sessizce kanıtla, sonra konuş" disiplinine uyar — kullanıcıya
   // kanıtlamadığı kök-neden/iddia sunmaz (gözlemlenen yanlış-teşhisin — gerçek testleri okumadan E2BIG demek — önlemi).
   systemPrompt += `\n\n---\n\n${VERIFY_BEFORE_CLAIM}`;
@@ -138,6 +141,8 @@ export interface OrchestratorAgentDeps {
   questionMode?: boolean;
   /** YZLLM 2026-07-10: otonom-cevap — cevaplanmakta olan askq (bağlam bölümü getActiveAskq top-of-stack yerine bunu gösterir). */
   activeAskq?: ActiveAskqSnapshot | null;
+  /** 2026-11-27: aktif soru bölümünü hiç gösterme (korumalı soru açıkken serbest metnin yeniden değerlendirilmesi). */
+  hideActiveAskq?: boolean;
 }
 
 export class OrchestratorAgent {
@@ -167,7 +172,7 @@ export class OrchestratorAgent {
       this.deps.config,
       this.deps.state,
       userText,
-      { questionMode: this.deps.questionMode, activeAskq: this.deps.activeAskq },
+      { questionMode: this.deps.questionMode, activeAskq: this.deps.activeAskq, hideActiveAskq: this.deps.hideActiveAskq },
     );
 
     log.info("orchestrator-agent", "respond start", {

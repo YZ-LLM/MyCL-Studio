@@ -398,7 +398,7 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
  * Default davranış: askq açık + composer mesajı → `chat` action ile cevapla,
  * askq UI açık kalır, kullanıcı isterse askq'dan da seçim yapabilir.
  */
-function renderActiveAskqSection(askq: ActiveAskqSnapshot | null): string {
+export function renderActiveAskqSection(askq: ActiveAskqSnapshot | null): string {
   if (!askq) return "";
   // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10): otonom-cevap modunda bu askq'yi "cevapla" (composer-mesajı semantiğini override).
   // KRİTİK (mahkeme 2026-07-10): KORUNAN askq (agent_decision_ cancel / dast_confirm_ DAST / forceUserPrompt=protected) bu
@@ -424,6 +424,14 @@ function renderActiveAskqSection(askq: ActiveAskqSnapshot | null): string {
         "durumu + iş kuyruğu + geçmişi değerlendir, seçeneklerden EN DOĞRU olanı seç ve `answer_askq` aksiyonuyla ver " +
         "(`askq_answer` = seçenek metni BİREBİR). Yıkıcı/geri-alınamaz/iptal seçme; işi koruyan + hedefi ilerleten " +
         "seçeneği tercih et. Askq'yı CANCEL etme.",
+    );
+  } else if (!isAutonomouslyAnswerableAskq(askq)) {
+    // 2026-11-27 (koşu 29): KORUMALI soru (ör. model geçişi onayı) açıkken kullanıcı Faz 6'da "tamam" yazdı; orkestratör
+    // bunu korumalı sorunun "Evet, geç" cevabı saydı ve ayarlar değişti. Korumalı soru composer metniyle CEVAPLANMAZ.
+    lines.push(
+      "**KORUMALI SORU**: Bu soruyu yalnız kullanıcının kendisi, seçeneğe tıklayarak ya da seçenek metnini AYNEN " +
+        "yazarak cevaplar. `answer_askq` KULLANMA. Kullanıcının mesajını bu soru yokmuş gibi, projenin ve fazın bağlamına " +
+        "göre değerlendir (ör. Faz 6 incelemesi beklerken \"tamam\" arayüz onayıdır). Soruyu CANCEL etme.",
     );
   } else {
     lines.push(
@@ -453,7 +461,7 @@ export async function buildAgentSystemPrompt(
   // HİÇBİR ŞEY SORMA (YZLLM 2026-07-10): otonom-cevap yolu cevaplanmakta OLAN askq'yi geçirir → renderActiveAskqSection
   // getActiveAskq() (askqStack TEPESİ; eşzamanlı 2. askq açıksa YANLIŞ askq olabilir) yerine bunu gösterir. Omitilirse
   // (tüm mevcut çağrılar) eskisi gibi getActiveAskq() → BYTE-AYNI parite.
-  opts?: { activeAskq?: ActiveAskqSnapshot | null },
+  opts?: { activeAskq?: ActiveAskqSnapshot | null; hideActiveAskq?: boolean },
 ): Promise<string> {
   const staticPart = await loadStaticSystemPrompt();
   // Doğru-karar/recall: userMessage varsa relevance-tabanlı geri-çağırmayı da paralel
@@ -480,7 +488,7 @@ export async function buildAgentSystemPrompt(
     readGlobalLessons().catch(() => []),
   ]);
   // Override verildiyse (otonom-cevap) cevaplanmakta olan askq'yi göster; yoksa askqStack tepesi (eski davranış).
-  const askqSection = renderActiveAskqSection(opts?.activeAskq ?? getActiveAskq());
+  const askqSection = opts?.hideActiveAskq ? "" : renderActiveAskqSection(opts?.activeAskq ?? getActiveAskq());
   const convSection = renderConversationSection(conv);
   const factsSection = facts?.summary ? `\n\n### Proje gerçekleri\n${facts.summary}` : "";
   // Kalıcı yönergeler BELİRGİN olmalı (kullanıcının çapası) → staticPart'ın hemen ardında, her işte uyulur.

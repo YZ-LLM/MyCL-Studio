@@ -158,6 +158,22 @@ describe("kayıt — senaryo, dosyaları ve bağlamalarıyla", () => {
     expect(store.path_template).toBe("src/{{mycl:entity}}Store.js");
   });
 
+  it("doğal dille yazılan bağlama adı düzeltilir ('tasks endpoint' → tasks_endpoint); senaryo kaydedilir", async () => {
+    await seedFiles(proj);
+    const out = await recordCodeMapAfterGate({
+      state: state(),
+      phase: 5,
+      gatePassed: true,
+      gatesPassed: ["g"],
+      agentText: agentText({
+        scenarios: [{ ...SCENARIO, bindings: [{ name: "tasks endpoint", description: "list key", value: "todos" }, { name: "entity", description: "noun", value: "todo" }] }],
+      }),
+    });
+    expect(out.rejected).toEqual([]);
+    const scen = (await listRecords()).find((r) => r.level === "scenario") as ScenarioRecord;
+    expect(scen.bindings.map((b) => b.name)).toEqual(["tasks_endpoint", "entity"]);
+  });
+
   it("kapı geçmeden de kayıt alınıyor ve kayıt kapının geçmediğini söylüyor", async () => {
     await seedFiles(proj);
     const out = await recordCodeMapAfterGate({ state: state(), phase: 8, gatePassed: false, gatesPassed: [], agentText: agentText({ scenarios: [SCENARIO] }) });

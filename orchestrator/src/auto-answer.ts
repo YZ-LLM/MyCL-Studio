@@ -193,6 +193,44 @@ export function isAutonomouslyAnswerableAskq(askq: { id: string; protected?: boo
 }
 
 /**
+ * SAF (2026-11-27, koşu 29): korumalı soruya kullanıcının KENDİ yazdığı cevap — mesaj, seçeneklerden biriyle (baş ve son
+ * boşluk, büyük küçük harf hariç) AYNI ise o seçenek; değilse null. Korumalı soru composer metninden yalnız böyle
+ * cevaplanır: orkestratörün "tamam"ı "Evet, geç" sayması gibi bir yorum korumayı aşamaz.
+ */
+export function protectedAskqUserChoice(
+  askq: { options: Array<string | { label: string; value: string }> },
+  userText: string,
+): string | null {
+  // İki küçültme: Türkçe (İ→i) ve dil bağımsız (İngilizce "I" Türkçe kuralda "ı" olur, "Install" eşleşmezdi).
+  const same = (a: string, b: string) =>
+    a.trim().toLocaleLowerCase("tr") === b.trim().toLocaleLowerCase("tr") || a.trim().toLowerCase() === b.trim().toLowerCase();
+  if (!userText.trim()) return null;
+  for (const o of askq.options) {
+    // Tıklamada kart seçeneğin DEĞERİNİ gönderir → yazılan cevap da değeri iletir (etiketle eşleşir).
+    if (typeof o === "string") {
+      if (same(o, userText)) return o;
+    } else if (same(o.label, userText) || same(o.value, userText)) {
+      return o.value;
+    }
+  }
+  return null;
+}
+
+/**
+ * SAF: orkestratörün `answer_askq` kararı için yönlendirme. Korumasız soru → orkestratörün cevabı aynen (eski davranış).
+ * Korumalı soru → kullanıcının mesajı bir seçenekle aynıysa o seçenek; değilse "yeniden değerlendir" (cevap iletilmez).
+ */
+export function routeComposerAskqAnswer(
+  askq: { id: string; protected?: boolean; options: Array<string | { label: string; value: string }> },
+  userText: string,
+  proposedAnswer: string,
+): { kind: "forward"; answer: string } | { kind: "reevaluate" } {
+  if (isAutonomouslyAnswerableAskq(askq)) return { kind: "forward", answer: proposedAnswer };
+  const choice = protectedAskqUserChoice(askq, userText);
+  return choice === null ? { kind: "reevaluate" } : { kind: "forward", answer: choice };
+}
+
+/**
  * SAF: LLM/mahkeme cevabını geçerli seçeneklerden BİRİNE eşle (uydurma yasak) — exact, sonra çift-yön includes; yoksa null.
  * Motorun ürettiği metin bir seçeneğe birebir/kapsayan biçimde uymazsa null → çağıran mahkemeye/varsayılana düşer.
  */

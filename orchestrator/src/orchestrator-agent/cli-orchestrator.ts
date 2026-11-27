@@ -114,6 +114,8 @@ export class CliOrchestratorBackend {
     private readonly questionMode: boolean = false,
     /** YZLLM 2026-07-10: otonom-cevap — cevaplanmakta olan askq (bağlam getActiveAskq top-of-stack yerine bunu gösterir). */
     private readonly activeAskq: ActiveAskqSnapshot | null = null,
+    /** 2026-11-27: aktif soru bölümünü hiç gösterme (korumalı soru açıkken serbest metnin yeniden değerlendirilmesi). */
+    private readonly hideActiveAskq: boolean = false,
   ) {}
 
   /**
@@ -136,7 +138,7 @@ export class CliOrchestratorBackend {
       this.config,
       this.state,
       userText,
-      { questionMode: this.questionMode, activeAskq: this.activeAskq },
+      { questionMode: this.questionMode, activeAskq: this.activeAskq, hideActiveAskq: this.hideActiveAskq },
     );
     log.info("cli-orchestrator", "respond start", {
       model: modelId,

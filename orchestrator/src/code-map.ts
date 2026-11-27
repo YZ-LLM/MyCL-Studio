@@ -352,6 +352,29 @@ async function writeRecordOnce(rec: CodeMapRecord): Promise<boolean> {
   }
 }
 
+/**
+ * SAF: bağlama adlarını düzelt — geçersiz karakter dizileri (boşluk dahil) alt çizgi olur, baştaki/sondaki alt çizgi
+ * atılır, rakamla başlayan ada `b_` eklenir, çakışan ada `_2`, `_3`… eklenir. Düzeltilince boş kalan ad ya da boş kaynak
+ * değeri reddedilir.
+ */
+export function normalizeBindingNames(
+  bindings: Array<{ name: string; description: string; value: string }>,
+): { bindings: Array<{ name: string; description: string; value: string }> } | { reason: string } {
+  const used = new Set<string>();
+  const out: Array<{ name: string; description: string; value: string }> = [];
+  for (const b of bindings) {
+    let n = b.name.trim().replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!n) return { reason: `geçersiz bağlama adı '${b.name}' (düzeltilince boş kalıyor)` };
+    if (/^[0-9]/.test(n)) n = `b_${n}`;
+    let key = n;
+    for (let k = 2; used.has(key); k++) key = `${n}_${k}`;
+    used.add(key);
+    if (!b.value) return { reason: `'${b.name}' bağlamasının kaynak değeri boş` };
+    out.push({ ...b, name: key });
+  }
+  return { bindings: out };
+}
+
 export interface RecordOutcome {
   recorded: string[];
   reused: string[];
@@ -441,21 +464,15 @@ export async function recordCodeMapAfterGate(opts: {
         out.rejected.push({ key: label, reason: "senaryonun adı yok" });
         continue;
       }
-      // Bağlamalar: senaryo başına TEK liste; ad biçimi, tekillik, boş olmayan değer.
-      const names = new Set<string>();
-      let bad: string | null = null;
-      for (const b of s.bindings) {
-        if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(b.name)) bad = `geçersiz bağlama adı '${b.name}'`;
-        else if (names.has(b.name)) bad = `bağlama adı iki kez: '${b.name}'`;
-        else if (!b.value) bad = `'${b.name}' bağlamasının kaynak değeri boş`;
-        if (bad) break;
-        names.add(b.name);
-      }
-      if (bad) {
-        out.rejected.push({ key: label, reason: bad });
+      // Bağlamalar: senaryo başına TEK liste. Adı MyCL düzeltir (koşu 29: ajan 'tasks endpoint' gibi doğal dille yazıyor,
+      // senaryolar "geçersiz bağlama adı" diye reddediliyordu); yalnız düzeltilince boş kalan ad ve boş değer reddedilir.
+      const norm = normalizeBindingNames(s.bindings);
+      if ("reason" in norm) {
+        out.rejected.push({ key: label, reason: norm.reason });
         continue;
       }
-      const pairs = s.bindings.map((b) => ({ name: b.name, value: b.value }));
+      const bindings = norm.bindings;
+      const pairs = bindings.map((b) => ({ name: b.name, value: b.value }));
       const fileRecs: FileRecord[] = [];
       const texts: string[] = [];
       for (const rel of [...new Set(s.files)]) {
@@ -479,7 +496,7 @@ export async function recordCodeMapAfterGate(opts: {
         out.rejected.push({ key: label, reason: "kayda girebilen dosyası yok" });
         continue;
       }
-      const unused = s.bindings.filter((b) => !texts.some((t) => t.includes(b.value)));
+      const unused = bindings.filter((b) => !texts.some((t) => t.includes(b.value)));
       if (unused.length > 0) {
         out.rejected.push({ key: label, reason: `bağlama değeri dosyalarda ve yollarda geçmiyor: ${unused.map((b) => b.name).join(", ")}` });
         continue;
@@ -488,7 +505,7 @@ export async function recordCodeMapAfterGate(opts: {
       const scenario: ScenarioRecord = {
         // Kimlikte kayıt zamanı var: aynı senaryo yeniden kaydedilince eski kayıt silinmez, YENİ kayıt tarihiyle eklenir
         // (Ümit: "önceki kaydı silmeden yeni kaydı açar ve tarih yazar"). Dosya kayıtları içerikten türer (paylaşılır).
-        id: `scenario-${slugName(s.name) || "scenario"}-${sha256([stack, s.name, fileIds.join(","), s.bindings.map((b) => `${b.name}=${b.value}`).join(","), s.acceptance_criteria.join(","), provenance.created_at, provenance.project_root_sha].join("|")).slice(0, 12)}`,
+        id: `scenario-${slugName(s.name) || "scenario"}-${sha256([stack, s.name, fileIds.join(","), bindings.map((b) => `${b.name}=${b.value}`).join(","), s.acceptance_criteria.join(","), provenance.created_at, provenance.project_root_sha].join("|")).slice(0, 12)}`,
         level: "scenario",
         name: s.name,
         description: s.description,
@@ -496,7 +513,7 @@ export async function recordCodeMapAfterGate(opts: {
         frameworks: report.frameworks,
         acceptance_criteria: s.acceptance_criteria,
         files: fileIds,
-        bindings: s.bindings.map((b) => ({ name: b.name, description: b.description, source_value: b.value })),
+        bindings: bindings.map((b) => ({ name: b.name, description: b.description, source_value: b.value })),
         declared_by_agent: true,
         provenance,
       };

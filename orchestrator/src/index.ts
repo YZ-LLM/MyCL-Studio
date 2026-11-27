@@ -282,7 +282,7 @@ import { shouldKickQueue, startLivenessWatchdog } from "./liveness-watchdog.js";
 import { detectCliRateLimit, isCliUsageLimitError } from "./cli-rate-limit.js";
 import { setSandboxPolicy } from "./agent-sandbox.js";
 import { setCacheTtl } from "./codegen/cli-backend.js";
-import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk, isAutonomouslyAnswerableAskq, isCourtFirstAskqId, matchAnswerToOption, stripDestructiveOptions, pickConservativeDefault, shouldStopAutoAnswer } from "./auto-answer.js";
+import { autoAnswerSuggested, autoAnswerPick, isAutoAnswerEnabled, setAutoAnswerSuggested, setIntegrateModeSuppression, setNeverAsk, isNeverAsk, isAutonomouslyAnswerableAskq, isCourtFirstAskqId, matchAnswerToOption, routeComposerAskqAnswer, stripDestructiveOptions, pickConservativeDefault, shouldStopAutoAnswer } from "./auto-answer.js";
 import { advisorStatusMessage } from "./advisor.js";
 import { runContextTrimDoctor } from "./context-trim-doctor.js";
 import { bootstrapLivingDocs, refreshDocsIfStale } from "./living-docs.js";
@@ -4669,7 +4669,7 @@ async function executeAgentDecision(
       // geldi, orkestratör mesajın askq'ya uygun cevap olduğuna karar verdi.
       // Programatik olarak handleAskqAnswer çağırılır; ana ajan askq cevabı
       // gelmiş gibi devam eder.
-      const ans = decision.askq_answer ?? "";
+      let ans = decision.askq_answer ?? "";
       const active = getActiveAskq();
       if (!active) {
         log.warn("orchestrator", "answer_askq but no active askq", { ans });
@@ -4679,6 +4679,40 @@ async function executeAgentDecision(
         );
         return;
       }
+      // KESİN KURAL (2026-11-27, koşu 29): korumalı soru yalnız kullanıcının mesajı bir seçenekle AYNI ise cevaplanır.
+      // Canlı kanıt: model geçişi sorusu açıkken Faz 6'da "tamam" yazıldı, orkestratör "Evet, geç" dedi ve ayarlar değişti.
+      // Değilse cevap iletilmez, soru açık kalır, mesaj soru YOKMUŞ gibi yeniden değerlendirilir (kaybolmaz).
+      const route = routeComposerAskqAnswer(active, text, ans);
+      if (route.kind === "reevaluate") {
+        emitChatMessage(
+          "system",
+          "🔒 Açık soru korumalı: yalnız seçeneğe tıklayarak ya da seçenek metnini aynen yazarak cevaplanır. Mesajın bu " +
+            "sorunun cevabı sayılmadı, soru açık kalıyor; mesajın genel mesaj olarak değerlendiriliyor.",
+        );
+        if (runtime.state) {
+          await appendAuditModule(runtime.state.project_root, {
+            ts: Date.now(),
+            phase: runtime.state.current_phase as PhaseId,
+            event: "protected-askq-not-answered",
+            caller: "mycl-orchestrator",
+            detail: `askq=${active.id} önerilen=${ans.slice(0, 60)} mesaj=${text.slice(0, 80)}`,
+          }).catch(() => {});
+        }
+        if (!runtime.config || !runtime.state) return;
+        const again = await respondAsOrchestrator(runtime.config, runtime.state, text, { hideActiveAskq: true });
+        if (again.action === "answer_askq" || again.action === "fallback_to_classifier") {
+          // Soru gizliyken yine soru cevabı ya da karar yok → döngüye girme; sessiz kalma.
+          emitChatMessage(
+            again.reason ? "assistant" : "system",
+            again.reason || "Anlayamadım, tekrar yazar mısın? Farklı bir cümle yapısı yardımcı olabilir.",
+            again.reason ? { modelRole: "orchestrator" } : undefined,
+          );
+          return;
+        }
+        await executeAgentDecision(again, text);
+        return;
+      }
+      ans = route.answer; // korumalıda kullanıcının kendi yazdığı seçenek; korumasızda orkestratörün cevabı (aynen)
       if (decision.reason) {
         emitChatMessage("assistant", decision.reason, { modelRole: "orchestrator" });
       }
