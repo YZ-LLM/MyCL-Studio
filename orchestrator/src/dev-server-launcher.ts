@@ -38,7 +38,7 @@ export interface DevServerHandle {
   exited: boolean;
   /**
    * 2026-06-10 (YZLLM: "bu kadar kolay bişeyi çözemedi" — kör teşhis kökü): spawn'ın
-   * GERÇEK çıktısı (stderr+stdout son ~4KB + spawn 'error' olayı = E2BIG/ENOENT).
+   * GERÇEK çıktısı (stderr+stdout ilk 1500 + son 4000 karakter + spawn 'error' olayı = E2BIG/ENOENT).
    * Eskiden hiç okunmuyordu → çöküş "timeout" diye raporlanıp ajan yanlış yeri tamir
    * ediyordu. Drain ayrıca OS-buffer-dolu hang'ini de önler.
    */
@@ -82,13 +82,12 @@ export function spawnDevServer(
     cmd,
     port,
   });
-  // GERÇEK çıktı yakalama (kör-teşhis fix): stderr+stdout son ~4KB ring buffer'a +
+  // GERÇEK çıktı yakalama (kör-teşhis fix): stderr+stdout BAŞ + SON (bkz. appendCapturedOutput) +
   // spawn 'error' (E2BIG "argument list too long" / ENOENT "command not found").
   // Drain ayrıca pipe-buffer-dolu hang'ini önler (stdio:pipe tüketilmezse child asılır).
-  let outputBuf = "";
-  const MAX_OUTPUT = 4000;
+  let captured: CapturedOutput = { head: "", tail: "", dropped: false };
   const capture = (chunk: Buffer | string) => {
-    outputBuf = (outputBuf + (typeof chunk === "string" ? chunk : chunk.toString("utf8"))).slice(-MAX_OUTPUT);
+    captured = appendCapturedOutput(captured, typeof chunk === "string" ? chunk : chunk.toString("utf8"));
   };
   child.stdout?.on("data", capture);
   child.stderr?.on("data", capture);
@@ -98,7 +97,7 @@ export function spawnDevServer(
     stdout: child.stdout ?? null,
     stderr: child.stderr ?? null,
     exited: false,
-    recentOutput: () => outputBuf.trim(),
+    recentOutput: () => renderCapturedOutput(captured),
   };
   // Event-driven exit — strictPort-exit / crash'i KESİN yakala (pid-poll değil;
   // shell:true wrapper pid'i yanıltıcı). waitForDevServer her turda kontrol eder.
@@ -112,6 +111,94 @@ export function spawnDevServer(
     handle.exited = true;
   });
   return handle;
+}
+
+/** Yakalanan çıktının başında saklanan karakter sayısı (ilk hata satırları burada olur). */
+export const CAPTURE_HEAD_MAX = 1500;
+/** Yakalanan çıktının sonunda saklanan karakter sayısı (eski halka; yığının sonu burada olur). */
+export const CAPTURE_TAIL_MAX = 4000;
+
+/** Sunucu çıktısının saklanan kısmı: baş + son; arada atılan bir şey varsa `dropped`. */
+export interface CapturedOutput {
+  head: string;
+  tail: string;
+  dropped: boolean;
+}
+
+/**
+ * SAF: yeni çıktı parçasını ekle. CANLI KANIT (ekransız deneme koşusu 11, 2026-11-27): çıktı yalnız son
+ * 4000 karakterlik halkada tutuluyordu; esbuild'in uzun yığın izi halkayı doldurunca İLK hata satırı
+ * atılıyordu ve kayıtta yalnız yığının kuyruğu kalıyordu. Artık ilk CAPTURE_HEAD_MAX karakter ayrıca
+ * saklanır; son CAPTURE_TAIL_MAX karakter eskisi gibi halkada tutulur.
+ */
+export function appendCapturedOutput(c: CapturedOutput, chunk: string): CapturedOutput {
+  if (chunk === "") return c;
+  if (c.head.length < CAPTURE_HEAD_MAX) {
+    const room = CAPTURE_HEAD_MAX - c.head.length;
+    return appendCapturedOutput({ ...c, head: c.head + chunk.slice(0, room) }, chunk.slice(room));
+  }
+  const tail = c.tail + chunk;
+  return tail.length > CAPTURE_TAIL_MAX
+    ? { ...c, tail: tail.slice(-CAPTURE_TAIL_MAX), dropped: true }
+    : { ...c, tail };
+}
+
+/** SAF: saklanan çıktıyı tek metne çevir; arada atılan kısım varsa bunu açıkça işaretler. */
+export function renderCapturedOutput(c: CapturedOutput): string {
+  const gap = c.dropped ? "\n…(çıktının ortası atıldı)…\n" : "";
+  return `${c.head}${gap}${c.tail}`.trim();
+}
+
+/** SAF: uzun metni baştan ve sondan kırp (iz satırları için); kısa metin aynen döner. */
+export function clipHeadTail(text: string, headChars: number, tailChars: number): string {
+  if (text.length <= headChars + tailChars) return text;
+  return `${text.slice(0, headChars)} … ${text.slice(-tailChars)}`;
+}
+
+/**
+ * Hata satırı sayılan kalıplar (stack-bağımsız: araç ve dil adı yok, yalnız yaygın hata sözcükleri).
+ * Büyük küçük harf duyarlı: `/i` ile `E[A-Z0-9]{3,}` (hata kodu: EPIPE, ENOENT, EADDRINUSE) "esbuild",
+ * "expose", "Environments" gibi sıradan sözcüklerle eşleşiyordu (inceleme bulgusu).
+ */
+const ERROR_LINE_RE =
+  /\b(error|Error|ERROR|ERR!|failed|Failed|FAILED|fatal|Fatal|FATAL|cannot|Cannot|could not|Could not|not found|No such|no such|denied|Denied|refused|Refused|exception|Exception|panic|Traceback|E[A-Z0-9]{3,})\b|✘|✗/;
+/** Yığın izi satırları (`at …`, `File "…", line N`): hata satırı sayılmaz. */
+const STACK_LINE_RE = /^\s*(at\s|File\s+"|\.\.\.\s*\d+\s+more|\^+\s*$)/;
+
+/**
+ * SAF: yakalanan çıktıdan kullanıcıya gösterilecek ilk hata satırları: hata sözcüğü taşıyan, yığın izi
+ * olmayan satırlar. Hiç yoksa BOŞ liste (npm başlığı ya da "ready" satırı hata diye gösterilmez); o durumda
+ * çağıran `lastOutputLines` ile çıktının sonunu gösterebilir. Her satır kırpılır, tekrarlar atılır.
+ */
+export function extractErrorLines(output: string, max = 5, lineMax = 220): string[] {
+  return pickOutputLines(output, max, lineMax, "errors");
+}
+
+/** SAF: yığın izi olmayan SON satırlar (hata sözcüğü bulunamadığında gösterilir). */
+export function lastOutputLines(output: string, max = 5, lineMax = 220): string[] {
+  return pickOutputLines(output, max, lineMax, "last");
+}
+
+function pickOutputLines(output: string, max: number, lineMax: number, mode: "errors" | "last"): string[] {
+  const lines = output
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+$/, ""))
+    .filter((l) => l.trim() !== "" && !STACK_LINE_RE.test(l) && !l.includes("(çıktının ortası atıldı)"));
+  const pick = (arr: string[]) => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const l of arr) {
+      const t = l.trim();
+      const clipped = t.length > lineMax ? `${t.slice(0, lineMax - 1)}…` : t;
+      if (seen.has(clipped)) continue;
+      seen.add(clipped);
+      out.push(clipped);
+      if (out.length >= max) break;
+    }
+    return out;
+  };
+  if (mode === "errors") return pick(lines.filter((l) => ERROR_LINE_RE.test(l)));
+  return pick([...lines].reverse()).reverse();
 }
 
 /**
@@ -292,7 +379,7 @@ export interface DevServerAttempt {
     | "port_timeout"
     | "port_occupied_unforceable" // hedef port başka app'te + bu komutta port zorlanamıyor → false-match yerine dürüst fail
     | "no_free_port"; // hiç boş port bulunamadı
-  /** Spawn'ın GERÇEK çıktısı (stderr/stdout son ~4KB + spawn-error). Kör-teşhis fix — analiz buna bakar. */
+  /** Spawn'ın GERÇEK çıktısı (stderr/stdout ilk 1500 + son 4000 karakter + spawn-error). Kör-teşhis fix — analiz buna bakar. */
   output?: string;
 }
 
@@ -449,7 +536,8 @@ export async function tryDevServerChain(
       cmd,
       port: target,
       exited: handle.exited,
-      output: output.slice(-500),
+      // Baş + son: ilk hata satırı da, yığının sonu da izde kalsın (eskiden yalnız son 500 karakter).
+      output: clipHeadTail(output, 600, 400),
       next: attempts.length < candidates.length ? "trying next" : "exhausted",
     });
   }
@@ -463,7 +551,7 @@ export async function tryDevServerChain(
  *   1. Olayın somut özeti (pid, port, timeout)
  *   2. Process canlı mı (crashed vs port yanıt vermedi ayırımı)
  *   3. `package.json:scripts.dev` parse — Vite çağırıyor mu?
- *   4. Olası nedenler + manuel çözüm yolu
+ *   4. Yakalanan çıktının ilk hata satırları (varsa); yoksa olası nedenler + manuel çözüm yolu
  *   5. Resume talimatı
  *
  * Test edilebilir (saf fonksiyon, sadece fs.readFile + isProcessAlive yan
@@ -498,7 +586,13 @@ export async function buildDevServerFailMessage(
   /** Tanıyı üreten faz + bağımlılık durumu. `phaseLabel` verilmezse "Faz 5" (eski davranış) yazılır;
    *  Faz 6 incelemesinden gelen hata "Faz 5" demesin. `depsMissing` çağıranın stack profiliyle
    *  hesapladığı gerçek: bağımlılık dizini yok/boş. */
-  opts: { phaseLabel?: string; depsMissing?: boolean } = {},
+  opts: {
+    phaseLabel?: string;
+    depsMissing?: boolean;
+    /** Denemelerin yakalanan GERÇEK çıktısı (başarısız adayların `output` alanları). Verilirse ilk hata
+     *  satırları iletiye yazılır ve süreç öldüyse tahmin listesinin yerini alır. */
+    output?: string;
+  } = {},
 ): Promise<string> {
   // package.json scripts.dev + scripts.start oku — parse fail veya dosya yoksa boş
   let devScript = "";
@@ -532,6 +626,22 @@ export async function buildDevServerFailMessage(
   lines.push(`package.json "dev" script: \`${devScript || "(yok)"}\``);
   lines.push(``);
 
+  // GERÇEK HATA ÖNCE (2026-11-27, deneme koşusu 11): süreç öldüyse ileti eskiden sabit bir tahmin listesi
+  // ve "elle başlatın" yazıyordu; MyCL'in yakaladığı çıktı iletiye hiç girmiyordu. Çıktı varsa ilk hata
+  // satırları burada gösterilir; "elle başlatın" yalnız hiç çıktı yakalanamadıysa yazılır (aşağıda).
+  const errorLines = opts.output ? extractErrorLines(opts.output) : [];
+  // Çıktı var ama hata sözcüğü yok → son satırlar "hata" diye etiketlenmeden gösterilir; tahmin listesi kalır.
+  const tailLines = opts.output && errorLines.length === 0 ? lastOutputLines(opts.output) : [];
+  if (errorLines.length > 0) {
+    lines.push(`Sürecin bildirdiği ilk hata satırları:`);
+    for (const l of errorLines) lines.push(`  ${l}`);
+    lines.push(``);
+  } else if (tailLines.length > 0) {
+    lines.push(`Sürecin son çıktı satırları (hata sözcüğü bulunamadı):`);
+    for (const l of tailLines) lines.push(`  ${l}`);
+    lines.push(``);
+  }
+
   // EN TEMEL SEBEP ÖNCE (2026-09-16): bağımlılıklar hiç kurulmamışsa hiçbir script çalışamaz ve
   // script yapısı üzerine kurulan her tahmin yanıltıcı olur. Canlı kanıtta kullanıcı tam bu yüzden
   // "dev script'iniz vite başlatmıyor" okudu; oysa script doğruydu, eksik olan kurulumdu.
@@ -557,12 +667,18 @@ export async function buildDevServerFailMessage(
     lines.push(`  "dev:frontend": "vite"`);
     lines.push(`Çözüm B: Yeni terminalde manuel başlatın:`);
     lines.push(`  cd ${projectRoot} && npx vite`);
+  } else if (!alive && errorLines.length > 0) {
+    // Gerçek hata yukarıda: tahmin listesi ve "elle başlatıp hatayı görün" yazılmaz (hata zaten görünüyor).
+    lines.push(`Asıl neden yukarıdaki hata satırlarında.`);
   } else if (!alive) {
     lines.push(`Olası nedenler:`);
     lines.push(`  • Bağımlılık eksik (örn. node_modules yok) → \`npm install\` çalıştırın`);
     lines.push(`  • Backend bağımlılığı down (DB, env vars vb.) — script çıktısına bakın`);
-    lines.push(`  • Yeni terminalde manuel başlatın ve gerçek hatayı görün:`);
-    lines.push(`    cd ${projectRoot} && npm run dev`);
+    // "Elle başlatın" yalnız hiç çıktı yakalanamadıysa (çıktı varsa yukarıda gösterildi).
+    if (tailLines.length === 0) {
+      lines.push(`  • Yeni terminalde manuel başlatın ve gerçek hatayı görün:`);
+      lines.push(`    cd ${projectRoot} && npm run dev`);
+    }
   } else {
     lines.push(`Olası nedenler:`);
     // v15.8 (2026-05-30): Platform-aware port-check hint (Windows'ta lsof yok).

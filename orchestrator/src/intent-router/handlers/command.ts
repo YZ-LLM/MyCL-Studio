@@ -558,6 +558,12 @@ async function runDevServer(
         last?.port ?? expectedPortFor(cmd),
         DEV_SERVER_TIMEOUT_MS,
         isNeverAsk(), // otonom modda "sen çöz + devam et" park talimatı basılmaz (DONMUŞ HEDEF #1)
+        {
+          output: chainResult.attempts
+            .map((a: DevServerAttempt) => a.output)
+            .filter((o): o is string => !!o)
+            .join("\n---\n"),
+        },
       );
       const attemptsLog = chainResult.attempts
         .map((a: DevServerAttempt) => `  • \`${a.cmd}\` (port=${a.port}, ${a.reason})`)

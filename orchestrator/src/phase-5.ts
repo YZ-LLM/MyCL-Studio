@@ -24,6 +24,8 @@ import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
 import {
   buildDevServerFailMessage,
+  clipHeadTail,
+  extractErrorLines,
   openBrowser,
   stopActiveDevServer,
   waitForDevServer,
@@ -953,12 +955,17 @@ export class Phase5Controller {
     if (!chainResult.ok || !chainResult.handle || !chainResult.cmd) {
       const lastAttempt =
         chainResult.attempts[chainResult.attempts.length - 1];
+      const attemptOutput = chainResult.attempts
+        .map((a) => a.output)
+        .filter((o): o is string => !!o)
+        .join("\n---\n");
       const diagnostic = await buildDevServerFailMessage(
         this.state.project_root,
         lastAttempt?.reason === "process_died" ? -1 : 0,
         lastAttempt?.port ?? 5173,
         DEV_SERVER_TIMEOUT_MS,
         isNeverAsk(), // otonom modda "sen çöz + devam et yaz" park talimatı basılmaz (DONMUŞ HEDEF #1)
+        { output: attemptOutput },
       );
       const attemptsLog = chainResult.attempts
         .map((a) => `  • \`${a.cmd}\` (port=${a.port}, ${a.reason})`)
@@ -972,19 +979,20 @@ export class Phase5Controller {
         ...chainResult.attempts.map((a) => a.output).filter((o): o is string => !!o),
       ]
         .filter(Boolean)
-        .join("\n---\n")
-        .slice(-1500);
+        .join("\n---\n");
+      // Baş + son (deneme koşusu 11): eskiden yalnız son 1500 karakter → uzun yığında ilk hata satırı düşüyordu.
+      const realOutputShown = clipHeadTail(realOutput, 700, 800);
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 5,
         event: "phase-5-dev-server-fail",
         caller: "mycl-orchestrator",
-        detail: `attempts=${chainResult.attempts.length} timeout=${DEV_SERVER_TIMEOUT_MS}ms${realOutput ? ` output=${realOutput.slice(-300)}` : ""}`,
+        detail: `attempts=${chainResult.attempts.length} timeout=${DEV_SERVER_TIMEOUT_MS}ms${realOutput ? ` error=${extractErrorLines(realOutput, 1)[0] ?? ""} output=${realOutput.slice(-300)}` : ""}`,
       });
       emitChatMessage(
         "error",
         `${diagnostic}\n\nDenenen komutlar (hepsi başarısız):\n${attemptsLog}` +
-          (realOutput ? `\n\n**Sürecin gerçek çıktısı (asıl hata):**\n\`\`\`\n${realOutput}\n\`\`\`` : ""),
+          (realOutput ? `\n\n**Sürecin gerçek çıktısı (asıl hata):**\n\`\`\`\n${realOutputShown}\n\`\`\`` : ""),
       );
       log.warn("phase-5", "dev server chain exhausted", {
         attempts: chainResult.attempts,
@@ -993,7 +1001,7 @@ export class Phase5Controller {
       // analiz "timeout" değil ASIL hatayı (E2BIG vb.) görsün → doğru fix, döngü kırılır.
       this.lastFailReason =
         `dev server chain exhausted (${chainResult.attempts.length} attempts)` +
-        (realOutput ? `\n\nSpawn output (the actual error — diagnose THIS, not generic causes):\n${realOutput}` : "");
+        (realOutput ? `\n\nSpawn output (the actual error — diagnose THIS, not generic causes):\n${realOutputShown}` : "");
       return "fail";
     }
     const handle = chainResult.handle;

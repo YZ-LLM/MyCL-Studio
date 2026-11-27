@@ -10,6 +10,7 @@
 import type { MyclConfig } from "./config.js";
 import {
   buildDevServerFailMessage,
+  extractErrorLines,
   openBrowser,
   stopActiveDevServer,
 } from "./dev-server-launcher.js";
@@ -31,6 +32,8 @@ export interface RestartResult {
   ok: boolean;
   port?: number;
   reason?: string;
+  /** Başarısızsa sürecin bildirdiği ilk hata satırı (yakalanan çıktıdan; yoksa undefined). */
+  firstError?: string;
 }
 
 /**
@@ -45,12 +48,12 @@ export async function ensureDevServerForReview(
   config: MyclConfig,
   /** `openBrowser: false` → sunucu ayağa kalkar ama tarayıcı açılmaz (E2E gibi insan-dışı tüketiciler). */
   opts: { openBrowser?: boolean } = {},
-): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number }> {
+): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number; firstError?: string }> {
   const alive =
     state.dev_server_pid !== undefined && isProcessAliveSync(state.dev_server_pid);
   if (alive) return { ok: true, alreadyAlive: true, port: await deriveDevPort(state) };
   const restart = await restartDevServerSimple(state, config, opts);
-  return { ok: restart.ok, alreadyAlive: false, port: restart.port };
+  return { ok: restart.ok, alreadyAlive: false, port: restart.port, firstError: restart.firstError };
 }
 
 /**
@@ -147,17 +150,21 @@ export async function restartDevServerSimple(
   }
   // Tanı, ÇAĞIRAN fazın adıyla ve gerçek bağımlılık durumuyla üretilir: Faz 6 incelemesinden gelen
   // hata "Faz 5" dememeli, ve bağımlılıklar hiç kurulmamışsa sebep script yapısı diye gösterilmemeli.
+  const output = result.attempts
+    .map((a) => a.output)
+    .filter((o): o is string => !!o)
+    .join("\n---\n");
   const diag = await buildDevServerFailMessage(
     state.project_root,
     -1,
     candidates[0]?.ports[0] ?? 5173,
     20_000,
     false,
-    { phaseLabel: "Faz 6", depsMissing: await projectDepsMissing(state.project_root, stack) },
+    { phaseLabel: "Faz 6", depsMissing: await projectDepsMissing(state.project_root, stack), output },
   );
   emitChatMessage(
     "error",
     `${diag}\n\nNot: Fix'ler uygulandı. Sadece dev server otomatik başlamadı.`,
   );
-  return { ok: false, reason: diag };
+  return { ok: false, reason: diag, firstError: output ? extractErrorLines(output, 1)[0] : undefined };
 }

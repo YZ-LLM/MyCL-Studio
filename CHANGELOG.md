@@ -1,5 +1,28 @@
 ## 2026-11-27
 
+- **fix(dev sunucu): açılamayan sunucunun gerçek çıktısı kayda ve kullanıcı iletisine girsin; asıl hata satırı
+  kesilmesin.** Ekransız deneme koşusu 11'de `npm run dev` ve `npx vite` bir saniyede öldü. Çıktı yalnız son 4000
+  karakterlik halkada tutuluyordu; esbuild'in uzun yığın izi halkayı doldurunca ilk hata satırı atıldı. İze yığının son
+  500 karakteri yazıldı, kullanıcı iletisi sabit bir tahmin listesiyle "yeni terminalde elle başlatın" dedi, Faz 6 kaydı
+  yalnız `dev_server_restart_failed` taşıdı; danışman hata satırını hiçbir kayıtta bulamadı.
+  Artık: (1) yakalama ilk 1500 karakteri ayrıca saklıyor, son 4000 karakter eskisi gibi halkada; arada atılan kısım
+  açıkça işaretleniyor (`dev-server-launcher.ts` `appendCapturedOutput`). Bu biçim denemenin `output` alanına da giriyor.
+  (2) İz satırı baş ve sonu birlikte taşıyor. (3) Kullanıcı iletisi (`buildDevServerFailMessage`) yakalanan çıktının ilk
+  hata satırlarını gösteriyor; süreç öldüyse ve hata satırı varsa tahmin listesi ve "elle başlatın" yazılmıyor. Hata
+  sözcüğü taşıyan satır yoksa son satırlar "hata" diye etiketlenmeden gösteriliyor ve tahmin listesi kalıyor; "elle
+  başlatın" yalnız hiç çıktı yakalanamadıysa yazılıyor. (4) Faz 6 kaydı `dev_server_restart_failed | <ilk hata satırı>`
+  biçiminde; ayrıntı bu sözcükle başlamaya devam ediyor. (5) Faz 5'in iletisi, hata nedeni ve kaydı da son 1500 / 300
+  karakter yerine baş ve sonu taşıyor, kayda `error=` ekleniyor. Hata satırı ölçütü büyük küçük harf duyarlı ve araç adı
+  içermiyor (kural 1).
+  **Değişmeyen (kural 14):** çıktı verilmeyen her çağrıda ileti eskisiyle birebir aynı. Çıktı verildiğinde öteki dallar
+  (bağımlılık yok, yalnız `start` betiği, `dev` betiği yok, `dev` betiği sunucu açmıyor, süreç canlı ama port yanıtsız)
+  aynı metni yazıyor, yalnız hata satırları ekleniyor. Çağıranlar: Faz 5 (`phase-5.ts`), Faz 6 yeniden başlatma
+  (`smoke-test.ts` `restartDevServerSimple`, `ensureDevServerForReview` üzerinden), çalıştır komutu
+  (`intent-router/handlers/command.ts`); duman testi yolu aynı `restartDevServerSimple`'ı kullanıyor. Faz 5 ve çalıştır
+  komutu ham çıktıyı ayrıca da gösteriyor; hata satırları onun özetidir. Bağımlılık eksikliği algılayıcısı artık çıktının
+  başını da görüyor; daha önce kayan bir "Cannot find module" yakalanabilir (güvenli yön).
+  **Test ve kontrol koşturulmadı, yalnız derlendi.**
+
 - **fix(faz 5): "rötuş hiçbir şeyi değiştirmedi" hükmü komut ayrıştırarak değil dosya durumuyla verilsin.** Bir
   önceki düzeltme (aşağıdaki girdi) sonuçsuz kullanıcı rötuşunu başarısız faz saymamak için dört koşul arıyordu;
   üçüncüsü ajanın her araç çağrısının "kanıtlanabilir biçimde salt okunur" olmasıydı ve kabuk komutlarını ayrıştırarak

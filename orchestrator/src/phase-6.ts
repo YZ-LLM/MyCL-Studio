@@ -136,7 +136,8 @@ export class Phase6Controller {
         phase: 6,
         event: "phase-6-deferred",
         caller: "mycl-orchestrator",
-        detail: "dev_server_restart_failed",
+        // Kısa neden (deneme koşusu 11: ayrıntı sabitti, neden kayıtta yoktu). Ayrıntı bu sözcükle başlar.
+        detail: `dev_server_restart_failed${dev.firstError ? ` | ${dev.firstError.slice(0, 200)}` : ""}`,
       });
       return "deferred";
     }
