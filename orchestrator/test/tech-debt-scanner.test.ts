@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isTodoCommentLine,
   scanTechDebt,
   acceptedFindingKey,
   updateLastTechDebtFindings,
@@ -206,5 +207,44 @@ describe("updateLastTechDebtFindings / getLastTechDebtFindings (accept snippet e
     expect(getLastTechDebtFindings(root)).toHaveLength(1);
     resetLastTechDebtFindings(root);
     expect(getLastTechDebtFindings(root)).toEqual([]);
+  });
+});
+
+// 2026-11-28 (koşu 31): yapılacaklar uygulamasında "todo" kelimesi yorum sayılıp Faz 8 kapısı 13 kez düştü.
+describe("todo_comment — yalnız gerçek yorum işareti", () => {
+  const yakalanmamali = [
+    'const DB_PATH = process.env.DB_PATH ?? "todo.sqlite3";',
+    "console.log(`todo server listening on port ${PORT}`);",
+    'status: "TODO",',
+    "<h1>Todo</h1>",
+    ".todo-list { margin: 0; }",
+    't("todo.add")',
+    "// Todo list state",
+    "// todo: küçük harf bilerek yakalanmaz",
+    'a(); const s = "TODO";',
+    'this.#status = "TODO";',
+    'fetch("http://x"); s = "TODO"',
+    'color: "#fff", label: "TODO"',
+    'i--; s = "TODO"',
+  ];
+  const yakalanmali = [
+    "// TODO: boş liste",
+    "# FIXME sonra",
+    "/* HACK */",
+    " * XXX",
+    "<!-- TODO -->",
+    "x = 1; // TODO",
+    "-- TODO: dizin ekle",
+    "; TODO ini notu",
+    "% WIP",
+    "x = 1  # TODO",
+    "SELECT 1 -- FIXME",
+  ];
+  it.each(yakalanmamali)("yakalanmaz: %s", (line) => {
+    expect(isTodoCommentLine(line)).toBe(false);
+    expect(scanTechDebt(line).filter((f) => f.category === "todo_comment")).toEqual([]);
+  });
+  it.each(yakalanmali)("yakalanır: %s", (line) => {
+    expect(isTodoCommentLine(line)).toBe(true);
   });
 });

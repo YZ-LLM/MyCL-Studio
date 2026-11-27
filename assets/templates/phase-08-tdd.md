@@ -198,9 +198,11 @@ production code:
 - **No skipped tests** — `.skip`, `.only`, `xit`, `xdescribe`, `@pytest.skip`
   marks block the phase; resolve or delete.
 
-The orchestrator runs the technical debt scan automatically after each Write/Edit
-and emits `tdd-tech-debt-detected` audit events with file:line + reason. The
-gate fails if any such event remains at phase end.
+The orchestrator scans for technical debt ONCE, at the phase gate, on the
+CURRENT content of every production file you wrote or edited in this phase
+(not while you work). Each finding is reported with file:line, rule and the
+line text, and the gate fails while any remains. Check your own files for
+these markers before you finish — nothing warns you mid-run.
 
 ## Error catalog — MANDATORY in every project
 
@@ -444,7 +446,7 @@ backend.
 - You are about to add `.skip`/`.only`/`xit`/`xdescribe` to move past a failure.
 - You wrote production code before its test existed.
 - The final full suite was not run, or you are declaring done off a partial run.
-- A `tdd-tech-debt-detected` event fired and you are ignoring it.
+- A gate tech-debt finding (file:line, rule, line text) was reported and you are ignoring it.
 - You are optimizing code with no measurement showing it is a bottleneck.
 - You wrote an API/library call from memory without confirming its signature in-repo.
 - You added a hardcoded secret, an unparametrized query, or skipped an authz check.
@@ -466,8 +468,8 @@ Before declaring done, confirm with evidence you actually observed:
   the unit under test. Persisted state is checked where the AC implies it.
 - **Full suite green**: you ran the complete suite once at the end and saw it
   pass — you did not assume it from per-group runs.
-- **Zero debt**: no TODO/mock-in-production/skip/empty-catch remains; no
-  `tdd-tech-debt-detected` event is outstanding.
+- **Zero debt**: no TODO/mock-in-production/skip/empty-catch remains in the
+  current content of the production files you wrote or edited.
 - **Security basics**: inputs validated, queries parametrized, authz enforced,
   no inlined secrets — for every handler this iteration touched.
 - **CSP korunur + strict (her yanıtta)**: bu iterasyonda yazdığın/dokunduğun backend
@@ -516,7 +518,7 @@ only; if it is unavailable you'll be told to proceed with your best judgment.)
 - **Final full-suite run mandatory**: before declaring done, run the complete
   test suite once. The orchestrator audits the final Bash test command.
 - **Zero technical debt mandatory** — see policy section above. The phase
-  cannot complete if any `tdd-tech-debt-detected` audit event remains.
+  cannot complete while the gate-time scan finds any debt in your files.
 
 ## Project root
 

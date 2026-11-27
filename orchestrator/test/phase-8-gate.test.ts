@@ -59,6 +59,7 @@ function kosu18(over: Partial<TddGateInput> = {}, ajanSatiri = "green: AC1,AC2,A
     finalSuiteRun: true,
     techDebtCount: 0,
     techDebtPaths: [],
+    techDebtFindings: [],
     reproOk: true,
     ...over,
   };
@@ -113,9 +114,18 @@ describe("decideTddGate — yeşil ölçüsü", () => {
     expect(kirmizi.pass).toBe(false);
     expect(kirmizi.reasons).toContain("final tam-suite KIRMIZI — son doğrulama (npm test) geçmedi");
     expect(kirmizi.codeQualityFail).toBe(true);
-    const borc = decideTddGate(kosu18({ techDebtCount: 1, techDebtPaths: ["src/a.js"] }));
+    const borc = decideTddGate(
+      kosu18({
+        techDebtCount: 1,
+        techDebtPaths: ["src/a.js"],
+        techDebtFindings: [1, 2, 3, 4].map((line) => ({ path: "src/a.js", line, category: "todo_comment", excerpt: `// TODO ${line}` })),
+      }),
+    );
     expect(borc.pass).toBe(false);
-    expect(borc.reasons).toContain("1 dosyada tech debt: src/a.js");
+    // 2026-11-28: ileti her bulgu için yol, satır, kural ve satır metnini veriyor (en çok üç, gerisi sayıyla).
+    expect(borc.reasons).toContain(
+      "1 dosyada tech debt: src/a.js:1 [todo_comment] `// TODO 1`; src/a.js:2 [todo_comment] `// TODO 2`; src/a.js:3 [todo_comment] `// TODO 3` (+1 bulgu daha)",
+    );
     const kosmadi = decideTddGate(kosu18({ lastEvent: "tdd-unverified", finalSuiteRun: false }));
     expect(kosmadi.pass).toBe(false);
     expect(kosmadi.reasons).toContain("final tam-suite doğrulaması yapılamadı (yeşil sonuç yok)");

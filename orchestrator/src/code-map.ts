@@ -379,6 +379,8 @@ export interface RecordOutcome {
   recorded: string[];
   reused: string[];
   rejected: Array<{ key: string; reason: string }>;
+  /** Değeri dosyalarda ve yollarda geçmediği için atılan bağlamalar (senaryo kalanlarla kaydedildi). */
+  dropped_bindings: Array<{ key: string; names: string[] }>;
   noReport: boolean;
 }
 
@@ -427,7 +429,7 @@ export async function recordCodeMapAfterGate(opts: {
   gatesPassed: string[];
   agentText: string;
 }): Promise<RecordOutcome> {
-  const out: RecordOutcome = { recorded: [], reused: [], rejected: [], noReport: false };
+  const out: RecordOutcome = { recorded: [], reused: [], rejected: [], dropped_bindings: [], noReport: false };
   const { state, phase } = opts;
   try {
     const project = basename(state.project_root);
@@ -496,16 +498,20 @@ export async function recordCodeMapAfterGate(opts: {
         out.rejected.push({ key: label, reason: "kayda girebilen dosyası yok" });
         continue;
       }
+      // 2026-11-28 (koşu 31: 6 senaryonun 5'i bu yüzden düştü; ör. `route` = "PATCH /api/tasks/:id" dosyada bu biçimde
+      // geçmiyor): değeri dosyalarda ve yollarda geçmeyen bağlama ATILIR, senaryo kalan bağlamalarla kaydedilir; atılan
+      // adlar iletide görünür. Dosya şablonları bağlamalardan önce üretildi; atılan bağlama yer tutucusu üretmez
+      // çünkü değeri metinde yok.
       const unused = bindings.filter((b) => !texts.some((t) => t.includes(b.value)));
       if (unused.length > 0) {
-        out.rejected.push({ key: label, reason: `bağlama değeri dosyalarda ve yollarda geçmiyor: ${unused.map((b) => b.name).join(", ")}` });
-        continue;
+        out.dropped_bindings.push({ key: label, names: unused.map((b) => b.name) });
       }
+      const usedBindings = bindings.filter((b) => !unused.includes(b));
       const fileIds = fileRecs.map((f) => f.id);
       const scenario: ScenarioRecord = {
         // Kimlikte kayıt zamanı var: aynı senaryo yeniden kaydedilince eski kayıt silinmez, YENİ kayıt tarihiyle eklenir
         // (Ümit: "önceki kaydı silmeden yeni kaydı açar ve tarih yazar"). Dosya kayıtları içerikten türer (paylaşılır).
-        id: `scenario-${slugName(s.name) || "scenario"}-${sha256([stack, s.name, fileIds.join(","), bindings.map((b) => `${b.name}=${b.value}`).join(","), s.acceptance_criteria.join(","), provenance.created_at, provenance.project_root_sha].join("|")).slice(0, 12)}`,
+        id: `scenario-${slugName(s.name) || "scenario"}-${sha256([stack, s.name, fileIds.join(","), usedBindings.map((b) => `${b.name}=${b.value}`).join(","), s.acceptance_criteria.join(","), provenance.created_at, provenance.project_root_sha].join("|")).slice(0, 12)}`,
         level: "scenario",
         name: s.name,
         description: s.description,
@@ -513,7 +519,7 @@ export async function recordCodeMapAfterGate(opts: {
         frameworks: report.frameworks,
         acceptance_criteria: s.acceptance_criteria,
         files: fileIds,
-        bindings: bindings.map((b) => ({ name: b.name, description: b.description, source_value: b.value })),
+        bindings: usedBindings.map((b) => ({ name: b.name, description: b.description, source_value: b.value })),
         declared_by_agent: true,
         provenance,
       };
@@ -524,11 +530,15 @@ export async function recordCodeMapAfterGate(opts: {
       out.rejected.length > 0
         ? ` Reddedilen ${out.rejected.length}: ${out.rejected.slice(0, 5).map((r) => `${r.key} (${r.reason})`).join("; ")}${out.rejected.length > 5 ? "; …" : ""}.`
         : "";
+    const dropped =
+      out.dropped_bindings.length > 0
+        ? ` Değeri dosyada geçmediği için atılan bağlamalar: ${out.dropped_bindings.slice(0, 5).map((d) => `${d.key} (${d.names.join(", ")})`).join("; ")}${out.dropped_bindings.length > 5 ? "; …" : ""}.`
+        : "";
     await visible(
       state,
       phase,
       "code-map-recorded",
-      `🗺️ Kod haritası (Faz ${phase}): ${out.recorded.length} yeni kayıt, ${out.reused.length} kayıt zaten vardı.${rej}`,
+      `🗺️ Kod haritası (Faz ${phase}): ${out.recorded.length} yeni kayıt, ${out.reused.length} kayıt zaten vardı.${rej}${dropped}`,
     );
     return out;
   } catch (e) {

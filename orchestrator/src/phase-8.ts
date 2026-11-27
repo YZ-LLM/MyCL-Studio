@@ -11,10 +11,10 @@
 
 import { exec } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
-import { relative, isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
-import { appendAudit, appendHandoff, readAuditLogTail, readAcceptedFindings } from "./audit.js";
+import { appendAudit, appendHandoff, readAuditLogTail } from "./audit.js";
 import { currentSpecPath, currentSpecRelPath } from "./devs-paths.js";
 import { isMissingCommand, isSpawnEnvFailure, resolveMechanicalCmd } from "./base/mechanical-runner.js";
 import { probeTestValidity } from "./test-validity.js";
@@ -57,12 +57,14 @@ import { modelChoiceLineIfChanged } from "./model-catalog.js";
 import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import type { ToolDef } from "./claude-api.js";
+import { resetLastTechDebtFindings, updateLastTechDebtFindings } from "./tech-debt-scanner.js";
 import {
-  scanTechDebt,
-  acceptedFindingKey,
-  updateLastTechDebtFindings,
-  type TechDebtFinding,
-} from "./tech-debt-scanner.js";
+  formatGateDebtFinding,
+  readAcceptedTechDebtKeys,
+  scanGateTechDebt,
+  type GateDebtFinding,
+  type GateTechDebtScan,
+} from "./phase-9-tech-debt.js";
 import { TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js";
 import { computeChangedScope } from "./fix/scope.js";
 import type { PhaseDeps } from "./phase-deps.js";
@@ -128,6 +130,8 @@ export interface TddGateInput {
   finalSuiteRun: boolean;
   techDebtCount: number;
   techDebtPaths: string[];
+  /** Kapı anındaki taramanın bulguları (iletide ilk üçü, gerisi sayıyla). */
+  techDebtFindings: GateDebtFinding[];
   reproOk: boolean;
 }
 
@@ -190,12 +194,17 @@ export function decideTddGate(i: TddGateInput): TddGateDecision {
           : "final tam-suite doğrulaması yapılamadı (yeşil sonuç yok)",
       );
     }
-    if (!debtOk)
+    if (!debtOk) {
+      // 2026-11-28 (koşu 31): ileti yalnız yolu veriyordu; ilk düşüşten düzeltmeye 8 dakika geçti. Artık her bulgu
+      // için yol, satır, kural ve satır metni (en çok üç bulgu, gerisi sayıyla).
+      const shown = i.techDebtFindings.slice(0, 3).map(formatGateDebtFinding);
+      const rest = i.techDebtFindings.length - shown.length;
       reasons.push(
-        `${i.techDebtCount} dosyada tech debt: ${i.techDebtPaths.slice(0, 3).join(", ")}${
-          i.techDebtPaths.length > 3 ? "..." : ""
+        `${i.techDebtCount} dosyada tech debt: ${shown.length > 0 ? shown.join("; ") : i.techDebtPaths.slice(0, 3).join(", ")}${
+          rest > 0 ? ` (+${rest} bulgu daha)` : ""
         }`,
       );
+    }
     if (!i.reproOk) reasons.push("repro-first ihlali: bug'ı yeniden üreten failing test (kırmızı→yeşil) yok");
     if (!acCoverageOk)
       reasons.push(
@@ -1001,40 +1010,27 @@ export class Phase8Controller {
     const results = p9.filter((e) => RESULT_EVENTS.has(e.event));
     const lastEvent = results.length > 0 ? results[results.length - 1].event : null;
 
-    // Tech debt counting: her dosya için en son scan event'i kazanır.
-    // (tdd-tech-debt-detected veya tdd-tech-debt-clean per path).
-    const lastDebtByPath = new Map<string, "detected" | "clean">();
+    // Teknik borç (2026-11-28, koşu 31): karar KAPI ANINDA, dosyaların o anki içeriği taranarak verilir. Eskiden
+    // her Write/Edit anında taranıp kapı denetim kaydındaki "dosyanın son tarama olayına" bakıyordu; CLI kipinde
+    // gözlemci araç henüz koşmadan çağrıldığı için `Edit`te düzenlemeden ÖNCEKİ içerik taranıyor, borcu temizleyen
+    // düzenleme "borç var" kaydı üretiyordu (13 sahte düşüş); `Bash`/geri almayla değişen dosya hiç taranmıyor,
+    // kalıcı kabul de kapıya yansımıyordu. Kapsam AYNI: bu yinelemede Faz 8'de yazılan/düzenlenen üretim dosyaları.
+    // `tdd-tech-debt-*` kayıtlarının ve kalıcı kabul deposunun TEK kaynağı bu taramadır.
+    const touched: string[] = [];
     for (const e of p9) {
-      if (e.event === "tdd-tech-debt-detected" && e.detail) {
-        // detail format: "<path>:<line> <category> — <reason>"
-        const path = e.detail.split(":")[0];
-        lastDebtByPath.set(path, "detected");
-      } else if (e.event === "tdd-tech-debt-clean" && e.detail) {
-        lastDebtByPath.set(e.detail, "clean");
+      if (!e.detail) continue;
+      if (e.event === "tdd-prod-write" || (e.event === "code-edit" && !isTestPath(e.detail) && isProdPath(e.detail))) {
+        touched.push(e.detail);
       }
     }
-    // QC v15.2.4 #3 fix: Bash `rm` ile silinen dosyalar audit'te "detected"
-    // kalır → gate yanlış fail. fs.access ile dosya varlığını doğrula;
-    // yoksa lastDebtByPath'ten temizle (silinmiş = teknik borç değil).
-    const techDebtPathsRaw = [...lastDebtByPath.entries()]
-      .filter(([, v]) => v === "detected")
-      .map(([k]) => k);
-    const techDebtPaths: string[] = [];
-    for (const p of techDebtPathsRaw) {
-      try {
-        await stat(p);
-        techDebtPaths.push(p); // dosya hâlâ var → tech debt
-      } catch (e) {
-        // errno-AYRIMI (sessiz-fallback denetimi): yalnız ENOENT = silinmiş (tech-debt sayma). Belirsiz hata
-        // (EACCES/EIO) → "silinmiş" SANMAK tech-debt'i eksik sayar (false-clean) → kuşkuda DAHİL et (TUT).
-        if ((e as { code?: string }).code === "ENOENT") {
-          log.info("phase-8", "deleted file skipped from tech debt", { path: p });
-        } else {
-          log.warn("phase-8", "stat belirsiz — dosya tech-debt'te TUTULDU (kuşkuda dahil et)", { path: p, code: (e as { code?: string }).code });
-          techDebtPaths.push(p);
-        }
-      }
-    }
+    const debtScan = await scanGateTechDebt(
+      this.state.project_root,
+      touched,
+      await readAcceptedTechDebtKeys(this.state.project_root, "phase-8"),
+    );
+    await this.auditGateTechDebt(debtScan);
+    const techDebtPaths = debtScan.debtPaths;
+    const techDebtFindings = debtScan.findings;
     const techDebtCount = techDebtPaths.length;
 
     // AC sayısı — spec.md'den çıkar (v15.7: cache'li).
@@ -1132,6 +1128,7 @@ export class Phase8Controller {
       finalSuiteRun,
       techDebtCount,
       techDebtPaths,
+      techDebtFindings,
       reproOk,
     });
     const { tddOk, acCoverageOk } = gate;
@@ -1720,12 +1717,8 @@ export class Phase8Controller {
         this.checkConsentViolation(path, audits);
         if (isTestPath(path)) audits.push({ event: "tdd-test-write", detail: path });
         else if (isProdPath(path)) {
+          // Teknik borç taraması burada DEĞİL, kapı anında (2026-11-28); bu kayıt kapının tarama kapsamıdır.
           audits.push({ event: "tdd-prod-write", detail: path });
-          // sıfır-teknik-borç ilkesi "ASLA TEKNİK BORÇ BIRAKMA" — production
-          // path'lerinde tech debt taraması. Bulguları audit'e yansıt; gate
-          // tech_debt_count !== 0 ise faili döndürür.
-          const content = String(input.content ?? "");
-          await this.scanAndAuditTechDebt(path, content);
         }
         // BDD dış döngü görünür artefaktı — GATE DEĞİL, yalnız görünürlük (Faz 9 yumuşak
         // inceleme + audit izi). required_audits/gate'e eklenmez (yalnızca refactor/doküman
@@ -1737,16 +1730,8 @@ export class Phase8Controller {
         const path = String(input.file_path ?? input.path ?? "");
         this.checkConsentViolation(path, audits);
         audits.push({ event: "code-edit", detail: path });
-        // Edit sonrası dosya içeriği input'ta yok (sadece replacement).
-        // Disk'ten oku → tara. Test path'leri skip.
-        if (isProdPath(path)) {
-          try {
-            const content = await readFile(path, "utf-8");
-            await this.scanAndAuditTechDebt(path, content);
-          } catch (err) {
-            log.warn("phase-8", "edit tech-debt scan read failed", { path, err });
-          }
-        }
+        // Teknik borç taraması burada DEĞİL, kapı anında (2026-11-28): CLI kipinde bu gözlemci araç koşmadan
+        // çağrılır, diskten okumak düzenlemeden ÖNCEKİ içeriği verirdi. `code-edit` kaydı kapının tarama kapsamıdır.
         // Mevcut bir `.feature`'ı Edit ile güncelleme de BDD görünürlük izi bırakır
         // (Write dalıyla simetri — sinyal sessizce kaybolmasın). GATE DEĞİL.
         if (isFeatureFile(path)) audits.push({ event: "bdd-scenario-write", detail: path });
@@ -1780,71 +1765,36 @@ export class Phase8Controller {
   }
 
   /**
-   * Production dosyasını tarar; tech debt bulgularını her bulgu için tek bir
-   * `tdd-tech-debt-detected` audit event olarak kaydeder. Phase 8 gate
-   * evaluation bu sayıyı kontrol eder; sıfır olmazsa faili döndürür.
-   *
-   * Edit ile borç temizlenirse: önceki audit event'leri silinmez (immutable
-   * log) ama gate son state'e bakar → temizlenen dosya artık yeni event
-   * üretmez. Toplam count yeniden hesaplanır: gate'te
-   * `readAuditLog`'tan tdd-tech-debt-detected sayar VE dosya bazlı dedupe
-   * yapar (aynı path için son `tdd-prod-write` veya `code-edit` sonrası).
-   *
-   * v15.2.4: basitlik için sayar, dedupe yapmaz; kullanıcı temizlerse REFACTOR
-   * adımında Edit + dosyayı yeniden tarar → temiz scan = yeni "tech-debt-clean"
-   * event (Phase 8 ileri sürümünde marker; v15.2.4 minimal).
+   * Kapı anındaki teknik borç taramasını denetime ve kalıcı kabul deposuna yazar (2026-11-28; tek kaynak).
+   * Olay adları değişmedi (`layer-cost-report.ts` okuyor): temiz dosya → `tdd-tech-debt-clean` (detay: yol),
+   * her bulgu → `tdd-tech-debt-detected` (detay: `yol:satır [kural] `metin``). Depo bu taramayla BAŞTAN dolar —
+   * kalıcı kabul yalnız bu kapının gördüğü bulguları yazar.
    */
-  private async scanAndAuditTechDebt(path: string, content: string): Promise<void> {
-    // FIX D (YZLLM 2026-07-01): KALICI kabul edilmiş bulguları kapı ARTIK işaretlemez (aynı-soru döngüsü kalıcı
-    // kırılır). Küme her scan'da okunur (accept nadir + dosya küçük); okuma hatası → boş küme (fail-open: normal tara).
-    const accepted = await readAcceptedFindings(this.state.project_root).catch((e) => {
-      // KATI #4 (sessiz fallback yok): fail-open doğru yön (accepted okunamazsa normal tara) ama GÖRÜNÜR olsun.
-      log.warn("phase-8", "accepted-findings okunamadı (normal taramaya devam)", { err: String(e) });
-      return [];
-    });
-    // FIX D (mahkeme 2026-07-01): kabul-anahtarı GÖRELİ path kullanır (Faz 9 getChangedFiles göreli döndürür;
-    // Faz 8'in mutlak Write path'iyle eşleşmezse Faz 9 kabul edileni yeniden işaretler). Audit/gate mutlak path
-    // korunur (gate stat() mutlak yol bekler). relKey yalnız kabul-eşleşmesi + store için.
+  private async auditGateTechDebt(scan: GateTechDebtScan): Promise<void> {
     const root = this.state.project_root;
-    const relKey = isAbsolute(path) ? relative(root, path) : path;
-    const acceptedKeys = new Set(
-      accepted
-        .filter((a) => a.scope === "tech-debt")
-        .map((a) => acceptedFindingKey(a.file, a.category, a.snippet)),
-    );
-    const findings: TechDebtFinding[] = scanTechDebt(content, relKey, acceptedKeys);
-    // Accept yazımı excerpt'e buradan erişir (audit event excerpt taşımaz) — GÖRELİ path ile dosya bazlı güncelle.
-    updateLastTechDebtFindings(root, relKey, findings);
-    if (findings.length === 0) {
-      // Clean snapshot — gate evaluation dosya bazlı son scan'ı temiz sayar.
-      await appendAudit(this.state.project_root, {
-        ts: Date.now(),
-        phase: 8,
-        event: "tdd-tech-debt-clean",
-        caller: "mycl-orchestrator",
-        detail: path,
-      });
-      return;
+    resetLastTechDebtFindings(root);
+    for (const f of scan.store) updateLastTechDebtFindings(root, f.rel, f.findings);
+    for (const p of scan.cleanPaths) {
+      await appendAudit(root, { ts: Date.now(), phase: 8, event: "tdd-tech-debt-clean", caller: "mycl-orchestrator", detail: p });
     }
-    for (const f of findings) {
-      await appendAudit(this.state.project_root, {
+    for (const f of scan.findings) {
+      await appendAudit(root, {
         ts: Date.now(),
         phase: 8,
         event: "tdd-tech-debt-detected",
         caller: "mycl-orchestrator",
-        detail: `${path}:${f.line} ${f.category} — ${f.reason}`,
+        detail: formatGateDebtFinding(f).slice(0, 300),
       });
     }
-    emitChatMessage(
-      "system",
-      `⚠️ Phase 8 tech-debt: ${path} — ${findings.length} bulgu ` +
-        `(${findings.map((f) => f.category).join(", ")}). ` +
-        `sıfır teknik borç ilkesi "ASLA TEKNİK BORÇ BIRAKMA" — REFACTOR ile temizle.`,
-    );
-    log.warn("phase-8", "tech debt detected", {
-      path,
-      count: findings.length,
-      categories: findings.map((f) => f.category),
-    });
+    if (scan.findings.length > 0) {
+      emitChatMessage(
+        "system",
+        `⚠️ Faz 8 teknik borç: ${scan.debtPaths.length} dosyada ${scan.findings.length} bulgu — ` +
+          scan.findings.slice(0, 3).map(formatGateDebtFinding).join("; ") +
+          (scan.findings.length > 3 ? ` (+${scan.findings.length - 3} bulgu daha)` : "") +
+          `. Sıfır teknik borç ilkesi: temizle.`,
+      );
+      log.warn("phase-8", "tech debt detected", { files: scan.debtPaths.length, count: scan.findings.length });
+    }
   }
 }

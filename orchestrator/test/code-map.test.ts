@@ -174,6 +174,23 @@ describe("kayıt — senaryo, dosyaları ve bağlamalarıyla", () => {
     expect(scen.bindings.map((b) => b.name)).toEqual(["tasks_endpoint", "entity"]);
   });
 
+  it("değeri dosyada geçmeyen bağlama atılır, senaryo kalan bağlamalarla kaydedilir, atılan ad iletide (koşu 31)", async () => {
+    await seedFiles(proj);
+    const out = await recordCodeMapAfterGate({
+      state: state(),
+      phase: 5,
+      gatePassed: true,
+      gatesPassed: ["g"],
+      agentText: agentText({
+        scenarios: [{ ...SCENARIO, bindings: [...SCENARIO.bindings, { name: "route", description: "endpoint", value: "PATCH /api/tasks/:id" }] }],
+      }),
+    });
+    expect(out.rejected).toEqual([]);
+    expect(out.dropped_bindings).toEqual([{ key: SCENARIO.name, names: ["route"] }]);
+    const scen = (await listRecords()).find((r) => r.level === "scenario") as ScenarioRecord;
+    expect(scen.bindings.map((b) => b.name)).toEqual(["entity", "Entity", "storageKey"]);
+  });
+
   it("kapı geçmeden de kayıt alınıyor ve kayıt kapının geçmediğini söylüyor", async () => {
     await seedFiles(proj);
     const out = await recordCodeMapAfterGate({ state: state(), phase: 8, gatePassed: false, gatesPassed: [], agentText: agentText({ scenarios: [SCENARIO] }) });

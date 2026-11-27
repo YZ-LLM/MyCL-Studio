@@ -5,13 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   collectIterationTechDebt,
+  formatGateDebtFinding,
   MAX_SCAN_FILES,
+  scanGateTechDebt,
   renderChangedFilesList,
   renderTechDebtFindings,
   scanFiles,
   type IterationTechDebt,
 } from "../src/phase-9-tech-debt.js";
 import type { State } from "../src/types.js";
+import { acceptedFindingKey } from "../src/tech-debt-scanner.js";
 
 // Saf çekirdek testleri — scanFiles + render'lar IO'suz. collectIterationTechDebt
 // (git/fs impure) entegrasyon kapsamında; burada deterministik mantık doğrulanır.
@@ -172,5 +175,42 @@ describe("phase-9-tech-debt · collectIterationTechDebt (git entegrasyon)", () =
     await writeFile(join(dir, "src", "feature.test.ts"), "it.skip('x', () => {});\n// TODO: t\n");
     const td = await collectIterationTechDebt(asState(dir));
     expect(td.files.map((f) => f.path)).not.toContain("src/feature.test.ts");
+  });
+});
+
+// 2026-11-28 (koşu 31): Faz 8 kapısı kararını kapı anında, dosyaların o anki içeriğiyle verir.
+describe("scanGateTechDebt — Faz 8 kapı anı taraması", () => {
+  const root = "/proj";
+  const files: Record<string, string> = {
+    "/proj/server/index.ts": 'const DB = process.env.DB ?? "tasklist.sqlite3";\n',
+    "/proj/src/a.ts": "// TODO: sonra\nconst x = 1;\n",
+  };
+  const read = async (abs: string): Promise<string> => {
+    if (abs in files) return files[abs];
+    if (abs.endsWith("gone.ts")) throw Object.assign(new Error("yok"), { code: "ENOENT" });
+    throw Object.assign(new Error("izin"), { code: "EACCES" });
+  };
+
+  it("o anki içerik taranır; silinmiş atlanır; okunamayan borç sayılır; aynı yol bir kez", async () => {
+    const out = await scanGateTechDebt(
+      root,
+      ["/proj/server/index.ts", "src/a.ts", "/proj/src/a.ts", "/proj/src/gone.ts", "/proj/src/locked.ts"],
+      new Set(),
+      read,
+    );
+    expect(out.cleanPaths).toEqual(["/proj/server/index.ts"]);
+    expect(out.debtPaths).toEqual(["src/a.ts", "/proj/src/locked.ts"]);
+    expect(out.findings.map(formatGateDebtFinding)).toEqual([
+      "src/a.ts:1 [todo_comment] `// TODO: sonra`",
+      "/proj/src/locked.ts [unreadable] dosya okunamadı (EACCES)",
+    ]);
+    expect(out.store.map((s) => s.rel)).toEqual(["server/index.ts", "src/a.ts"]);
+  });
+
+  it("kalıcı kabul anahtarı (göreli yol) kapı taramasında geçerli", async () => {
+    const keys = new Set([acceptedFindingKey("src/a.ts", "todo_comment", "// TODO: sonra")]);
+    const out = await scanGateTechDebt(root, ["/proj/src/a.ts"], keys, read);
+    expect(out.debtPaths).toEqual([]);
+    expect(out.cleanPaths).toEqual(["/proj/src/a.ts"]);
   });
 });

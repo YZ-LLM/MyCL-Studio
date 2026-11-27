@@ -2,12 +2,13 @@
 // (sıfır-teknik-borç ilkesi).
 //
 // Production path'larına yazılan/edit edilen dosyaları tarar ve teknik borç
-// göstergelerini tespit eder. Phase 8 observer her Write/Edit sonrası bu
-// scanner'ı çağırır; bulgular `tdd-tech-debt-detected` audit event olarak
-// kayda geçer. Gate evaluation tech_debt_count !== 0 ise faili döndürür.
+// göstergelerini tespit eder. Faz 8 kapısı bu iterasyonda yazılan/düzenlenen dosyaları
+// KAPI ANINDA, o anki içerikleriyle tarar (2026-11-28; eskiden her Write/Edit anında —
+// CLI kipinde araç henüz koşmadan — taranıyordu); bulgular `tdd-tech-debt-detected`
+// audit event olarak kayda geçer. Kapı bulgu varsa düşer.
 //
 // Detection categories:
-//   - todo_comment: TODO/FIXME/HACK/XXX/WIP yorum işaretleri
+//   - todo_comment: TODO/FIXME/HACK/XXX/WIP yorum işaretleri (büyük harf + önünde yorum başlatıcısı; isTodoCommentLine)
 //   - mock_in_prod: mock/stub/dummy/fake kelimesi production path'inde
 //   - hardcoded_credential: inline password/api_key/secret
 //   - empty_catch: try/catch içinde boş veya sadece comment'li body
@@ -33,9 +34,33 @@ export interface TechDebtFinding {
  * Production code'da kabul edilmeyen yorum işaretleri. Test path'lerinde
  * (`*.test.*`, `__tests__/`) tarama dışı — orada TODO/FIXME OK.
  */
-const TODO_PATTERNS: { re: RegExp; reason: string }[] = [
-  { re: /\b(TODO|FIXME|HACK|XXX|WIP)\b/i, reason: "todo/fixme/hack/xxx/wip marker" },
-];
+const TODO_MARKER_RE = /\b(TODO|FIXME|HACK|XXX|WIP)\b/g;
+const TODO_REASON = "todo/fixme/hack/xxx/wip marker";
+
+/**
+ * SAF (2026-11-28, ekransız deneme koşusu 31): satır gerçek bir borç YORUMU mu taşıyor?
+ *
+ * KANIT: işaret satırın her yerinde ve harf ayrımı olmadan aranıyordu; yapılacaklar uygulamasında
+ * `… ?? "todo.sqlite3";` ve `` `todo server listening …` `` satırları `todo_comment` sayıldı, Faz 8 kapısı 13 kez düştü.
+ *
+ * KURAL (stack'e bağlı değil): işaret BÜYÜK harfle yazılmış olmalı VE aynı satırda ondan önce bir yorum başlatıcısı
+ * bulunmalı: `//` (önünde `:` yokken), `/*`, `<!--` satırın herhangi bir yerinde; `#` ve `--` satır başında ya da boşluktan
+ * sonra; `*`, `;`, `%` satır başında. Satır ortasındaki
+ * `;` ve `%` yalnız işaretten HEMEN önce gelirse (aradaki boşluk hariç) sayılır: JS'te `a(); s = "TODO"` gibi satırlarda
+ * `;` deyim sonudur, yorum değil (temkinli seçim).
+ * BİLEREK: küçük harfli `// todo: …` artık yakalanmaz.
+ */
+export function isTodoCommentLine(line: string): boolean {
+  if (/^\s*[*;%]/.test(line) && new RegExp(TODO_MARKER_RE.source).test(line.replace(/^\s*[*;%]+/, ""))) return true;
+  for (const m of line.matchAll(TODO_MARKER_RE)) {
+    const prefix = line.slice(0, m.index);
+    // `#` ve `--` yalnız satır başında ya da boşluktan sonra (`this.#alan`, `"#fff"`, `i--` yorum değil); `//` önünde `:`
+    // olmamalı (`http://…` adres) — inceleme bulgusu, temkinli seçim.
+    if (/(^|[^:])\/\/|\/\*|<!--|(^|\s)#|(^|\s)--/.test(prefix)) return true;
+    if (/[;%]\s*$/.test(prefix)) return true;
+  }
+  return false;
+}
 
 /**
  * Production code'da mock/stub/dummy/fake kelimesi. Test fixtures legit
@@ -118,15 +143,13 @@ export function scanTechDebt(
     const line = lines[i];
     const ln = i + 1;
 
-    for (const p of TODO_PATTERNS) {
-      if (p.re.test(line)) {
-        findings.push({
-          category: "todo_comment",
-          line: ln,
-          excerpt: line.trim().slice(0, 100),
-          reason: p.reason,
-        });
-      }
+    if (isTodoCommentLine(line)) {
+      findings.push({
+        category: "todo_comment",
+        line: ln,
+        excerpt: line.trim().slice(0, 100),
+        reason: TODO_REASON,
+      });
     }
     for (const p of MOCK_PATTERNS) {
       if (p.re.test(line)) {
@@ -183,8 +206,8 @@ export function scanTechDebt(
 
 /**
  * FIX D: son (kabul-edilebilir) tech-debt bulguları — projeRoot → dosya bazlı mevcut bulgular. `tdd-tech-debt-detected`
- * audit event'i excerpt taşımadığından (yalnız path:line kategori — reason), KALICI kabul yazarken snippet'e
- * buradan erişilir. scanAndAuditTechDebt her Write/Edit'te ilgili dosyanın bulgularını GÜNCELLER (per-path replace).
+ * audit event'i kısaltılmış satır metni taşıdığından KALICI kabul yazarken tam snippet'e buradan erişilir. Faz 8 kapısı
+ * her değerlendirmede depoyu sıfırlayıp kendi taramasıyla doldurur (2026-11-28; tek kaynak kapı anındaki tarama).
  * Bellek-içi (döngü tek-oturum) — kalıcılık `.mycl/accepted-findings.jsonl`'de.
  */
 const _lastTechDebtFindings = new Map<string, { file: string; category: string; excerpt: string }[]>();

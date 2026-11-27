@@ -14,7 +14,7 @@
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { hasSourceExt } from "./fix/evidence.js";
 import { getChangedFiles, isGitRepo } from "./git.js";
 import { log } from "./logger.js";
@@ -73,6 +73,93 @@ export function scanFiles(
 }
 
 /**
+ * Faz 8 kalıcı kabul kümesi (`.mycl/accepted-findings.jsonl`, scope tech-debt) → anahtar kümesi. Faz 8 kapısı ve Faz 9
+ * toplayıcısı AYNI kümeyi kullanır. Okuma hatası → boş küme (fail-open: normal tara) ama görünür uyarı.
+ */
+export async function readAcceptedTechDebtKeys(root: string, scope: string): Promise<Set<string>> {
+  const accepted = await readAcceptedFindings(root).catch((e) => {
+    log.warn(scope, "accepted-findings okunamadı (normal taramaya devam)", String(e));
+    return [];
+  });
+  return new Set(
+    accepted
+      .filter((a) => a.scope === "tech-debt")
+      .map((a) => acceptedFindingKey(a.file, a.category, a.snippet)),
+  );
+}
+
+/** Faz 8 kapı taramasında tek bulgu (kapı iletisi + denetim kaydı için). `line` 0 = dosya okunamadı. */
+export interface GateDebtFinding {
+  /** Denetim ve kapı için verilen yol (kayıttaki biçimiyle; çoğunlukla mutlak). */
+  path: string;
+  line: number;
+  category: string;
+  excerpt: string;
+}
+
+export interface GateTechDebtScan {
+  /** Borcu olan (ya da okunamayan) dosyalar — kapı sayısı bunun uzunluğu. */
+  debtPaths: string[];
+  /** Temiz taranan dosyalar. */
+  cleanPaths: string[];
+  findings: GateDebtFinding[];
+  /** Kalıcı kabul deposuna gidecek bulgular (proje köküne göreli yol; yalnız okunabilen dosyalar). */
+  store: { rel: string; findings: TechDebtFinding[] }[];
+}
+
+/**
+ * Faz 8 kapısının teknik borç taraması (2026-11-28, koşu 31): kapı ANINDA dosyaların o anki içeriği taranır.
+ * Eskiden her Write/Edit anında taranıyordu; CLI kipinde gözlemci araç henüz koşmadan çağrıldığı için `Edit`te
+ * DÜZENLEMEDEN ÖNCEKİ içerik taranıyor, `Bash` ya da geri almayla değişen dosya hiç yeniden taranmıyordu.
+ * Kapsam çağıranda: bu yinelemede Faz 8'de yazılan/düzenlenen üretim dosyaları (Faz 9'un git farkı kapsamı DEĞİL).
+ * Silinmiş dosya (ENOENT) atlanır; başka okuma hatası borç sayılır (kuşkuda dahil et). `read` test için enjekte edilir.
+ */
+export async function scanGateTechDebt(
+  root: string,
+  paths: string[],
+  acceptedKeys: ReadonlySet<string>,
+  read: (abs: string) => Promise<string> = (abs) => readFile(abs, "utf-8"),
+): Promise<GateTechDebtScan> {
+  const out: GateTechDebtScan = { debtPaths: [], cleanPaths: [], findings: [], store: [] };
+  const seen = new Set<string>();
+  for (const p of paths) {
+    const abs = isAbsolute(p) ? p : join(root, p);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    // Kabul anahtarı GÖRELİ yol kullanır (Faz 9 getChangedFiles göreli döndürür) — eskisiyle aynı.
+    const rel = relative(root, abs);
+    let content: string;
+    try {
+      content = await read(abs);
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code === "ENOENT") {
+        log.info("phase-8", "deleted file skipped from tech debt", { path: p });
+        continue;
+      }
+      log.warn("phase-8", "dosya okunamadı — tech-debt'te TUTULDU (kuşkuda dahil et)", { path: p, code });
+      out.debtPaths.push(p);
+      out.findings.push({ path: p, line: 0, category: "unreadable", excerpt: `dosya okunamadı (${code ?? String(e).slice(0, 60)})` });
+      continue;
+    }
+    const findings = scanTechDebt(content, rel, acceptedKeys);
+    out.store.push({ rel, findings });
+    if (findings.length === 0) {
+      out.cleanPaths.push(p);
+      continue;
+    }
+    out.debtPaths.push(p);
+    for (const f of findings) out.findings.push({ path: p, line: f.line, category: f.category, excerpt: f.excerpt });
+  }
+  return out;
+}
+
+/** SAF: kapı iletisi ve denetim için bulgu satırı: `yol:satır [kural] `metin``. */
+export function formatGateDebtFinding(f: GateDebtFinding): string {
+  return f.line > 0 ? `${f.path}:${f.line} [${f.category}] \`${f.excerpt}\`` : `${f.path} [${f.category}] ${f.excerpt}`;
+}
+
+/**
  * İmpure: bu iterasyonda değişen üretim dosyalarını bul (getChangedFiles), oku,
  * tara. Test/spec + kaynak-dışı + node_modules + silinmiş dosyalar elenir.
  */
@@ -114,15 +201,7 @@ export async function collectIterationTechDebt(state: State): Promise<IterationT
     }
   }
   // FIX D (mahkeme): Faz 8 ile aynı kabul kümesini kullan (okuma hatası → boş küme, normal tara — fail-open).
-  const accepted = await readAcceptedFindings(root).catch((e) => {
-    log.warn("phase-9-tech-debt", "accepted-findings okunamadı (normal taramaya devam)", String(e));
-    return [];
-  });
-  const acceptedKeys = new Set(
-    accepted
-      .filter((a) => a.scope === "tech-debt")
-      .map((a) => acceptedFindingKey(a.file, a.category, a.snippet)),
-  );
+  const acceptedKeys = await readAcceptedTechDebtKeys(root, "phase-9-tech-debt");
   const { files, totalFindings } = scanFiles(entries, acceptedKeys);
   return {
     files,

@@ -1,3 +1,44 @@
+## 2026-11-28
+
+- **fix(Faz 8 teknik borç): kapı kararını kapı anında, dosyaların o anki içeriğiyle versin; `todo_comment` yalnız gerçek
+  yorum işaretini yakalasın. + fix(kod haritası): değeri geçmeyen bağlama senaryoyu düşürmesin.** Ekransız deneme koşusu
+  31 (`yapilacaklar-sunucu-28`, `e7092ed`): yapılacaklar uygulamasında `… ?? "todo.sqlite3";` ve
+  `` `todo server listening …` `` satırları `todo_comment` sayıldı. Ajan iki satırı tek `Edit` ile değiştirdi; aynı saniyede
+  tarama yine "satır 5 ve 11" yazdı, çünkü CLI kipinde gözlemci araç henüz koşmadan çağrılıyor ve `Edit`te diski
+  düzenlemeden ÖNCE okuyordu. Kapı dosya temizken 13 kez düştü (yaklaşık 11 dakika); döngü kırıcının kalıcı kabulü de kapıya
+  yansımadı, çünkü kapı dosyaya değil denetim kaydındaki son tarama olayına bakıyordu.
+  1. **Kapı anı taraması (`scanGateTechDebt`, `phase-9-tech-debt.ts`):** kapsam AYNI: bu yinelemede Faz 8'de yazılan
+     (`tdd-prod-write`) ya da düzenlenen (`code-edit`, üretim yolu) dosyalar. Silinmiş dosya atlanır, okunamayan dosya borç
+     sayılır (`unreadable`). Kalıcı kabul anahtarları uygulanır; kalıcı kabul deposu (`getLastTechDebtFindings`) her kapı
+     değerlendirmesinde sıfırlanıp bu taramayla dolar. Kabul kümesini okuma Faz 9 toplayıcısıyla ortak
+     (`readAcceptedTechDebtKeys`); Faz 9'un kapsamı ve akışı değişmedi.
+  2. **Yazma ve düzenleme anındaki tarama kaldırıldı** (`scanAndAuditTechDebt` silindi). `tdd-tech-debt-clean` ve
+     `tdd-tech-debt-detected` kayıtlarını artık yalnız kapı yazar; olay adları aynı (`layer-cost-report.ts`). Yazma anındaki
+     sohbet uyarısının yerine kapı anında tek uyarı çıkar.
+  3. **`todo_comment` (`isTodoCommentLine`):** işaret BÜYÜK harfle yazılmış olmalı ve aynı satırda önünde yorum başlatıcısı
+     bulunmalı: `//`, `/*`, `<!--`, `#`, `--` satırın herhangi bir yerinde; `*`, `;`, `%` satır başında. **Temkinli seçim:**
+     satır ortasındaki `;` ve `%` yalnız işaretten hemen önce gelirse sayılır (JS'te `a(); s = "TODO"` satırındaki `;` deyim
+     sonudur); `#` ve `--` yalnız satır başında ya da boşluktan sonra (`this.#alan`, `"#fff"`, `i--`), `//` önünde `:`
+     yokken (`http://…`). Bilerek bırakılan: küçük harfli `// todo: …` artık yakalanmaz. Faz 9 aynı tarayıcıyı kullandığı için o da
+     düzelir.
+  4. **Kapı iletisi ve denetim kaydı** her bulgu için `yol:satır [kural] `satır metni`` verir; iletide en çok üç bulgu,
+     gerisi "+N bulgu daha". Kapının dosya sayısı ve puan cezası (dosya başına 5) değişmedi.
+  5. **Kod haritası (`recordCodeMapAfterGate`):** değeri dosyalarda ve yollarda geçmeyen bağlama (ör. `route` =
+     "PATCH /api/tasks/:id") artık senaryoyu reddetmez; atılır, senaryo kalan bağlamalarla kaydedilir, atılan adlar iletide
+     yazılır (`dropped_bindings`). Koşu 31'de 6 senaryonun 5'i bu nedenle düşmüştü.
+  - Kapsam notu: Faz 8'de odaklı otomatik düzeltmenin (`gate-autofix.ts`) yazdığı `code-edit` kayıtları da artık kapı
+    taramasına girer (eskiden bu düzenlemeler taranmıyordu); ölçütteki "Faz 8'de düzenlenen" tanımına uyuyor.
+  - Faz 8 şablonu (`phase-08-tdd.md`) güncellendi: "her Write/Edit sonrası tarama" ve "kalan `tdd-tech-debt-detected`
+    olayı" anlatımı yerine taramanın kapı anında bir kez, dosyaların o anki içeriğiyle yapıldığı ve ajanın kendi dosyalarını
+    bitirmeden kontrol etmesi gerektiği yazıyor (inceleme bulgusu).
+  - Bilinen sınır (hipotez, koşturulmadı): kapı iletisi artık satır metnini taşıdığı için ajan borç satırını farklı
+    biçimde yeniden yazarsa döngü imzası (`failSignature`) değişebilir; imzaya bağlı erken sayaçlar daha geç tetiklenir.
+    Faz düzeyindeki döngü kırıcı imzadan bağımsız olduğu için döngü yine sınırlı.
+  - Değişmeyenler: öteki dört kural ve muafiyetleri, test yollarının taranmaması, borç varken kapının düşmesi.
+  - Yeni modül yok (kural 15); kapı taraması Faz 9'un teknik borç modülüne eklendi.
+  - Testler eklendi, koşturulmadı (yalnız derlendi): tarayıcıda ölçütteki yakalanmalı ve yakalanmamalı satırlar, kapı
+    taramasında silinmiş, okunamayan ve kabul edilmiş dosya, kapı iletisi biçimi, kod haritasında atılan bağlama.
+
 ## 2026-11-27
 
 - **fix(korumalı soru): kullanıcının serbest metniyle cevaplanmasın; Faz 6'da "tamam" arayüz onayı sayılsın. + fix(kod
