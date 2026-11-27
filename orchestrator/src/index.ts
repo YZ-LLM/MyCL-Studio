@@ -108,6 +108,7 @@ import {
   decideUserAbortOnFail,
   userAbortOutlivedPhase,
   fixRouteKind,
+  queuedBehindParkedMessage,
   decideIterationStart,
   resumeEntryPoint,
   resumeWasStale,
@@ -4565,12 +4566,26 @@ async function executeAgentDecision(
           // FROZEN-GOAL #11: ensureDevServerForReview dönüşü yok sayılıyordu → dev-server başlamasa bile
           // "UI'yi onayla" deniyordu (çalışmayan uygulamayı incele). ok'a göre mesajı ayır.
           const dev = await ensureDevServerForReview(runtime.state, runtime.config);
-          emitChatMessage(
-            "system",
-            dev.ok
-              ? "👀 Bildirdiklerin kuyruğa eklendi. Bu işin UI'sini onaylıyor musun → `tamam` (Faz 7'e geçeriz) · düzeltme istersen yaz · `iptal` ile durdur."
-              : "⚠️ Bildirdiklerin kuyruğa eklendi AMA dev-server otomatik başlatılamadı — UI'yi inceleyemezsin. `▶ Çalıştır` ile başlat, sonra `tamam`/`iptal` yaz (ya da düzeltme iste).",
-          );
+          if (dev.ok) {
+            emitChatMessage(
+              "system",
+              "👀 Bildirdiklerin kuyruğa eklendi. Bu işin UI'sini onaylıyor musun → `tamam` (Faz 7'e geçeriz) · düzeltme istersen yaz · `iptal` ile durdur.",
+            );
+          } else {
+            // 2026-11-28 (koşu 34/35, inceleme): uygulama açılamıyorsa açılmamış arayüze onay İSTENMEZ — Faz 6'nın
+            // kendisiyle aynı kural: park kalkar, bu Faz 5'in kırmızısıdır ve neden Faz 5'in düşüş yoluna gider.
+            runtime.state = { ...runtime.state, pending_ui_review: undefined, current_phase: 5 as PhaseId, updated_at: Date.now() };
+            await saveState(runtime.state);
+            emitChatMessage(
+              "system",
+              "⚠️ Bildirdiklerin kuyruğa eklendi AMA uygulama açılamadı — açılmamış arayüze onay istemiyorum. Faz 5'in düşüşü " +
+                "olarak ele alıyorum; uygulama açılınca Faz 6 incelemesini soracağım.",
+            );
+            await failPhase(5, {
+              lastFailReason:
+                dev.failReason ?? `dev server could not be started for the UI review${dev.firstError ? `: ${dev.firstError}` : ""}`,
+            });
+          }
         }
         return;
       }
@@ -5799,10 +5814,9 @@ async function driveWorkQueue(rawText: string): Promise<void> {
   // currentTaskId'yi ezmek parkta bekleyen işi sessizce orphan ederdi. O iş bitince
   // reconcileAndDrainTasks bu yeni işleri öncelik sırasıyla çeker.
   if (runtime.currentTaskId) {
-    emitChatMessage(
-      "system",
-      `📥 ${enqueued.length} iş kuyruğa eklendi (öncelikle) — çalışan iş bitince sırayla, her biri Faz 1'den işlenecek.`,
-    );
+    // 2026-11-28 (koşu 35): çalışan iş kullanıcının cevabını bekliyorsa ileti bunu ve hangi cevabın akışı sürdüreceğini söyler.
+    const waiting = runtime.state.pending_ui_review ? "ui-review" : getActiveAskq() !== null ? "question" : null;
+    emitChatMessage("system", queuedBehindParkedMessage(enqueued.length, waiting));
     return;
   }
   if (enqueued.length > 1) {
@@ -7597,7 +7611,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // set+persist edilmiştir + outer loop STOP. User'ın bir sonraki composer
       // mesajı router'da Phase 6 context'inde işlenir (approve_ui/revise_ui/cancel).
       const p6 = new Phase6Controller({ state, config: cfg, spec });
-      let r: "deferred";
+      let r: "deferred" | "app-not-open";
       try {
         r = await runController(p6, () => p6.run(), "UI inceleniyor");
       } catch (e) {
@@ -7610,6 +7624,18 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         return;
       }
       log.info("orchestrator", "phase 6 end", { result: r });
+      if (r === "app-not-open") {
+        // 2026-11-28 (koşu 34/35): uygulama açılmadı → Faz 5'in kırmızısı. Park YOK (`pending_ui_review` kurulmaz),
+        // "hiçbir şey sorma" kipinde otomatik onay YOK. Faz 5'in düşüş yolu (kanıt taşıyan faz): gerçek neden düzeltme
+        // yoluna gider, düzeltme Faz 5'i (rötuş kipi) yeniden koşar ve uygulama açılınca Faz 6 sorulur; çözülemezse
+        // iş kuyruğa yazılır ve akış durur. Ortam kaynaklıysa failPhase'in ortam denetimi durdurur (kod düzeltmesi yok).
+        state = { ...state, ...p6.statePatch, current_phase: 5 as PhaseId, updated_at: Date.now() };
+        runtime.state = state;
+        await saveState(state);
+        emitChatMessage("system", "↩️ Faz 5'in düşüşü olarak ele alıyorum; uygulama açılınca Faz 6 incelemesini soracağım.");
+        await failPhase(5, { lastFailReason: p6.lastFailReason });
+        return;
+      }
       // Phase 6 dev server'ı (boot-resume'da Faz 5 spawn atlandığı için ölü
       // olabilir) yeniden başlatmış olabilir → güncel dev_server_pid'i persist
       // et. Deferred yol normalde state kaydetmez; statePatch boşsa no-op.

@@ -110,7 +110,7 @@ export class Phase6Controller {
     void deps.spec;
   }
 
-  async run(): Promise<"deferred"> {
+  async run(): Promise<"deferred" | "app-not-open"> {
     log.info("phase-6", "deferred start");
 
     // Dev server gerçekten ayakta mı? UI incelemesi "uygulama tarayıcıda açık"
@@ -125,21 +125,26 @@ export class Phase6Controller {
       // bu statePatch'i uygular (yeniden açılışta zombi/yanlış pid olmasın).
       this.statePatch = { dev_server_pid: this.state.dev_server_pid };
     } else if (!dev.ok) {
-      // Yeniden başlatılamadı — "tarayıcıda açıldı" İDDİA ETME (dürüst). Tanıyı
-      // ensureDevServerForReview zaten yazdı; kullanıcıya net sonraki adım ver.
+      // 2026-11-28 (ekransız deneme koşuları 34 ve 35): uygulama açılamayınca Faz 6 incelemeye park ediyordu; kurulum
+      // çıktısı hiçbir düzeltme yoluna gitmiyor, kullanıcının "açılmıyor, düzelt" isteği parkın arkasında kuyrukta
+      // kalıyordu ("hiçbir şey sorma" kipinde ise açılmamış uygulama otomatik onaylanıyordu). "Uygulamanın açılması"
+      // Faz 5'in kapısıdır → bu durum Faz 5'in KIRMIZISIDIR: park YOK, onay YOK; çağıran nedeni Faz 5'in düşüş yoluna
+      // verir (`failPhase(5)`; ortam kaynaklıysa o yolun ortam denetimi durdurur, kod düzeltmesine göndermez).
+      this.lastFailReason =
+        dev.failReason ?? `dev server could not be started for the UI review${dev.firstError ? `: ${dev.firstError}` : ""}`;
       emitChatMessage(
         "system",
-        "⚠ **Faz 6: UI İncelemesi** — Dev server otomatik başlatılamadı (yukarıdaki tanıya bak). `▶ Çalıştır` ile başlat, uygulamayı tarayıcıda inceledikten sonra composer'a `tamam` (Faz 7) veya değişiklik isteğini yaz; `iptal` ile durdurabilirsin.",
+        "⚠ **Faz 6: UI İncelemesi** — uygulama açılamadı (yukarıdaki tanıya bak). Açılmayan arayüzü incelemeye sunmuyorum: " +
+          "bu, Faz 5'in kapısının (uygulamanın açılması) kırmızısı.",
       );
       await appendAudit(this.state.project_root, {
         ts: Date.now(),
         phase: 6,
-        event: "phase-6-deferred",
+        event: "phase-6-app-not-open",
         caller: "mycl-orchestrator",
-        // Kısa neden (deneme koşusu 11: ayrıntı sabitti, neden kayıtta yoktu). Ayrıntı bu sözcükle başlar.
         detail: `dev_server_restart_failed${dev.firstError ? ` | ${dev.firstError.slice(0, 200)}` : ""}`,
       });
-      return "deferred";
+      return "app-not-open";
     }
 
     // ♿ Erişilebilirlik (WCAG) SALT-RAPOR — dev-server ayakta, tam da kullanıcının UI'yi incelediği an.

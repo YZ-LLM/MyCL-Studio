@@ -3,8 +3,8 @@
 // düşüş nedeni kurulum komutu + çıktının son satırlarıdır. Faz 5 düşüşünün düzeltmesi Faz 5'i yeniden koşar.
 
 import { describe, expect, it } from "vitest";
-import { installFailureReason, installOutputTail } from "../src/service-provision.js";
-import { fixRouteKind } from "../src/resume-decision.js";
+import { installFailureReason, installOutputTail, salientInstallError } from "../src/service-provision.js";
+import { fixRouteKind, queuedBehindParkedMessage } from "../src/resume-decision.js";
 
 describe("kurulum düşüşü — neden kurulum çıktısının son satırları", () => {
   it("son satırlar boşluklar atılarak alınır; çakışan paket adları kalır", () => {
@@ -39,5 +39,37 @@ describe("Faz 5 düşüşünün düzeltme yolu Faz 5'i yeniden koşar", () => {
     expect(fixRouteKind("full-stack", 5)).toBe("full-stack");
     expect(fixRouteKind("backend-only", 8)).toBe("backend-only");
     expect(fixRouteKind("backend-only", undefined)).toBe("backend-only");
+  });
+});
+
+// 2026-11-28 (koşu 34/35): Faz 6'nın kısa nedeni npm'in son satırıydı (günlük dosyasının yolu).
+describe("kurulum düşüşünün kısa nedeni anlamlı satırdır", () => {
+  it("son satır günlük yolu olsa da ERESOLVE nedeni seçilir", () => {
+    const tail = installOutputTail(
+      [
+        "npm error code ERESOLVE",
+        "npm error ERESOLVE unable to resolve dependency tree",
+        'npm error peer eslint@"^8.0.0-0" from eslint-plugin-react-hooks@4.6.2',
+        "npm error A complete log of this run can be found in: /tmp/x/_logs/debug-0.log",
+      ].join("\n"),
+    );
+    const s = salientInstallError(tail);
+    expect(s).toContain("ERESOLVE");
+    expect(s).not.toContain("complete log");
+  });
+});
+
+describe("parkta bekleyen işin arkasına eklenen istek için ileti", () => {
+  it("arayüz onayı bekleniyorsa ne yazılacağını söyler", () => {
+    const m = queuedBehindParkedMessage(1, "ui-review");
+    expect(m).toContain("onayını bekliyor");
+    expect(m).toContain("`tamam`");
+    expect(m).toContain("`iptal`");
+  });
+  it("açık soru bekleniyorsa seçeneği söyler; bekleyen yoksa eski ileti", () => {
+    expect(queuedBehindParkedMessage(2, "question")).toContain("seçeneklerden birini");
+    expect(queuedBehindParkedMessage(1, null)).toBe(
+      "📥 1 iş kuyruğa eklendi (öncelikle) — çalışan iş bitince sırayla, her biri Faz 1'den işlenecek.",
+    );
   });
 });

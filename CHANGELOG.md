@@ -1,5 +1,44 @@
 ## 2026-11-28
 
+- **fix(Faz 6): uygulama açılamazsa incelemeye park etmesin; Faz 5'in düşüşü olarak düzeltilsin. + fix(kuyruk iletisi):
+  bekleyen cevabı söylesin.** Ekransız deneme koşuları 34 ve 35 (`alisveris-sunucu-33`, `cd41ca6`): sürdürmede
+  `npm install` ERESOLVE ile düştü. Faz 6 "Dev server otomatik başlatılamadı … `tamam` (Faz 7)" deyip park etti
+  (`phase-6-deferred: dev_server_restart_failed | npm install: npm error A complete log …`); üç sürdürmede üçünde aynı.
+  Kullanıcının "Uygulama açılmıyor … Düzelt." isteği "çalışan iş bitince" diye kuyruğa eklendi ve başka hiçbir şey
+  olmadı: çalışan iş, kullanıcının hiç görmediği arayüze onay bekliyordu.
+  1. **Faz 6 açılamama = Faz 5'in kırmızısı:**
+     - `Phase6Controller.run` artık `"app-not-open"` dönebiliyor; nedeni `lastFailReason`'da (denetim:
+       `phase-6-app-not-open`).
+     - Akış park ETMEZ (`pending_ui_review` kurulmaz). "Hiçbir şey sorma" kipinde de otomatik onaylamaz.
+       `current_phase` 5'e çekilir ve `failPhase(5)` çağrılır.
+     - Gerçek neden düzeltme yoluna gider: kurulum düşüşünde kurulum komutu ve çıktının son satırları
+       (`installFailureReason`), başlatma düşüşünde başlatma çıktısı (`startFailureReason`, `smoke-test.ts`).
+     - Faz 5 kanıt taşıyan fazdır (prompt 23): düzeltme rötuş kipinde Faz 5'i yeniden koşar ve uygulama açılınca
+       Faz 6 sorulur. Çözülemezse iş kuyruğa yazılır ve akış durur.
+     - Ortam kaynaklı nedenler (port dolu, araç engelli, hesap hatası; `isEnvironmentError`) kod düzeltmesine gitmez:
+       `failPhase`'in ortam denetimi ortam rehberiyle durdurur. Bu, eskiden Faz 6'da park olan ortam durumunun da yeni
+       yoludur.
+     - Faz 6 parktayken gelen belirsiz bir mesajın yeniden sorma yolu (inceleme bulgusu): uygulama açılamazsa artık
+       "`tamam` yaz" demez; park kalkar ve aynı şekilde `failPhase(5)`'e gidilir.
+     - Tek faz çalıştırma yolunda (`runPhaseOnce`) açılamama artık otomatik onaylanmaz ve park etmez; "başarısız"
+       yazılır. Bu yol (kenar çubuğundan tek faz) düzeltme akışı başlatmaz: tek fazın sonucunu bildirir.
+  2. **Kuyruk iletisi (`queuedBehindParkedMessage`, `resume-decision.ts`):** çalışan iş Faz 6 onayını bekliyorsa
+     "uygulamayı inceleyip `tamam` yazarsan akış sürer …" der; açık bir soru bekliyorsa "sorudaki seçeneklerden birini
+     seç" der. Kuyruk sırası değişmedi.
+  3. **Kısa neden:** Faz 6'nın `firstError`'ı kurulum çıktısının son satırı yerine `salientInstallError` ile seçiliyor.
+     npm'de son satır günlük dosyasının yoluydu.
+  - Değişmeyenler: uygulama açıldığında Faz 6 her zaman sorar (kural 9); "hiçbir şey sorma" kipindeki otomatik geçiş;
+    rötuş isteği (`revise_ui`) ve iptal akışı.
+  - Döngü sınırı (kod yolundan): Faz 5 yeşil → Faz 6 açamıyor → `failPhase(5)` döngüsünde Faz 5 her geçişte faz
+    düzeyindeki sayacı sıfırlar; döngüyü aynı hata imzasına bağlı sayaç (`AUTO_SOLVE_MAX`) sınırlar. Neden metinlerinin
+    ilk 160 karakteri sabit olduğu için imza kararlıdır.
+  - İleti kapsamı: yalnız Faz 6 onayı ve açık soru için özel ileti var; başka park türlerinde eski ileti kalır.
+  - Bilinen sınır (kod yolundan): `HARD_ENV_RE` "command not found" satırını ortam sayar. Bağımlılık dizini dolu ama
+    eksikse ve başlatma bu satırla düşerse kod düzeltmesine değil ortam durdurmasına gidilir (önceden de böyleydi).
+  - Yeni modül yok (kural 15).
+  - Testler eklendi (`install-failure.test.ts`), koşturulmadı (yalnız derlendi). Akışın kendisi (`index.ts`) birim
+    testinde koşturulamaz.
+
 - **fix(Faz 5): kırmızıyken "kabul edip" Faz 6'ya geçilmesin; bağımlılık kurulumu düşünce uygulama başlatılmasın.**
   Ekransız deneme koşusu 33 (yeni proje `alisveris-sunucu-33`, `4e53226`): Faz 5 CSP ihlaliyle düştü (`ErrorBoundary.jsx`
   inline stil), ileti "Faz 5 yeniden çalışacak" dedi. Mahkeme "escalate" verdi; otomatik kipte `mahkeme-escalate-accept-

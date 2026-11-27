@@ -14,7 +14,12 @@ import {
   openBrowser,
   stopActiveDevServer,
 } from "./dev-server-launcher.js";
-import { launchWithProvision, projectDepsMissing } from "./service-provision.js";
+import {
+  installFailureReason,
+  launchWithProvision,
+  projectDepsMissing,
+  salientInstallError,
+} from "./service-provision.js";
 import {
   detectStack,
   expectedPortsFor,
@@ -34,6 +39,20 @@ export interface RestartResult {
   reason?: string;
   /** Başarısızsa sürecin bildirdiği ilk hata satırı (yakalanan çıktıdan; yoksa undefined). */
   firstError?: string;
+  /**
+   * Başarısızsa düzeltme yoluna giden asıl neden (2026-11-28, koşu 34/35): kurulum komutu + çıktının son satırları,
+   * ya da başlatma çıktısı. Faz 6 bunu Faz 5'in düşüşü olarak `failPhase(5)`'e verir.
+   */
+  failReason?: string;
+}
+
+/** SAF: başlatma düşüşünün düzeltme yoluna giden metni (çıktının başı + sonu). */
+export function startFailureReason(output: string): string {
+  const shown = output.length > 1500 ? `${output.slice(0, 700)}\n…\n${output.slice(-800)}` : output;
+  return (
+    "dev server could not be started for the UI review (the app did not open)" +
+    (shown.trim() ? `\n\nSpawn output (the actual error — diagnose THIS, not generic causes):\n${shown}` : "")
+  );
 }
 
 /**
@@ -48,12 +67,18 @@ export async function ensureDevServerForReview(
   config: MyclConfig,
   /** `openBrowser: false` → sunucu ayağa kalkar ama tarayıcı açılmaz (E2E gibi insan-dışı tüketiciler). */
   opts: { openBrowser?: boolean } = {},
-): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number; firstError?: string }> {
+): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number; firstError?: string; failReason?: string }> {
   const alive =
     state.dev_server_pid !== undefined && isProcessAliveSync(state.dev_server_pid);
   if (alive) return { ok: true, alreadyAlive: true, port: await deriveDevPort(state) };
   const restart = await restartDevServerSimple(state, config, opts);
-  return { ok: restart.ok, alreadyAlive: false, port: restart.port, firstError: restart.firstError };
+  return {
+    ok: restart.ok,
+    alreadyAlive: false,
+    port: restart.port,
+    firstError: restart.firstError,
+    failReason: restart.failReason,
+  };
 }
 
 /**
@@ -105,7 +130,11 @@ export async function restartDevServerSimple(
       "system",
       "⚠ Dev server yeniden başlatılamadı — komut türetilemedi. Terminalde `npm run dev` çalıştır.",
     );
-    return { ok: false, reason: "no command" };
+    return {
+      ok: false,
+      reason: "no command",
+      failReason: `dev server command not derivable (stack=${stack}) — check the project's run scripts`,
+    };
   }
   const candidates = cmds.map((cmd) => ({
     cmd,
@@ -128,7 +157,6 @@ export async function restartDevServerSimple(
   if (installFailed) {
     // 2026-11-28 (koşu 33): kurulum düştü → uygulama başlatılmadı (yardımcı çıktıyı sohbete yazdı). Tanı, başlatma
     // hatası değil kurulum düşüşüdür; "command not found" satırları asıl neden değildi.
-    const last = installFailed.outputTail.split("\n").filter((l) => l.trim()).slice(-1)[0];
     emitChatMessage(
       "error",
       `❌ Dev server başlatılmadı: bağımlılık kurulumu (\`${installFailed.cmd}\`) başarısız. Asıl neden kurulum çıktısında (yukarıda).`,
@@ -136,7 +164,9 @@ export async function restartDevServerSimple(
     return {
       ok: false,
       reason: `dependency install failed: ${installFailed.cmd}`,
-      firstError: last ? `${installFailed.cmd}: ${last}` : `${installFailed.cmd} başarısız`,
+      // 2026-11-28 (koşu 34/35): son satır npm'de günlük dosyasının yoluydu, neden değil → anlamlı satır.
+      firstError: `${installFailed.cmd}: ${salientInstallError(installFailed.outputTail)}`,
+      failReason: installFailureReason(installFailed),
     };
   }
   if (result.ok && result.handle) {
@@ -180,5 +210,10 @@ export async function restartDevServerSimple(
     "error",
     `${diag}\n\nNot: Fix'ler uygulandı. Sadece dev server otomatik başlamadı.`,
   );
-  return { ok: false, reason: diag, firstError: output ? extractErrorLines(output, 1)[0] : undefined };
+  return {
+    ok: false,
+    reason: diag,
+    firstError: output ? extractErrorLines(output, 1)[0] : undefined,
+    failReason: startFailureReason(output),
+  };
 }

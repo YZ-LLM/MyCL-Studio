@@ -165,3 +165,23 @@ export function fixRouteKind<K extends string>(planned: K, fromFailedPhase: numb
   if (fromFailedPhase === 5 && planned === "backend-only") return "ui-only";
   return planned;
 }
+
+/**
+ * SAF (2026-11-28, ekransız deneme koşusu 35): yeni istek, parkta bekleyen işin arkasında kuyruğa eklendiğinde ileti.
+ * KANIT: kullanıcı "Uygulama açılmıyor … Düzelt." yazdı; ileti yalnız "çalışan iş bitince" dedi. Çalışan iş kullanıcının
+ * arayüz onayını bekliyordu; kullanıcı ne yapacağını bilmedi ve hiçbir şey olmadı. İleti neyin beklendiğini ve akışı
+ * hangi cevabın sürdüreceğini söyler. Kuyruk sırası değişmez.
+ */
+export function queuedBehindParkedMessage(count: number, waiting: "ui-review" | "question" | null): string {
+  const head = `📥 ${count} iş kuyruğa eklendi (öncelikle) — çalışan iş bitince sırayla, her biri Faz 1'den işlenecek.`;
+  if (waiting === "ui-review") {
+    return (
+      `${head} Çalışan iş Faz 6 arayüz incelemesinde **senin onayını bekliyor**: uygulamayı inceleyip \`tamam\` ` +
+      `yazarsan akış sürer ve sıra yeni işe gelir; değişiklik istiyorsan onu yaz, işi durdurmak için \`iptal\` yaz.`
+    );
+  }
+  if (waiting === "question") {
+    return `${head} Çalışan iş açık bir soruya **senin cevabını bekliyor**: sorudaki seçeneklerden birini seçersen akış sürer.`;
+  }
+  return head;
+}
