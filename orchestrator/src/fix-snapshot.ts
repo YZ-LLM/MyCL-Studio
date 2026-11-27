@@ -70,6 +70,26 @@ export async function pruneProjectBackups(
 }
 
 /**
+ * Kaynak ağacını `destDir`'e kopyalar; EXCLUDE_TOP'taki üst dizinler (node_modules, .git, dist, build,
+ * .mycl…) kopyalanmaz. `destDir` projenin DIŞINDA olmalı (`fs.cp` bir dizini kendi altına kopyalayamaz).
+ * `snapshotBeforeAutofix`'in kopya adımıdır; Faz 5 rötuşu da "koşu hiçbir kaynak dosyayı değiştirmedi"
+ * kanıtı için aynı kopyayı alıp `changedFilesVsSnapshot` ile karşılaştırır (tek dışlama listesi, tek
+ * karşılaştırma). Hata fırlatır — çağıran karar verir.
+ */
+export async function copySourceTree(projectRoot: string, destDir: string): Promise<void> {
+  await mkdir(destDir, { recursive: true });
+  await cp(projectRoot, destDir, {
+    recursive: true,
+    filter: (src: string) => {
+      const rel = src.slice(projectRoot.length).replace(/^[/\\]+/, "");
+      if (rel === "") return true;
+      const top = rel.split(/[/\\]/)[0];
+      return !EXCLUDE_TOP.has(top);
+    },
+  });
+}
+
+/**
  * Oto-düzeltme öncesi snapshot. Git temizse git-checkpoint (ref). Değilse kaynak kopyası (.mycl/backups).
  * İkisi de olmazsa görünür uyarı + {none} (düzeltme yine uygulanır ama geri-alma yok — dürüstçe söylenir).
  * `nowTs` dışarıdan verilir (test determinizmi; runtime Date.now()).
@@ -93,16 +113,7 @@ export async function snapshotBeforeAutofix(projectRoot: string, nowTs: number):
     const backupsRoot = join(globalConfigDir(), "backups");
     const projectName = basename(projectRoot);
     const dir = join(backupsRoot, `${projectName}-autofix-${nowTs}`);
-    await mkdir(dir, { recursive: true });
-    await cp(projectRoot, dir, {
-      recursive: true,
-      filter: (src: string) => {
-        const rel = src.slice(projectRoot.length).replace(/^[/\\]+/, "");
-        if (rel === "") return true;
-        const top = rel.split(/[/\\]/)[0];
-        return !EXCLUDE_TOP.has(top);
-      },
-    });
+    await copySourceTree(projectRoot, dir);
     emitChatMessage(
       "system",
       "📌 Snapshot alındı (`~/.mycl/backups`) — git yok ama kaynak yedeklendi; silinen/yanlış değişen dosya oradan geri alınır.",

@@ -1,5 +1,38 @@
 ## 2026-11-27
 
+- **fix(faz 5): "rötuş hiçbir şeyi değiştirmedi" hükmü komut ayrıştırarak değil dosya durumuyla verilsin.** Bir
+  önceki düzeltme (aşağıdaki girdi) sonuçsuz kullanıcı rötuşunu başarısız faz saymamak için dört koşul arıyordu;
+  üçüncüsü ajanın her araç çağrısının "kanıtlanabilir biçimde salt okunur" olmasıydı ve kabuk komutlarını ayrıştırarak
+  sınanıyordu. Ekransız deneme koşusu 10'da bu koşul hiç tutmadı: ajan her denemede `HOME=… git -c … status …`,
+  `find … | sort | head`, `npm run build` çalıştırıyordu; hiçbir dosya değişmediği hâlde hüküm eski yola düştü, mahkeme
+  (1 dk 53 sn) ve hata analizi (42 araç çağrısı) yine koştu. Artık ajanın ne çalıştırdığına bakılmıyor, dosyaların
+  değişip değişmediğine bakılıyor: kullanıcı kaynaklı rötuştan önce MyCL kendi sürecinde (ajanın kum havuzunda değil)
+  kaynak ağacının kopyasını alıyor; koşu yazma kanıtı bırakmadan biterse var olan içerik karşılaştırması
+  (`fix-snapshot.ts` `changedFilesVsSnapshot`) çalışıyor. Fark yoksa üçüncü koşul tutuyor. Kopya alınamadıysa ya da
+  karşılaştırma okunamadıysa kanıt yok sayılır ve eski yol sürer. Öteki üç koşul aynı: istek kullanıcının, engellenen
+  ya da hata veren yazma yok, koşu süre ya da tur tavanına takılmadı.
+  **Silinen:** komut ayrıştırıcı (`isProvablyReadOnlyShell`, `isProvablyReadOnlyToolUse` ve sayaçları); başka kullananı
+  yoktu. **Eklenen modül yok:** kopya adımı `snapshotBeforeAutofix`'in içinden `copySourceTree` olarak dışarı alındı
+  (davranışı aynı), karşılaştırma var olan işlev.
+  **Neyin fark sayıldığı (koddan okundu):** kopya ve karşılaştırma `node_modules`, `.git`, `dist`, `build`, `.next`,
+  `out`, `coverage`, `.mycl`, `error_folder`, `.turbo`, `.cache`, `.vite` üst dizinlerini atlar; `.gitignore`'a bakmaz.
+  Yani `npm run build` çıktısı fark sayılmaz, izlenmeyen bir kaynak dosyadaki değişiklik sayılır. Yalnız üst düzey
+  atlanır: alt klasördeki bir `dist/` (ör. `web/dist/`) ya da kökte yazılan bir önbellek dosyası fark sayılır ve hüküm
+  eski yola düşer (temkinli taraf). Git tabanlı işlevler bu iş için kullanılmadı: `createCheckpoint` yalnız temiz
+  çalışma ağacında çalışıyor, `getChangedFiles` yalnız yol döndürüyor (zaten değişmiş bir dosyanın yeniden değiştiğini
+  göremez) ve hata durumunda da boş liste veriyor.
+  **Değişmeyen (kural 14):** fark VARSA ama yazma aracı kanıtı yoksa (kabuk komutuyla yazılmış değişiklik) hüküm
+  eskisi gibi başarısız fazdır; değişen dosyalar artık ize yazılıyor. Düzeltme kaynaklı rötuşta (Faz 0 çözümü, Faz 9
+  riski) kopya alınmaz, akış aynı. Kopya geri alma noktası değildir: rollback kurmaz, sohbete yazmaz, koşu bitince
+  silinir, `-autofix-` yedeklerinin budamasına girmez; süreç rötuşun ortasında ölürse kalan kopya bir sonraki kullanıcı
+  rötuşunun başında silinir. Yeni bedel: her kullanıcı rötuşundan önce kaynak ağacı bir kez kopyalanır (büyük projede
+  koşuyu geciktirir; kopya alınamazsa koşu sürer, yalnız bu hüküm verilemez).
+  **Koddan okundu, gözlemlenmedi (dokunulmadı):** ajanın düz `git status` çağrısını her seferinde `HOME=<proje>` ile
+  yinelemesinin olası nedeni: kum havuzu ev dizinini kabuk okumasına kapatıyor ve açık bırakılan girdiler arasında
+  `.gitconfig` yok; bu makinede `~/.gitconfig` var. MyCL ajana git ile ilgili ortam değişkeni vermiyor. Ajanın gördüğü
+  hata metni yakalanmadığı için bu bir hipotezdir.
+  **Test ve kontrol koşturulmadı, yalnız derlendi.** Dosya durumu testleri gerçek geçici klasörlerde çalışır.
+
 - **fix(faz 5): hiçbir şey yazmadan biten kullanıcı rötuşu "başarısız faz" sayılmasın; Faz 6 beklemesine dönülsün.**
   Ekransız deneme koşusu 9'da kullanıcının Faz 6'da yazdığı cümle rötuş isteği sayıldı; ajan yalnız `git status`,
   `git log`, `find`, `cat` çağırdı, yazmayı hiç denemedi. Faz iki kez başarısız döndü; her seferinde mahkeme (yaklaşık

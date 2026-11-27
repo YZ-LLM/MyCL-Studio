@@ -7,8 +7,8 @@
 // yazıyordu (1-indexed pseudocode'tan kayma), şimdi 0-indexed pipeline ile
 // hizalı: Phase5Controller → Phase 5 = UI Build.
 
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, readdir, rm, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { appendAudit, readAuditLog, readAuditLogTail } from "./audit.js";
@@ -18,7 +18,7 @@ import { scanCspViolations, ensureCspMeta } from "./csp-compliance.js";
 import { runVisualDesignAgent } from "./visual-design-agent.js";
 import { runDesignFanout, negotiateConflicts } from "./design-fanout.js";
 import { designPanelDecision, designSynthesizedInCurrentIteration } from "./design-panel-gate.js";
-import { snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
+import { changedFilesVsSnapshot, copySourceTree, snapshotBeforeAutofix, disarmRollback } from "./fix-snapshot.js";
 import { escalatedModelEffort } from "./escalation.js";
 import type { ToolDef } from "./claude-api.js";
 import type { MyclConfig } from "./config.js";
@@ -45,7 +45,7 @@ import { log } from "./logger.js";
 import { substitute } from "./template-engine.js";
 import { TOOLS_CODEGEN, type ToolContext } from "./tool-handlers.js";
 import { translate } from "./translator.js";
-import { validateBashCommand } from "./orchestrator-agent/tools.js";
+import { globalConfigDir } from "./paths.js";
 import { safeEnv } from "./safe-env.js";
 import type { PhaseDeps } from "./phase-deps.js";
 import type { AuditEvent, PhaseSpec, State } from "./types.js";
@@ -100,50 +100,6 @@ export function uiTweakStaleOnEnter(state: Pick<State, "pending_ui_tweak">, ente
 const TOOL_DENIAL_EVENTS: ReadonlySet<string> = new Set(["overlay_gate_triggered", "tool-permission-denied"]);
 /** Dosya yazan araçlar: hata ile dönerse "yazmayı denedi, engellendi" sayılır. */
 const TWEAK_WRITE_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
-/** Hiçbir dosyayı değiştiremeyen araçlar. Listede OLMAYAN her araç "salt okunur olduğu kanıtlanamadı" sayılır. */
-const TWEAK_READ_ONLY_TOOLS: ReadonlySet<string> = new Set(["Read", "Grep", "Glob", "LS", "TodoWrite"]);
-/**
- * Tırnaklar ve ters bölü atıldıktan sonra komutun HİÇBİR yerinde geçmemesi gerekenler: satır sonu (ikinci
- * bir komut), dosyaya yazan `--output` (git diff/log/show) ve `find`'ı yazan ya da komut çalıştıran bir
- * araca çeviren eylemler. Tırnak atılır ki `'-delete'` gibi yazımlar da yakalansın.
- */
-const SHELL_HARD_REJECT = /[\n\r]|--output\b|-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b/;
-/** Çalışma ağacına ve `.git` içine yazmayan git alt komutları (`branch`, `remote`, `config` yazabilir). */
-const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set(["status", "log", "diff", "show"]);
-
-/**
- * SAF: bu kabuk komutu KANITLANABİLİR biçimde salt okunur mu?
- *
- * Tabanı karar ajanının var olan güvenli komut denetimidir (`validateBashCommand`: ilk sözcük
- * `ls pwd cat head tail wc find echo git`; yönlendirme, `;`, `$(`, ters tırnak, `rm/mv/cp/chmod/curl…`
- * reddedilir) ve boru / `&&` ile ayrılmış HER parçaya uygulanır. O denetim okuma yapan bir ajanı
- * sınırlamak için yazıldı, "dosyaya dokunulmadı" kanıtı için değil; bu yüzden burada daraltılır
- * (mahkeme bulguları, 2026-11-27): satır sonu, tek `&` (arka plan), `--output`, `find` eylemleri ve
- * `status|log|diff|show` dışındaki git alt komutları reddedilir. Yalnız iki zararsız hata akışı
- * yönlendirmesi (`2>/dev/null`, `2>&1`) önce silinir. Kuşkuda `false` (ör. `grep`, `cd`, `npm`, `sed`):
- * o koşu "salt okunur olduğu kanıtlanamadı" sayılır ve eski yol (faz başarısız) korunur.
- */
-export function isProvablyReadOnlyShell(command: string): boolean {
-  const cleaned = command
-    .replace(/\s2>\s*\/dev\/null(?=\s|$)/g, " ")
-    .replace(/\s2>&1(?=\s|$)/g, " ")
-    .trim();
-  if (cleaned === "" || SHELL_HARD_REJECT.test(cleaned.replace(/['"\\]/g, ""))) return false;
-  return cleaned.split(/\|\||&&|\|/).every((raw) => {
-    const part = raw.trim();
-    if (part.includes("&")) return false; // tek `&`: ardındaki komut denetimsiz koşardı
-    if (!validateBashCommand(part).ok) return false;
-    const [first, second] = part.split(/\s+/);
-    return first !== "git" || READ_ONLY_GIT_SUBCOMMANDS.has(second ?? "");
-  });
-}
-
-/** SAF: bu araç çağrısı hiçbir dosyayı değiştiremez mi? (rötuşta "yazma denemesi yok" hükmünün ölçütü) */
-export function isProvablyReadOnlyToolUse(toolUse: { name: string; input: Record<string, unknown> }): boolean {
-  if (TWEAK_READ_ONLY_TOOLS.has(toolUse.name)) return true;
-  if (toolUse.name !== "Bash") return false;
-  return typeof toolUse.input.command === "string" && isProvablyReadOnlyShell(toolUse.input.command);
-}
 
 /**
  * SAF: durumdaki rötuş isteğini Faz 6'da KULLANICI mı yazdı?
@@ -180,28 +136,39 @@ export function countDeniedToolCalls(
 /**
  * SAF: hiçbir yazma kanıtı (`ui-tweak-applied`) bırakmadan biten rötuşun hükmü.
  *
- * CANLI KANIT (ekransız deneme koşusu 9, 2026-11-27): kullanıcının Faz 6'da yazdığı cümle rötuş isteği
- * sayıldı; ajan yalnız `git status` / `git log` / `find` / `cat` çağırdı, yazmayı hiç denemedi. Faz iki
- * kez `fail` döndü; her seferinde mahkeme (yaklaşık 2 dk) ve hata analizi (her biri 16-17 araç çağrısı)
- * koştu. Ortada bir hata yoktu: istekten yapılacak bir değişiklik çıkmamıştı.
+ * CANLI KANIT (ekransız deneme koşuları 9 ve 10, 2026-11-27): kullanıcının Faz 6'da yazdığı cümle rötuş
+ * isteği sayıldı; ajan hiçbir dosyayı değiştirmedi. Faz her seferinde `fail` döndü, mahkeme (yaklaşık
+ * 2 dk) ve hata analizi (42 araç çağrısına kadar) koştu. Ortada bir hata yoktu: istekten yapılacak bir
+ * değişiklik çıkmamıştı.
  *
  * `no_change` (başarısızlık değil, sonuçsuz istek) için DÖRT koşulun hepsi gerekir:
  *   1. isteği kullanıcı yazdı (düzeltme isteğinde yazma yokluğu "düzeltme uygulanmadı" demektir);
  *   2. hata veren yazma aracı çağrısı ve engellenen hiçbir çağrı yok (denedi ama olmadıysa nedeni aranmalı);
- *   3. koşudaki HER araç çağrısı kanıtlanabilir biçimde salt okunur (kabuk komutuyla yapılan bir yazma
- *      `ui-tweak-applied` kanıtı bırakmaz; "dokunulmadı" demek için okumadan başka bir şey olmamalı);
+ *   3. KOŞU HİÇBİR KAYNAK DOSYAYI DEĞİŞTİRMEDİ: koşudan önce alınan kaynak kopyası ile koşudan sonraki
+ *      çalışma ağacı içerikçe aynı (`changedFiles` boş liste). `null` = karşılaştırma yapılamadı →
+ *      kanıt yok → `no_change` değil;
  *   4. koşu süre ya da tur tavanına takılmadı (asılı kalan ajan "değişiklik çıkmadı" demek değildir).
  * Biri bile tutmuyorsa hüküm `fail`: eski yol aynen (faz başarısız, mahkeme ve hata analizi).
+ *
+ * 3. koşul eskiden ajanın KOMUTLARINI ayrıştırıp "salt okunur" olduklarını kanıtlamaya çalışıyordu
+ * (e15911f). Koşu 10'da pratikte hiç tutmadı: ajan her denemede `HOME=… git status …` ya da
+ * `npm run build` çalıştırıyordu ve bunlar kanıtlanamıyordu. Artık ajanın NE çalıştırdığına bakılmaz,
+ * dosyaların değişip değişmediğine bakılır; derleme çıktısı (`dist/`, `build/`…) kaynak sayılmaz.
+ *
+ * Fark VARSA ama `ui-tweak-applied` yoksa (kabuk komutuyla yazılmış değişiklik): hüküm `fail`, bu
+ * değişmedi. Değişen dosyalar ize yazılır.
  */
 export function classifyEmptyTweak(input: {
   userRequested: boolean;
   blockedWriteAttempts: number;
-  unprovenToolCalls: number;
+  /** Koşunun değiştirdiği kaynak dosyalar; `null` = karşılaştırma yapılamadı. */
+  changedFiles: readonly string[] | null;
   capped: boolean;
 }): "no_change" | "fail" {
   return input.userRequested &&
     input.blockedWriteAttempts === 0 &&
-    input.unprovenToolCalls === 0 &&
+    input.changedFiles !== null &&
+    input.changedFiles.length === 0 &&
     !input.capped
     ? "no_change"
     : "fail";
@@ -211,8 +178,8 @@ export class Phase5Controller {
   public statePatch: Partial<State> = {};
   /** Rötuş kipinde HATA ile dönen yazma aracı çağrıları (API yolu; CLI yolu denetim kaydından okunur). */
   private tweakWriteErrors = 0;
-  /** Rötuş kipinde salt okunur olduğu kanıtlanamayan araç çağrıları (bkz. isProvablyReadOnlyToolUse). */
-  private tweakUnprovenCalls = 0;
+  /** Kullanıcı rötuşundan ÖNCE alınan kaynak kopyası (yoksa null); koşu bitince silinir. */
+  private tweakProbeDir: string | null = null;
 
   private base: CodegenBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
@@ -239,6 +206,51 @@ export class Phase5Controller {
   }
 
   async run(): Promise<"complete" | "fail" | "no_change"> {
+    try {
+      return await this.runInner();
+    } finally {
+      // Rötuş yoklama kopyası yalnız bu koşunun hükmü içindir; hangi yoldan çıkılırsa çıkılsın silinir.
+      const probe = this.tweakProbeDir;
+      this.tweakProbeDir = null;
+      if (probe) {
+        await rm(probe, { recursive: true, force: true }).catch((e: unknown) =>
+          log.warn("phase-5", "rötuş yoklama kopyası silinemedi (non-fatal)", { probe, error: String(e) }),
+        );
+      }
+    }
+  }
+
+  /**
+   * Kullanıcı rötuşundan önce kaynak ağacının kopyasını al (MyCL'in kendi sürecinde, ajanın kum havuzunda
+   * değil). Koşu yazma kanıtı bırakmadan biterse `changedFilesVsSnapshot` bu kopyayla karşılaştırır.
+   * Geri alma noktası DEĞİLDİR: rollback kurulmaz, sohbete yazılmaz, `-autofix-` yedeklerinin budamasına
+   * girmez (adı farklı). Alınamazsa `null` → hüküm kanıtsız kalır → eski yol.
+   */
+  private async takeTweakProbe(): Promise<string | null> {
+    const root = this.state.project_root;
+    const backupsRoot = join(globalConfigDir(), "backups");
+    const prefix = `${basename(root)}-tweak-probe-`;
+    // ARTIK KOPYA BIRAKMA: kopya normalde run()'ın finally'sinde silinir; süreç rötuşun ortasında ölürse
+    // (uygulama kapatıldı) kalır ve hiçbir budama onu tanımaz. Bir projede aynı anda tek rötuş koşar →
+    // yenisini almadan önce bu projenin eski yoklama kopyalarını sil (fail-soft).
+    const stale = await readdir(backupsRoot).catch(() => [] as string[]);
+    for (const name of stale) {
+      if (name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length))) {
+        await rm(join(backupsRoot, name), { recursive: true, force: true }).catch(() => {});
+      }
+    }
+    const dir = join(backupsRoot, `${prefix}${Date.now()}`);
+    try {
+      await copySourceTree(root, dir);
+      return dir;
+    } catch (e) {
+      log.warn("phase-5", "rötuş yoklama kopyası alınamadı — sonuçsuz istek hükmü verilemeyecek", { error: String(e) });
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      return null;
+    }
+  }
+
+  private async runInner(): Promise<"complete" | "fail" | "no_change"> {
     log.info("phase-5", "run start");
     const runStartedAt = Date.now(); // bu koşunun engel olaylarını öncekilerden ayırır
 
@@ -464,6 +476,16 @@ export class Phase5Controller {
     if (!isTweakMode) await snapshotBeforeAutofix(this.state.project_root, Date.now());
     // Tasarım paneli/müzakere bittiyse banner'ı codegen'e geri al (staleness yok — her adım kendi etiketi).
     emitPhaseRunning(isTweakMode ? "UI rötuşu yazılıyor" : "UI kodu yazılıyor");
+    // KULLANICI RÖTUŞU: koşu yazma kanıtı bırakmadan biterse "hiçbir kaynak dosya değişmedi" hükmü dosya
+    // durumundan verilir → koşudan ÖNCE kaynak kopyası al. Yalnız kullanıcı isteğinde (düzeltme kaynaklı
+    // rötuşta yazma yokluğu her durumda başarısızlıktır; kopya boşa alınmaz). Afişten SONRA alınır ki
+    // büyük projede kopya sürerken arayüz "rötuş yazılıyor" göstersin.
+    let userTweak = false;
+    if (isTweakMode && tweakDesc) {
+      const auditBefore = await readAuditLog(this.state.project_root).catch(() => []);
+      userTweak = isUserUiTweakRequest(auditBefore, tweakDesc);
+      if (userTweak) this.tweakProbeDir = await this.takeTweakProbe();
+    }
     this.base = createCodegenBackend({
       tag: "phase-5",
       phaseId: 5,
@@ -490,14 +512,10 @@ export class Phase5Controller {
         //   - tweak mode + Write/Edit → "ui-tweak-applied"
         // Post-run check normal mode'da ui-file-write event sayar; tweak
         // mode'da ayrı check yapılır (statePatch'te pending_ui_tweak temizlenir).
-        // Rötuşta "yazma denemesi yok" hükmü için iki sayaç (bkz. classifyEmptyTweak): yazma aracı hata
-        // verdiyse DENEDİ ama olmadı; çağrı kanıtlanabilir biçimde salt okunur değilse (ör. kabukta
-        // `sed -i`) dosyaya dokunmuş olabilir. İkincisi hata sonucundan BAĞIMSIZ sayılır: çıkış kodu
-        // sıfırdan farklı bir kabuk komutu da dosya değiştirmiş olabilir (`sed -i … && npm run build`).
-        // İkisi de mevcut kanıt yazımını değiştirmez.
-        if (isTweakMode) {
-          if (ctx.result.is_error && TWEAK_WRITE_TOOLS.has(ctx.tool_use.name)) this.tweakWriteErrors++;
-          if (!isProvablyReadOnlyToolUse(ctx.tool_use)) this.tweakUnprovenCalls++;
+        // Rötuşta yazma aracı hata verdiyse ajan DENEDİ ama olmadı → "sonuçsuz istek" sayılmasın
+        // (bkz. classifyEmptyTweak). Mevcut kanıt yazımını değiştirmez.
+        if (isTweakMode && ctx.result.is_error && TWEAK_WRITE_TOOLS.has(ctx.tool_use.name)) {
+          this.tweakWriteErrors++;
         }
         if (ctx.result.is_error) return;
         if (isTweakMode && (ctx.tool_use.name === "Edit" || ctx.tool_use.name === "Write")) {
@@ -583,17 +601,31 @@ export class Phase5Controller {
         // gözlemciye hiç ulaşmaz, arka uç her engeli denetim kaydına yazar (bu koşunun başından beri
         // düşenler sayılır). Kapı kancası kapalıyken CLI her yazma çağrısını başarılı bildirir; o durumda
         // `ui-tweak-applied` kanıtı oluşur ve bu dala hiç gelinmez.
+        // Dosya durumu: koşudan önceki kaynak kopyasıyla içerik karşılaştırması (derleme çıktısı ve
+        // node_modules dışarıda). Kopya yoksa ya da karşılaştırma okunamadıysa `null` → kanıt yok.
+        const probe = this.tweakProbeDir;
+        const changedFiles = probe
+          ? await changedFilesVsSnapshot({ method: "copy", dir: probe }, this.state.project_root).catch(() => null)
+          : null;
         const verdict = classifyEmptyTweak({
-          userRequested: isUserUiTweakRequest(audit, tweakDesc),
+          userRequested: userTweak,
           blockedWriteAttempts: this.tweakWriteErrors + countDeniedToolCalls(audit, runStartedAt),
-          unprovenToolCalls: this.tweakUnprovenCalls,
+          changedFiles,
           capped: outcome.kind === "done" && outcome.capped === true,
         });
+        if (changedFiles && changedFiles.length > 0) {
+          // Yazma aracı kanıtı yok ama kaynak değişmiş (ör. kabuk komutuyla). Hüküm eskisi gibi `fail`;
+          // hangi dosyaların değiştiği kaybolmasın.
+          log.warn("phase-5", "rötuş: yazma kanıtı yok ama kaynak dosyalar değişmiş", {
+            count: changedFiles.length,
+            files: changedFiles.slice(0, 10),
+          });
+        }
         if (verdict === "no_change") {
           // İstek tüketildi. Durumu, denetim kaydını ve kullanıcı mesajını ÇAĞIRAN yazar (index.ts ana
           // döngü), ardından Faz 6 yeniden bekler. Tek seferlik koşu bu sonucu `fail` olarak raporlar.
           this.statePatch = { ...this.statePatch, pending_ui_tweak: undefined };
-          log.info("phase-5", "tweak: no change (user request, only read-only tool calls)");
+          log.info("phase-5", "tweak: no change (user request, source tree unchanged)");
           return "no_change";
         }
         emitError("Faz 5 rötuş: değişiklik uygulanmadı — Claude yazmadı", null);

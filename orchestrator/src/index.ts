@@ -7425,7 +7425,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         continue;
       } else if (r === "no_change") {
         // SONUÇSUZ KULLANICI İSTEĞİ (2026-11-27, deneme koşusu 9): kullanıcının Faz 6'da yazdığı rötuş
-        // isteğinden değişiklik çıkmadı; ajanın bütün araç çağrıları kanıtlanabilir biçimde salt okunurdu.
+        // isteğinden değişiklik çıkmadı; koşu hiçbir kaynak dosyayı değiştirmedi (dosya durumuyla kanıtlı).
         // Bu bir faz hatası DEĞİL → failPhase çağrılmaz (mahkeme ve hata analizi koşmaz). İstek tüketilir
         // (statePatch) ve akış Faz 6'ya geçer: Faz 6 uygulamayı açık tutup yeniden park eder
         // (`pending_ui_review`). Faz tamamlanmış sayılmaz (recordPhaseComplete yok); hüküm phase-5.ts
@@ -7439,7 +7439,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           phase: 5,
           event: "ui-tweak-no-change",
           caller: "mycl-orchestrator",
-          detail: `istekten değişiklik çıkmadı, yalnız okuma yapıldı — "${askedFor.slice(0, 120)}"`,
+          detail: `istekten değişiklik çıkmadı, kaynak dosyalar aynı — "${askedFor.slice(0, 120)}"`,
         }).catch(() => {});
         emitChatMessage(
           "system",
