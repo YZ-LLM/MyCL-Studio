@@ -1,7 +1,7 @@
 // regression-diff — fix öncesi/sonrası fail farkı. Parser TUTARLI olmalı (mükemmel değil); fark yeni kırılmayı verir.
 
 import { describe, expect, it } from "vitest";
-import { parseFailures, computeRegression } from "../src/regression-diff.js";
+import { parseFailures, computeRegression, baselineFromRun, regressionVerdict } from "../src/regression-diff.js";
 
 describe("regression-diff · parseFailures", () => {
   it("vitest '×' satırlarını + 'FAIL dosya'yı yakalar, süreyi (5ms) soyar", () => {
@@ -72,5 +72,36 @@ describe("regression-diff · computeRegression", () => {
   it("yeşil baseline (boş) → sonra herhangi bir fail = regresyon", () => {
     const r = computeRegression(new Set(), new Set(["x > y"]));
     expect(r.regressed).toEqual(["x > y"]);
+  });
+});
+
+// 2026-11-28 (koşu 32): takım düzeltmeden önce de 4 kırık testle kırmızıydı; Faz 10 lint düzeltmesinden sonra regresyon
+// guard "başka testleri bozdu" dedi ve akış ikinci bir Faz 9'a döndü.
+describe("regressionVerdict — düzeltme öncesi temele göre hüküm", () => {
+  const kirik4 = ["× a > t1", "× a > t2", "× b > t3", "× b > t4"].join("\n");
+  it("temel yeşil: yeşil → green; ayrıştırılan kırık → new", () => {
+    const base = baselineFromRun(0, "");
+    expect(base).toEqual({ failures: new Set(), green: true });
+    expect(regressionVerdict(base, 0, "")).toEqual({ kind: "green" });
+    expect(regressionVerdict(base, 1, "× a > t1")).toEqual({ kind: "new", regressed: ["a > t1"], preExisting: 0 });
+  });
+  it("koşu 32: önceden kırık 4 test, sonra aynı 4 → no-new (düşmez)", () => {
+    const base = baselineFromRun(1, kirik4);
+    expect(base?.failures.size).toBe(4);
+    expect(regressionVerdict(base, 1, kirik4)).toEqual({ kind: "no-new", preExisting: 4 });
+  });
+  it("önceden kırık 4 + yeni 1 → new, yalnız yenisinin adı", () => {
+    const base = baselineFromRun(1, kirik4);
+    expect(regressionVerdict(base, 1, `${kirik4}\n× c > t5`)).toEqual({ kind: "new", regressed: ["c > t5"], preExisting: 4 });
+  });
+  it("yeşil temeldeki tutarlı gürültü satırı sonraki koşuda yeni kırık sayılmaz (Faz 8'in eski kuralı)", () => {
+    const base = baselineFromRun(0, "FAIL fixtures/ornek.txt");
+    expect(base?.failures.has("fixtures/ornek.txt")).toBe(true);
+    expect(regressionVerdict(base, 1, "FAIL fixtures/ornek.txt")).toEqual({ kind: "no-new", preExisting: 1 });
+  });
+  it("ayrıştırılamayan çıktı → mutlak (temel null ya da sonraki çıktı boş)", () => {
+    expect(baselineFromRun(1, "bir şeyler patladı")).toBeNull();
+    expect(regressionVerdict(null, 1, kirik4)).toEqual({ kind: "absolute" });
+    expect(regressionVerdict(baselineFromRun(1, kirik4), 1, "anlaşılmaz çıktı")).toEqual({ kind: "absolute" });
   });
 });

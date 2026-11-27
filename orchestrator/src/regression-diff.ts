@@ -64,3 +64,42 @@ export function computeRegression(baseline: Set<string>, after: Set<string>): Re
     afterCount: after.size,
   };
 }
+
+/** Düzeltme öncesi test temeli: hangi testler ZATEN kırık. `green` = takım yeşildi. */
+export interface RegressionBaseline {
+  failures: Set<string>;
+  green: boolean;
+}
+
+/**
+ * SAF: bir test koşusundan temel çıkar (Faz 8'in kuralı, tek kaynak). Yeşil → ayrıştırılan küme (çoğunlukla boş). Kırmızı ama hiç kırık test
+ * ayrıştırılamadı → parser bu runner'ı anlamadı → temel GÜVENİLMEZ → null (çağıran mutlak davranışa düşer).
+ */
+export function baselineFromRun(code: number, output: string): RegressionBaseline | null {
+  // Yeşil koşuda da ayrıştırılan küme SAKLANIR (Faz 8'in eski kodu böyleydi): geçen koşudaki tutarlı gürültü satırı
+  // iki tarafta da olur ve farkta iptal olur (dosya başı ilkesi).
+  const failures = parseFailures(output);
+  if (code === 0) return { failures, green: true };
+  return failures.size > 0 ? { failures, green: false } : null;
+}
+
+export type RegressionVerdict =
+  | { kind: "green" }
+  /** Kırmızı ama bütün kırıklar temelde de vardı. */
+  | { kind: "no-new"; preExisting: number }
+  /** Temelde olmayan kırık var (gerçek regresyon). */
+  | { kind: "new"; regressed: string[]; preExisting: number }
+  /** Temel yok ya da sonraki çıktı ayrıştırılamadı → kırmızı mutlak regresyon sayılır (Faz 8'deki kural). */
+  | { kind: "absolute" };
+
+/** SAF (2026-11-28, koşu 32): düzeltme sonrası koşunun hükmü, temele göre. */
+export function regressionVerdict(baseline: RegressionBaseline | null, code: number, output: string): RegressionVerdict {
+  if (code === 0) return { kind: "green" };
+  if (!baseline) return { kind: "absolute" };
+  const after = parseFailures(output);
+  if (after.size === 0) return { kind: "absolute" };
+  const reg = computeRegression(baseline.failures, after);
+  return reg.regressed.length === 0
+    ? { kind: "no-new", preExisting: reg.preExistingCount }
+    : { kind: "new", regressed: reg.regressed, preExisting: reg.preExistingCount };
+}

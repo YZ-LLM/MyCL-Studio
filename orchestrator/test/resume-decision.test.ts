@@ -6,6 +6,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  decideUserAbortOnFail,
+  userAbortOutlivedPhase,
   shouldPreserveIterationState,
   decideIterationStart,
   resumeEntryPoint,
@@ -178,5 +180,26 @@ describe("shouldPreserveIterationState — kullanıcı yönlendirmesi üçüncü
       userRedirect: false,
     });
     expect(r.preserve).toBe(false);
+  });
+});
+
+// 2026-11-28 (koşu 32): Faz 9 için kurulan durdurma Faz 9 normal bitince asılı kaldı; 11 dk sonra Faz 10'un düşüşü
+// "sen yönlendirdin" sayılıp akış Faz 9'a döndü.
+describe("kullanıcı durdurması yalnız durdurulan fazın düşüşüne ait", () => {
+  it("durdurulan faz düşer → redirect (bugünkü gibi)", () => {
+    expect(decideUserAbortOnFail({ flag: true, abortedPhase: 9, failedPhase: 9 })).toBe("redirect");
+  });
+  it("koşu 32: Faz 9 için kurulan bayrak, Faz 10 düşüşünde → stale (yönlendirme sayılmaz)", () => {
+    expect(decideUserAbortOnFail({ flag: true, abortedPhase: 9, failedPhase: 10 })).toBe("stale");
+  });
+  it("bayrak yok → none; durdurulan faz bilinmiyor → eski davranış (redirect)", () => {
+    expect(decideUserAbortOnFail({ flag: false, abortedPhase: 9, failedPhase: 9 })).toBe("none");
+    expect(decideUserAbortOnFail({ flag: true, abortedPhase: null, failedPhase: 4 })).toBe("redirect");
+  });
+  it("durdurulan faz normal biterse bayrak atılmalı; başka faz bitince değil", () => {
+    expect(userAbortOutlivedPhase({ flag: true, abortedPhase: 9, completedPhase: 9 })).toBe(true);
+    expect(userAbortOutlivedPhase({ flag: true, abortedPhase: 9, completedPhase: 8 })).toBe(false);
+    expect(userAbortOutlivedPhase({ flag: false, abortedPhase: 9, completedPhase: 9 })).toBe(false);
+    expect(userAbortOutlivedPhase({ flag: true, abortedPhase: null, completedPhase: 9 })).toBe(false);
   });
 });

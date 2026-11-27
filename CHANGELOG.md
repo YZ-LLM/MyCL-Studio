@@ -1,5 +1,41 @@
 ## 2026-11-28
 
+- **fix(regresyon guard): yalnız YENİ kırılan testte düşsün. + fix(durdurma bayrağı): başka bir fazın düşüşüne
+  taşınmasın.** Ekransız deneme koşusu 32 (`yapilacaklar-sunucu-28`, `54f4fe2`): takım bağımsız test yazarının bıraktığı 4
+  kırık testle düzeltmeden ÖNCE de kırmızıydı. Faz 10 lint düzeltmesinden sonra regresyon guard "bu fix BAŞKA testleri
+  bozdu" dedi. Aynı anda 11 dakika önce Faz 9 için kurulmuş durdurma bayrağı tüketildi: Faz 9 durmadan normal bitmişti,
+  bayrak kurulu kalmıştı. Düşüş "sen yönlendirdin" sayıldı ve akış ikinci bir Faz 9'a döndü (24 dk 46 sn).
+  1. **Test temeli (`captureRegressionBaseline`, `regression-guard.ts`):** kapı düzeltmesinden (`runGateAutofix`) ÖNCE,
+     guard'ın koşacağı yerlerde alınıyor: Faz ≥9 mekanik kapı ve Faz 13 güvenlik düzeltmesi. Guard sonucu temele göre
+     değerlendiriyor (`regressionVerdict`, `regression-diff.ts`). Takım yeşilse geçer. Bütün kırıklar temelde de varsa
+     "önceden kırık N test var, bu düzeltme yeni bir şey kırmadı" der ve geçer. Yeni kırık varsa düşer ve adlarını verir.
+     Temel yoksa ya da çıktı ayrıştırılamazsa kırmızı mutlak regresyon sayılır (Faz 8'in kuralı). Temel kuralı Faz 8 ile
+     ortak (`baselineFromRun`). Test komutu yokken ve ortam hatasında guard bugünkü gibi "doğrulanamadı" der.
+  2. **Durdurma bayrağı fazına bağlı (`_userAbortPhase`; `decideUserAbortOnFail`, `userAbortOutlivedPhase`;
+     `resume-decision.ts`):** durdurma kurulurken çalışan faz denetleyicisinin fazı kaydediliyor. Bayrak yalnız o fazın
+     düşüşünde "sen yönlendirdin" sayılır. Başka fazın düşüşünde bayraklar atılır (durdurma, otomatik devam, yönlendirme
+     koruması), düşüş normal işlenir ve bu görünür yazılır. Durdurulmak istenen faz normal biterse (`recordPhaseComplete`)
+     bayraklar atılır. Başka faza yönlendirme uygulanamadıysa sohbete "yeniden iste" yazılır.
+     Ayrıca durdurma, durdurulan denetleyici ÖRNEĞİNE bağlı: `runtime.controller` ayarlayıcısı yeni bir denetleyici
+     başlarken tüketilmemiş durdurmayı atar. Bu, `failPhase`'e ve `recordPhaseComplete`'e uğramayan işleri de kapsar:
+     Faz 9 içindeki risk düzeltmesi, Faz 1, Faz 0 ve tek faz çalıştırma (inceleme bulgusu). Uygulanmayan yönlendirme
+     her durumda sohbete yazılır.
+  3. **İstenen faz zaten çalışıyorsa durdurma kurulmaz** (`emitPhaseRunAskq`); "Faz N zaten çalışıyor — durdurmadım"
+     yazılır. Hem denetleyicinin fazı hem akışın fazı eşleşmeli: Faz 9 içindeki risk düzeltmesi Faz 8 denetleyicisi
+     koşturur ve o sırada Faz 8 istemek yönlendirmedir. Koşu 32'de "Kaldığın yerden devam et" ile Faz 9 çalışırken
+     Faz 9 isteniyordu.
+  - Temkinli seçimler: durdurulan faz bilinmiyorsa (ör. Faz 0) düşüş eski davranışla yönlendirme sayılır; bayrak yeni
+    denetleyici başlarken atılır. Çalışan fazın kendisini yeniden başlatmak isteyen kullanıcı artık önce durdurma
+    düğmesini kullanmalı. Yeşil temelde ayrıştırılan satırlar da saklanır (Faz 8'in eski kuralı): tutarlı gürültü
+    farkta iptal olur.
+  - Bilinen sınır (hipotez): temel koşusu zaman aşımına uğrar ve kısmi çıktı verirse eksik kalan kırıklar düzeltmeden
+    sonra "yeni" görünebilir; bu yanlış düşüş yönündedir, yanlış geçiş üretmez.
+  - Maliyet: guard'ın koşacağı her kapı düzeltmesinden önce takım bir kez daha koşar.
+  - Yeni modül yok (kural 15); saf kararlar var olan `regression-diff.ts` ve `resume-decision.ts` içinde.
+  - Testler eklendi, koşturulmadı (yalnız derlendi): temele göre hüküm (yeşil, önceden kırık, yeni kırık, ayrıştırılamayan)
+    ve durdurma bayrağının hangi düşüşe ait olduğu. Akışın kendisi (`index.ts`) içe aktarılınca uygulamayı başlattığı için
+    birim testinde koşturulamaz.
+
 - **fix(Faz 8 teknik borç): kapı kararını kapı anında, dosyaların o anki içeriğiyle versin; `todo_comment` yalnız gerçek
   yorum işaretini yakalasın. + fix(kod haritası): değeri geçmeyen bağlama senaryoyu düşürmesin.** Ekransız deneme koşusu
   31 (`yapilacaklar-sunucu-28`, `e7092ed`): yapılacaklar uygulamasında `… ?? "todo.sqlite3";` ve

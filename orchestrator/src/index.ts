@@ -105,6 +105,8 @@ import {
 } from "./task-queue/system-task.js";
 import {
   shouldPreserveIterationState,
+  decideUserAbortOnFail,
+  userAbortOutlivedPhase,
   decideIterationStart,
   resumeEntryPoint,
   resumeWasStale,
@@ -179,7 +181,8 @@ import { predictPipelineCost } from "./cost-forecast.js";
 import { getLastTechDebtFindings, acceptedFindingKey, resetLastTechDebtFindings } from "./tech-debt-scanner.js";
 import { sumSecurityFindings, stepSecurityConvergence } from "./security-convergence.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
-import { runRegressionGuard } from "./regression-guard.js";
+import { captureRegressionBaseline, runRegressionGuard } from "./regression-guard.js";
+import type { RegressionBaseline } from "./regression-diff.js";
 import { isApiAccountError, isEnvironmentError, environmentErrorAdvice, isTimeoutHangOnly } from "./claude-api.js";
 import { decideTimeoutDivert, runTimeoutMultiAngle, TIMEOUT_DIVERT_MAX } from "./timeout-diagnosis.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
@@ -454,10 +457,20 @@ interface OrchestratorRuntime {
   } | null;
 }
 
+let _runtimeController: AnyPhaseController | null = null;
 const runtime: OrchestratorRuntime = {
   state: null,
   config: null,
-  controller: null,
+  // 2026-11-28 (koşu 32, inceleme): kullanıcı durdurması durdurulan DENETLEYİCİYE bağlıdır. Yeni bir denetleyici
+  // başlarken durdurma hâlâ kuruluysa, durdurulan iş `failPhase`'e uğramadan bitmiştir (ör. Faz 9 içindeki risk
+  // düzeltmesi, Faz 1, Faz 0) → bayrak sonraki bir düşüşe taşınmasın diye atılır. Atama noktası tek: bu ayarlayıcı.
+  get controller(): AnyPhaseController | null {
+    return _runtimeController;
+  },
+  set controller(c: AnyPhaseController | null) {
+    if (c !== null && c !== _runtimeController) dropUserAbortIfControllerEnded(c);
+    _runtimeController = c;
+  },
   pendingPhaseRun: null,
   pendingAgentDecision: null,
   pendingMemoryProposal: null,
@@ -1109,6 +1122,11 @@ let _securityNoProgress = 0; // art arda "bulgu azalmadı" deneme sayısı (≥2
 // yanlış-negatif loop'unun kaynağıydı". Faz tamamlanınca yalnız escalation başarı
 // kaydı tutulur (merdiven öğrenmeye devam etsin); üst-rung yeniden-koşumu YOK.
 async function recordPhaseComplete(n: PhaseId): Promise<void> {
+  // 2026-11-28 (koşu 32): durdurulmak istenen faz durmadan NORMAL bitti → durdurma tutmadı; bayrak sonraki bir
+  // düşüşe taşınmasın. Başka faza yönlendirme uygulanamadıysa bu görünür söylenir (sessiz düşüş yok).
+  if (userAbortOutlivedPhase({ flag: isUserInitiatedAbort(), abortedPhase: _userAbortPhase, completedPhase: n })) {
+    dropStaleUserAbort(`Faz ${n} durdurma isteğine yetişmeden normal bitti`);
+  }
   await recordRungOutcome(n, true);
   _autoAnswerChain = 0; // faz GERÇEKTEN tamamlandı → otonom-cevap döngü sayacı sıfır (ilerleme var; MAX yanlış-tetiklenmesin).
   _escalateAcceptChain = 0; // gerçek faz-tamamlanması = müfettiş O fazda çalıştı → escalate 'art arda' semantiği korunur
@@ -1670,6 +1688,24 @@ function makePhaseOutageResume(n: PhaseId): () => Promise<OutageResumeResult> {
   };
 }
 
+/**
+ * Tutmayan kullanıcı durdurmasının bütün bayraklarını at (durdurma + otomatik devam + yönlendirme koruması).
+ * Bir faza yönlendirme bekliyorduysa uygulanmadığı GÖRÜNÜR söylenir (sessiz düşüş yok); `why` nedeni verir.
+ */
+function dropStaleUserAbort(why: string): void {
+  const resume = _resumePhaseAfterAbort;
+  clearUserInitiatedAbort();
+  _resumePhaseAfterAbort = null;
+  // Yönlendirme koruması yalnız bu durdurmanın hedefi içinse at (başka bir yönlendirmeyi silme).
+  if (resume !== null && _userRedirectPending === resume) _userRedirectPending = null;
+  if (resume !== null) {
+    emitChatMessage(
+      "system",
+      `ℹ️ ${why}; Faz ${resume}'e yönlendirme uygulanmadı, akış normal sürüyor. Hâlâ istiyorsan Faz ${resume}'i yeniden iste.`,
+    );
+  }
+}
+
 async function failPhase(
   n: PhaseId,
   ctrl?: FailReasonHolder,
@@ -1677,7 +1713,15 @@ async function failPhase(
 ): Promise<void> {
   // Kullanıcı çalışan fazı yönlendirmeyle durdurduysa bu bir HATA değil — analiz/oto-çözüm BAŞLATMA.
   // (YZLLM: "beni dinlemedi" — durdurma sonrası MyCL kendi analizine dalmasın, kullanıcının isteğine geçsin.)
-  if (isUserInitiatedAbort()) {
+  const abortVerdict = decideUserAbortOnFail({ flag: isUserInitiatedAbort(), abortedPhase: _userAbortPhase, failedPhase: n });
+  if (abortVerdict === "stale") {
+    // 2026-11-28 (koşu 32): durdurma BAŞKA bir fazı hedeflemişti ve o faz durmadan bitti → bu düşüş kullanıcı
+    // yönlendirmesi DEĞİL. Bayat bayrakları at, düşüşü normal işle (görünür).
+    const staleFor = _userAbortPhase;
+    dropStaleUserAbort(`Önceki durdurma isteği Faz ${staleFor} içindi`);
+    emitChatMessage("system", `ℹ️ Önceki durdurma isteği Faz ${staleFor} içindi; Faz ${n}'in bu düşüşü yönlendirme sayılmadı.`);
+  }
+  if (abortVerdict === "redirect") {
     clearUserInitiatedAbort();
     emitChatMessage("system", `⏹ Faz ${n} durduruldu (sen yönlendirdin).`);
     // YZLLM 2026-06-11: kullanıcı hedef fazı zaten söyledi → OTOMATİK oradan devam (tekrar yazdırma yok).
@@ -3821,6 +3865,41 @@ function isUserInitiatedAbort(): boolean {
 }
 function clearUserInitiatedAbort(): void {
   _userInitiatedAbort = false;
+  _userAbortPhase = null;
+  _userAbortController = null;
+}
+/**
+ * Durdurmanın hedeflediği faz (2026-11-28, koşu 32): bayrak yalnız BU fazın düşüşünde "sen yönlendirdin" sayılır
+ * (`decideUserAbortOnFail`); bu faz normal biterse bayraklar atılır (`recordPhaseComplete`). null = çalışan iş bir faz
+ * denetleyicisi değil (ör. Faz 0) → eski davranış.
+ */
+let _userAbortPhase: PhaseId | null = null;
+function controllerPhase(c: AnyPhaseController | null): PhaseId | null {
+  if (c instanceof Phase1Controller) return 1 as PhaseId;
+  if (c instanceof Phase2Controller) return 2 as PhaseId;
+  if (c instanceof Phase3Controller) return 3 as PhaseId;
+  if (c instanceof Phase4Controller) return 4 as PhaseId;
+  if (c instanceof Phase5Controller) return 5 as PhaseId;
+  if (c instanceof Phase6Controller) return 6 as PhaseId;
+  if (c instanceof Phase7Controller) return 7 as PhaseId;
+  if (c instanceof Phase8Controller) return 8 as PhaseId;
+  if (c instanceof Phase9Controller) return 9 as PhaseId;
+  return null;
+}
+/** Durdurmanın hedeflediği denetleyici örneği (yeni denetleyici başlarken tüketilmemiş durdurmayı atmak için). */
+let _userAbortController: AnyPhaseController | null = null;
+/** Kullanıcı durdurmasını kur: bayrak + çalışan fazın kimliği (çağıran ardından `abort()` çağırır). */
+function markUserInitiatedAbort(): void {
+  _userInitiatedAbort = true;
+  _userAbortPhase = controllerPhase(runtime.controller);
+  _userAbortController = runtime.controller;
+}
+/** Ayarlayıcıdan: başka bir denetleyici başlıyor ve durdurma hâlâ kurulu → durdurulan iş bitti, durdurma tutmadı. */
+function dropUserAbortIfControllerEnded(next: AnyPhaseController): void {
+  if (!_userInitiatedAbort || _userAbortController === null || _userAbortController === next) return;
+  const what = _userAbortPhase !== null ? `Faz ${_userAbortPhase} işi` : "Durdurulan iş";
+  log.info("orchestrator", "tüketilmemiş kullanıcı durdurması atıldı (yeni denetleyici başlıyor)", { phase: _userAbortPhase });
+  dropStaleUserAbort(`${what} durdurma isteğinden sonra düşmeden bitti`);
 }
 
 // SORU MODU oturum geçmişi (YZLLM 2026-06-19): orkestratör soru modunda turlar arası bağlamı
@@ -3966,7 +4045,7 @@ async function handleUserMessage(text: string): Promise<void> {
       "abort" in runtime.controller &&
       typeof runtime.controller.abort === "function"
     ) {
-      _userInitiatedAbort = true;
+      markUserInitiatedAbort();
       runtime.controller.abort();
       emitChatMessage(
         "system",
@@ -3987,7 +4066,7 @@ async function handleUserMessage(text: string): Promise<void> {
   if (_pendingRedirect !== null) {
     const next = _pendingRedirect;
     _pendingRedirect = null;
-    _userInitiatedAbort = false;
+    clearUserInitiatedAbort();
     await handleUserMessage(next);
   }
   // İş kuyruğu: bu turda bir kuyruk işi bittiyse/yarıda kaldıysa orphan uzlaştır +
@@ -6588,7 +6667,7 @@ async function reconcileAndDrainTasks(): Promise<void> {
   if (_pendingRedirect !== null) {
     const r = _pendingRedirect;
     _pendingRedirect = null;
-    _userInitiatedAbort = false;
+    clearUserInitiatedAbort();
     await handleUserMessage(r);
   }
 }
@@ -7979,6 +8058,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             "🔧 Faz 13 (Güvenlik) — bulguları fazın içinde düzeltiyorum + güvenliği yeniden doğruluyorum (Faz 8'e dönmeden).",
           );
           emitForeignAutoFixNotice("Faz 13 güvenlik düzeltmesi");
+          // 2026-11-28 (koşu 32): düzeltmeden ÖNCE test temeli → regresyon guard yalnız YENİ kırılmada düşer.
+          const rgBase13 = await captureRegressionBaseline(state, 13);
           const fixRan = await runGateAutofix(state, cfg, 13, phaseLabelTR(13, spec), outcome.stderr, secMahkemeGuidance);
           if (fixRan) {
             const reRunner = new MechanicalRunnerBase({
@@ -8013,7 +8094,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
               _securityFindingsPrev = null; // yakınsama-kırıcı sıfırla (güvenlik çözüldü)
               _securityNoProgress = 0;
               // Güvenlik düzeltmesi kodu değiştirdi → testleri bozmuş olabilir; regresyon guard (YZLLM 2026-06-12).
-              const rg13 = await runRegressionGuard(state, cfg, 13);
+              const rg13 = await runRegressionGuard(state, cfg, 13, rgBase13);
               if (rg13.ran && rg13.pass === false) {
                 outcome = { kind: "fail", rescans: 0, stderr: "regression-guard: security fix broke tests" };
                 // continue ETME — aşağıdaki analiz/accept-continue regresyonu ele alsın.
@@ -8242,12 +8323,15 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         }
         // escalate → autofix ATLANIR (fixRan=false) → aşağıdaki failPhase insana götürür. proceed → normal autofix.
         let fixRan = false;
+        let rgBase: RegressionBaseline | null = null;
         if (mahkemeAction === "proceed") {
           emitChatMessage(
             "system",
             `🔧 Faz ${next} (${phaseLabelTR(next, spec)}) — bildirilen hataları fazın içinde düzeltiyorum (bu fazın işi; debug'a kaçmadan).`,
           );
           emitForeignAutoFixNotice(`Faz ${next} (${phaseLabelTR(next, spec)}) otomatik düzeltmesi`);
+          // 2026-11-28 (koşu 32): guard yalnız Faz ≥9'da koşar → temel de yalnız orada alınır (düzeltmeden ÖNCE).
+          rgBase = next >= 9 ? await captureRegressionBaseline(state, next) : null;
           fixRan = await runGateAutofix(state, cfg, next, phaseLabelTR(next, spec), outcome.stderr, mahkemeGuidance);
         }
         if (fixRan) {
@@ -8283,7 +8367,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
             // YZLLM 2026-06-12: Faz 8 SONRASI (≥9) bir gate düzeltmesi kodu değiştirdi → testleri bozmuş olabilir.
             // Regresyon guard: tüm testleri yeniden koş; kırmızıysa bu faz fail'e döner (sessiz bozulma engellenir).
             if (next >= 9) {
-              const rg = await runRegressionGuard(state, cfg, next);
+              const rg = await runRegressionGuard(state, cfg, next, rgBase);
               if (rg.ran && rg.pass === false) {
                 outcome = { kind: "fail", rescans: 0, stderr: "regression-guard: fix broke tests" };
                 // continue ETME — aşağıdaki investigate+solve bu regresyonu ele alsın.
@@ -9992,8 +10076,16 @@ async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<voi
   if (runtime.controller) {
     // YZLLM 2026-06-11: "kullanıcı zaten Faz 11 yazdı, tekrar yazdırmanın anlamı yok." Kullanıcı hangi fazı
     // istediğini SÖYLEDİ → durunca OTOMATİK o fazdan devam et (yeniden yazdırma/yeniden bastırma YOK).
+    // 2026-11-28 (koşu 32): istenen faz ZATEN çalışan fazsa durdurma kurma — durdurulacak bir şey yok; kurulan
+    // bayrak faz normal bitince asılı kalıp sonraki bir düşüşü "sen yönlendirdin" sayıyordu.
+    // Denetleyicinin sınıfı ve akışın fazı İKİSİ de eşleşmeli: Faz 9 içindeki risk düzeltmesi bir Faz 8 denetleyicisi
+    // koşturur; o sırada Faz 8 istemek "zaten çalışıyor" sayılmamalı (inceleme bulgusu).
+    if (controllerPhase(runtime.controller) === phaseId && runtime.state.current_phase === phaseId) {
+      emitChatMessage("system", `▶️ Faz ${phaseId} zaten çalışıyor — durdurmadım; bitince akış normal sürecek.`);
+      return;
+    }
     if ("abort" in runtime.controller && typeof runtime.controller.abort === "function") {
-      _userInitiatedAbort = true;
+      markUserInitiatedAbort();
       _resumePhaseAfterAbort = phaseId as PhaseId;
       _userRedirectPending = phaseId as PhaseId; // hedef faz başlayana kadar yaşar (uzlaştırma korur)
       runtime.controller.abort();
@@ -10068,9 +10160,10 @@ async function handleRunPhase(
   // MAHKEME HIGH (2026-07-17): kullanıcı elle devam ediyor → bekle-ve-devam zamanlayıcısı iptal
   // (aksi halde reset saatinde insan + zamanlayıcı AYNI fazı iki kez koşturabilirdi).
   cancelLlmOutageWait();
-  // YÖNLENDİRME BAYRAĞININ TEK TEMİZLEME NOKTASI. Hedef faz artık gerçekten başlıyor → koruma
+  // YÖNLENDİRME BAYRAĞININ OLAĞAN TEMİZLEME NOKTASI. Hedef faz artık gerçekten başlıyor → koruma
   // görevini tamamladı. Başka yerde temizlemek hatayı geri getirir (uzlaştırma yine terminal hata
-  // sayar); hiç temizlememek kuyruğu kilitler (iş bir daha pending'e düşmez). Bu yüzden tek nokta.
+  // sayar); hiç temizlememek kuyruğu kilitler (iş bir daha pending'e düşmez). Tek istisna (2026-11-28):
+  // durdurma TUTMAYINCA `dropStaleUserAbort` yalnız o durdurmanın kendi hedefini temizler (hedef hiç başlamayacak).
   if (_userRedirectPending === phaseId) _userRedirectPending = null;
   if (!runtime.state || !runtime.config) {
     emitError("Aktif proje yok", null);
@@ -10963,7 +11056,7 @@ ipcRouter.register("abort_phase", () => {
     });
     // YZLLM 2026-06-11: durdur-butonu = KULLANICI kesmesi — başarısızlık DEĞİL. Bu bayrak olmadan failPhase
     // kesmeyi gerçek hata sanıp escalation'a kaydediyordu (rapor %0'larla doldu) + analiz başlatıyordu.
-    _userInitiatedAbort = true;
+    markUserInitiatedAbort();
     runtime.controller.abort();
     emitChatMessage(
       "system",

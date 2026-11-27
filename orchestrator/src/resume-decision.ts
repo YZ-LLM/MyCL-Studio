@@ -127,3 +127,28 @@ export function resumeEntryPoint(currentPhase: number): ResumeEntry {
   if (currentPhase <= 1) return { kind: "phase1" };
   return { kind: "advance", from: currentPhase - 1 };
 }
+
+/**
+ * SAF (2026-11-28, ekransız deneme koşusu 32): bir faz düştüğünde kurulu kullanıcı durdurması bu düşüşe mi ait?
+ *
+ * KANIT: Faz 9 çalışırken orkestratör `run_phase` (Faz 9) verdi → durdurma bayrağı ve "Faz 9'dan devam" kuruldu. Faz 9
+ * durmadı, normal bitti; bayraklar yalnız `failPhase` içinde tüketildiği için kurulu kaldı. 11 dakika sonra Faz 10'un
+ * regresyon düşüşü "sen yönlendirdin" sayıldı ve akış Faz 9'a döndü (kullanıcı bir şey yazmamıştı).
+ *
+ * KURAL: durdurma, durdurulan fazın (`abortedPhase`) kendi düşüşüne aittir. Başka fazın düşüşü → "stale" (bayraklar
+ * atılır, düşüş normal işlenir). Durdurulan faz bilinmiyorsa (`null`, ör. faz denetleyicisi dışı bir iş) → eski davranış.
+ */
+export function decideUserAbortOnFail(p: {
+  flag: boolean;
+  abortedPhase: number | null;
+  failedPhase: number;
+}): "none" | "redirect" | "stale" {
+  if (!p.flag) return "none";
+  if (p.abortedPhase === null || p.abortedPhase === p.failedPhase) return "redirect";
+  return "stale";
+}
+
+/** SAF: biten faz, kurulu durdurmanın hedefi mi? Evet → durdurma tutmadı (faz normal bitti), bayraklar atılmalı. */
+export function userAbortOutlivedPhase(p: { flag: boolean; abortedPhase: number | null; completedPhase: number }): boolean {
+  return p.flag && p.abortedPhase !== null && p.abortedPhase === p.completedPhase;
+}

@@ -46,7 +46,7 @@ import {
 } from "./fix-snapshot.js";
 import { CODE_MAP_REPORT_INSTRUCTION, countCodeMapUse, prepareFromCodeMap, recordCodeMapAfterGate } from "./code-map.js";
 import { decideRevertOrKeep } from "./revert-decision.js";
-import { parseFailures, computeRegression } from "./regression-diff.js";
+import { parseFailures, computeRegression, baselineFromRun } from "./regression-diff.js";
 import {
   readBehaviorBaseline,
   verifyNoUnconsentedRegression,
@@ -919,15 +919,16 @@ export class Phase8Controller {
         emitChatMessage("system", "📋 Düzeltme öncesi test temeli alınıyor (gerçek regresyonu, zaten önceden başarısız olan testlerden ayırmak için)…");
         const baseRes = await this.runCmdResult(baseCmd);
         if (!isMissingCommand(baseRes)) {
-          const failures = parseFailures(`${baseRes.stdout}\n${baseRes.stderr}`);
           // Kırmızı ama 0 fail ayrıştırıldı → parser bu runner'ı anlamadı → baseline GÜVENİLMEZ (mutlak'a düş).
-          if (baseRes.code === 0 || failures.size > 0) {
-            this.baseline = { failures, green: baseRes.code === 0 };
+          // Kural tek kaynakta (`baselineFromRun`; regresyon guard da kullanıyor — 2026-11-28).
+          const base = baselineFromRun(baseRes.code, `${baseRes.stdout}\n${baseRes.stderr}`);
+          if (base) {
+            this.baseline = base;
             emitChatMessage(
               "system",
-              baseRes.code === 0
+              base.green
                 ? "📋 Test temeli YEŞİL — fix sonrası HERHANGİ bir kırmızı regresyon sayılır."
-                : `📋 Test temeli: ${failures.size} test düzeltmeden ÖNCE de KIRIK (düzeltme dışı). Düzeltme sonrası yalnız YENİ kırılma gate'i düşürür.`,
+                : `📋 Test temeli: ${base.failures.size} test düzeltmeden ÖNCE de KIRIK (düzeltme dışı). Düzeltme sonrası yalnız YENİ kırılma gate'i düşürür.`,
             );
           }
         }
