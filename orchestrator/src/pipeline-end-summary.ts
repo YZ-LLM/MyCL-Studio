@@ -109,7 +109,7 @@ export function buildPipelineEndLines(input: PipelineEndInput): string[] {
   // Hükmün kendi dürüst metni (verdict.summary) zaten üretiliyordu ama hiç okunmuyordu.
   //
   // KAPSAM SINIRI: düzeltme YALNIZ bu özet metnindedir. computeVerdict'in PASS/PARTIAL/FAIL
-  // semantiğine dokunulmaz — prototip kaydı (prototype-cache) ve kod haritasının "bütün kapılar yeşil" kanıtı (code-map)
+  // semantiğine dokunulmaz — prototip kaydı (prototype-cache)
   // o hükme bağlıdır; hükmü sertleştirmek onları sessizce devre dışı bırakırdı.
   if (verdict && verdict.verdict !== "PASS" && uyarilar.length === 0) {
     uyarilar.push(verdict.summary);

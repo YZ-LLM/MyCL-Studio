@@ -1,5 +1,36 @@
 ## 2026-11-27
 
+- **refactor(kod haritası): ilk sürüm için sadeleştirildi — yalnız DOSYA ve SENARYO kaydı kaldı.** Neden (Ümit,
+  2026-11-27: "sen de çalışırken over engineering kontrolü yapmalısın"): ilk prompt ilk sürüm için fazlasını istedi;
+  `code-map.ts` 1177 satıra çıktı, iki inceleme turu tam fazla kısımlarda (kimlik ve sürüm zinciri, faz karışması) hata
+  buldu, ilk koşuda özellik hiç devreye girmedi. Önce tek yol uçtan uca çalışsın; düzeyler ve zincirler koşuda ihtiyaç
+  görülünce eklenir. `code-map.ts` 822 satır.
+  **Kalan kayıt türleri:** dosya (bütün dosya: metin ve yol şablonu, metin özeti, köken) ve senaryo (ad, açıklama, kabul
+  ölçütleri, çalışma SIRASIYLA dosya kayıt kimlikleri, TEK bağlama listesi: ad, açıklama, kaynak değer; senaryonun bütün
+  dosyalarına ve yollarına uygulanır). Ajan bildirimi buna göre kısaldı:
+  `{"kind":"code_map","frameworks":[…],"scenarios":[{"name","description","acceptance_criteria","files","bindings"}]}`.
+  Senaryodaki her dosya tek tek doğrulanır (geçemeyen dosya reddedilir, nedeni yazılır); en az bir dosyası kalan ve her
+  bağlama değeri dosyalarında ya da yollarında geçen senaryo kaydedilir.
+  **Silinenler (yerine bir şey KONMADI, bilerek):** `symbol`, `block`, `module` düzeyleri; `lines`, `first_line`, `parts`,
+  `uses`, `used_by`, `steps`, `tests`, `part_of` alanları; ajana verilen "hazır parça" bölümü (`<map_parts>`); dosya başına
+  bağlama listesi ve ad çakışması çözümü (`bindingKeysForParts`), bağlama türü (`kind`); sürüm zinciri (`supersedes`,
+  `change_reason`, `lineage`, `currentRecords`) — aynı proje yeniden kayıt alırsa yeni kayıt eklenir, aramada aynı stack +
+  adlı senaryolardan en yenisi kullanılır (`latestScenarios`; yalnız aynı proje + aynı faz içinde — başka projenin ya da başka fazın aynı adlı kaydı ayrı kalır, inceleme bulgusu); kanıt dosyası (`evidence.jsonl`: kullanım, kapı geçti,
+  bütün kapılar yeşil) ve boru hattı sonundaki adım (`markPipelineGreen`, `index.ts` çağrısıyla) — seçimde
+  kullanılmıyordu; Faz 5/8'deki yerleştirilen dosya izleme alanları (`mapPlaced`).
+  **Aynı kalanlar (kural 14), tek tek:** kayıt yalnız Faz 5 (rötuş dışı) ve Faz 8 kendi kapısı geçince (`gatePassed`
+  false → yazım yok); stack açılışta bilinmiyorsa kayıt anında `detectStack`; ajan bildirmezse görünür ileti; kesin
+  denetim (kaynak değerleriyle metin ve yol birebir); yol ve sır denetimleri (`isSafeRelPath`, `looksLikeSecret`,
+  `realInsideProject`, ajan talimat dosyaları); kayıtlar `wx` ile yazılır, üzerine yazılmaz, önbellekli okunur; arama
+  Faz 5 rötuş dışı / Faz 8 düzeltme dışı, aynı stack (boş projede bütün stack'ler, kodlu projede stack bilinmiyorsa
+  aranmaz), aynı faz, başka proje süzgeciyle; var olan ilgililik puanlayıcısı, eşik 7, en iyi senaryo; bağlama değerleri
+  için tek araçsız çağrı (değer denetimi aynı); MyCL dosyaları yerleştirir (üzerine yazmaz, proje dışına, gizli ve talimat
+  yoluna yazmaz; aynı metinle var olan dosya "mevcut"); ajana "önce hepsini toplu incele, yalnız eksiği yaz"; her adım
+  sohbete ve denetim kaydına; harita hata verirse bugünkü akış; eski biçim modüllerin listelenmesi ve orkestratör
+  özetindeki satır. Yeni modül yok.
+  Testler `test/code-map.test.ts` içinde (sürüm zinciri, kanıt ve bağlama çakışması testleri silindi). Test ve kontrol
+  koşturulmadı, yalnız derlendi.
+
 - **fix(kod haritası): yeni (boş) projede de çalışsın — kayıt anında stack yeniden belirlensin, arama stack bilinmeden de
   yapılabilsin.** Ekransız deneme koşusu 23 (`aa6e094`, yeni arayüzlü proje): Faz 5 başında arama ve Faz 5 sonunda kayıt
   "projenin stack'i bilinmiyor" diye atlandı; `state.stack` proje açılırken boş klasörden "unknown" alınıyor ve ancak faz

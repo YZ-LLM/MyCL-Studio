@@ -199,7 +199,6 @@ import { snapshotPrototype } from "./prototype-cache.js";
 import { runPhaseContributionReport } from "./phase-contribution.js";
 import { runLayerCostReport } from "./layer-cost-report.js";
 import { specSignalMatches } from "./mechanical-skip-signal.js";
-import { markPipelineGreen } from "./code-map.js";
 import { generateGuideShots } from "./guide-shots.js";
 import { promoteVisualBaseline } from "./visual-regression.js";
 import {
@@ -6969,12 +6968,6 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // dosyalarını golden prototip olarak kaydet (bu stack'te sonraki proje hızlı başlasın).
       // Non-blocking — snapshotPrototype kendi içinde yeşil/stack kontrolü yapar + throw etmez.
       await snapshotPrototype(state);
-      // Kod haritası (2026-11-27; module-stock'un yerine): boru hattı sonunda model çağrılı çıkarım YOK — kayıtlar Faz 5/8
-      // kendi kapısı geçince alındı. Burada yalnız YEŞİL koşuda bu iterasyonun kayıtlarına "bütün kapılar yeşil" kanıt
-      // satırı eklenir. Non-blocking (throw etmez).
-      await markPipelineGreen(state).catch((e: unknown) =>
-        log.warn("orchestrator", "code-map pipeline-green evidence failed (non-fatal)", e),
-      );
       // Faz-Katkı Mahkemesi (YZLLM 2026-06-22): her fazın bu koşuya katkı yüzdesini mahkeme değerlendirip
       // Türkçe rapor chat'e basar → kullanıcı gereksiz fazı görüp KENDİ budar. Flag-gated + fail-soft.
       await runPhaseContributionReport(state, cfg).catch((e: unknown) =>

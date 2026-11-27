@@ -12,7 +12,7 @@ import { basename, join } from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { appendAudit, readAuditLog, readAuditLogTail } from "./audit.js";
-import { CODE_MAP_REPORT_INSTRUCTION, prepareFromCodeMap, recordCodeMapAfterGate, type PlacedFile } from "./code-map.js";
+import { CODE_MAP_REPORT_INSTRUCTION, prepareFromCodeMap, recordCodeMapAfterGate } from "./code-map.js";
 import { currentSpecPath, currentSpecRelPath } from "./devs-paths.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { scanCspViolations, ensureCspMeta } from "./csp-compliance.js";
@@ -183,10 +183,9 @@ export class Phase5Controller {
   private tweakWriteErrors = 0;
   /** Kullanıcı rötuşundan ÖNCE alınan kaynak kopyası (yoksa null); koşu bitince silinir. */
   private tweakProbeDir: string | null = null;
-  /** Kod haritası (2026-11-27): bu koşu harita kapsamında mı (rötuş dışı), ajanın metni, haritadan yerleştirilenler. */
+  /** Kod haritası (2026-11-27): bu koşu harita kapsamında mı (rötuş dışı) ve ajanın metni. */
   private codeMapEligible = false;
   private agentText = "";
-  private mapPlaced: PlacedFile[] = [];
 
   private base: CodegenBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
@@ -226,7 +225,6 @@ export class Phase5Controller {
           gatePassed: result === "complete",
           gatesPassed: [`phase-5-complete${done?.detail ? `: ${done.detail}` : ""}`],
           agentText: this.agentText,
-          placed: this.mapPlaced,
         });
       }
       return result;
@@ -502,7 +500,6 @@ export class Phase5Controller {
         `${this.state.intent_summary ?? ""}\n\n${specText.slice(0, 3000)}`,
       );
       codeMapAddition = prep.promptAddition;
-      this.mapPlaced = prep.placed;
     }
     const initialUserMessage = isTweakMode
       ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. Backend paths are denied. Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`

@@ -44,7 +44,7 @@ import {
   changedFilesVsSnapshot,
   type FixSnapshot,
 } from "./fix-snapshot.js";
-import { CODE_MAP_REPORT_INSTRUCTION, prepareFromCodeMap, recordCodeMapAfterGate, type PlacedFile } from "./code-map.js";
+import { CODE_MAP_REPORT_INSTRUCTION, prepareFromCodeMap, recordCodeMapAfterGate } from "./code-map.js";
 import { decideRevertOrKeep } from "./revert-decision.js";
 import { parseFailures, computeRegression } from "./regression-diff.js";
 import {
@@ -567,9 +567,8 @@ export class Phase8Controller {
   /** YZLLM 2026-07-15 (faz-seviyesi döngü-kırıcı): gate-fail'de test takımı YEŞİL miydi (yalnız repro-first/AC gibi
    *  method-gate blokladı; testler kırmızı DEĞİL)? Döngü-kırıcı never-ask oto-kabul'ü yalnız true iken yapar. */
   public lastFailSuiteGreen?: boolean;
-  /** Kod haritası (2026-11-27): ajanın metni ve haritadan yerleştirilen dosyalar. */
+  /** Kod haritası (2026-11-27): ajanın metni (iş sonu code_map bildirimi). */
   private agentText = "";
-  private mapPlaced: PlacedFile[] = [];
   /** v15.7 (2026-05-27): Faz 7'den gelen pending migration not — initialMessage'a eklenir. */
   private pendingMigrationNote = "";
   /** v15.7 (2026-05-27): Phase 0 D2 backend-only fix routing'ten gelen plan. */
@@ -828,7 +827,6 @@ export class Phase8Controller {
         `${this.state.intent_summary ?? ""}\n\n${specText.slice(0, 3000)}`,
       );
       initialMessage += prep.promptAddition;
-      this.mapPlaced = prep.placed;
     }
 
     // YZLLM 2026-06-10: "silme kararı → önce yedek." TDD codegen ajanı dosya silebilir/üstüne yazabilir. Fix modu
@@ -1152,7 +1150,6 @@ export class Phase8Controller {
         gatePassed: true,
         gatesPassed: [`phase-8-complete: tdd=${tddOk} suite=${finalSuiteRun} debt=${techDebtCount} repro=${reproOk} ac=${acCoverageOk} ${gate.measureText}`],
         agentText: this.agentText,
-        placed: this.mapPlaced,
       });
       // Puan: ölçü × 100 − teknik borç cezası (decideTddGate; ölçü kapsamaysa kapsanan/toplam ölçüt).
       const score = gate.score;

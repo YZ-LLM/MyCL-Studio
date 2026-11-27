@@ -1,6 +1,6 @@
-// code-map — kod haritası (ilk sürüm; module-stock'un yerine). Kayıt doğrulaması (bağlama ile birebir geri çıkma), değişmez
-// sürümler, faz kapısı koşulu, haritadan yerleştirme (üzerine yazmaz, proje dışına yazmaz) ve isabet yokken/harita boşken
-// bugünkü akış.
+// code-map — kod haritası (ilk sürüm, sade: yalnız DOSYA ve SENARYO kaydı). Kayıt doğrulaması (bağlamalar kaynak
+// değerleriyle birebir geri çıkıyor), faz kapısı koşulu, başka boş projede arama + yerleştirme (üzerine yazmaz, proje
+// dışına ve gizli yola yazmaz), harita boşken / isabet yokken bugünkü akış, stack süzgeci.
 //
 // Gerçek `claude` çağrılmaz: ilgililik puanlaması ve bağlama değeri çağrısı taklit edilir. `MYCL_HOME` geçici klasöre
 // yönlendirilir (gerçek ~/.mycl'e dokunulmaz).
@@ -29,15 +29,13 @@ vi.mock("../src/ipc.js", async (orig) => ({
 vi.mock("../src/logger.js", () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 import {
-  bindingKeysForParts,
-  currentRecords,
   listRecords,
-  placeFileRecords,
+  placeScenarioFiles,
   prepareFromCodeMap,
-  readEvidence,
   recordCodeMapAfterGate,
   renderTemplate,
-  type CodeMapRecord,
+  type FileRecord,
+  type ScenarioRecord,
 } from "../src/code-map.js";
 import type { MyclConfig } from "../src/config.js";
 import type { State } from "../src/types.js";
@@ -78,157 +76,108 @@ const TODO_STORE = [
   "}",
   "",
 ].join("\n");
+const TODO_VIEW = "import { loadTodos } from './todoStore.js';\nexport const title = 'My Todos';\n";
 
 /** Ajanın iş sonu metni: serbest metin + son code_map bloğu. */
 function agentText(report: unknown): string {
   return `Done. All tests pass.\n\n${JSON.stringify({ kind: "code_map", ...(report as object) })}`;
 }
 
-const STORE_UNIT = {
-  key: "u1",
-  level: "file",
-  name: "Local storage store",
-  description: "Loads items from localStorage",
-  path: "src/todoStore.js",
-  bindings: [
-    { name: "entity", kind: "name", description: "item noun (lowercase)", value: "todo" },
-    { name: "Entity", kind: "name", description: "item noun (capitalised)", value: "Todo" },
-    { name: "storageKey", kind: "key", description: "localStorage key", value: "todos" },
-  ],
-  uses: [],
+const BINDINGS = [
+  { name: "entity", description: "item noun (lowercase)", value: "todo" },
+  { name: "Entity", description: "item noun (capitalised)", value: "Todo" },
+  { name: "storageKey", description: "localStorage key", value: "todos" },
+];
+const SCENARIO = {
+  name: "Persist list in browser",
+  description: "Loads and shows items stored in localStorage",
+  acceptance_criteria: ["AC1"],
+  files: ["src/todoStore.js", "src/todoView.js"],
+  bindings: BINDINGS,
 };
 
-async function seedProject(): Promise<void> {
-  await mkdir(join(proj, "src"), { recursive: true });
-  await writeFile(join(proj, "src", "todoStore.js"), TODO_STORE);
+async function seedFiles(root: string): Promise<void> {
+  await mkdir(join(root, "src"), { recursive: true });
+  await writeFile(join(root, "src", "todoStore.js"), TODO_STORE);
+  await writeFile(join(root, "src", "todoView.js"), TODO_VIEW);
 }
 
-/** Kaynak projede (A) kayıt al (varsayılan Faz 5). */
-async function seedMapFromProjectA(phase = 5, stack = "node-npm", name = "Persist list in browser"): Promise<void> {
+/** Kaynak projede (A) kayıt al. */
+async function seedMapFromProjectA(phase = 5, stack = "node-npm", name = SCENARIO.name): Promise<void> {
   const a = await mkdtemp(join(tmpdir(), "mycl-codemap-A-"));
   try {
-    await mkdir(join(a, "src"), { recursive: true });
-    await writeFile(join(a, "src", "todoStore.js"), TODO_STORE);
+    await seedFiles(a);
     await recordCodeMapAfterGate({
       state: state(a, stack),
       phase,
       gatePassed: true,
       gatesPassed: [`phase-${phase}-complete`],
-      agentText: agentText({ units: [STORE_UNIT], scenarios: [{ key: "s1", name, steps: ["u1"] }] }),
+      agentText: agentText({ frameworks: ["react"], scenarios: [{ ...SCENARIO, name }] }),
     });
   } finally {
     await rm(a, { recursive: true, force: true });
   }
 }
 
-describe("kayıt doğrulaması — kaynak değerleriyle birebir geri çıkma", () => {
-  it("kabul edilen kayıt kaynak değerleriyle yerine konunca kaynak metni ve yolu BİREBİR veriyor", async () => {
-    await seedProject();
+const hit = async (_m: string, _i: string, chunks: Array<{ id: string }>) => chunks.map((c) => ({ ...c, score: 9, reason: "x" }));
+const miss = async (_m: string, _i: string, chunks: Array<{ id: string }>) => chunks.map((c) => ({ ...c, score: 2, reason: "x" }));
+const bindingReply = {
+  ok: true,
+  text: JSON.stringify({ kind: "binding_values", values: { entity: "task", Entity: "Task", storageKey: "tasks" } }),
+  toolUses: [],
+  turns: 1,
+};
+
+describe("kayıt — senaryo, dosyaları ve bağlamalarıyla", () => {
+  it("bildirimdeki senaryo dosyaları + tek bağlama listesiyle kayda dönüşüyor; dosyalar kaynak değerleriyle BİREBİR geri çıkıyor", async () => {
+    await seedFiles(proj);
     const out = await recordCodeMapAfterGate({
       state: state(),
       phase: 5,
       gatePassed: true,
       gatesPassed: ["phase-5-complete: dev server ready"],
-      agentText: agentText({ frameworks: ["react"], units: [STORE_UNIT], scenarios: [{ key: "s1", name: "Persist list", steps: ["u1"] }] }),
+      agentText: agentText({ frameworks: ["react"], scenarios: [SCENARIO] }),
     });
     expect(out.rejected).toEqual([]);
-    expect(out.recorded).toHaveLength(2);
-    const rec = (await listRecords()).find((r) => r.level === "file")!;
-    const values = Object.fromEntries(rec.bindings.map((b) => [b.name, b.source_value]));
-    expect(renderTemplate(rec.template!, values)).toBe(TODO_STORE);
-    expect(renderTemplate(rec.path_template!, values)).toBe("src/todoStore.js");
-    // Uzun değer önce: 'todos' depolama anahtarı, 'Todo' fonksiyon adında; 'todo' yalnız yolda kalır.
-    expect(rec.template).toContain("{{mycl:storageKey}}");
-    expect(rec.template).toContain("load{{mycl:Entity}}s");
-    expect(rec.path_template).toBe("src/{{mycl:entity}}Store.js");
-    expect(rec.template).not.toContain("todo");
-    expect(rec.links_declared_by_agent).toBe(true);
-    const scen = (await listRecords()).find((r) => r.level === "scenario")!;
-    expect(scen.steps).toEqual([rec.id]);
-    expect(rec.used_by).toEqual([scen.id]);
+    expect(out.recorded).toHaveLength(3); // 2 dosya + 1 senaryo
+    const all = await listRecords();
+    const scen = all.find((r) => r.level === "scenario") as ScenarioRecord;
+    expect(scen.files).toHaveLength(2);
+    expect(scen.bindings.map((b) => b.name)).toEqual(["entity", "Entity", "storageKey"]);
+    expect(scen.acceptance_criteria).toEqual(["AC1"]);
+    expect(scen.provenance.gates_passed).toEqual(["phase-5-complete: dev server ready"]);
+    const values = Object.fromEntries(scen.bindings.map((b) => [b.name, b.source_value]));
+    // Sıra korunur: senaryodaki ilk dosya store.
+    const store = all.find((r) => r.id === scen.files[0]) as FileRecord;
+    expect(renderTemplate(store.template, values)).toBe(TODO_STORE);
+    expect(renderTemplate(store.path_template, values)).toBe("src/todoStore.js");
+    expect(store.path_template).toBe("src/{{mycl:entity}}Store.js");
   });
 
-  it("birebir geri çıkmayan / tutmayan birim reddediliyor ve nedeni yazılıyor", async () => {
-    await seedProject();
-    await writeFile(join(proj, "src", "tricky.js"), "const t = '{{mycl:entity}}';\n");
+  it("kapı geçmeden kayıt alınmıyor", async () => {
+    await seedFiles(proj);
+    const out = await recordCodeMapAfterGate({ state: state(), phase: 8, gatePassed: false, gatesPassed: [], agentText: agentText({ scenarios: [SCENARIO] }) });
+    expect(out.recorded).toEqual([]);
+    expect(await listRecords()).toEqual([]);
+  });
+
+  it("güvensiz yol ve gizli dosya reddediliyor, nedeni yazılıyor; geçerli dosya yine kaydediliyor", async () => {
+    await seedFiles(proj);
+    await writeFile(join(proj, ".env"), "SECRET=1\n");
+    await writeFile(join(proj, "src", "key.js"), "export const k = 'sk-ant-abcdefghijklmnop';\n");
     const out = await recordCodeMapAfterGate({
       state: state(),
       phase: 5,
       gatePassed: true,
-      gatesPassed: ["phase-5-complete"],
-      agentText: agentText({
-        units: [
-          { ...STORE_UNIT, key: "u1", bindings: [{ name: "entity", kind: "name", description: "x", value: "widget" }] },
-          { key: "u2", level: "file", name: "Tricky", path: "src/tricky.js", bindings: [{ name: "entity", kind: "name", description: "x", value: "t" }] },
-          { key: "u3", level: "symbol", name: "Loader", path: "src/todoStore.js", lines: [2, 4], first_line: "function wrong() {", bindings: [] },
-          { key: "u4", level: "file", name: "Env", path: ".env", bindings: [] },
-        ],
-        scenarios: [],
-      }),
+      gatesPassed: ["g"],
+      agentText: agentText({ scenarios: [{ ...SCENARIO, files: ["src/todoStore.js", ".env", "../outside.js", "CLAUDE.md", "src/key.js"] }] }),
     });
-    expect(out.recorded).toEqual([]);
-    const reasons = Object.fromEntries(out.rejected.map((r) => [r.key, r.reason]));
-    expect(reasons.u1).toMatch(/değeri metinde ve yolda geçmiyor/);
-    expect(reasons.u2).toMatch(/yer tutucu çakışması/);
-    expect(reasons.u3).toMatch(/ilk satırla tutmuyor/);
-    expect(reasons.u4).toMatch(/güvensiz ya da gizli/);
-    const ileti = chatMock.mock.calls.map((c) => String(c[1])).find((t) => t.includes("Kod haritası (Faz 5)"));
-    expect(ileti).toMatch(/Reddedilen 4/);
-  });
-});
-
-describe("değişmez kayıt — değişen sürüm yeni kayıt", () => {
-  it("aynı parçanın değişen sürümü YENİ kayıt açıyor; eski kayıt duruyor, yenisi onu gösteriyor", async () => {
-    await seedProject();
-    const report = agentText({ units: [STORE_UNIT], scenarios: [] });
-    const first = await recordCodeMapAfterGate({ state: state(), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: report });
-    const oldId = first.recorded[0]!;
-    await writeFile(join(proj, "src", "todoStore.js"), TODO_STORE.replace("'[]'", "'[]' /* default */"));
-    // Aynı faz (sürüm zinciri proje + faz içindedir).
-    const second = await recordCodeMapAfterGate({ state: state(), phase: 5, gatePassed: true, gatesPassed: ["g2"], agentText: report });
-    const newId = second.recorded[0]!;
-    expect(newId).not.toBe(oldId);
-    const all = await listRecords();
-    expect(all.find((r) => r.id === oldId)).toBeDefined(); // eski kayıt duruyor
-    const neu = all.find((r) => r.id === newId)!;
-    expect(neu.supersedes?.id).toBe(oldId);
-    expect(neu.supersedes?.reason).toMatch(/içerik değişti \(.*, Faz 5\)/);
-    expect(currentRecords(all).map((r) => r.id)).toEqual([newId]);
-  });
-
-  it("aynı içerik ikinci kez bildirilirse yeni kayıt açılmaz, kanıt satırı eklenir", async () => {
-    await seedProject();
-    const report = agentText({ units: [STORE_UNIT], scenarios: [] });
-    const a = await recordCodeMapAfterGate({ state: state(), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: report });
-    const b = await recordCodeMapAfterGate({ state: state(), phase: 8, gatePassed: true, gatesPassed: ["g2"], agentText: report });
-    expect(b.recorded).toEqual([]);
-    expect(b.reused).toEqual(a.recorded);
-    expect((await readEvidence()).filter((e) => e.record_id === a.recorded[0])).toHaveLength(2);
-  });
-});
-
-describe("faz kapısı koşulu", () => {
-  it("kapı geçmeden kayıt alınmıyor; geçince alınıyor ve kanıt satırı hangi kapının geçtiğini söylüyor", async () => {
-    await seedProject();
-    const report = agentText({ units: [STORE_UNIT], scenarios: [] });
-    const no = await recordCodeMapAfterGate({ state: state(), phase: 8, gatePassed: false, gatesPassed: [], agentText: report });
-    expect(no.recorded).toEqual([]);
-    expect(await listRecords()).toEqual([]);
-    const yes = await recordCodeMapAfterGate({
-      state: state(),
-      phase: 8,
-      gatePassed: true,
-      gatesPassed: ["phase-8-complete: tdd=true suite=true debt=0"],
-      agentText: report,
-    });
-    expect(yes.recorded).toHaveLength(1);
-    const ev = await readEvidence();
-    expect(ev).toHaveLength(1);
-    expect(ev[0]!.kind).toBe("gates-passed");
-    expect(ev[0]!.detail).toContain("phase-8-complete: tdd=true suite=true debt=0");
-    const rec = (await listRecords())[0]!;
-    expect(rec.provenance.gates_passed).toEqual(["phase-8-complete: tdd=true suite=true debt=0"]);
-    expect(rec.provenance.phase).toBe(8);
+    const reasons = out.rejected.map((r) => `${r.key} → ${r.reason}`).join("\n");
+    expect(reasons).toMatch(/\.env → güvensiz ya da gizli/);
+    expect(reasons).toMatch(/\.\.\/outside\.js → güvensiz ya da gizli/);
+    expect(reasons).toMatch(/CLAUDE\.md → güvensiz ya da gizli/);
+    expect(reasons).toMatch(/key\.js → .*gizli bilgi kayda girmez/);
+    expect(out.recorded).toHaveLength(2); // store + senaryo
   });
 
   it("ajan bildirim yapmadıysa kayıt yok ve bu görünür yazılıyor", async () => {
@@ -236,83 +185,51 @@ describe("faz kapısı koşulu", () => {
     expect(out.noReport).toBe(true);
     expect(chatMock.mock.calls.some((c) => String(c[1]).includes("iş sonu bildirimini (code_map) yapmadı"))).toBe(true);
   });
+
+  it("açılışta stack 'unknown', kayıt anında bildirim dosyası var → kayıt gerçek stack ile yazılır", async () => {
+    await seedFiles(proj);
+    await writeFile(join(proj, "package.json"), JSON.stringify({ name: "x" }));
+    const out = await recordCodeMapAfterGate({ state: state(proj, "unknown"), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: agentText({ scenarios: [SCENARIO] }) });
+    expect(out.recorded.length).toBeGreaterThan(0);
+    expect((await listRecords()).every((r) => r.stack === "node-npm")).toBe(true);
+  });
 });
 
-describe("kod yazmadan önce — haritadan yerleştirme", () => {
-  it("isabet varken dosya yerleştiriliyor (bağlama değerleriyle), ajana toplu inceleme talimatı veriliyor", async () => {
+describe("kod yazmadan önce — başka projede arama ve yerleştirme", () => {
+  it("başka bir boş projede aranıp yerleştiriliyor; ajana toplu inceleme talimatı veriliyor", async () => {
     await seedMapFromProjectA();
-    scoreCliMock.mockImplementation(async (_m: string, _i: string, chunks: Array<{ id: string }>) =>
-      chunks.map((c) => ({ ...c, score: 9, reason: "same use case" })),
-    );
-    runCliMock.mockResolvedValue({
-      ok: true,
-      text: JSON.stringify({ kind: "binding_values", values: { entity: "task", Entity: "Task", storageKey: "tasks" } }),
-      toolUses: [],
-      turns: 1,
-    });
+    scoreCliMock.mockImplementation(hit);
+    runCliMock.mockResolvedValue(bindingReply);
     const res = await prepareFromCodeMap(state(), config, 5, "A task list stored in the browser");
-    expect(res.placed.map((p) => p.path)).toEqual(["src/taskStore.js"]);
-    const text = await readFile(join(proj, "src", "taskStore.js"), "utf8");
-    expect(text).toBe(TODO_STORE.split("todo").join("task").split("Todo").join("Task"));
-    expect(res.promptAddition).toMatch(/review ALL placed files together/);
-    expect(chatMock.mock.calls.some((c) => String(c[1]).includes("1 dosya yerleştirildi"))).toBe(true);
+    expect(res.placed.map((p) => p.path)).toEqual(["src/taskStore.js", "src/taskView.js"]);
+    const store = await readFile(join(proj, "src", "taskStore.js"), "utf8");
+    expect(store).toBe(TODO_STORE.split("todo").join("task").split("Todo").join("Task"));
+    expect(await readFile(join(proj, "src", "taskView.js"), "utf8")).toBe(
+      "import { loadTasks } from './taskStore.js';\nexport const title = 'My Tasks';\n",
+    );
+    expect(res.promptAddition).toMatch(/review ALL of them together/);
+    expect(chatMock.mock.calls.some((c) => String(c[1]).includes("2 dosya yerleştirildi"))).toBe(true);
   });
 
   it("var olan dosyanın üzerine yazmıyor", async () => {
     await seedMapFromProjectA();
-    scoreCliMock.mockImplementation(async (_m: string, _i: string, chunks: Array<{ id: string }>) =>
-      chunks.map((c) => ({ ...c, score: 9, reason: "x" })),
-    );
-    runCliMock.mockResolvedValue({
-      ok: true,
-      text: JSON.stringify({ kind: "binding_values", values: { entity: "task", Entity: "Task", storageKey: "tasks" } }),
-      toolUses: [],
-      turns: 1,
-    });
+    scoreCliMock.mockImplementation(hit);
+    runCliMock.mockResolvedValue(bindingReply);
     await mkdir(join(proj, "src"), { recursive: true });
     await writeFile(join(proj, "src", "taskStore.js"), "// mine\n");
     const res = await prepareFromCodeMap(state(), config, 5, "task list");
-    expect(res.placed).toEqual([]);
+    expect(res.placed.map((p) => p.path)).toEqual(["src/taskView.js"]);
     expect(await readFile(join(proj, "src", "taskStore.js"), "utf8")).toBe("// mine\n");
   });
 
-  it("proje dışına ve güvensiz yola yazmıyor", async () => {
-    const outside = { id: "file-x", level: "file", path_template: "../escape.js", template: "x", bindings: [] } as unknown as CodeMapRecord;
-    const env = { id: "file-y", level: "file", path_template: ".env", template: "SECRET=1", bindings: [] } as unknown as CodeMapRecord;
-    const res = await placeFileRecords(proj, [outside, env], {});
+  it("proje dışına ve gizli/talimat yoluna yazmıyor", async () => {
+    const mk = (path_template: string): FileRecord =>
+      ({ id: `file-${path_template}`, level: "file", path_template, template: "x" }) as unknown as FileRecord;
+    const res = await placeScenarioFiles(proj, [mk("../escape.js"), mk(".env"), mk("CLAUDE.md")], {});
     expect(res.placed).toEqual([]);
-    expect(res.skipped.map((s) => s.reason)).toEqual(["güvensiz ya da gizli yol", "güvensiz ya da gizli yol"]);
+    expect(res.skipped.map((s) => s.reason)).toEqual(["güvensiz ya da gizli yol", "güvensiz ya da gizli yol", "güvensiz ya da gizli yol"]);
     expect(existsSync(join(proj, "..", "escape.js"))).toBe(false);
     expect(existsSync(join(proj, ".env"))).toBe(false);
-  });
-
-  it("başka fazın kaydı yerleştirilmez (Faz 8 arka uç kaydı Faz 5'e girmez); projenin kendi kaydı aranmaz", async () => {
-    await seedMapFromProjectA(8);
-    const res5 = await prepareFromCodeMap(state(), config, 5, "A task list stored in the browser");
-    expect(res5).toEqual({ promptAddition: "", placed: [] });
-    expect(scoreCliMock).not.toHaveBeenCalled();
-    // Kendi projesi: proj'de Faz 5 kaydı al, aynı projede Faz 5 araması onu görmez.
-    await seedProject();
-    await recordCodeMapAfterGate({
-      state: state(),
-      phase: 5,
-      gatePassed: true,
-      gatesPassed: ["g"],
-      agentText: agentText({ units: [STORE_UNIT], scenarios: [{ key: "s1", name: "Own", steps: ["u1"] }] }),
-    });
-    expect(await prepareFromCodeMap(state(), config, 5, "todo")).toEqual({ promptAddition: "", placed: [] });
-    expect(scoreCliMock).not.toHaveBeenCalled();
-  });
-
-  it("aynı adlı bağlama parçalar arasında farklı kaynak değer taşıyorsa ayrı anahtar alır", () => {
-    const a = { id: "a", bindings: [{ name: "name", kind: "name", description: "list", source_value: "TodoList" }] } as unknown as CodeMapRecord;
-    const b = { id: "b", bindings: [{ name: "name", kind: "name", description: "item", source_value: "TodoItem" }] } as unknown as CodeMapRecord;
-    const c = { id: "c", bindings: [{ name: "name", kind: "name", description: "list", source_value: "TodoList" }] } as unknown as CodeMapRecord;
-    const { bindings, keyOf } = bindingKeysForParts([a, b, c]);
-    expect(bindings.map((x) => x.name)).toEqual(["name", "name_2"]);
-    expect(keyOf.get("a")!.get("name")).toBe("name");
-    expect(keyOf.get("b")!.get("name")).toBe("name_2");
-    expect(keyOf.get("c")!.get("name")).toBe("name");
   });
 
   it("harita boşken akış bugünküyle aynı: puanlama yok, dosya yok, ek talimat yok", async () => {
@@ -324,72 +241,80 @@ describe("kod yazmadan önce — haritadan yerleştirme", () => {
 
   it("isabet yokken akış bugünküyle aynı: dosya yok, ek talimat yok, bağlama çağrısı yok", async () => {
     await seedMapFromProjectA();
-    scoreCliMock.mockImplementation(async (_m: string, _i: string, chunks: Array<{ id: string }>) =>
-      chunks.map((c) => ({ ...c, score: 2, reason: "unrelated" })),
-    );
+    scoreCliMock.mockImplementation(miss);
     const res = await prepareFromCodeMap(state(), config, 5, "A weather dashboard");
     expect(res).toEqual({ promptAddition: "", placed: [] });
     expect(runCliMock).not.toHaveBeenCalled();
     expect(existsSync(join(proj, "src"))).toBe(false);
   });
-});
 
-// CANLI KANIT (ekransız deneme koşusu 23, 2026-11-27): yeni projede açılışta stack "unknown"; Faz 5 başında arama ve Faz 5
-// sonunda kayıt "stack bilinmiyor" diye atlandı, oysa Faz 5 sonunda dosyalar yerindeydi (saniyeler sonra node-npm tespit edildi).
-describe("stack bilinmeyen (yeni) proje", () => {
-  const hit = async (_m: string, _i: string, chunks: Array<{ id: string }>) => chunks.map((c) => ({ ...c, score: 9, reason: "x" }));
-  const bindingReply = {
-    ok: true,
-    text: JSON.stringify({ kind: "binding_values", values: { entity: "task", Entity: "Task", storageKey: "tasks" } }),
-    toolUses: [],
-    turns: 1,
-  };
-
-  it("açılışta stack 'unknown', kayıt anında bildirim dosyası var → kayıt gerçek stack ile yazılır", async () => {
-    await seedProject();
-    await writeFile(join(proj, "package.json"), JSON.stringify({ name: "x" }));
-    const out = await recordCodeMapAfterGate({
-      state: state(proj, "unknown"),
-      phase: 5,
-      gatePassed: true,
-      gatesPassed: ["phase-5-complete"],
-      agentText: agentText({ units: [STORE_UNIT], scenarios: [] }),
-    });
-    expect(out.recorded).toHaveLength(1);
-    expect((await listRecords())[0]!.stack).toBe("node-npm");
+  it("başka fazın kaydı yerleştirilmez; projenin kendi kaydı aranmaz", async () => {
+    await seedMapFromProjectA(8);
+    expect(await prepareFromCodeMap(state(), config, 5, "task list")).toEqual({ promptAddition: "", placed: [] });
+    await seedFiles(proj);
+    await recordCodeMapAfterGate({ state: state(), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: agentText({ scenarios: [{ ...SCENARIO, name: "Own" }] }) });
+    expect(await prepareFromCodeMap(state(), config, 5, "todo")).toEqual({ promptAddition: "", placed: [] });
+    expect(scoreCliMock).not.toHaveBeenCalled();
   });
 
-  it("boş proje, stack 'unknown', başka projeden senaryo var → bütün stack'lerde aranır, isabet yerleştirilir", async () => {
+  it("boş proje, stack 'unknown' → bütün stack'lerde aranır, puanlayıcı adayın stack'ini görür", async () => {
     await seedMapFromProjectA(5, "node-npm");
     scoreCliMock.mockImplementation(hit);
     runCliMock.mockResolvedValue(bindingReply);
     const res = await prepareFromCodeMap(state(proj, "unknown"), config, 5, "A task list stored in the browser");
-    expect(res.placed.map((p) => p.path)).toEqual(["src/taskStore.js"]);
-    // Puanlayıcı adayın stack'ini görür.
+    expect(res.placed).toHaveLength(2);
     const chunks = scoreCliMock.mock.calls[0]![2] as Array<{ text: string }>;
     expect(chunks[0]!.text).toContain("Stack: node-npm");
-    expect(chatMock.mock.calls.some((c) => String(c[1]).includes("stack bilinmiyor, proje boş: bütün stack'lerde"))).toBe(true);
   });
 
   it("stack 'unknown' ama projede kod var → aranmaz, görünür ileti", async () => {
     await seedMapFromProjectA(5, "node-npm");
-    await seedProject(); // src/ var → isExistingProject true
-    const res = await prepareFromCodeMap(state(proj, "unknown"), config, 5, "task list");
-    expect(res).toEqual({ promptAddition: "", placed: [] });
+    await seedFiles(proj);
+    expect(await prepareFromCodeMap(state(proj, "unknown"), config, 5, "task list")).toEqual({ promptAddition: "", placed: [] });
     expect(scoreCliMock).not.toHaveBeenCalled();
     expect(chatMock.mock.calls.some((c) => String(c[1]).includes("stack'i bilinmiyor ve projede kod var — aranmadı"))).toBe(true);
   });
 
-  it("REGRESYON: stack bilinen projede yalnız aynı stack'in kayıtları aranır", async () => {
+  it("stack bilinen projede yalnız aynı stack'in kayıtları aranır", async () => {
     await seedMapFromProjectA(5, "python-pip", "Python store");
     await seedMapFromProjectA(5, "node-npm", "Node store");
-    scoreCliMock.mockImplementation(async (_m: string, _i: string, chunks: Array<{ id: string }>) =>
-      chunks.map((c) => ({ ...c, score: 2, reason: "x" })),
-    );
+    scoreCliMock.mockImplementation(miss);
     await prepareFromCodeMap(state(proj, "node-npm"), config, 5, "store");
     const chunks = scoreCliMock.mock.calls[0]![2] as Array<{ text: string }>;
     expect(chunks).toHaveLength(1);
     expect(chunks[0]!.text).toContain("Node store");
     expect(chunks[0]!.text).not.toContain("Stack:");
+  });
+
+  it("aynı proje aynı adlı senaryoyu yeniden kaydederse en yenisi aranır; başka projenin aynı adlısı ayrı kalır", async () => {
+    const a = await mkdtemp(join(tmpdir(), "mycl-codemap-A-"));
+    try {
+      await seedFiles(a);
+      const rec = () =>
+        recordCodeMapAfterGate({ state: state(a), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: agentText({ scenarios: [SCENARIO] }) });
+      const first = await rec();
+      await new Promise((r) => setTimeout(r, 5)); // created_at farklı olsun
+      await writeFile(join(a, "src", "todoView.js"), TODO_VIEW.replace("My Todos", "All Todos")); // içerik değişti
+      const second = await rec();
+      const ids = (o: { recorded: string[] }) => o.recorded.filter((id) => id.startsWith("scenario-"));
+      expect(ids(second)[0]).not.toBe(ids(first)[0]);
+      // Başka proje, aynı ad, farklı içerik (aynı içerik aynı kimliği alır, ayrı kayıt olmaz).
+      const b = await mkdtemp(join(tmpdir(), "mycl-codemap-B-"));
+      try {
+        await seedFiles(b);
+        await writeFile(join(b, "src", "todoView.js"), TODO_VIEW.replace("My Todos", "Other Todos"));
+        await recordCodeMapAfterGate({ state: state(b), phase: 5, gatePassed: true, gatesPassed: ["g"], agentText: agentText({ scenarios: [SCENARIO] }) });
+      } finally {
+        await rm(b, { recursive: true, force: true });
+      }
+      scoreCliMock.mockImplementation(miss);
+      await prepareFromCodeMap(state(), config, 5, "store");
+      const chunkIds = (scoreCliMock.mock.calls[0]![2] as Array<{ id: string }>).map((c) => c.id);
+      expect(chunkIds).toContain(ids(second)[0]); // A'nın en yenisi
+      expect(chunkIds).not.toContain(ids(first)[0]); // A'nın eskisi değil
+      expect(chunkIds).toHaveLength(2); // + öteki projenin aynı adlısı
+    } finally {
+      await rm(a, { recursive: true, force: true });
+    }
   });
 });
