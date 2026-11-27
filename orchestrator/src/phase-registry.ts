@@ -419,7 +419,8 @@ export const PHASE_SPECS: Partial<Record<PhaseId, PhaseSpec>> = {
         {
           // Güvenlik-baseline (Unit 1): CSP değerlendirme (Google csp_evaluator —
           // Chrome "CSP Evaluator" extension'ının headless/otomatik karşılığı).
-          // Web-UI olmayan projede self-skip; kaynak-tabanlı (index.html meta);
+          // Web-UI olmayan projede self-skip; kaynak-tabanlı (index.html meta + sunucu ayar dosyaları, ikisi
+          // birden — 2026-11-27); statik uygulamanın meta politikasında `script-src 'self'` serbest;
           // statik bulunamayan CSP → görünür atlama (false-fail YOK). MUTLAK yol:
           // runner cwd=hedef-proje, script csp_evaluator'ı orchestrator/node_modules'tan
           // import eder. Eşik severity<=40 blocking ("MEDIUM da bloklasın" — 2026-06-04).

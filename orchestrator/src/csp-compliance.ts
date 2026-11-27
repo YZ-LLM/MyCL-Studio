@@ -14,10 +14,18 @@ import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join, extname, relative } from "node:path";
 import { log } from "./logger.js";
 
-/** unsafe-* İÇERMEYEN katı baseline CSP. Faz 5 kodu zaten buna uyacak şekilde üretilir. */
+/**
+ * unsafe-* İÇERMEYEN katı baseline CSP. Faz 5 kodu zaten buna uyacak şekilde üretilir. Tek tüketici
+ * `ensureCspMeta`: giriş sayfasına META olarak yazılır.
+ * 2026-11-27: `frame-ancestors 'none'` ÇIKARILDI — meta ile verilince tarayıcı yok sayar, yalnız konsola
+ * "directive 'frame-ancestors' is ignored when delivered via a <meta> element" yazar (koşu 6, Faz 6 kaydı;
+ * MDN: "not supported in the <meta> element"). Hiçbir koruma kaybolmadı; çerçeveleme koruması barındırma
+ * tarafında yanıt başlığıyla verilir. `script-src 'self'` kalır: statik uygulamanın meta politikasında
+ * serbest (karar 2026-11-27, csp-check.mjs).
+ */
 export const STRICT_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+  "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'";
 
 export interface CspViolation {
   file: string;

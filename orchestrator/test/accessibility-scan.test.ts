@@ -79,10 +79,11 @@ describe("formatA11yReport", () => {
 // CANLI KANIT (ekransız deneme koşusu, 2026-11-27): MyCL'in kendi istediği katı politikayı taşıyan
 // sayfada tarama `page.addScriptTag` satır içi betik eklediği için hiç koşamadı
 // ("Executing inline script violates ... 'script-src 'self''") ve `a11y-scan-skipped` yazıldı.
-// Politika, o koşuda üretilen `index.html` içindeki politikanın aynısıdır.
+// Politika, o koşuda üretilen `index.html` içindeki politikanın aynısıdır; 2026-11-27'den beri `STRICT_CSP` gibi
+// `frame-ancestors` içermez (meta ile verilince tarayıcı zaten yok sayar).
 const KATI_POLITIKA =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
-  "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+  "connect-src 'self'; object-src 'none'; base-uri 'self'";
 
 /** Bilinen bir ihlal (alt metni olmayan resim) taşıyan sayfa: taramanın GERÇEKTEN koştuğunun kanıtı. */
 function denemeSayfasi(metaIle: boolean): string {

@@ -24,6 +24,8 @@ const DENY = new Set([
 ]);
 // Üstte tanımlı olmalı: aşağıdaki ana akış scanForHints'i bu satırdan SONRA, fonksiyon tanımından ÖNCE çağırır.
 const TEST_DIRS = new Set(["test", "tests", "__tests__", "spec", "e2e", "__mocks__"]);
+// "Projenin kendi sunucusu var mı" ölçütü. csp-check.mjs `BACKEND` ile AYNI olmalı (statik uygulamada
+// `script-src 'self'` serbest — karar 2026-11-27); eşitlik test/csp-check.test.ts'te sınanır.
 const BACKEND = ["express", "fastify", "koa", "@nestjs/core", "hapi", "@hapi/hapi", "next"];
 const HELMET = ["helmet", "@fastify/helmet", "koa-helmet"];
 // Manuel header ayarı / helmet kullanımı işaretleri (kaynak taramada).

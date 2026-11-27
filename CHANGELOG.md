@@ -1,5 +1,63 @@
 ## 2026-11-27
 
+- **fix(Faz 13 CSP): politika denetimi giriş sayfasındaki politikayı TAM okusun; statik uygulamada `script-src 'self'`
+  serbest (karar: Ümit, 2026-11-27, "statik uygulamalarda kalksın").** Danışman `00b3270` üzerinde denetimi örnek
+  sayfalarla elle çalıştırdı: meta değeri `content=["']([^"']+)["']` ile okunuyordu, değer ilk tırnakta kesiliyordu
+  (okunan metin `default-src `). Tırnaklı anahtar sözcükle başlayan her meta politikası sahte "Missing object-src" ile
+  reddediliyordu (ajan düzeltemezdi, yönerge zaten vardı); `'unsafe-inline'` ve `*` görülmüyordu; `content` önce
+  yazılınca politika hiç bulunmuyordu ("görünür atlama", çıkış 0). Var olan tek meta testi tırnaksız `default-src *`
+  kullandığı için hatayı gizliyordu.
+  **Okuma (`csp-check.mjs`):** sayfadaki HER `<meta` başlangıcı okunur, yorumun, `<script>`/`<style>`/`<template>`
+  içinin içinde olsa bile; her biri etiket belirteçleme kurallarıyla (`readTag`) ayrıştırılır: değer kendi açılış
+  tırnağının eşine kadar (tırnaksız değerdeki `'` düz karakter), öznitelik sırası ve büyük küçük harf fark etmez,
+  noktalı virgülle biten sayısal karakter göndermeleri ve beş temel ad TEK GEÇİŞTE çözülür (tarayıcı gibi; geçersiz
+  kod noktası U+FFFD, denetim çökmez). Politikada çözülmemiş ya da çözülmüş bir `&`, ASCII dışı ya da denetim karakteri
+  (bölünmez boşluk, `\v` gibi) kalırsa okunamadı sayılır: tarayıcı yalnız ASCII boşlukta ayırır, değerlendirici JS `\s`
+  ile ayırır. Tarama iş sınırlı (kapanmayan çok sayıda `<meta` karesel süre harcıyordu); aşılırsa görünür hata, çıkış 1.
+  Değerlendiricinin geçersiz kaynakta attığı istisna (ör. `img-src [`) artık yığın izi değil görünür gerekçeli engel. Yalnız
+  `http-equiv` değeri tam olarak `content-security-policy` olan öğe politikadır (`…-Report-Only` meta ile
+  verilemez). Birden çok CSP meta öğesi varsa hepsi değerlendirilir (eskiden yalnız ilki). CSP meta öğesi var ama
+  içeriği okunamıyorsa (boş, yok, çözülemeyen karakter göndermesi taşıyor, etiket kapanmıyor) ya da giriş sayfası
+  okunamıyorsa atlama değil görünür hata, çıkış 1 (kural 4). Okunan politika metni çıktıya aynen basılır.
+  **Neden içerik atlanmıyor (tam inceleme, iki tur):** ilk sürüm düzenli ifadeyle yorum siliyordu; ikinci sürüm
+  tarayıcının belirteçleme kurallarının bir parçasını taklit ediyordu. Çürütme turları ikisinde de tarayıcının
+  UYGULADIĞI zayıf bir meta'yı gizleyen girdiler buldu: kısa yorum `<!-->`, tırnaksız değerdeki `'`, betik içinde
+  çift kaçış, geçersiz bitiş etiketi `</ …>`, `<template>` içi SVG `<style>` ve CDATA; ayrıca çözülmeyen ad
+  göndermeleri (`&ast;` → `*`). Üçüncü tur, iki aşamalı çözmeyi (`&#38;apos;`), Unicode boşlukları (`&#xA0;`) ve
+  karesel taramayı buldu; üçü de kapatıldı. Tarayıcıyı birebir taklit etmek yerine yön değiştirildi: hiçbir şey atlanmaz, uygulanan
+  bir meta gözden kaçamaz; tarayıcının uygulamadığı bir meta (yorumda, `<template>`ta, gövdede) da değerlendirilebilir,
+  bu yalnız fazladan sıkıdır ve 2026-11-27 öncesi davranış da buydu. Çözülemeyen karakter göndermesi okunamadı sayılır
+  (fail-closed). Bütün bu girdiler testte.
+  **Statik ölçütü:** `headers-check.mjs` ile aynı `BACKEND` paket listesi; yoksa (package.json yoksa da) statik.
+  İki `.mjs` ayrı süreç olarak koşar ve içe aktarılınca çalışıp çıkar; ortak dosya eklenmedi (kural 15), iki kopyanın
+  eşitliği `test/csp-check.test.ts`'te sınanıyor.
+  **`'self'` kuralı:** meta'dan okunan politika + statik proje → `'self'` engellemez, `csp-check: [uyarı] script-src
+  'self' statik uygulamada serbest (karar 2026-11-27)` basılır; öteki engelleyen bulgular (`severity <= 40`) aynen
+  engeller. Meta + sunucu paketi var → engel aynen, ileti nedeni söylüyor. Sunucu ayar dosyasından okunan politika ve
+  `--policy` yolu → engel aynen. Meta engelsiz geçse bile sunucu ayar dosyaları da değerlendiriliyor (eskiden meta
+  bulununca süreç bitiyordu; yasak sunucu tarafında bir meta eklenerek atlatılabilirdi). İleti artık statik için
+  hash önermiyor.
+  **`STRICT_CSP`:** `frame-ancestors 'none'` çıktı (meta ile verilince tarayıcı yok sayar, yalnız konsola ileti
+  yazar; koşu 6 Faz 6 kaydı). `script-src 'self'` kaldı. Testlerdeki iki yerel kopya da güncellendi.
+  **Şablon (`phase-05-ui.md`):** statik = projenin kendi sunucu programı yok, giriş sayfası dosya olarak
+  yayımlanıyor (paketleyicinin geliştirme sunucusu sayılmaz); `'self'` kuralı ikiye ayrıldı (sunucusu olan: aynen,
+  nonce + `'strict-dynamic'`; statik: `script-src 'self'`, hash isteği kalktı); temel politika iki örnek (başlıkla
+  verilen bugünkü metin; meta ile verilen, `frame-ancestors` yok). Geliştirmede gevşetme yasağı aynen.
+  **Değişmeyenler (kural 14):** `--policy` ile `'self'` hâlâ çıkış 1 (`test/csp-check.test.ts` eski testi aynen);
+  sunucu ayarından okunan `'self'` hâlâ 1; meta'da `'unsafe-inline'`, `*` ve öteki engelleyen bulgular artık GERÇEK
+  gerekçeyle 1 (eskiden yanlış gerekçeyle 1); `frame-ancestors`'ın çıkması korumayı kaldırmıyor (meta'da tarayıcı
+  zaten yok sayıyordu); Faz 5'in `phase-5-csp-meta-added` yolu ve iletisi aynı (`ensureCspMeta` yalnız sabiti
+  kullanıyor). **Sıkılaşan birleşimler:** meta temiz + sunucu ayarı kusurlu (eskiden 0, artık 1); içeriği okunamayan
+  CSP meta öğesi (eskiden sunucu ayarına ya da atlamaya düşüyordu, artık 1); ikinci bir CSP meta öğesindeki kusur;
+  `content` önce yazılmış meta (eskiden hiç bulunmuyordu).
+  **Yeni false fail olabilecek tek birleşim:** `&amp;` gibi zararsız bir ad göndermesi taşıyan CSP meta artık okunamadı
+  sayılıyor (çıkış 1, ileti nedeni söylüyor). Yeni modül yok.
+  **Bilinen sınırlar (çözülmedi):** `package.json` olmayan projede sunucu varlığı anlaşılamıyor (`headers-check.mjs`
+  ile aynı sınır); böyle bir projede meta ile verilen politika statik sayılır. Sunucu paketi olan ama sayfası dosya
+  olarak sunulan uygulamada (tek sayfa uygulama + API) yasak duruyor; `ensureCspMeta` bu projelere de `'self'`
+  yazıyor ve Faz 13 reddedecek — ayrı karar.
+  Testler `test/csp-check.test.ts` içinde. Test ve kontrol koşturulmadı, yalnız derlendi (`.mjs` için `node --check`).
+
 - **fix(araç politikası): yalnız metin işleyen yardımcı çağrılar kendi sistem istemiyle koşsun ve girdilerini görev
   sanmasın.** Ekransız deneme koşuları 6, 7 ve 13'te ilgililik sınıflandırıcısı puan yerine işe girişme metni üretti
   ("Proje durumunu kontrol edeyim…", "Phase 5'e geçmeli ve todo app'i implementation yapmalıyım"); yaklaşık on

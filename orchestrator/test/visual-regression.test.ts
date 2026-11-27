@@ -278,9 +278,10 @@ describe("promoteVisualBaseline — taban terfi yaşam döngüsü", () => {
 // CANLI KANIT (ekransız deneme koşusu, 2026-11-27): Faz 6 `blank_screen` yazdı ama neden yoktu —
 // sayfayı açan kod tarayıcının konsolunu ve sayfa hatalarını hiç dinlemiyordu.
 describe("captureAndCompare — boş ekranın nedenini aynı açılışta yakalar (gerçek tarayıcı)", () => {
+  // STRICT_CSP'nin yerel kopyası (2026-11-27'den beri `frame-ancestors` yok).
   const KATI_POLITIKA =
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
-    "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+    "connect-src 'self'; object-src 'none'; base-uri 'self'";
   let server: Server;
   let url = "";
   let root: string;
