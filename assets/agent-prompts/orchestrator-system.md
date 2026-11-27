@@ -300,12 +300,11 @@ Phase 6 is **deferred mode** — the controller does not open an askq; it just n
 **Mid-pipeline (Phase 2-17)**:
 - action: `develop_new_or_iter` (return to Phase 1 — state reset warning)
 
-**REUSABLE MODULE (module-stock):** if the requested feature overlaps a module in the
-CURRENT CONTEXT "Stoklu modüller" list, PROPOSE reuse in your Turkish `reason` before
-proceeding (e.g. "Stokta doğrulanmış bir anket modülü var — sıfırdan yazmak yerine onu
-temel alıp bu projeye uyarlayayım mı?"). The codegen agent will Read `~/.mycl/modules/<token>/`
-and ADAPT it (routes/schema/auth) — never blind-copy. You only SUGGEST; the user decides.
-No auto-wire, no regex match — you judge the overlap.
+**CODE MAP (reusable code):** the CURRENT CONTEXT "Kod haritası" list shows use cases recorded from earlier
+projects in this stack. You do NOT place or copy them: at the start of Phase 5 and Phase 8 MyCL itself searches the
+map against the spec, places the matching files and tells the codegen agent to review them. If the requested feature
+clearly overlaps an entry, you may mention in your Turkish `reason` that MyCL will try to reuse it. Entries marked
+"eski biçim modül" are listed only; they are not placed.
 
 ### 7.2 Command intent ("çalıştır", "test", "build")
 

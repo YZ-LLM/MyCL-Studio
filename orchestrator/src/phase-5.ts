@@ -12,6 +12,7 @@ import { basename, join } from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { appendAudit, readAuditLog, readAuditLogTail } from "./audit.js";
+import { CODE_MAP_REPORT_INSTRUCTION, prepareFromCodeMap, recordCodeMapAfterGate, type PlacedFile } from "./code-map.js";
 import { currentSpecPath, currentSpecRelPath } from "./devs-paths.js";
 import { createCodegenBackend, type CodegenBackend } from "./codegen/backend.js";
 import { scanCspViolations, ensureCspMeta } from "./csp-compliance.js";
@@ -182,6 +183,10 @@ export class Phase5Controller {
   private tweakWriteErrors = 0;
   /** Kullanıcı rötuşundan ÖNCE alınan kaynak kopyası (yoksa null); koşu bitince silinir. */
   private tweakProbeDir: string | null = null;
+  /** Kod haritası (2026-11-27): bu koşu harita kapsamında mı (rötuş dışı), ajanın metni, haritadan yerleştirilenler. */
+  private codeMapEligible = false;
+  private agentText = "";
+  private mapPlaced: PlacedFile[] = [];
 
   private base: CodegenBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
@@ -209,7 +214,22 @@ export class Phase5Controller {
 
   async run(): Promise<"complete" | "fail" | "no_change"> {
     try {
-      return await this.runInner();
+      const result = await this.runInner();
+      // Kod haritası: Faz 5'in KENDİ kapısı geçince (complete) ajanın iş sonu bildirimi kayda dönüşür. Rötuşta yok.
+      // Hızlandırıcıdır, kapı değil: hatası fazı düşürmez (recordCodeMapAfterGate throw etmez, görünür yazar).
+      if (this.codeMapEligible) {
+        const tail = await readAuditLogTail(this.state.project_root, 200).catch(() => []);
+        const done = [...tail].reverse().find((e) => e.phase === 5 && e.event === "phase-5-complete");
+        await recordCodeMapAfterGate({
+          state: this.state,
+          phase: 5,
+          gatePassed: result === "complete",
+          gatesPassed: [`phase-5-complete${done?.detail ? `: ${done.detail}` : ""}`],
+          agentText: this.agentText,
+          placed: this.mapPlaced,
+        });
+      }
+      return result;
     } finally {
       // Rötuş yoklama kopyası yalnız bu koşunun hükmü içindir; hangi yoldan çıkılırsa çıkılsın silinir.
       const probe = this.tweakProbeDir;
@@ -468,9 +488,25 @@ export class Phase5Controller {
       }
     }
 
+    // Kod haritası (2026-11-27): rötuş dışında, kod yazmadan ÖNCE haritaya bak. İsabet yoksa promptAddition "" →
+    // bugünkü akış birebir. İsabet varsa MyCL dosyaları yerleştirir, ajana toplu inceleme talimatı eklenir.
+    let codeMapAddition = "";
+    if (!isTweakMode) {
+      this.codeMapEligible = true;
+      systemPrompt += CODE_MAP_REPORT_INSTRUCTION;
+      const specText = await readFile(specPath, "utf-8").catch(() => "");
+      const prep = await prepareFromCodeMap(
+        this.state,
+        this.config,
+        5,
+        `${this.state.intent_summary ?? ""}\n\n${specText.slice(0, 3000)}`,
+      );
+      codeMapAddition = prep.promptAddition;
+      this.mapPlaced = prep.placed;
+    }
     const initialUserMessage = isTweakMode
       ? `UI tweak requested: ${tweakDescEn}\n\nApply only the requested change. Do NOT rewrite the whole UI. Backend paths are denied. Edit the minimal set of files; the dev server is already running (HMR will refresh the browser). Stop when \`${buildCmd}\` succeeds.`
-      : `Begin Phase 5: build the UI. Backend paths are denied. Write all UI files AND a complete package.json — EVERY library you import MUST be listed in "dependencies" (or "devDependencies"), with the pipeline scripts from the spec. Do NOT run \`${installCmd}\`, do NOT run a build, do NOT start the dev server, do NOT touch node_modules — MyCL installs dependencies and launches the dev server itself after you stop. Stop when every file is written and package.json is complete.${designInjection}`;
+      : `Begin Phase 5: build the UI. Backend paths are denied. Write all UI files AND a complete package.json — EVERY library you import MUST be listed in "dependencies" (or "devDependencies"), with the pipeline scripts from the spec. Do NOT run \`${installCmd}\`, do NOT run a build, do NOT start the dev server, do NOT touch node_modules — MyCL installs dependencies and launches the dev server itself after you stop. Stop when every file is written and package.json is complete.${designInjection}${codeMapAddition}`;
 
     // YZLLM 2026-06-10: "silme kararı verirse önce yedek al." Codegen ajanı dosya silebilir/üstüne yazabilir
     // (supersession). Tweak modu zaten debug-fix yolunda snapshot'landı; normal codegen'de burada snapshot al →
@@ -510,6 +546,10 @@ export class Phase5Controller {
       maxTurns: 60,
       budgetNudge:
         "⚠ TURN BUDGET: You've used most of your step budget. Do NOT open new directions, experiments, or refactors — CONCLUDE the current UI: finish the remaining screens/flows, make sure the app runs, then stop.",
+      // Kod haritası iş sonu bildirimi için ajanın metni biriktirilir (son 400 KB).
+      onAssistantText: (t) => {
+        this.agentText = (this.agentText + t).slice(-400_000);
+      },
       observer: async (ctx) => {
         // Audit event ismi mode'a göre değişir:
         //   - normal mode + Write → "ui-file-write"

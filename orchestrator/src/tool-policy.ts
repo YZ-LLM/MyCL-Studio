@@ -30,7 +30,7 @@ export const WRITE_TOOLS = ["Write", "Edit", "NotebookEdit"] as const;
 /**
  * Salt-okunur ANALİZ fazları için deny-list: yazma + alt-ajan yasak, ama Bash AÇIK kalır
  * (faz kodu Read/Grep/Glob/Bash ile inceler). Örn: phase-0 D1, error-analysis, living-docs,
- * module-stock, hypothesis-investigation.
+ * hypothesis-investigation.
  */
 export const READ_ONLY_DISALLOWED_TOOLS: string[] = [...WRITE_TOOLS, ...SUBAGENT_SPAWN_TOOLS];
 

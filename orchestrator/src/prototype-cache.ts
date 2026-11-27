@@ -30,7 +30,7 @@ import type { State } from "./types.js";
 const MAX_AGE_DAYS = 30;
 
 /** Yürüyüş sırasında HİÇ girilmeyen dizinler (build çıktısı / vcs / bağımlılık).
- *  EXPORT: module-stock.ts da aynı deny-listesini kullanır (DRY). */
+ *  EXPORT: code-map.ts (kod haritası; eski module-stock) da aynı deny-listesini kullanır (DRY). */
 export const DENY_SEGMENTS = new Set([
   "node_modules", "dist", "build", ".git", ".mycl", "coverage", ".next",
   "target", "__pycache__", ".venv", "venv", ".cache", "out", "tmp", ".turbo",

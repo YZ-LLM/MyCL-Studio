@@ -16,7 +16,8 @@ export type ChunkSource =
   | "git"
   | "agent-decisions"  // v15.6 — orkestrator ajan recurring topic dedup için
   | "features"  // v15.11 — yaşayan özellik dökümantasyonu (.mycl/features.md)
-  | "decisions";  // ADR — mimari karar kayıtları (.mycl/decisions/ADR-*.md)
+  | "decisions"  // ADR — mimari karar kayıtları (.mycl/decisions/ADR-*.md)
+  | "code-map";  // 2026-11-27 — kod haritası senaryo kayıtları (~/.mycl/modules/map; code-map.ts)
 
 export interface ChunkMetadata {
   ts?: number;

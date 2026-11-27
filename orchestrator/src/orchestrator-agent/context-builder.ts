@@ -21,7 +21,7 @@ import { buildProjectFacts } from "../project-facts.js";
 import { readUserDirectives } from "../user-directives.js";
 import { formatGlobalLessonsTR, readGlobalLessons } from "../lesson-distill.js";
 import { loadCommunicationGuide } from "../communication-guide.js";
-import { listAvailableModules, type ModuleSummary } from "../module-stock.js";
+import { listCodeMapSummaries, type CodeMapSummary } from "../code-map.js";
 import {
   readProjectMemory,
   readGeneralMemory,
@@ -118,7 +118,7 @@ export interface AgentContextSnapshot {
   feature_headings: string[];
   /** Modül-stoğu (discover): bu stack için stoklu reuse-edilebilir modüller. Orkestratör
    *  yeni feature isteğinde reuse önerir (auto-wire YOK; ajan karar verir). */
-  available_modules: ModuleSummary[];
+  available_modules: CodeMapSummary[];
 }
 
 /**
@@ -218,8 +218,8 @@ export async function buildAgentContext(
   )
     .map((c) => c.metadata.heading)
     .filter((h): h is string => typeof h === "string");
-  // Modül-stoğu (discover): bu stack için stoklu modüller (özet; stack-filtre + limit).
-  const availableModules = await listAvailableModules(state.stack).catch(() => []);
+  // Kod haritası (2026-11-27; module-stock'un yerine): bu stack'in güncel senaryo kayıtları + eski biçim modüller (özet).
+  const availableModules = await listCodeMapSummaries(state.stack, state.project_root).catch(() => []);
   return {
     current_phase: state.current_phase ?? 0,
     iteration_count: state.iteration_count ?? 1,
@@ -279,18 +279,17 @@ export function renderContextSection(ctx: AgentContextSnapshot): string {
     for (const h of ctx.feature_headings) lines.push(`- ${h}`);
     lines.push("", "(detay için .mycl/features.md'yi Read et)");
   }
-  // Modül-stoğu (discover): stoklu reuse-edilebilir modüller (bu stack). Orkestratör
-  // yeni feature isteğinde bunlardan birini önerebilir (auto-wire YOK — bkz §7.1).
-  lines.push("", "### Stoklu modüller (~/.mycl/modules — bu stack)", "");
+  // Kod haritası (2026-11-27): bu stack'in yeniden kullanılabilir senaryoları. Yerleştirmeyi Faz 5/8 başında MyCL
+  // KENDİSİ yapar (spec'e karşı ilgililik araması); orkestratör yalnız bilir.
+  lines.push("", "### Kod haritası (~/.mycl/modules — bu stack)", "");
   if (ctx.available_modules.length === 0) {
-    lines.push("(stoklu modül yok)");
+    lines.push("(kayıt yok)");
   } else {
     for (const m of ctx.available_modules) {
-      const db = m.db_tables.length > 0 ? `db: ${m.db_tables.join(",")}` : "db: yok";
-      const rt = m.routes.length > 0 ? `route: ${m.routes.join(",")}` : "route: yok";
-      lines.push(`- **${m.name}** (${m.fileCount} dosya, ${db}, ${rt})`);
+      const kind = m.kind === "scenario" ? "senaryo" : "eski biçim modül";
+      lines.push(`- **${m.name}** (${kind}, ${m.parts} parça, kaynak: ${m.source_project || "?"})`);
     }
-    lines.push("", "(reuse için: ilgili modülü `~/.mycl/modules/<token>/` altından Read et + projeye ADAPTE et)");
+    lines.push("", "(Faz 5/8 başında MyCL ilgili senaryoyu kendisi bulur ve dosyalarını yerleştirir; elle kopyalama yok)");
   }
   lines.push("", "### Recent audit events (last 30)", "");
   if (ctx.recent_audit.length === 0) {

@@ -596,6 +596,7 @@ export class CliCodegenBackend implements CodegenBackend {
         if (b.type === "text" && typeof b.text === "string") {
           emitClaudeStream({ sub: "text", text: b.text });
           this.lastTextTail = (this.lastTextTail + b.text).slice(-2000); // 529/transient tespiti için (YZLLM 2026-06-17)
+          this.opts.onAssistantText?.(b.text); // kod haritası iş sonu bildirimi (code-map.ts)
           if (this.opts.onTestResult) {
             for (const r of parseTestResultMarkers(b.text)) {
               this.opts.onTestResult(r.green, r.detail);

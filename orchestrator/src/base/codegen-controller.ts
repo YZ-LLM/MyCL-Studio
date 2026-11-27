@@ -133,6 +133,11 @@ export interface CodegenRunOpts {
    */
   onTestResult?: (green: boolean, detail: string) => void;
   /**
+   * 2026-11-27 (kod haritası): ajanın metin akışı (CLI: her metin bloğu; SDK: her metin parçası). Faz 5/8 bunu biriktirip
+   * iş sonu `{"kind":"code_map",…}` bildirimini okur (code-map.ts). Verilmezse davranış aynı.
+   */
+  onAssistantText?: (text: string) => void;
+  /**
    * PhaseSpec.allowed_tools allowlist'i. Verilirse `tools` bu set ile süzülür
    * (SDK'ya yalnız izinli tool tanımları gönderilir). undefined → tüm tools
    * geçer (legacy davranış).
@@ -512,6 +517,7 @@ export class CodegenBaseController {
   ): Promise<void> {
     if (ev.type === "text_delta") {
       emitClaudeStream({ sub: "text", text: ev.text });
+      this.opts.onAssistantText?.(ev.text);
     } else if (ev.type === "tool_use") {
       emitClaudeStream({
         sub: "tool_use",

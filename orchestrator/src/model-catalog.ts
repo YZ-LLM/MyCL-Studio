@@ -188,7 +188,7 @@ export interface ResolvedModel {
 }
 
 /**
- * Model guard (YZLLM 2026-07-01): yardımcı LLM adımları (living-docs / spec-refresh / module-stock /
+ * Model guard (YZLLM 2026-07-01): yardımcı LLM adımları (living-docs / spec-refresh /
  * quality-audit) `selected_models.orchestrator ?? main`'i doğrulamadan CLI'a veriyordu → katalog-DIŞI bir id
  * (canlı: `claude-fable-5` — MyCL kataloğunda yok, CLI `exit=1 "issue with the selected model"`) adımı DÜŞÜRÜYORDU.
  *
