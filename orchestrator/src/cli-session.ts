@@ -32,7 +32,7 @@ import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js"
 import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
-import { effectiveDisallowedTools, zeroToolLaunchArgs } from "./tool-policy.js";
+import { effectiveDisallowedTools, systemPromptFlag, zeroToolLaunchArgs, zeroToolLaunchEnv } from "./tool-policy.js";
 
 export interface CliSessionTurnOpts {
   /** Sabit oturum kimliği (faz-instance başına bir uuid, tüm turlar aynı). */
@@ -41,7 +41,7 @@ export interface CliSessionTurnOpts {
   resume: boolean;
   /** İlk tur: görev metni; sonraki turlar: askq cevabı (EN). */
   userMessage: string;
-  /** Sadece ilk turda --append-system-prompt olarak geçer. */
+  /** Sadece ilk turda geçer: `--append-system-prompt` ile; sıfır araç politikasında `--system-prompt` ile (bkz. tool-policy systemPromptFlag). */
   systemPrompt?: string;
   modelId: string;
   cwd: string;
@@ -106,7 +106,8 @@ export function buildCliSessionArgs(opts: CliSessionTurnOpts, overlay: OverlayIn
     args.push("--resume", opts.sessionId);
   } else {
     args.push("--session-id", opts.sessionId);
-    if (opts.systemPrompt) args.push("--append-system-prompt", opts.systemPrompt);
+    // Sıfır araç politikası → `--system-prompt` (ajan istemi yerine); öteki politikalarda eskisi gibi ek.
+    if (opts.systemPrompt) args.push(systemPromptFlag(opts.disallowedTools), opts.systemPrompt);
   }
   args.push(
     "--model",
@@ -213,7 +214,9 @@ export async function runClaudeCliSession(
     const child = spawn(spawnCmd.cmd, spawnCmd.args, {
       cwd: opts.cwd,
       // API key YOK → abonelik; PATH zenginleştirilir. extraEnv (varsa) ÜSTE eklenir.
-      env: opts.extraEnv ? { ...claudeSpawnEnv(), ...opts.extraEnv } : claudeSpawnEnv(),
+      // Sıfır araç politikası → talimat dosyaları ve otomatik hafıza kapalı (en sonda: üstüne yazılamaz).
+      // Öteki politikalarda boş: ortam eskisiyle aynı içerikte.
+      env: { ...claudeSpawnEnv(), ...(opts.extraEnv ?? {}), ...zeroToolLaunchEnv(opts.disallowedTools) },
       stdio: ["ignore", "pipe", "pipe"],
     });
 

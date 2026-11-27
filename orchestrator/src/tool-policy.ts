@@ -128,3 +128,34 @@ export function isZeroToolPolicy(disallowed: string[] | undefined): boolean {
 export function zeroToolLaunchArgs(disallowed: string[] | undefined): string[] {
   return isZeroToolPolicy(disallowed) ? ["--tools", "", "--strict-mcp-config"] : [];
 }
+
+/**
+ * SAF: çağrının istemini veren bayrak. Sıfır araç politikasında `--system-prompt` (Claude Code'un ajan
+ * istemi YERİNE), öteki politikalarda `--append-system-prompt` (ajan isteminin sonuna; eskisiyle aynı).
+ *
+ * CANLI KANIT (ekransız deneme koşuları 6, 7, 13; 2026-11-27): ilgililik sınıflandırıcısı puan yerine
+ * "Proje durumunu kontrol edeyim…", "Phase 5'e geçmeli ve todo app'i implementation yapmalıyım" gibi
+ * işe girişme metni üretti (yaklaşık on denemenin dördü). İstem ajan isteminin sonuna eklendiği için
+ * model kendini kodlama ajanı sanıyordu; yalnız metin işleyen çağrının ajan istemine ihtiyacı yok.
+ */
+export function systemPromptFlag(disallowed: string[] | undefined): "--system-prompt" | "--append-system-prompt" {
+  return isZeroToolPolicy(disallowed) ? "--system-prompt" : "--append-system-prompt";
+}
+
+/**
+ * SAF: sıfır araç politikalı çağrının `claude` sürecine EK ortam değişkenleri; öteki politikalarda boş.
+ * Kullanıcının kişisel ve proje talimat dosyaları (CLAUDE.md, CLAUDE.local.md) ve otomatik hafızası
+ * bu çağrılara girmez: puanlayıcı ve özetleyici her makinede aynı davranır. Koşu 6, 7 ve 13'teki
+ * yanlış cevapların Türkçe ve "faz" diliyle yazılması kişisel talimat dosyasının girdiğini düşündürüyordu
+ * (hipotez; çağrı koşturulmadı).
+ *   • `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`: belgeye göre kullanıcı, proje ve otomatik hafıza dosyalarının
+ *     hiçbiri yüklenmez.
+ *   • `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`: otomatik hafıza ne yüklenir ne yazılır.
+ * `--bare` BİLEREK kullanılmaz: abonelik girişini (OAuth, anahtar zinciri) hiç okumaz. `--setting-sources`
+ * kullanılmaz: boş değeri ve talimat dosyalarına etkisi belgede yok.
+ */
+export function zeroToolLaunchEnv(disallowed: string[] | undefined): Record<string, string> {
+  return isZeroToolPolicy(disallowed)
+    ? { CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" }
+    : {};
+}

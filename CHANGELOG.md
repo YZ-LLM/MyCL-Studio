@@ -1,5 +1,33 @@
 ## 2026-11-27
 
+- **fix(araç politikası): yalnız metin işleyen yardımcı çağrılar kendi sistem istemiyle koşsun ve girdilerini görev
+  sanmasın.** Ekransız deneme koşuları 6, 7 ve 13'te ilgililik sınıflandırıcısı puan yerine işe girişme metni üretti
+  ("Proje durumunu kontrol edeyim…", "Phase 5'e geçmeli ve todo app'i implementation yapmalıyım"); yaklaşık on
+  denemenin dördü. İstem `--append-system-prompt` ile Claude Code'un ajan isteminin sonuna ekleniyordu, niyet cümlesi
+  ("Kaldığın yerden devam et.") ham ve en baştaydı, çıktı talimatı verinin ardından yinelenmiyordu.
+  Artık sıfır araç politikalı çağrı:
+  1. `--system-prompt` ile kendi istemiyle koşuyor (`tool-policy.ts` `systemPromptFlag`; `zeroToolLaunchArgs` ile
+     aynı yaklaşım, politikadan türetilir, çağıranlar bayrak yazmıyor).
+  2. `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` ve `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` ortam değişkenleriyle başlıyor
+     (`zeroToolLaunchEnv`): belgeye göre kullanıcı, proje ve otomatik hafıza dosyaları yüklenmez. Değişkenler ortamın
+     en sonuna konur, `extraEnv` üstüne yazamaz. `--bare` kullanılmadı: abonelik girişini (OAuth, anahtar zinciri) hiç
+     okumaz. `--setting-sources` kullanılmadı: boş değeri ve talimat dosyalarına etkisi belgede yok (temkinli seçenek).
+  3. Kullanıcı mesajında metni açıkça veri olarak sınırlıyor ve çıktı talimatını verinin ardından yineliyor:
+     ilgililik sınıflandırıcısı (`buildCliScoringMessage`, `<intent>` ve `<chunks>`), proje tipi
+     (`buildCliClassifyMessage`), konuşma özeti (`cliSummaryUserMessage`), sohbet özeti
+     (`wrapChatSummaryUserForCli`; "döküm kesildi" notu talimat olduğu için sınırın dışında kalır), ders damıtma
+     (`wrapDistillUserForCli`). Yalnız CLI yolları değişti; API yollarının mesajları aynı (temkinli seçenek:
+     o yollar ajan istemi almıyor).
+  **Değişmeyenler (kural 14):** sıfır araç politikası olmayan her çağrının komut satırı (`--append-system-prompt`
+  aynı yerde), istemi ve ortam değişkenlerinin içeriği aynı. Oturumlu yolda devam turları istem göndermez, değişmedi.
+  Beş çağrının istemi tek tek okundu; hiçbirinde "varsayılan istemin sonuna eklendiği" varsayımına dayanan cümle yok.
+  Var olan yeniden deneme ve "geçmiş bağlam alınamadı" yolu aynen duruyor. Yeni modül yok.
+  **Doğrulanmadı (deneme koşusunda bakılacak):** kişisel talimat dosyasının bu çağrılara gerçekten girip girmediği
+  (hipotezdi; çağrı koşturulmadı); iki ortam değişkeninin bu CLI sürümünde (2.1.332) belgedeki gibi çalıştığı;
+  kullanıcı ayar dosyasındaki kancaların (hook) bu çağrılarda hâlâ koştuğu (kapsam dışı bırakıldı).
+  Testler `test/cli-tool-policy.test.ts` ve `test/text-only-cli-calls.test.ts` içinde. Test ve kontrol
+  koşturulmadı, yalnız derlendi.
+
 - **fix(araç politikası): araçsız koşması gereken yardımcı çağrılarda modelin elinde hiç araç kalmasın.** Ekransız
   deneme koşuları 9, 10 ve 11'de ilgililik sınıflandırıcısı sıfır araç ret listesiyle koştuğu hâlde `ListAgents`,
   `ToolSearch`, `SendMessage` ve `Glob` çağırdı (iz: `araçsız çağrıda model araç çağırmayı denedi`). Ret listesi yalnız

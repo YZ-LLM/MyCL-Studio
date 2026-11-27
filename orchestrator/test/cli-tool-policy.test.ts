@@ -18,6 +18,7 @@ import {
   READ_ONLY_DISALLOWED_TOOLS,
   ZERO_TOOLS_DISALLOWED,
   withDangerousBashDeny,
+  zeroToolLaunchEnv,
 } from "../src/tool-policy.js";
 
 /** argv içinde `--disallowedTools` bayrağından sonraki değerler (bir sonraki `--bayrak`a kadar). */
@@ -145,6 +146,68 @@ describe("sıfır araç politikası — izin listesi de boş", () => {
         expect(args).not.toContain("--strict-mcp-config");
         expect(denyList(args)).toEqual(withDangerousBashDeny(policy));
       }
+    }
+  });
+});
+
+// CANLI KANIT (ekransız deneme koşuları 6, 7, 13; 2026-11-27): sınıflandırıcı puan yerine işe girişme metni
+// üretti. Sıfır araç politikalı çağrı Claude Code'un ajan istemine EKLENMEZ, kendi istemiyle koşar
+// (`--system-prompt`) ve kişisel/proje talimat dosyaları ile otomatik hafıza ona girmez (ortam değişkeni).
+describe("sıfır araç politikası — kendi sistem istemi, talimat dosyası ve hafıza yok", () => {
+  /** argv'de bayraktan hemen sonraki değer. */
+  function valueAfter(args: string[], flag: string): string | undefined {
+    const i = args.indexOf(flag);
+    return i >= 0 ? args[i + 1] : undefined;
+  }
+
+  it("cli-run: sıfır araç politikası → `--system-prompt` var, `--append-system-prompt` yok", () => {
+    const args = buildCliRunArgs({ ...runBase, disallowedTools: ZERO_TOOLS_DISALLOWED }, null);
+    expect(valueAfter(args, "--system-prompt")).toBe("s");
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  it("cli-run: politika verilmeyen çağrı da `--system-prompt` alır", () => {
+    const args = buildCliRunArgs(runBase as unknown as CliRunOpts, null);
+    expect(valueAfter(args, "--system-prompt")).toBe("s");
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  it("cli-session: sıfır araç politikalı ilk tur → `--system-prompt`", () => {
+    const args = buildCliSessionArgs({ ...sessionBase, disallowedTools: ZERO_TOOLS_DISALLOWED }, null);
+    expect(valueAfter(args, "--system-prompt")).toBe("s");
+    expect(args).not.toContain("--append-system-prompt");
+  });
+
+  it("REGRESYON: öteki politikalarda istem eskisi gibi `--append-system-prompt` ile, aynı yerde", () => {
+    for (const policy of [
+      READ_ONLY_DISALLOWED_TOOLS,
+      PURE_REASONING_DISALLOWED_TOOLS,
+      ["Bash", "Agent", "Task"],
+      ["Write", "Edit", "NotebookEdit"],
+      [],
+    ]) {
+      const run = buildCliRunArgs({ ...runBase, disallowedTools: policy }, null);
+      // Eski argv'nin başı: -p <mesaj> --append-system-prompt <istem> --model <model>
+      expect(run.slice(0, 6)).toEqual(["-p", "u", "--append-system-prompt", "s", "--model", "m"]);
+      expect(run).not.toContain("--system-prompt");
+      const ses = buildCliSessionArgs({ ...sessionBase, disallowedTools: policy }, null);
+      expect(valueAfter(ses, "--append-system-prompt")).toBe("s");
+      expect(ses).not.toContain("--system-prompt");
+    }
+  });
+
+  it("ortam: sıfır araç politikası → talimat dosyaları ve otomatik hafıza kapalı", () => {
+    for (const policy of [ZERO_TOOLS_DISALLOWED, undefined]) {
+      expect(zeroToolLaunchEnv(policy)).toEqual({
+        CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      });
+    }
+  });
+
+  it("REGRESYON: öteki politikalarda ek ortam değişkeni yok", () => {
+    for (const policy of [READ_ONLY_DISALLOWED_TOOLS, PURE_REASONING_DISALLOWED_TOOLS, ["Bash", "Agent", "Task"], []]) {
+      expect(zeroToolLaunchEnv(policy)).toEqual({});
     }
   });
 });

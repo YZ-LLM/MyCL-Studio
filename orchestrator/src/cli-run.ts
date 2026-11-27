@@ -28,7 +28,13 @@ import { shouldFolderGuard, wrapReadOnlyClaude } from "./claude-folder-guard.js"
 import { extractTokenUsage, type TokenUsage } from "./cli-json.js";
 import { recordTokenUsage } from "./ipc.js";
 import { log } from "./logger.js";
-import { effectiveDisallowedTools, isZeroToolPolicy, zeroToolLaunchArgs } from "./tool-policy.js";
+import {
+  effectiveDisallowedTools,
+  isZeroToolPolicy,
+  systemPromptFlag,
+  zeroToolLaunchArgs,
+  zeroToolLaunchEnv,
+} from "./tool-policy.js";
 
 export interface CliRunOpts {
   systemPrompt: string;
@@ -118,7 +124,8 @@ export function buildCliRunArgs(opts: CliRunOpts, overlay: OverlayInjection | nu
   const args: string[] = [
     "-p",
     opts.userMessage,
-    "--append-system-prompt",
+    // Sıfır araç politikası → `--system-prompt` (ajan istemi yerine); öteki politikalarda eskisi gibi ek.
+    systemPromptFlag(opts.disallowedTools),
     opts.systemPrompt,
     "--model",
     opts.modelId,
@@ -228,7 +235,9 @@ export async function runClaudeCli(opts: CliRunOpts): Promise<CliRunResult> {
       cwd: opts.cwd,
       // API key YOK → abonelik; PATH zenginleştirilir. extraEnv (varsa) ÜSTE eklenir
       // (Agent Teams/Workflow flag'leri için; yoksa davranış birebir korunur).
-      env: opts.extraEnv ? { ...claudeSpawnEnv(), ...opts.extraEnv } : claudeSpawnEnv(),
+      // Sıfır araç politikası → talimat dosyaları ve otomatik hafıza kapalı (en sonda: üstüne yazılamaz).
+      // Öteki politikalarda boş: ortam eskisiyle aynı içerikte.
+      env: { ...claudeSpawnEnv(), ...(opts.extraEnv ?? {}), ...zeroToolLaunchEnv(opts.disallowedTools) },
       stdio: ["ignore", "pipe", "pipe"],
     });
 

@@ -35,7 +35,9 @@ vi.mock("../src/ipc.js", () => ({
 
 import { _clearSummaryCache, buildConversationContext } from "../src/conversation-context.js";
 import { classifyProjectType } from "../src/project-type-classifier.js";
-import { scoreChunksViaCli } from "../src/relevance/classifier.js";
+import { buildCliScoringMessage, scoreChunksViaCli } from "../src/relevance/classifier.js";
+import { wrapChatSummaryUserForCli } from "../src/chat-summary.js";
+import { wrapDistillUserForCli } from "../src/lesson-distill.js";
 import { ZERO_TOOLS_DISALLOWED } from "../src/tool-policy.js";
 
 const NOTR_KLASOR = "/tmp/mycl-notr-klasor-testi";
@@ -127,5 +129,93 @@ describe("yalnız metin işleyen CLI çağrıları — araçsız, tavanlı, tara
     const r = await classifyProjectType(config, "A small command line tool that renames files in bulk.");
     expect(r.project_type).toBe("cli");
     aracsizVeTavanli(tekCagri());
+  });
+});
+
+// CANLI KANIT (ekransız deneme koşuları 6, 7, 13; 2026-11-27): niyet cümlesi ("Kaldığın yerden devam et.")
+// ham ve en baştaydı; model puan yerine işe girişti. Kullanıcı metni artık açıkça VERİ olarak sınırlanır ve
+// çıktı talimatı verinin ARDINDAN yinelenir. Etiketler satır başında aranır: giriş cümlesi de etiket adlarını anar.
+describe("yalnız metin işleyen CLI çağrıları — kullanıcı metni veri sınırı içinde", () => {
+  const NIYET = "Kaldığın yerden devam et.";
+
+  it("sınıflandırıcı: niyet veri sınırı içinde, mesaj çıktı talimatıyla biter", () => {
+    const chunks = [
+      { id: "c1", source: "audit", text: "phase-4 approved", metadata: {} },
+      { id: "c2", source: "spec", text: "todo app", metadata: {} },
+    ] as unknown as Chunk[];
+    const msg = buildCliScoringMessage(NIYET, chunks);
+    const ac = msg.indexOf("\n<intent>\n");
+    const kapa = msg.indexOf("\n</intent>");
+    const niyet = msg.indexOf(NIYET);
+    expect(ac).toBeGreaterThan(0); // önce "bu veridir" cümlesi
+    expect(msg.slice(0, ac)).toMatch(/DATA/);
+    expect(niyet).toBeGreaterThan(ac);
+    expect(niyet).toBeLessThan(kapa);
+    // Parçalar da kendi sınırı içinde ve niyetten sonra.
+    const parcaAc = msg.indexOf("\n<chunks>\n");
+    const parcaKapa = msg.indexOf("\n</chunks>");
+    expect(parcaAc).toBeGreaterThan(kapa);
+    expect(msg.indexOf("[id=c2]")).toBeLessThan(parcaKapa);
+    // Çıktı talimatı verinin ARDINDAN, son satır JSON kalıbı.
+    const sonrasi = msg.slice(parcaKapa);
+    expect(sonrasi).toMatch(/Do NOT call any tool/);
+    expect(sonrasi).toMatch(/2 entries/);
+    expect(msg.trimEnd().endsWith('"reason":"<short>"}]}')).toBe(true);
+  });
+
+  it("sınıflandırıcı CLI çağrısı bu mesajı gönderir", async () => {
+    const chunks: Chunk[] = [{ id: "c1", source: "audit", text: "phase-4 approved", metadata: {} } as Chunk];
+    runCliMock.mockResolvedValue({
+      ok: true,
+      text: '{"kind":"relevance_scores","scores":[{"id":"c1","score":7,"reason":"ilgili"}]}',
+      toolUses: [],
+      turns: 1,
+    });
+    await scoreChunksViaCli("claude-haiku-4-5", NIYET, chunks);
+    const opts = runCliMock.mock.calls[0]![0] as { userMessage: string };
+    expect(opts.userMessage).toBe(buildCliScoringMessage(NIYET, chunks));
+  });
+
+  it("konuşma özeti ve proje tipi: kullanıcı metni sınır içinde", async () => {
+    loadMessagesMock.mockResolvedValue({
+      events: Array.from({ length: 8 }, (_, i) => ({ kind: "chat_message", data: { role: "user", text: `${NIYET} ${i}` } })),
+    });
+    runCliMock.mockResolvedValue({ ok: true, text: "OZET", toolUses: [], turns: 1 });
+    await buildConversationContext(config, { project_root: "/tmp/x" } as unknown as State);
+    const ozet = (runCliMock.mock.calls[0]![0] as { userMessage: string }).userMessage;
+    expect(ozet.indexOf("\n<messages>\n")).toBeLessThan(ozet.indexOf(NIYET));
+    expect(ozet.indexOf(NIYET)).toBeLessThan(ozet.indexOf("\n</messages>"));
+    expect(ozet.slice(ozet.indexOf("\n</messages>"))).toMatch(/Do NOT call any tool/);
+
+    runCliMock.mockReset();
+    runCliMock.mockResolvedValue({
+      ok: true,
+      text: '{"kind":"project_type","project_type":"cli","has_database":false,"ui_complexity":"simple"}',
+      toolUses: [],
+      turns: 1,
+    });
+    await classifyProjectType(config, `A small CLI. ${NIYET}`);
+    const tip = (runCliMock.mock.calls[0]![0] as { userMessage: string }).userMessage;
+    expect(tip.indexOf("\n<summary>\n")).toBeLessThan(tip.indexOf(NIYET));
+    expect(tip.indexOf(NIYET)).toBeLessThan(tip.indexOf("\n</summary>"));
+    expect(tip.trimEnd().endsWith("}")).toBe(true);
+  });
+
+  it("sohbet özeti: kesilme notu sınırın DIŞINDA, döküm içinde", () => {
+    const NOT = "(NOT: döküm uzundu — yalnız EN YENİ kısım verildi; özetin başında bunu tek cümleyle belirt.)";
+    const kesik = wrapChatSummaryUserForCli(`${NOT}\n\n[01.01 10:00 user] ${NIYET}`);
+    expect(kesik.indexOf(NOT)).toBeLessThan(kesik.indexOf("\n<dokum>\n"));
+    expect(kesik.indexOf(NIYET)).toBeGreaterThan(kesik.indexOf("\n<dokum>\n"));
+    expect(kesik.indexOf(NIYET)).toBeLessThan(kesik.indexOf("\n</dokum>"));
+    const tam = wrapChatSummaryUserForCli(`[01.01 10:00 user] ${NIYET}`);
+    expect(tam).not.toContain(NOT);
+    expect(tam.slice(tam.indexOf("\n</dokum>"))).toMatch(/YALNIZ özeti yaz/);
+  });
+
+  it("ders damıtma: sorun/çözüm sınır içinde, mesaj JSON kalıbıyla biter", () => {
+    const msg = wrapDistillUserForCli(`Sorun: ${NIYET}\n\nÇözüm: x\n\nYerel ilke: y`);
+    expect(msg.indexOf("\n<veri>\n")).toBeLessThan(msg.indexOf(NIYET));
+    expect(msg.indexOf(NIYET)).toBeLessThan(msg.indexOf("\n</veri>"));
+    expect(msg.trimEnd().endsWith('{"kind":"skip"}')).toBe(true);
   });
 });
