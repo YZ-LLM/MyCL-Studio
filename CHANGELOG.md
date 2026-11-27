@@ -1,5 +1,40 @@
 ## 2026-11-27
 
+- **fix(açılış, faz 5): sonuçsuz kalan arayüz rötuş isteği bayat kalmasın; uygulama yeniden açılınca iş Faz 1'den
+  başlamasın.** Ekransız deneme koşusu 6'da Faz 6'da bekleyen projeye yazılan cümle rötuş isteği sayıldı, Faz 5 rötuş
+  ajanı hiçbir şey yazmadı ve faz başarısız oldu; mahkeme "devam" deyince akış Faz 6'ya geçti ama `pending_ui_tweak`
+  durumda kaldı (silme yalnız başarı yollarından birindeydi). Koşu 7'de aynı proje açılınca açılış kararı bekleyen rötuşu
+  "kuyruk devamı devreye girmesin" işareti saydı ve `drain` verdi: yetim iş `pending` yapıldı, kuyruk Faz 1'den baştan
+  sürdü, onaylanmış niyet, brif ve spec yeniden üretildi; açılış mesajı ise "UI incelemesi bekliyor (Faz 6)" diyordu.
+  Yorumdaki "açılış bloğu kendi özel yoluyla işler" yolu kodda yoktu. Düzeltme iki yerde:
+  **(1) Açılış kararı** (`resume-detection.ts`): bekleyen rötuş artık kuyruğu durdurmaz, yalnız hangi fazdan
+  sürüleceğini belirler. Faz 5'te, ya da spec'i onaylı Faz 4'te (isteği koyan iki yolun başlangıç noktası) → Faz 5'ten,
+  rötuş sürdürülür (spec onay bayrağı Faz 4 yeniden koşarken sıfırlanmadığı için, spec dosyası kaybolup Faz 4'e düşülmüş
+  bir kesinti başlangıç noktasından ayırt edilemez). Faz 6-9'da → kesintinin kaldığı fazdan, istek bayat sayılıp düşürülür (Faz 6 parkında bu, Faz 6
+  beklemesine dönmektir; açılış mesajıyla aynı). Faz 6 parkı (`pending_ui_review`) artık aynı iterasyonda eski bir
+  `phase-6-complete` olsa da Faz 6'dan sürer; eskiden bu durumda da `drain` veriliyordu.
+  **(2) İsteğin ömrü** (`phase-5.ts`, `index.ts`): istek, akış Faz 5'ten çıktığı anda düşer: Faz 6'ya girişte, yeni bir
+  Faz 1 başlangıcında ve arayüz onayında; sohbete yazılır, denetim kaydına `ui-tweak-dropped-stale` düşer. Başarılı
+  rötuş isteği artık her başarı yolunda siliyor: eskiden dışarıdan başlatılmış sunucu yolu hiç silmiyor, sunucuyu
+  yeniden başlatan yol da yamayı eziyordu. Faz 5'in içinde (başarısız rötuşun yeniden denenmesi, kesintiden dönüş) istek
+  bilerek durur; ilk tasarım hata anında siliyordu, inceleme bunun Faz 5'e yeniden girişi rötuş yerine tam arayüz
+  üretimine çevirdiğini ve işin parktan düşüp Faz 1'e sıfırlanabildiğini gösterdi, geri alındı.
+  **Değişmeyen (kural 14):** açılış kararının öteki iki özel dalı (`pending_diagnostic`; entegre projede Faz 6 parkı)
+  rötuş dolu olsa da eskisi gibi `drain` verir; kapı fazındaki (10-16) düzeltme planı eskisi gibi sürer; başarısız
+  rötuşun mahkeme ve hata analizi akışı aynı; 2026-06-13 notundaki "rötuş zaten uygulanmış" durumunda faz yine
+  başarısız döner ve yükseltme merdivenine çıkılmaz.
+  **Koddan okundu, gözlemlenmedi:** koşu 7'nin açılışında `pending_ui_review` doluydu ("UI incelemesi bekliyor" metni
+  yalnız o alan doluyken üretilir, `open-status.ts`). Ekranlı kullanımda aynı durumda Faz 1-4 soruları kullanıcıya
+  yeniden sorulurdu (kuyruk yolu ekran ya da ekransız ayrımı yapmıyor). Faz 0'ın arayüz düzeltme yolundan gelen rötuş
+  sonuçsuz kalırsa `pending_realapp_verify` ve `fix_checkpoint_ref` durumda kalır; bu değişiklikten önce de öyleydi.
+  **Açık kalan (karar bekliyor), dokunulmadı:** (a) açılış kararının öteki iki dalı aynı `drain` yoluna gidiyor:
+  bekleyen hata çözüm sorusu ya da entegre proje Faz 6 geçişi varken kuyrukta yarım iş bulunursa iş Faz 1'den yeniden
+  başlayabilir (kod okumasıyla; gözlemlenmedi). (b) Onaylı faz kapsamı Faz 5'i içermiyorsa Faz 6'da yazılan rötuş
+  isteği hiç denenmeden kapanır: Faz 5 kapsam dışı diye atlanır. Eskiden bu sessizdi, artık sohbete yazılıyor; isteği
+  yinelemek aynı sonucu verir (kod okumasıyla; böyle bir kapsamın pratikte oluştuğu gözlemlenmedi).
+  **Test ve kontrol koşturulmadı, yalnız derlendi.** Yeni kuralın `index.ts` içindeki üç çağrı noktası testle değil kod
+  okumasıyla incelendi; saf karar işlevleri testli.
+
 - **fix(araç politikası): yalnız metin işleyen yardımcı çağrılar araçsız koşsun; politika vermeyen çağrı tam yetkiyle
   koşamasın.** Ekransız deneme koşusu 6'da ilgililik sınıflandırıcısı parça metinlerini görev sandı ve MyCL'in
   başlatıldığı klasöre 10 dosya yazdı; iki deneme 147 ve 93 saniye sürdü. Çağrı ret listesi vermiyordu: tek seferlik

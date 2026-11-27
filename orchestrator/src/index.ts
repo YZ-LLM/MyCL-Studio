@@ -214,7 +214,7 @@ import { Phase3Controller } from "./phase-3.js";
 import { Phase4Controller } from "./phase-4.js";
 import { resolveRiskFixTarget } from "./risk-fix-routing.js";
 import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
-import { Phase5Controller } from "./phase-5.js";
+import { Phase5Controller, uiTweakStaleOnEnter } from "./phase-5.js";
 import { blankScreenGate, Phase6Controller, runtimeErrorGate } from "./phase-6.js";
 import { stampPhaseCompletion } from "./phase-complete.js";
 import { lensTaskText } from "./pre-commit-lens.js";
@@ -3336,6 +3336,29 @@ async function resumeInterruptedPhase(
   await advanceToNextPhase((resolvedPhase - 1) as PhaseId);
 }
 
+/**
+ * Uygulanmadan kalmış (bayat) arayüz rötuş isteğini durumdan sil ve GÖRÜNÜR yaz (sessiz düşürme yok).
+ * İstek yoksa hiçbir şey yapmaz. Ne zaman bayat sayılacağına çağıran karar verir: açılışta decideBootQueueAction, akışta
+ * uiTweakStaleOnEnter (Faz 6'ya ve Faz 1'e giriş), bir de arayüz onayı.
+ */
+async function dropStaleUiTweak(atPhase: PhaseId): Promise<void> {
+  const stale = runtime.state?.pending_ui_tweak;
+  if (!runtime.state || !stale) return;
+  runtime.state = { ...runtime.state, pending_ui_tweak: undefined, updated_at: Date.now() };
+  await saveState(runtime.state);
+  await appendAuditModule(runtime.state.project_root, {
+    ts: Date.now(),
+    phase: atPhase,
+    event: "ui-tweak-dropped-stale",
+    caller: "mycl-orchestrator",
+    detail: stale.slice(0, 200),
+  }).catch(() => {});
+  emitChatMessage(
+    "system",
+    `ℹ️ Uygulanmadan kalan arayüz rötuş isteği kapatıldı: _"${stale.slice(0, 100)}"_ — hâlâ istiyorsan ne değişeceğini açık yazarak yeniden iste.`,
+  );
+}
+
 async function emitInitialTaskQueue(projectRoot: string): Promise<void> {
   try {
     const items = await readTasks(projectRoot);
@@ -3348,6 +3371,10 @@ async function emitInitialTaskQueue(projectRoot: string): Promise<void> {
     const action = decideBootQueueAction(runtime.state ?? ({} as State), items, audit);
     if (action.kind === "resume" && runtime.state && runtime.state.project_root === projectRoot) {
       emit("task_queue_loaded", { items }); // orphan "running" kalır — FLIP ETME
+      // BAYAT RÖTUŞ İSTEĞİ (2026-11-27, deneme koşusu 7): akış Faz 5'i geçmişse o isteğin Faz 5 koşusu
+      // bitmiştir. Durumda kalırsa sonraki ilgisiz Faz 5 koşusunu rötuş kipine sokar → sürdürmeden ÖNCE
+      // sil ve görünür yaz (sessiz düşürme yok). Karar saf işlevde: decideBootQueueAction.
+      if (action.dropUiTweak) await dropStaleUiTweak(action.phaseId);
       await resumeInterruptedPhase(action.phaseId, {
         taskId: action.taskId,
         message: `📍 Faz ${action.phaseId} yarıda kalmıştı — kaldığım yerden devam ediyorum (baştan sormuyorum).`,
@@ -4850,6 +4877,9 @@ async function executeDispatchedIntent(
     // pipeline-end'de kuyruk işi normal "done" damgalanır).
     runtime.state = { ...runtime.state, pending_ui_review: undefined, updated_at: Date.now() };
     await saveState(runtime.state);
+    // Arayüz onaylandı → durumda kalmış bir rötuş isteği varsa artık geçersizdir (yalnız eski kayıtlarda
+    // görülür: Faz 6'ya girişte zaten düşürülüyor). İstek yoksa hiçbir şey yapmaz.
+    await dropStaleUiTweak(6 as PhaseId);
     emitChatMessage("system", "✅ Faz 6 onaylandı — Faz 7'e geçiliyor.");
     await advanceToNextPhase(6);
     return;
@@ -4875,8 +4905,8 @@ async function executeDispatchedIntent(
     } catch (err) {
       log.warn("orchestrator", "phase-6 clearHistory failed (non-fatal)", err);
     }
-    // state.pending_ui_tweak set + current_phase=4 → outer loop PHASE_TRANSITIONS[4]=6
-    // → Phase 5 tweak mini-loop tetiklenir; bitince Phase 6 deferred tekrar.
+    // state.pending_ui_tweak set + current_phase=4 → dış döngü Faz 5'e geçer (rötuş kipi);
+    // bitince Faz 6 yeniden bekler. Faz 4 burada yalnız başlangıç noktasıdır.
     runtime.state = {
       ...runtime.state,
       pending_ui_tweak: text,
@@ -5520,6 +5550,9 @@ async function runDevelopIteration(
     // konuşma geçmişini katma, öteki işi çekip birleştirme.
     isolatedIntent: true,
   });
+  // Yeni niyet turu başlıyor → önceki turdan kalmış rötuş isteği bu işle ilgisizdir; kalırsa dört faz
+  // sonra gelen Faz 5 koşusunu rötuş kipine sokar (deneme koşusu 7). Faz 1 bu alanı okumaz.
+  if (uiTweakStaleOnEnter(runtime.state, 1)) await dropStaleUiTweak(1 as PhaseId);
   // Token çizelgesi (YZLLM 2026-06-17): Faz 1 loop DIŞINDA → cost-bucket'ı burada set et (flush sonraki geçişte).
   beginPhaseCost(1, runtime.state.iteration_count ?? 1);
   runtime.lastPhase1Intent = text; // iter=1 Faz 1'i pürüzsüz tekrar koşmak için (canlı niyet)
@@ -7079,6 +7112,17 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
     setRecordContext({ phase: next });
     emitPhaseChanged(cur, next, "running");
     log.info("orchestrator", "phase advance", { from: cur, to: next });
+
+    // RÖTUŞ İSTEĞİNİN ÖMRÜ (2026-11-27, deneme koşusu 6): akış Faz 6'ya geçiyorsa durumda kalan rötuş
+    // isteği artık uygulanmayacaktır — başarısız rötuşa mahkeme "devam" dediyse buraya istek SİLİNMEDEN
+    // gelinir; Faz 5 kapsam dışı diye atlandıysa istek hiç denenmemiştir. İkisinde de kalırsa sonraki
+    // ilgisiz Faz 5 koşusunu rötuş kipine sokar ve işi "park etmiş" gösterir → görünür biçimde düşür.
+    // Başarılı rötuş isteği statePatch ile zaten silmiştir (bu dal çalışmaz). Faz 6'nın bütün atlama
+    // dallarından (entegre proje, kapsam, proje tipi) ÖNCE durur ki hiçbiri bu kuralı atlamasın.
+    if (next === 6 && uiTweakStaleOnEnter(state, 6)) {
+      await dropStaleUiTweak(6 as PhaseId); // runtime.state === state (hemen yukarıda atandı ve kaydedildi)
+      state = runtime.state;
+    }
 
     // YZLLM (cave5): ENTEGRE (foreign-origin) projede Faz 6 (UI İncelemesi) ATLANIR. Gap-task'lar UI-yapımı
     // değil (test/güvenlik/parmak-izi vb.); mevcut projede manuel UI-inceleme park'ı uygun değil + dev-server

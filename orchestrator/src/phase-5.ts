@@ -65,8 +65,39 @@ const AUTH_EXCEPTION_PATTERNS = [
   "**/session.*",
 ];
 
+/**
+ * SAF: bu Faz 5 koşusu rötuş kipinde mi? Tek ölçüt `pending_ui_tweak` alanıdır (Faz 6 "revise_ui",
+ * Faz 0 arayüz düzeltmesi ve risk düzeltmesi bu alanı doldurur).
+ */
+export function isUiTweakRun<S extends Pick<State, "pending_ui_tweak">>(
+  state: S,
+): state is S & { pending_ui_tweak: string } {
+  return !!state.pending_ui_tweak;
+}
+
+/**
+ * SAF: akış `entering` fazına GİRERKEN durumdaki rötuş isteği bayat mı?
+ *
+ * Rötuş isteği TEK SEFERLİKTİR ve yalnız Faz 5'te anlam taşır. CANLI KANIT (ekransız deneme koşuları 6
+ * ve 7, 2026-11-27): ajan hiçbir şey yazmadan bitince faz `fail` döndü, mahkeme "devam" dedi, akış Faz
+ * 6'ya geçti ve istek durumda kaldı; uygulama yeniden açılınca iş Faz 1'den başladı ve dört faz sonra
+ * gelen ilgisiz Faz 5 koşusu aynı cümleyle yine rötuş kipine girdi.
+ *
+ *   • Faz 6'ya giriş: akış Faz 5'i geride bıraktı → istek artık uygulanmayacak (rötuş başarısız olup
+ *     kabul edildi, ya da Faz 5 kapsam dışı diye atlandı ve istek hiç denenmedi). İstek kalırsa sonraki
+ *     Faz 5 koşusunu rötuş kipine sokar.
+ *   • Faz 1'e giriş: yeni bir niyet turu başlıyor → önceki rötuş isteği bu işle ilgisizdir.
+ *
+ * Faz 5'in İÇİNDE (başarısız rötuşun yeniden denenmesi, kesintiden dönüş) istek BİLEREK durur: orada
+ * silmek yeniden girişi rötuş yerine tam arayüz üretimine çevirirdi (mahkeme bulgusu, 2026-11-27).
+ */
+export function uiTweakStaleOnEnter(state: Pick<State, "pending_ui_tweak">, entering: number): boolean {
+  return isUiTweakRun(state) && (entering === 1 || entering === 6);
+}
+
 export class Phase5Controller {
   public statePatch: Partial<State> = {};
+
   private base: CodegenBackend | null = null;
   /** Fail durumunda kullanıcıya gösterilecek mesaj için error context. */
   public lastFailReason?: string;
@@ -145,7 +176,7 @@ export class Phase5Controller {
     // Tweak mode kontrolü: Phase 6 ui_tweak outcome'da set edilen
     // state.pending_ui_tweak okunur. Set ise initial message + audit event
     // ismi farklı; dev server zaten ayakta olduğu için spawn skip.
-    const tweakDesc = this.state.pending_ui_tweak;
+    const tweakDesc = isUiTweakRun(this.state) ? this.state.pending_ui_tweak : undefined;
     const isTweakMode = !!tweakDesc;
     log.info("phase-5", "mode", { isTweakMode });
 
@@ -426,8 +457,11 @@ export class Phase5Controller {
         // YZLLM 2026-06-13 (trace kökü): "hiç event yok" = ya tweak ZATEN uygulanmış (no-op) ya da
         // ajan yazamadı. İKİSİNDE de model-gücü çözmez — daha güçlü model de aynı dosyaları okuyup
         // "yapacak şey yok" der (trace: haiku→opus-max 11 rung, her biri 30-130dk, HEPSİ aynı sonuç).
-        // escalatable=false → merdiveni TIRMANMA, doğrudan error-analysis'e (akıllı deep-debug zaten
-        // "zaten uygulanmış"ı bulup pending_ui_tweak'i temizliyor — ama saatler tırmanmadan).
+        // escalatable=false → merdiveni TIRMANMA, doğrudan error-analysis'e.
+        // İSTEK BURADA SİLİNMEZ (2026-11-27): eski yorum silmeyi hata analizine bırakıyordu, ama o yola
+        // her zaman girilmiyor (mahkeme "devam" derse akış Faz 6'ya geçer). Burada silmek de yanlış:
+        // Faz 5'e yeniden giriş rötuş yerine tam arayüz üretimine dönerdi. İstek, akış Faz 5'ten
+        // ÇIKTIĞI anda düşer (index.ts: Faz 6'ya ve Faz 1'e giriş; bkz. uiTweakStaleOnEnter).
         this.lastFailEscalatable = false;
         return "fail";
       }
@@ -438,6 +472,12 @@ export class Phase5Controller {
         caller: "mycl-orchestrator",
         detail: `tweak verified: ${tweakWrites.length} file(s) changed — "${tweakDesc.slice(0, 80)}"`,
       });
+      // İSTEK TÜKETİLDİ: yazma doğrulandı → faz hangi başarı yolundan biterse bitsin istek silinir.
+      // Eskiden silme yalnız "dev sunucu zaten ayakta ve kimliği biliniyor" yolundaydı; dışarıdan
+      // başlatılmış sunucu yolu hiç silmiyor, yeniden başlatma yolu da yamayı `{ dev_server_pid }` ile
+      // EZİYORDU → başarılı rötuşun isteği Faz 6'ya bayat taşınıyordu (uygulama yeniden açıldıktan
+      // sonraki rötuşta sunucu kimliği boş olduğu için tam bu yola düşülür).
+      this.statePatch = { ...this.statePatch, pending_ui_tweak: undefined };
     } else {
       const uiWrites = audit.filter(
         (e) => e.phase === 5 && e.event === "ui-file-write",
@@ -529,7 +569,7 @@ export class Phase5Controller {
     // (yeni spawn pid çakışmasına neden olur). pending_ui_tweak statePatch'te
     // temizlenir → Phase 6 tekrar çağrıldığında state temiz.
     if (isTweakMode && this.state.dev_server_pid) {
-      this.statePatch = { pending_ui_tweak: undefined };
+      this.statePatch = { ...this.statePatch, pending_ui_tweak: undefined };
       // YZLLM 2026-06-18 KRİTİK (canlı remax_BO): tweak HMR'ı dev-server'ı 500'e düşürebilir (HMR bad-state) →
       // eski kod "Tweak uygulandı, dev server zaten ayakta" deyip 200 DOĞRULAMADAN complete diyordu → TÜM route
       // 500 veren BOZUK app Faz 6 incelemesine geçiyordu. FIX: tweak sonrası dev-server'ın 2xx/3xx servis ettiğini
@@ -782,7 +822,8 @@ export class Phase5Controller {
     }
     const handle = chainResult.handle;
     const usedCmd = chainResult.cmd;
-    this.statePatch = { dev_server_pid: handle.pid };
+    // Birleştir, ezme: rötuş kipinde yukarıda konan `pending_ui_tweak: undefined` korunmalı.
+    this.statePatch = { ...this.statePatch, dev_server_pid: handle.pid };
     replaceActiveWatcher({
       pid: handle.pid,
       stdout: handle.stdout,

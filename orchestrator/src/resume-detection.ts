@@ -45,9 +45,10 @@ export function detectInterruptedPhase2To9Pure(
   // codegen/risk fazı (5/8/9) güvenlik-fix/verify-up ile YENİDEN girildi ama bitmeden oturum koptu (BAYAT
   // phase-N-complete önceki koşudan kalır). Her iki halde de bayat complete'e rağmen RESUME et — "soldan faza tıkla"
   // DEMESİN ("nerede kaldıysak orayı aç"). Re-run bitince loop ilerler → döngü yok.
-  // HARİÇ: Faz 6 (deferred UI review — boot'ta pending_ui_tweak ile ayrı ele alınır) + mekanik gate'ler (10-17,
-  // tamamlanırsa truly-done, redo istemez). Boot-resume katmanı ayrıca pending_diagnostic/pending_ui_tweak'te
-  // resume yapmaz (kullanıcı seçimi bekleniyor) — bkz index.ts boot akışı.
+  // HARİÇ: Faz 6 (deferred UI review — tamamlanmamışsa aşağıda zaten resume edilir) + mekanik gate'ler (10-17,
+  // tamamlanırsa truly-done, redo istemez). Kuyruksuz boot-resume katmanı ayrıca pending_diagnostic/
+  // pending_ui_tweak'te resume yapmaz — bkz index.ts boot akışı. Kuyrukta yetim iş varken bekleyen rötuşun
+  // nasıl sürdürüldüğü: decideBootQueueAction / uiTweakResumePhase.
   const RESUMABLE_PARKED = new Set<number>([2, 3, 4, 5, 7, 8, 9]);
   if (handled && !RESUMABLE_PARKED.has(cp)) return null;
   return { phaseId: cp as PhaseId };
@@ -87,23 +88,60 @@ export function computeMidPipeline(input: {
 
 /**
  * boot-resume bloğunun ÖZEL-DÖNÜŞ bayrakları — bu durumlarda kuyruk-resume DEVREYE GİRMEZ (index.ts boot bloğu
- * kendi özel yolunu işler: Faz 0 debug re-emit `pending_diagnostic`; deferred UI tweak Faz≤9; foreign Faz 6 unpark).
+ * kendi özel yolunu işler: Faz 0 debug re-emit `pending_diagnostic`; foreign Faz 6 unpark).
  * decideBootQueueAction bunları dışlar → çift-işlem/çakışma olmaz.
+ *
+ * BEKLEYEN RÖTUŞ ARTIK BURADA DEĞİL (2026-11-27, ekransız deneme koşusu 7): eskiden üçüncü dal
+ * `pending_ui_tweak && current_phase <= 9` idi ve yorum "index.ts açılış bloğu kendi özel yoluyla işler"
+ * diyordu. Öyle bir yol YOK: açılış bloğu yalnız kendi devamını bastırıyor, kuyruk ise `drain` ile yetim
+ * işi `pending` yapıp Faz 1'den baştan sürüyordu (onaylanmış niyet, brif ve spec yeniden üretildi).
+ * Bekleyen rötuş artık kuyruğu durdurmaz; yalnız HANGİ fazdan sürüleceğini belirler (uiTweakResumePhase).
  */
 function bootResumeStandDown(
-  state: Pick<
-    State,
-    "pending_diagnostic" | "pending_ui_tweak" | "pending_ui_review" | "current_phase" | "origin"
-  >,
+  state: Pick<State, "pending_diagnostic" | "pending_ui_review" | "current_phase" | "origin">,
 ): boolean {
   if (state.pending_diagnostic) return true;
-  if (state.pending_ui_tweak && (state.current_phase ?? 0) <= 9) return true;
   if (state.origin === "foreign" && state.pending_ui_review && state.current_phase === 6) return true;
   return false;
 }
 
+/**
+ * SAF: bekleyen rötuş isteği (`pending_ui_tweak`, Faz ≤ 9) varken açılışta hangi fazdan sürülür?
+ * `null` → rötuş bu kararı etkilemiyor (istek yok ya da kapı fazında düzeltme planı; eski davranış).
+ *
+ *   • Faz 5, ya da spec'i ONAYLI Faz 4 → Faz 5 (rötuş sürdürülür). İsteği koyan iki yol da
+ *     (`revise_ui`, Faz 0 arayüz düzeltmesi) `current_phase = 4` yazıp ilerler; Faz 4 orada bir
+ *     BAŞLANGIÇ NOKTASIDIR → Faz 4 yeniden koşturulmaz (onaylanmış spec yeniden üretilmez).
+ *     Spec onaylı DEĞİLSE Faz 4 gerçekten yarıdadır → kesinti tespitinin verdiği faz, onay atlanmaz.
+ *     SINIR: `spec_approved` Faz 4 yeniden koşarken sıfırlanmaz (yalnız yeni iterasyon, düşen iş ve
+ *     Faz 2 vazgeçmesinde). Spec dosyası kaybolduğu için Faz 4'e düşülüp onay sorusunda kapanılmışsa
+ *     bayrak hâlâ doğrudur ve bu durum başlangıç noktasından ayırt edilemez.
+ *   • Faz 6-9 → kesinti tespitinin verdiği faz; istek BAYATTIR ve düşürülür. Akış Faz 5'i geçtiyse o
+ *     isteğin Faz 5 koşusu bitmiştir (başarısız rötuşa mahkeme "devam" dedi ya da başarılı rötuş isteği
+ *     silmeden ilerledi). Faz 6 parkında (`pending_ui_review`) bu, Faz 6 beklemesine dönmek demektir.
+ *   • Faz 2-3 → kesinti tespitinin verdiği faz; istek durur (yalnız eski hatanın ürettiği durum).
+ */
+function uiTweakResumePhase(
+  state: Pick<State, "pending_ui_tweak" | "current_phase" | "spec_approved">,
+  interrupted: PhaseId,
+): { phaseId: PhaseId; dropUiTweak: boolean } | null {
+  const cp = state.current_phase ?? 0;
+  if (!state.pending_ui_tweak || cp > 9) return null;
+  if (cp >= 6) return { phaseId: interrupted, dropUiTweak: true };
+  if (cp === 5 || (cp === 4 && state.spec_approved === true)) {
+    return { phaseId: 5 as PhaseId, dropUiTweak: false };
+  }
+  return { phaseId: interrupted, dropUiTweak: false };
+}
+
 export type BootQueueAction =
-  | { kind: "resume"; phaseId: PhaseId; taskId: string }
+  | {
+      kind: "resume";
+      phaseId: PhaseId;
+      taskId: string;
+      /** true → durumdaki `pending_ui_tweak` bayattır; sürdürmeden ÖNCE silinmeli (çağıran yazar). */
+      dropUiTweak?: true;
+    }
   | { kind: "drain" }
   | { kind: "none" };
 
@@ -113,6 +151,8 @@ export type BootQueueAction =
  * (running orphan + detectInterruptedPhase2To9Pure phaseId + intent_summary dolu + standDown yok) →
  * KALDIĞI FAZDAN devam et ("resume"). Aksi (yeni pending iş / Faz-1 orphan / standDown) → "drain"
  * (mevcut flip→pending + Faz 1'den koşma). Hiç iş yoksa "none".
+ * Bekleyen rötuş isteği (Faz ≤ 9) "resume"u ENGELLEMEZ; yalnız fazı belirler ve bayatsa `dropUiTweak`
+ * ile düşürülmesini ister (bkz. uiTweakResumePhase).
  *
  * YZLLM 2026-07-03: kullanıcı "yarım iterasyonu kapat-aç'ta kaldığı yerden devam et" istedi; kök —
  * current_phase doğru persist ediliyordu ama kuyruk-sürücü current_phase'e bakmadan Faz 1'den koşuyordu.
@@ -127,6 +167,7 @@ export function decideBootQueueAction(
     | "pending_diagnostic"
     | "pending_ui_tweak"
     | "pending_ui_review"
+    | "spec_approved"
     | "origin"
   >,
   tasks: { id: string; status?: string }[],
@@ -138,7 +179,13 @@ export function decideBootQueueAction(
   });
   if (!hasWork) return { kind: "none" };
   const orphan = tasks.find((t) => (t.status ?? "pending") === "running");
-  const rd = detectInterruptedPhase2To9Pure(state, audit);
+  // FAZ 6 PARKI kesinti tespitinden BAĞIMSIZ sürdürülür: `pending_ui_review` "inceleme bekleniyor"un
+  // kendi işaretidir. Aynı iterasyonda daha önce onaylanmış bir Faz 6 varsa (onaydan sonra arayüz
+  // düzeltmesi Faz 5'e dönüp Faz 6'yı yeniden park ettiyse) bayat `phase-6-complete` tespiti `null`
+  // yapar; eskiden bu `drain` demekti → park etmiş iş Faz 1'den baştan başlardı.
+  const parkedAtUiReview = state.pending_ui_review === true && state.current_phase === 6;
+  const rd =
+    detectInterruptedPhase2To9Pure(state, audit) ?? (parkedAtUiReview ? { phaseId: 6 as PhaseId } : null);
   if (
     orphan &&
     rd &&
@@ -146,6 +193,15 @@ export function decideBootQueueAction(
     state.intent_summary.trim() !== "" &&
     !bootResumeStandDown(state)
   ) {
+    const tweak = uiTweakResumePhase(state, rd.phaseId);
+    if (tweak) {
+      return {
+        kind: "resume",
+        phaseId: tweak.phaseId,
+        taskId: orphan.id,
+        ...(tweak.dropUiTweak ? { dropUiTweak: true as const } : {}),
+      };
+    }
     return { kind: "resume", phaseId: rd.phaseId, taskId: orphan.id };
   }
   return { kind: "drain" };
