@@ -32,6 +32,7 @@ import {
   countCodeMapUse,
   latestScenarios,
   listRecords,
+  needsRefresh,
   rankHits,
   usageCount,
   placeScenarioFiles,
@@ -418,3 +419,101 @@ describe("kod yazmadan önce — başka projede arama ve yerleştirme", () => {
     }
   });
 });
+
+describe("prompt 31 (2026-11-28): boş proje ölçütü ve önceki senaryoların tazelenmesi", () => {
+  it("stack 'unknown', projede yalnız .mycl/spec.md var → proje boş sayılır, aranır (koşu 40)", async () => {
+    await seedMapFromProjectA(5, "node-npm");
+    await mkdir(join(proj, ".mycl"), { recursive: true });
+    await writeFile(join(proj, ".mycl", "spec.md"), "# spec\n");
+    scoreCliMock.mockImplementation(miss);
+    await prepareFromCodeMap(state(proj, "unknown"), config, 5, "task list");
+    expect(scoreCliMock).toHaveBeenCalled();
+    expect(chatMock.mock.calls.some((c) => String(c[1]).includes("projede kod var — aranmadı"))).toBe(false);
+  });
+
+  const pass = (name: string, files: string[]) =>
+    recordCodeMapAfterGate({
+      state: state(),
+      phase: 8,
+      gatePassed: true,
+      gatesPassed: ["g"],
+      agentText: agentText({ frameworks: ["react"], scenarios: [{ ...SCENARIO, name, files }] }),
+    });
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  it("düzeltme geçişi başka adla kayıt açınca, dosyası değişen önceki senaryo AYNI adla güncel sürümle yeniden kaydedilir", async () => {
+    await seedFiles(proj);
+    await pass(SCENARIO.name, SCENARIO.files);
+    await tick();
+    const fixed = TODO_STORE + "export function clearTodos() { localStorage.removeItem(TODO_KEY); }\n";
+    await writeFile(join(proj, "src", "todoStore.js"), fixed);
+    const out = await pass("Fix: clear list", ["src/todoView.js"]);
+    expect(out.refreshed).toEqual([SCENARIO.name]);
+    expect(chatMock.mock.calls.some((c) => String(c[1]).includes("1 senaryo güncel sürümle yeniden kaydedildi"))).toBe(true);
+    const all = await listRecords();
+    const named = all.filter((r): r is ScenarioRecord => r.level === "scenario" && r.name === SCENARIO.name);
+    expect(named).toHaveLength(2); // eski kayıt silinmedi
+    const latest = latestScenarios(all).find((r) => r.name === SCENARIO.name)!;
+    const files = latest.files.map((id) => all.find((r) => r.id === id) as FileRecord);
+    const values = Object.fromEntries(latest.bindings.map((b) => [b.name, b.source_value]));
+    const store = files.find((f) => renderTemplate(f.path_template, values) === "src/todoStore.js")!;
+    expect(renderTemplate(store.template, values)).toBe(fixed);
+    expect(latest.bindings.map((b) => b.name).sort()).toEqual(["Entity", "entity", "storageKey"].sort());
+  });
+
+  it("dosyaları değişmeyen önceki senaryo yeniden kaydedilmez", async () => {
+    await seedFiles(proj);
+    await pass(SCENARIO.name, SCENARIO.files);
+    await tick();
+    const out = await pass("Other", ["src/todoView.js"]);
+    expect(out.refreshed).toEqual([]);
+  });
+
+  it("silinmiş dosya yeni kayda girmez; hiç dosyası kalmayan senaryo yeniden kaydedilmez", async () => {
+    await seedFiles(proj);
+    await pass(SCENARIO.name, SCENARIO.files);
+    await tick();
+    await rm(join(proj, "src", "todoStore.js"));
+    const out = await pass("Other", ["src/todoView.js"]);
+    expect(out.refreshed).toEqual([SCENARIO.name]);
+    const all = await listRecords();
+    const latest = latestScenarios(all).find((r) => r.name === SCENARIO.name)!;
+    expect(latest.files).toHaveLength(1);
+
+    await tick();
+    await rm(join(proj, "src", "todoView.js"));
+    const out2 = await recordCodeMapAfterGate({ state: state(), phase: 8, gatePassed: true, gatesPassed: ["g"], agentText: "no report" });
+    expect(out2.refreshed).not.toContain(SCENARIO.name);
+  });
+  it("kapısı geçmeyen geçişin tazelediği sürüm, sonraki kapısı geçen geçişte 'geçti' olarak yeniden kaydedilir; sonra durur", async () => {
+    await seedFiles(proj);
+    await pass(SCENARIO.name, SCENARIO.files); // geçti, v1
+    await tick();
+    await writeFile(join(proj, "src", "todoStore.js"), TODO_STORE + "// v2\n");
+    const failed = await recordCodeMapAfterGate({
+      state: state(),
+      phase: 8,
+      gatePassed: false,
+      gatesPassed: [],
+      agentText: agentText({ scenarios: [{ ...SCENARIO, name: "Fix A", files: ["src/todoView.js"] }] }),
+    });
+    expect(failed.refreshed).toEqual([SCENARIO.name]);
+    await tick();
+    const passed = await pass("Fix B", ["src/todoView.js"]); // dosya değişmedi ama sunulan sürüm hâlâ v1
+    expect(passed.refreshed).toEqual([SCENARIO.name]);
+    const latest = latestScenarios(await listRecords()).find((r) => r.name === SCENARIO.name)!;
+    expect(latest.provenance.gate_passed).toBe(true);
+    await tick();
+    const again = await pass("Fix C", ["src/todoView.js"]);
+    expect(again.refreshed).toEqual([]);
+  });
+
+  it("needsRefresh: sunulan sürüm güncelse ya da en yeni kayıt aynı kapı durumuyla günceldeyse yazılmaz", () => {
+    expect(needsRefresh(true, false, false, true)).toBe(false);
+    expect(needsRefresh(false, true, true, true)).toBe(false);
+    expect(needsRefresh(false, true, false, false)).toBe(false);
+    expect(needsRefresh(false, true, false, true)).toBe(true);
+    expect(needsRefresh(false, false, true, true)).toBe(true);
+  });
+});
+

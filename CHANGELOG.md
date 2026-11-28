@@ -1,5 +1,41 @@
 ## 2026-11-28
 
+- **fix(kod haritası): yeni projede Faz 5'te aransın; düzeltilen senaryolar güncel sürümle yeniden kaydedilsin.**
+  Harita üç projede çalıştı ama hız kazandırmadı.
+  - Koşu 40 (`not-defteri-sunucu-40`): Faz 4'ten sonra "projenin stack'i bilinmiyor ve projede kod var — aranmadı"
+    yazıldı. Projede o anda kod yoktu, yalnız `.mycl/spec.md` vardı.
+  - Koşu 37 (`alisveris-sunucu-33`): Faz 8'de ilk projenin düzeltilmemiş ilk geçiş sürümü yerleşti. Faz 9 ilk
+    projede bulunup düzeltilmiş riskleri yeniden buldu.
+  1. **Boş proje ölçütü (`hasProjectSource`, `phase-1-codebase-probe.ts`):** yalnız proje kaynağına bakıyor
+     (bildirim dosyası ya da kaynak klasörü); `.mycl/` altındaki MyCL dosyaları sayılmıyor. `classifyOpenedFolder`
+     aynı işlevi paylaşıyor, davranışı değişmedi. `isExistingProject`'in öbür kullanıcıları (prototip kaydı, yaşayan
+     belge) değişmedi. Kaynağı olan ve stack'i bilinmeyen projede aranmaması aynen kaldı.
+  2. **Tazeleme (`refreshStaleScenarios`, `code-map.ts`):** her kayıt anında, aynı projenin (aynı yineleme, faz ve
+     stack) önceki senaryoları gözden geçiriliyor. Bu geçişte ajanın bildirdiği adlar hariç.
+     - Bir dosya diskte değişmiş ya da silinmişse senaryo AYNI adla, aynı bağlamalarla ve dosyaların o anki
+       içeriğiyle yeni tarihli bir kayıt olarak yeniden kaydediliyor (o geçişin kapı durumuyla). Eski kayıt
+       silinmiyor.
+     - Silinmiş dosya yeni kayda girmiyor; dosyası kalmayan senaryo kaydedilmiyor.
+     - Dosya doğrulaması (yol, sır, birebir geri çıkma) kaydın kendisiyle aynı. Değeri artık geçmeyen bağlama
+       atılıyor. Model çağrısı yok.
+     - Ajan bildirim yapmasa da tazeleme koşuyor.
+  3. **İleti:** `code-map-recorded` satırı "N senaryo güncel sürümle yeniden kaydedildi (adlar)" diyor.
+  - **İnceleme bulguları, düzeltildi:**
+     - **Karşılaştırma ölçütü:** dosya kaydı içerikten türüyor ve projeler arasında paylaşılıyor; içindeki
+       `text_sha256` ilk yazan projenin metni. Bu yüzden karşılaştırma her geçişte "değişti" diyebilirdi. Artık her
+       kaydın kendi bağlama değerleriyle yerine konmuş şablon diskteki metinle karşılaştırılıyor; isteğin "kayıttaki
+       metin" ölçütünün doğru karşılığı bu.
+     - **Kapı önceliği:** seçim kapısı geçmiş sürümü öne aldığı için, kapısı geçmeyen bir geçişin tazelediği sürüm
+       sonra geçen geçişte hiç kaydedilmiyor ve eski sürüm sunulmaya devam ediyordu. Artık karşılaştırma seçimin
+       sunacağı sürümle (`latestScenarios`) yapılıyor; aynı içerik aynı ya da daha iyi kapı durumuyla zaten
+       kayıtlıysa tekrar yazılmıyor (`needsRefresh`).
+     - **Gizli ret:** bildirim olmayan geçişte tazeleme reddedildiyse bu artık sohbete yazılıyor.
+  - **Değişmeyenler:** üzerine yazmama ve tarihli yeni kayıt kuralı; yerleştirmenin var olan dosyaya dokunmaması;
+    yol ve sır denetimleri; seçim sırası (puan, kapısı geçmiş, kullanım, tarih).
+  - **Bilinen sınır (hipotez):** tazelenen kayıt yeni bir kimlik aldığı için kullanım sayısı sıfırdan başlar
+    (`usage.json` kimliğe bağlı). Ajanın aynı adla yeniden kaydı da bugün böyle.
+  - Testler eklendi (`code-map.test.ts`), koşturulmadı (yalnız derlendi). Yeni modül yok (kural 15).
+
 - **fix(Faz 16/12/17): arayüzü akış kurduysa E2E atlanmasın; çalışan uygulama gereken adımlar önce uygulamayı açsın.**
   Danışman kararı (Ümit proje kararlarını devretti). Faz 17'nin "geliştirme sunucusunu kendisi başlatmaz" seçimini
   (2026-08-03) değiştiriyor; araç kurulumu yine denenmez. Kanıt: `yapilacaklar-sunucu-28` (koşu 32) ve

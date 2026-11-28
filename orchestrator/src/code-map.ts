@@ -28,7 +28,7 @@ import { emitChatMessage } from "./ipc.js";
 import { log } from "./logger.js";
 import { globalConfigDir, globalConfigFile } from "./paths.js";
 import { detectStack } from "./intent-router/handlers/command.js";
-import { isExistingProject } from "./phase-1-codebase-probe.js";
+import { hasProjectSource } from "./phase-1-codebase-probe.js";
 import { DENY_SEGMENTS } from "./prototype-cache.js";
 import { scoreChunks, scoreChunksViaCli } from "./relevance/classifier.js";
 import { keywordPreFilter } from "./relevance/relevance-engine.js";
@@ -382,6 +382,8 @@ export interface RecordOutcome {
   /** Değeri dosyalarda ve yollarda geçmediği için atılan bağlamalar (senaryo kalanlarla kaydedildi). */
   dropped_bindings: Array<{ key: string; names: string[] }>;
   noReport: boolean;
+  /** Aynı projenin önceki senaryolarından dosyaları değiştiği için güncel sürümle YENİDEN kaydedilenlerin adları. */
+  refreshed: string[];
 }
 
 /** Bir dosyayı doğrula ve şablonunu türet: yol güvenli, metin okunur, sır yok, BİREBİR geri çıkıyor. */
@@ -416,6 +418,147 @@ async function verifyFile(
 }
 
 /**
+ * SAF: tazeleme adayları — AYNI proje, yineleme, faz ve stack; ad başına iki kayıt: `served` (seçimin sunduğu,
+ * `latestScenarios` kuralıyla: kapısı geçmiş önce, sonra yeni) ve `newest` (kapı durumuna bakmadan en yeni). Bu geçişte
+ * ajanın bildirdiği adlar hariç.
+ */
+export function scenariosToRefresh(
+  all: CodeMapRecord[],
+  where: { rootSha: string; iteration: number; phase: number; stack: string },
+  skipNames: ReadonlySet<string>,
+): Array<{ served: ScenarioRecord; newest: ScenarioRecord }> {
+  const mine = all.filter(
+    (r): r is ScenarioRecord =>
+      r.level === "scenario" &&
+      r.provenance.project_root_sha === where.rootSha &&
+      r.provenance.iteration === where.iteration &&
+      r.provenance.phase === where.phase &&
+      r.stack === where.stack &&
+      !skipNames.has(r.name),
+  );
+  const newest = new Map<string, ScenarioRecord>();
+  for (const r of mine) {
+    const prev = newest.get(r.name);
+    if (!prev || r.provenance.created_at > prev.provenance.created_at) newest.set(r.name, r);
+  }
+  return latestScenarios(mine).map((served) => ({ served, newest: newest.get(served.name) ?? served }));
+}
+
+/**
+ * SAF: tazeleme kararı. Diskteki metinler (`null` = dosya yok) her kaydın KENDİ bağlama değerleriyle yerine konmuş
+ * şablonuyla karşılaştırılır (dosya kaydı içerikten türer ve projeler arasında paylaşılır; içindeki `text_sha256` ilk
+ * yazanın metnidir — inceleme bulgusu).
+ * - Seçimin sunduğu sürüm diskle aynıysa → tazeleme yok.
+ * - En yeni kayıt diskle aynı ve kapı durumu bu geçişinkinden kötü değilse → zaten kayıtlı, tazeleme yok.
+ * - Aksi hâlde tazele (kapısı geçen geçiş, kapısı geçmemiş bir tazelemenin sürümünü "geçti" olarak yeniden kaydeder).
+ */
+export function needsRefresh(servedMatchesDisk: boolean, newestMatchesDisk: boolean, newestPassed: boolean, passPassed: boolean): boolean {
+  if (servedMatchesDisk) return false;
+  if (newestMatchesDisk && (newestPassed || !passPassed)) return false;
+  return true;
+}
+
+/**
+ * Önceki senaryoların dosyaları diskte değiştiyse AYNI ad ve bağlamalarla, dosyaların o anki içeriğiyle yeni tarihli kayıt
+ * aç (eski kayıt silinmez — `latestScenarios` en günceli seçer). Silinmiş dosya yeni kayda girmez; dosyası kalmayan
+ * senaryo yeniden kaydedilmez. Dosya doğrulaması kaydın kendisiyle aynı (`verifyFile`: yol, sır, birebir geri çıkma).
+ */
+async function refreshStaleScenarios(
+  projectRoot: string,
+  stack: string,
+  provenance: Provenance,
+  skipNames: ReadonlySet<string>,
+  write: (rec: CodeMapRecord) => Promise<void>,
+  out: RecordOutcome,
+): Promise<void> {
+  const all = await listRecords();
+  const byId = new Map(all.map((r) => [r.id, r]));
+  const prior = scenariosToRefresh(
+    all,
+    { rootSha: provenance.project_root_sha, iteration: provenance.iteration, phase: provenance.phase, stack },
+    skipNames,
+  );
+  const disk = new Map<string, string | null>();
+  const readDisk = async (rel: string): Promise<string | null> => {
+    if (!disk.has(rel)) {
+      const abs = resolve(projectRoot, rel);
+      let text: string | null = null;
+      if (abs.startsWith(resolve(projectRoot) + sep) && (await realInsideProject(projectRoot, abs))) {
+        text = await fs.readFile(abs, "utf-8").catch(() => null); // yok → silinmiş
+      }
+      disk.set(rel, text);
+    }
+    return disk.get(rel) ?? null;
+  };
+  /** Kayıt diskle aynı mı + diskte kalan dosya yolları (kaydın kendi bağlama değerleriyle). */
+  const compare = async (rec: ScenarioRecord): Promise<{ same: boolean; rels: string[] }> => {
+    const values = Object.fromEntries(rec.bindings.map((b) => [b.name, b.source_value]));
+    let same = true;
+    const rels: string[] = [];
+    for (const fid of rec.files) {
+      const f = byId.get(fid);
+      if (!f || f.level !== "file") continue;
+      const rel = renderTemplate(f.path_template, values);
+      if (rel === null || !isSafeRelPath(rel)) continue;
+      const text = await readDisk(rel);
+      if (text === null || renderTemplate(f.template, values) !== text) same = false;
+      if (text !== null) rels.push(rel);
+    }
+    return { same, rels };
+  };
+  for (const { served, newest } of prior) {
+    const old = newest; // ad, açıklama, bağlamalar ve dosya listesi en yeni kayıttan
+    const pairs = old.bindings.map((b) => ({ name: b.name, value: b.source_value }));
+    const s1 = await compare(served);
+    const s2 = served === newest ? s1 : await compare(newest);
+    const changed = needsRefresh(s1.same, s2.same, newest.provenance.gate_passed !== false, provenance.gate_passed !== false);
+    const rels = s2.rels;
+    if (!changed) continue;
+    const fileRecs: FileRecord[] = [];
+    const texts: string[] = [];
+    for (const rel of rels) {
+      const v = await verifyFile(projectRoot, rel, pairs);
+      if ("reason" in v) {
+        out.rejected.push({ key: `${old.name} (tazeleme): ${rel}`, reason: v.reason });
+        continue;
+      }
+      texts.push(v.text, rel);
+      fileRecs.push({
+        id: `file-${sha256([stack, v.pathTemplate, v.template].join("|")).slice(0, 16)}`,
+        level: "file",
+        stack,
+        path_template: v.pathTemplate,
+        template: v.template,
+        text_sha256: sha256(v.text),
+        provenance,
+      });
+    }
+    if (fileRecs.length === 0) continue; // hiç dosyası kalmadı → yeniden kaydedilmez
+    // Kayıttaki kuralla aynı: değeri artık dosyalarda ve yollarda geçmeyen bağlama atılır.
+    const usedBindings = old.bindings.filter((b) => texts.some((t) => t.includes(b.source_value)));
+    const dropped = old.bindings.filter((b) => !usedBindings.includes(b));
+    if (dropped.length > 0) out.dropped_bindings.push({ key: old.name, names: dropped.map((b) => b.name) });
+    const fileIds = fileRecs.map((f) => f.id);
+    const scenario: ScenarioRecord = {
+      id: `scenario-${slugName(old.name) || "scenario"}-${sha256([stack, old.name, fileIds.join(","), usedBindings.map((b) => `${b.name}=${b.source_value}`).join(","), old.acceptance_criteria.join(","), provenance.created_at, provenance.project_root_sha].join("|")).slice(0, 12)}`,
+      level: "scenario",
+      name: old.name,
+      description: old.description,
+      stack,
+      frameworks: old.frameworks,
+      acceptance_criteria: old.acceptance_criteria,
+      files: fileIds,
+      bindings: usedBindings,
+      declared_by_agent: true,
+      provenance,
+    };
+    for (const f of fileRecs) await write(f);
+    await write(scenario);
+    out.refreshed.push(old.name);
+  }
+}
+
+/**
  * Kod yazma fazı (Faz 5 rötuş dışı, Faz 8) bitince ajanın bildirimini kayda dönüştür — fazın kapısı geçmese de
  * (Ümit, 2026-11-27: "kapı çok zor olmamalı … kodu kaydedeceğiz sadece, projeyi etkilemeyecek"). Kapının geçip
  * geçmediği kayıtta alan olarak durur (`provenance.gate_passed`) ve seçim sırasında kullanılır. Her senaryo:
@@ -429,7 +572,7 @@ export async function recordCodeMapAfterGate(opts: {
   gatesPassed: string[];
   agentText: string;
 }): Promise<RecordOutcome> {
-  const out: RecordOutcome = { recorded: [], reused: [], rejected: [], dropped_bindings: [], noReport: false };
+  const out: RecordOutcome = { recorded: [], reused: [], rejected: [], dropped_bindings: [], noReport: false, refreshed: [] };
   const { state, phase } = opts;
   try {
     const project = basename(state.project_root);
@@ -443,8 +586,7 @@ export async function recordCodeMapAfterGate(opts: {
     const report = parseCodeMapReport(opts.agentText);
     if (!report) {
       out.noReport = true;
-      await visible(state, phase, "code-map-no-report", "🗺️ Kod haritası: ajan iş sonu bildirimini (code_map) yapmadı — bu fazdan kayıt alınmadı.");
-      return out;
+      await visible(state, phase, "code-map-no-report", "🗺️ Kod haritası: ajan iş sonu bildirimini (code_map) yapmadı — bu fazdan yeni senaryo kaydı alınmadı.");
     }
     const provenance: Provenance = {
       project,
@@ -460,7 +602,7 @@ export async function recordCodeMapAfterGate(opts: {
       if (await writeRecordOnce(rec)) out.recorded.push(rec.id);
       else out.reused.push(rec.id); // aynı içerik zaten kayıtlı (kimlik içerikten türer)
     };
-    for (const s of report.scenarios) {
+    for (const s of report?.scenarios ?? []) {
       const label = s.name || "(adsız senaryo)";
       if (!s.name) {
         out.rejected.push({ key: label, reason: "senaryonun adı yok" });
@@ -516,7 +658,7 @@ export async function recordCodeMapAfterGate(opts: {
         name: s.name,
         description: s.description,
         stack,
-        frameworks: report.frameworks,
+        frameworks: report?.frameworks ?? [],
         acceptance_criteria: s.acceptance_criteria,
         files: fileIds,
         bindings: usedBindings.map((b) => ({ name: b.name, description: b.description, source_value: b.value })),
@@ -526,6 +668,13 @@ export async function recordCodeMapAfterGate(opts: {
       for (const f of fileRecs) await write(f);
       await write(scenario);
     }
+    // TAZELEME (2026-11-28, prompt 31; koşu 37): düzeltme geçişleri ajanın verdiği BAŞKA adlarla kayıt açıyor, ana
+    // senaryonun kaydı ilk geçişin dosya sürümlerinde kalıyor ve yeni projeye o düzeltilmemiş sürüm yerleşiyordu.
+    // Model çağrısı yok: yalnız dosya karşılaştırması. Bu geçişte ajanın bildirdiği adlar zaten güncel kaydedildi.
+    const reportedNames = new Set((report?.scenarios ?? []).map((x) => x.name).filter(Boolean));
+    await refreshStaleScenarios(state.project_root, stack, provenance, reportedNames, write, out);
+    // Bildirim yok, tazelenen ve reddedilen de yok → eski davranış (tek ileti). Tazeleme reddi varsa sessiz kalmasın (kural 4).
+    if (!report && out.refreshed.length === 0 && out.rejected.length === 0) return out;
     const rej =
       out.rejected.length > 0
         ? ` Reddedilen ${out.rejected.length}: ${out.rejected.slice(0, 5).map((r) => `${r.key} (${r.reason})`).join("; ")}${out.rejected.length > 5 ? "; …" : ""}.`
@@ -538,7 +687,9 @@ export async function recordCodeMapAfterGate(opts: {
       state,
       phase,
       "code-map-recorded",
-      `🗺️ Kod haritası (Faz ${phase}): ${out.recorded.length} yeni kayıt, ${out.reused.length} kayıt zaten vardı.${rej}${dropped}`,
+      `🗺️ Kod haritası (Faz ${phase}): ${out.recorded.length} yeni kayıt, ${out.reused.length} kayıt zaten vardı` +
+        `${out.refreshed.length > 0 ? `, ${out.refreshed.length} senaryo güncel sürümle yeniden kaydedildi (${out.refreshed.slice(0, 5).join(", ")}${out.refreshed.length > 5 ? ", …" : ""})` : ""}.` +
+        `${rej}${dropped}`,
     );
     return out;
   } catch (e) {
@@ -791,9 +942,10 @@ export async function prepareFromCodeMap(state: State, config: MyclConfig, phase
     const all = await listRecords();
     const byId = new Map(all.map((r) => [r.id, r]));
     // Stack bilinmiyorsa: proje boşsa (yeni proje) bütün stack'lerde aranır, puanlayıcı adayın stack'ini görür; projede kod
-    // varsa aranmaz (başka dilin dosyaları yerleşmesin).
+    // varsa aranmaz (başka dilin dosyaları yerleşmesin). "Boş" yalnız proje KAYNAĞINA bakar (2026-11-28, prompt 31; koşu 40):
+    // Faz 4'ün yazdığı `.mycl/spec.md` "kod var" sayılıyordu → her yeni projede Faz 5'te arama yapılmıyordu.
     const allStacks = stack === "unknown";
-    if (allStacks && (await isExistingProject(state.project_root))) {
+    if (allStacks && (await hasProjectSource(state.project_root))) {
       await visible(state, phase, "code-map-search", "🗺️ Kod haritası: projenin stack'i bilinmiyor ve projede kod var — aranmadı, haritasız devam (bugünkü akış).");
       return none;
     }

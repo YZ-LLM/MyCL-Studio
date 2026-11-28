@@ -417,6 +417,22 @@ export async function isExistingProject(projectRoot: string): Promise<boolean> {
  * Fail-safe: tüm FS kontrolleri (fileExists/dirExists) hatayı yutup false döner → okunamayan/izin-kısıtlı
  * klasör "empty" olur, ASLA throw etmez (her açılışı bozma riski yok — mahkeme Mercek-C break-risk).
  */
+/**
+ * Projede KAYNAK var mı — yalnız proje kaynağına bakar: bilinen bildirim dosyası (manifest) ya da kaynak dizini.
+ * `.mycl/` altındaki MyCL dosyaları (spec, durum) SAYILMAZ. (2026-11-28, prompt 31: kod haritası her yeni projede Faz 4
+ * spec'i yazdıktan sonra `isExistingProject` yüzünden "kod var" sanıp aramıyordu.) `classifyOpenedFolder`'ın
+ * "foreign/empty" ayrımıyla aynı ölçüt; ikisi bu işlevi paylaşır.
+ */
+export async function hasProjectSource(projectRoot: string): Promise<boolean> {
+  for (const m of PROJECT_MANIFESTS) {
+    if (await fileExists(join(projectRoot, m))) return true;
+  }
+  for (const d of SOURCE_DIRS) {
+    if (await dirExists(join(projectRoot, d))) return true;
+  }
+  return false;
+}
+
 export async function classifyOpenedFolder(
   projectRoot: string,
 ): Promise<"empty" | "foreign" | "mycl"> {
@@ -426,13 +442,7 @@ export async function classifyOpenedFolder(
   ) {
     return "mycl";
   }
-  for (const m of PROJECT_MANIFESTS) {
-    if (await fileExists(join(projectRoot, m))) return "foreign";
-  }
-  for (const d of SOURCE_DIRS) {
-    if (await dirExists(join(projectRoot, d))) return "foreign";
-  }
-  return "empty";
+  return (await hasProjectSource(projectRoot)) ? "foreign" : "empty";
 }
 
 // .mycl (MyCL state) + devs (spec çalışma alanı) + ASLA-deliverable-olmayan türetilen/cache dizinleri.
