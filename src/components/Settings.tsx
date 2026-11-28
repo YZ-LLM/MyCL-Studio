@@ -62,7 +62,6 @@ interface Props {
     designWorkflow?: DesignWorkflowMode,
     agentTeamsOptIn?: boolean,
     cacheTtl?: "5m" | "1h",
-    multiAgentSelection?: boolean,
     opts?: { planModel?: string },
   ) => void;
   /** v15.8: rol başına backend (api/cli) mevcut değerleri — seçiciler için. */
@@ -101,8 +100,6 @@ interface Props {
   currentDesignWorkflow?: DesignWorkflowMode;
   /** v15.13: mevcut Agent Teams müzakere opt-in. */
   currentAgentTeamsOptIn?: boolean;
-  /** Çoklu Ajan Seçimi: ≥2 bağımsız modülü paralel yazdırma opt-in. */
-  currentMultiAgentSelection?: boolean;
   /** v15.14 (F2): mevcut prompt cache ömrü (5m/1h). */
   currentCacheTtl?: "5m" | "1h";
 }
@@ -201,7 +198,6 @@ export function Settings({
   currentBackends,
   currentDesignWorkflow,
   currentAgentTeamsOptIn,
-  currentMultiAgentSelection,
   currentCacheTtl,
 }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -231,11 +227,10 @@ export function Settings({
   const [planModelSel, setPlanModelSel] = useState<string>(currentPlanModel ?? "");
   const setTier = (tier: keyof ModelTiers, v: string) =>
     setModelTiersSel((prev) => ({ ...prev, [tier]: v || undefined }));
-  // SABİT (YZLLM 2026-06-22): bu 3 ayar kullanıcı-değiştirilemez (config read-force ezer). Setter YOK +
+  // SABİT (YZLLM 2026-06-22): bu 2 ayar kullanıcı-değiştirilemez (config read-force ezer). Setter YOK +
   // interaktif kontroller UI'dan kaldırıldı; değer yalnız onSaveModels'a (no-op) geçer. Default'lar = sabit değer.
   const [designWorkflowSel] = useState<DesignWorkflowMode>(currentDesignWorkflow ?? "create-only");
   const [agentTeamsOptInSel] = useState<boolean>(currentAgentTeamsOptIn ?? false);
-  const [multiAgentSelectionSel] = useState<boolean>(currentMultiAgentSelection ?? true);
   // v15.14 (F2): prompt cache ömrü (5m/1h).
   const [cacheTtlSel, setCacheTtlSel] = useState<"5m" | "1h">(currentCacheTtl ?? "5m");
 
@@ -504,7 +499,7 @@ export function Settings({
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
                 <p style={{ fontSize: 10, color: "var(--fg-dim)", margin: "0 0 8px" }}>
                   ℹ️ Çok-ajanlı tasarım sabitlendi: tasarım paneli <strong>create-only</strong> (yeni proje +
-                  kompleks işler) · Çoklu Ajan Seçimi <strong>açık</strong> · Agent Teams kapalı.
+                  kompleks işler) · Agent Teams kapalı.
                 </p>
                 <p
                   style={{
@@ -609,7 +604,6 @@ export function Settings({
                     designWorkflowSel,
                     agentTeamsOptInSel,
                     cacheTtlSel,
-                    multiAgentSelectionSel,
                     { planModel: planModelSel },
                   )
                 }

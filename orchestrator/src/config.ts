@@ -62,13 +62,6 @@ export interface ClaudeCodeFlags {
    */
   agent_teams_optin?: boolean;
   /**
-   * Çoklu Ajan Seçimi (2026-06-09): develop akışında, niyet ≥2 GERÇEKTEN bağımsız (dosya paylaşmayan)
-   * modüle bölünebiliyorsa, bunları izole git worktree'lerde PARALEL yazdırır (seri yerine → hız). Kapı
-   * (module-parallel/independence) ayrıklığı zorlar; bölünemezse/ayrık değilse SERİ (fail-closed). Varsayılan
-   * KAPALI → açık değilse normal akış hiç etkilenmez. Luke Alvoeiro tezi: paralel-yazma yalnız kanıtlı-bağımsız.
-   */
-  multi_agent_selection?: boolean;
-  /**
    * v15.14 (F2): Prompt cache ömrü. "5m" (default): mevcut davranış (Anthropic
    * varsayılanı). "1h": uzun pipeline koşularında cache-hit'i artırır → maliyet
    * düşer (1h cache-write 2x, cache-read 0.1x). API yolu: `cache_control.ttl:"1h"`.
@@ -242,7 +235,7 @@ export interface FeatureFlags {
    * kısımları izole worktree'lerde PARALEL koşar, birleştirme sonrası kalite fazları 9-17 (risk incelemesi
    * + mekanik kapılar + E2E) birleşik sonuçta TEK SEFER koşar. Faz 6 (kullanıcı UI incelemesi) bu birleşik
    * koşuda otomatik AÇILMAZ — kullanıcıya görünür söylenir (mahkeme dürüstlük düzeltmesi; emsal
-   * multi_agent_selection yalnız 10-17 koşuyordu, burada 9 da dahil). FAIL-CLOSED: git yok/kirli ağaç/
+   * kaldırılan Çoklu Ajan Seçimi yalnız 10-17 koşuyordu, burada 9 da dahil). FAIL-CLOSED: git yok/kirli ağaç/
    * kapsam çakışması/worker hatası → GÖRÜNÜR sıralı akış (iş kaybolmaz). Opt-in default KAPALI. En çok 3 iş.
    */
   parallel_task_batching?: boolean;
@@ -331,9 +324,6 @@ const DEFAULT_FLAGS: ClaudeCodeFlags = {
   design_workflow: "off",
   // v15.13 (Layer B): çatışma → gerçek Agent Teams müzakeresi default KAPALI (opt-in, maliyet).
   agent_teams_optin: false,
-  // Çoklu Ajan Seçimi (2026-06-09): ≥2 bağımsız modülü paralel yazdırma. Default KAPALI (opt-in) →
-  // açık değilse normal develop akışı hiç değişmez.
-  multi_agent_selection: false,
   // v15.14 (F2): prompt cache ömrü default 5dk (mevcut davranış; geriye uyum). "1h" opt-in.
   cache_ttl: "5m",
   // v15.15: pre-hoc kör-nokta merceği — açık ama gate'li (yalnız consequential + geri-dönülemez;
@@ -650,12 +640,11 @@ export async function loadConfig(): Promise<MyclConfig> {
     selected_models,
     claude_code_flags: {
       ...DEFAULT_FLAGS,
-      ...(fileConfig.claude_code_flags ?? {}),
-      // SABİT (YZLLM 2026-06-22): bu 3 ayar kullanıcı-değiştirilemez (Settings'ten kaldırıldı) → her
-      // config-yüklemede ZORLANIR (kayıtlı değer EZİLİR). create-only tasarım paneli + Çoklu Ajan Seçimi açık.
+      ...withoutRemovedFlags(fileConfig.claude_code_flags),
+      // SABİT (YZLLM 2026-06-22): bu 2 ayar kullanıcı-değiştirilemez (Settings'ten kaldırıldı) → her
+      // config-yüklemede ZORLANIR (kayıtlı değer EZİLİR). create-only tasarım paneli; Agent Teams kapalı.
       design_workflow: "create-only",
       agent_teams_optin: false,
-      multi_agent_selection: true,
     },
     agent_backends: resolveAgentBackends(fileConfig),
     features: { ...DEFAULT_FEATURES, ...(fileConfig.features ?? {}) },
@@ -780,7 +769,7 @@ export async function persistClaudeCodeFlags(
     ...existing,
     claude_code_flags: {
       ...DEFAULT_FLAGS,
-      ...(existing.claude_code_flags ?? {}),
+      ...withoutRemovedFlags(existing.claude_code_flags), // kaldırılmış alan bir sonraki kayıtta dosyadan düşer
       ...flags,
     },
   };
@@ -788,16 +777,26 @@ export async function persistClaudeCodeFlags(
   await fs.writeFile(configPath(), raw, { encoding: "utf-8", mode: 0o600 });
 }
 
+/**
+ * Kaldırılmış bayrakları eski ayar dosyasından ayıkla (okuma kırılmaz, alan yok sayılır). `multi_agent_selection`:
+ * Çoklu Ajan Seçimi 2026-11-28'de kaldırıldı (prompt 27) — dosyada kalan değer artık hiçbir yere taşınmaz.
+ */
+function withoutRemovedFlags(flags: Partial<ClaudeCodeFlags> | undefined): Partial<ClaudeCodeFlags> {
+  if (!flags) return {};
+  const { multi_agent_selection: _removed, ...rest } = flags as Partial<ClaudeCodeFlags> & { multi_agent_selection?: unknown };
+  void _removed;
+  return rest;
+}
+
 /** Mevcut effort'u okur (Settings'te seçili göstermek için). */
 export async function readClaudeCodeFlags(): Promise<ClaudeCodeFlags> {
   const file = await loadConfigFile();
   return {
     ...DEFAULT_FLAGS,
-    ...(file.claude_code_flags ?? {}),
+    ...withoutRemovedFlags(file.claude_code_flags),
     // SABİT (YZLLM 2026-06-22): kullanıcı-değiştirilemez (Settings'ten kaldırıldı) — kayıtlı değer EZİLİR.
     design_workflow: "create-only",
     agent_teams_optin: false,
-    multi_agent_selection: true,
   };
 }
 

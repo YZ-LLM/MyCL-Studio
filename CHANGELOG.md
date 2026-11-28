@@ -1,5 +1,31 @@
 ## 2026-11-28
 
+- **refactor(Çoklu Ajan Seçimi kaldırıldı): yeni iş her zaman Faz 1'den akışa girsin.** Danışman kararı
+  (Ümit proje kararlarını devretti, 2026-11-28). Bu, 2026-06-22 tarihli "Çoklu Ajan Seçimi her zaman açık"
+  kararını geri alıyor. Gerekçe: kural 8 ve 9 ile çelişiyor (uygulama açılır, arayüzlü projede Faz 6 atlanmaz);
+  kural 15'e göre de Faz 5 ve Faz 8'in ikinci uygulamasıydı. Koşu 39 (`not-defteri-sunucu-39`, `37ea022`): yeni
+  projede Faz 1-9'un hiçbiri koşmadı. İki `parallel-module` ajanı arka ucu ve ön ucu worktree'lerde yazdı, akış
+  `advanceToNextPhase(9)` ile Faz 10'a atladı. Şartname ve arayüz incelemesi sorulmadı, test yazılmadı, uygulama
+  açılmadı. Faz 10-16 `stack="unknown"` ile doğrulanmadı ve sonuç PARTIAL oldu.
+  1. **Akış:** `executeAgentDecision`'ın `develop_new_or_iter` dalı artık her zaman `executeConfirmedAgentDecision`'a
+     gidiyor. Bu, seçimin "hayır" dediği durumdaki bugünkü akıştır: kuyruğa alma, Faz 1'den başlama.
+  2. **Bayrak ve ayar:** `multi_agent_selection` `ClaudeCodeFlags`'ten, varsayılanlardan ve iki zorlama yerinden
+     (`config.ts` yükleme ve `readClaudeCodeFlags`) kaldırıldı. Ayarlar kaydı (`handleSaveSelectedModels`) ve
+     `selected_models` olayı artık bu alanı taşımıyor. Arayüzden de kalktı: `App.tsx`, `Settings.tsx` (konumsal
+     parametre ve "Çoklu Ajan Seçimi açık" notu) ve `types/events.ts`.
+  3. **Eski ayar dosyası:** dosyada alan varsa okuma kırılmaz, alan yok sayılır (`withoutRemovedFlags`). Bir sonraki
+     ayar kaydında dosyadan düşer. Eski bir arayüzden gelen alan da kayıtta ayıklanır.
+  4. **Silinen kod** (kimin kullandığı sayılarak): `module-parallel/select.ts`, `module-parallel/decompose.ts`
+     (yalnız `select.ts`, kendi testi ve elle çalıştırılan `scripts/smoke-decompose.mjs` kullanıyordu), bu iki
+     dosyanın testleri ve duman betiği.
+  - **Kalanlar:** `module-parallel/review.ts` görev toplu işleme yolunda kullanılıyor (`index.ts`, birleşik sonuç
+    incelemesi). `independence.ts`, `dispatch.ts`, `worker.ts` `task-batch.ts` ve görev toplu işleme tarafından
+    kullanılıyor. Bunlara ve `parallel_task_batching`'e (varsayılan kapalı) dokunulmadı.
+  - **Değişmeyenler:** tasarım panelinin `create-only` sabiti ve `agent_teams_optin` zorlaması.
+  - Silme işi; yeni mekanizma yok (kural 15).
+  - İnceleme iki görünür kalıntı buldu, düzeltildi: Ayarlar notu ve bir yorum satırı. Arka uç ve arayüz tip
+    denetimleri temiz; testler koşturulmadı.
+
 - **fix(tek akış kuralı): akış sürerken kullanıcı iletisi ikinci bir boru hattı başlatmasın.** Koşu 38
   (`alisveris-sunucu-33`, `2b1ecc4`) ve koşu 31 (`yapilacaklar-sunucu-28`, `e7092ed`). Açılıştaki kendiliğinden
   sürdürme ("📍 Faz N yarıda kalmıştı") `_handlingUserMessage` kilidinin dışında koşuyor. O sırada yazılan "Kaldığın

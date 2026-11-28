@@ -4,12 +4,12 @@
 // worktree'lerde çalışılsın, biten ana ağaca birleştirilsin — AMA hiçbir MyCL kuralı atlanmasın.
 // Tasarım: bağımsız işlerin YALNIZ KOD YAZMA kısmı paralel (kanıtlanmış module-parallel motoru:
 // worktree + ayrık kapsam + kapsam-kontrollü kopya birleştirme); birleştirme sonrası TÜM kalite
-// fazları (9→17, Faz 6 dahil) birleşik sonuçta TEK SEFER, EKSİKSİZ koşar (multi_agent_selection
-// emsali). Tam bağımsız pipeline'lar REDDEDİLDİ (12 teklik çatışma noktası).
+// fazları (9→17, Faz 6 dahil) birleşik sonuçta TEK SEFER, EKSİKSİZ koşar (kaldırılan Çoklu
+// Ajan Seçimi emsali). Tam bağımsız pipeline'lar REDDEDİLDİ (12 teklik çatışma noktası).
 //
 // FAIL-CLOSED her kenarda: bayrak kapalı / <2 iş / LLM bölemedi / kapsamlar ayrık değil / git yok /
 // ağaç kirli / worker-birleştirme hatası → SIRALI akış (hiçbir iş kaybolmaz). LLM önerir, KOD karar
-// verir (shouldParallelize deterministik kapısı — decompose.ts deseni).
+// verir (shouldParallelize deterministik kapısı — kaldırılan decompose.ts deseni).
 
 import { runReasoning } from "./llm-reasoning.js";
 import { selectModelForTask } from "./model-catalog.js";

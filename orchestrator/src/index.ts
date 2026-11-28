@@ -322,7 +322,6 @@ import { maybeRunEdd } from "./edd/engine.js";
 import { readEddProgress, summarizeProgress } from "./edd/progress.js";
 import { composeOpenStatus, formatOpenStatus, type OpenStatusInput } from "./open-status.js";
 import { attachEddCodegenNote } from "./edd/codegen-note.js";
-import { runMultiAgentSelection } from "./module-parallel/select.js";
 import { reviewMergedModules, formatReview } from "./module-parallel/review.js";
 import { runParallelModules } from "./module-parallel/dispatch.js";
 import { makeScopedCodegenWorker } from "./module-parallel/worker.js";
@@ -3506,7 +3505,6 @@ async function handleSaveSelectedModels(
     backends?: Partial<AgentBackends>;
     design_workflow?: ClaudeCodeFlags["design_workflow"];
     agent_teams_optin?: boolean;
-    multi_agent_selection?: boolean;
     cache_ttl?: ClaudeCodeFlags["cache_ttl"];
   },
 ): Promise<void> {
@@ -3520,8 +3518,10 @@ async function handleSaveSelectedModels(
   try {
     // v15.13: tasarım flag'lerini (design_workflow/agent_teams_optin) modellerden ayır;
     // gerisi (translator/main/orchestrator/model_tiers) selected_models'e gider.
-    const { effort, backends, design_workflow, agent_teams_optin, multi_agent_selection, cache_ttl, ...sel } =
-      payload;
+    // Eski arayüzden `multi_agent_selection` gelirse ayıklanır ve yok sayılır (Çoklu Ajan Seçimi kaldırıldı, 2026-11-28).
+    const { effort, backends, design_workflow, agent_teams_optin, cache_ttl, ...rest } = payload;
+    const { multi_agent_selection: _droppedMultiAgent, ...sel } = rest as typeof rest & { multi_agent_selection?: unknown };
+    void _droppedMultiAgent;
     // "Plan Modeli" seçicisinde "— varsayılan —" seçilirse boş string gelir. Alan-bazlı merge boş değeri
     // "koru" saydığı için bu AÇIK temizleme olmadan alan bir kez set edildikten sonra geri alınamazdı —
     // "boş bırakılırsa bugünkü davranış" sözü uygulanamaz kalırdı (YZLLM 2026-08-04).
@@ -3539,9 +3539,6 @@ async function handleSaveSelectedModels(
     }
     if (typeof agent_teams_optin === "boolean") {
       flagsPatch.agent_teams_optin = agent_teams_optin;
-    }
-    if (typeof multi_agent_selection === "boolean") {
-      flagsPatch.multi_agent_selection = multi_agent_selection;
     }
     if (cache_ttl === "5m" || cache_ttl === "1h") {
       flagsPatch.cache_ttl = cache_ttl;
@@ -3748,7 +3745,6 @@ async function handleReadSelectedModels(): Promise<void> {
       plan_model: sel?.plan_model,
       design_workflow: flags.design_workflow ?? "off",
       agent_teams_optin: flags.agent_teams_optin ?? false,
-      multi_agent_selection: flags.multi_agent_selection ?? false,
       cache_ttl: flags.cache_ttl ?? "5m",
     });
   } catch (err) {
@@ -4709,35 +4705,8 @@ async function executeAgentDecision(
       } catch (err) {
         log.warn("orchestrator", "agent decision log fail (fast-path)", err);
       }
-      // ÇOKLU AJAN SEÇİMİ (opt-in, varsayılan KAPALI): niyet ≥2 GERÇEKTEN bağımsız modüle bölünüyorsa
-      // izole worktree'lerde PARALEL yazdır. Kullanıldıysa fresh seri pipeline'ı ÇALIŞTIRMA (üzerine yazmasın).
-      // Flag kapalıysa bu blok hiç girmez → normal akış değişmez. Her hata → used:false → normal akışa düşer.
-      // TEK AKIŞ KURALI (2026-11-28): akış sürerken paralel yazım da ikinci bir akıştır → atla; iş aşağıda kuyruğa girer.
-      if (runtime.config.claude_code_flags.multi_agent_selection && !flowRunningElsewhere()) {
-        const sel = await runMultiAgentSelection(runtime.config, runtime.state, text);
-        if (sel.used) {
-          emitChatMessage(
-            "assistant",
-            `🤖 Çoklu Ajan Seçimi: ${sel.modules?.length ?? 0} bağımsız modül PARALEL yazıldı ` +
-              `(${(sel.modules ?? []).join(", ")}). Dosyalar: ${(sel.files ?? []).join(", ")}.`,
-          );
-          // (b) ANLAMSAL / business-logic review: birleşik çıktı bütün hâlinde tutarlı mı (bağımsız ajanlar
-          // birbirini görmeden yazdı → mekanik kapıların göremediği semantik/gizli-kuplaj). Yüzeye çıkarır, bloklamaz.
-          try {
-            const review = await reviewMergedModules(runtime.config, runtime.state.project_root, sel.files ?? []);
-            emitChatMessage("assistant", formatReview(review));
-          } catch (e) {
-            log.warn("orchestrator", "paralel anlamsal review hatası (non-blocking)", e);
-          }
-          // (a) TAM TİTİZLİK: paralel sonucu Faz 10-17 kalite pipeline'ından GEÇİR (codegen'den SONRA → ezmez,
-          // sadece doğrular: sadeleştir/perf/entegrasyon/e2e/yük dahil) + pipeline-SONU tazeleme (living-docs/
-          // proje-haritası/handoff) GERÇEK akıştan koşar. Bu yüzden burada return YOK / elde-tazeleme YOK.
-          emitChatMessage("assistant", "Kalite fazları (10-17) paralel sonuç üstünde çalışıyor…");
-          await advanceToNextPhase(9);
-          return;
-        }
-        log.info("orchestrator", "Çoklu Ajan Seçimi kullanılmadı → seri develop", { reason: sel.reason });
-      }
+      // ÇOKLU AJAN SEÇİMİ KALDIRILDI (2026-11-28, prompt 27; koşu 39): yeni iş HER ZAMAN boru hattına gider (Faz 1'den).
+      // Eski yol modülleri paralel yazıp Faz 1-9'u atlıyordu (şartname onayı, Faz 6 incelemesi, testler yok; kural 8/9).
       await executeConfirmedAgentDecision(decision, text);
       return;
     }
@@ -5968,7 +5937,7 @@ function batchSkipNotice(reason: string): void {
  * FAIL-CLOSED her kenarda: bayrak kapalı / <2 uygun iş / git yok / kirli ağaç / hakem bölemedi /
  * worker-birleştirme hatası → false (caller SIRALI devam eder; hiçbir iş kaybolmaz).
  * Başarıda: işler running, kod paralel worktree'lerde yazılıp birleştirilir, kalite fazları
- * (9→17, Faz 6 dahil) birleşik sonuçta TEK SEFER eksiksiz koşar (multi_agent_selection emsali).
+ * (9→17, Faz 6 dahil) birleşik sonuçta TEK SEFER eksiksiz koşar (kaldırılan Çoklu Ajan Seçimi emsali).
  * Çağıran _handlingUserMessage kilidini tutmalı (startNextPendingTask sözleşmesi).
  */
 async function tryStartTaskBatch(): Promise<boolean> {
@@ -6069,14 +6038,14 @@ async function tryStartTaskBatch(): Promise<boolean> {
     `⚡ Paralel küme birleştirildi (${outcome.reason}). Kalite fazları (9-17: risk incelemesi + mekanik kapılar + E2E) birleşik sonuç üstünde koşuyor. ` +
       `Not: bu birleşik koşuda Faz 6 UI incelemesi otomatik açılmaz — görsel incelemek istersen sonunda "▶ Çalıştır" veya 🧪 Full Test kullan.`,
   );
-  // Anlamsal bütünlük review'ı (multi_agent_selection emsali) — bloklamaz.
+  // Anlamsal bütünlük review'ı (kaldırılan Çoklu Ajan Seçimi emsali) — bloklamaz.
   try {
     const review = await reviewMergedModules(runtime.config, root, outcome.integratedFiles ?? []);
     emitChatMessage("assistant", formatReview(review));
   } catch (e) {
     log.warn("orchestrator", "küme anlamsal review hatası (non-blocking)", e);
   }
-  // Faz 9'dan itibaren (PHASE_TRANSITIONS[8]=9): risk incelemesi DAHİL — emsalden (multi_agent_selection
+  // Faz 9'dan itibaren (PHASE_TRANSITIONS[8]=9): risk incelemesi DAHİL — emsalden (kaldırılan Çoklu Ajan Seçimi
   // advanceToNextPhase(9) = yalnız 10-17) bilinçli GÜÇLENDİRME (mahkeme bulgusu: 9 atlanıyordu).
   await advanceToNextPhase(8);
   return true;

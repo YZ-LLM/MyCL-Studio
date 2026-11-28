@@ -131,7 +131,7 @@ Katmanların modelleri "İş-seviyesi modelleri" alanından seçilir. Ayarlar'da
 | Özellikler | Açılıp kapanan ayarlar: "🎭 Playwright (E2E Testler)" (varsayılan açık), "🧮 Over Engineering Kontrolü" (varsayılan kapalı), "⚡ Paralel iş kümeleme" (varsayılan kapalı), "🧭 Advisor (danışman)" (varsayılan kapalı). "🩺 Bağlamı sadeleştir" bir ayar değil, düğmedir: ajana verilen bağlamı ölçer ve kesim önerir, hiçbir şeyi kendisi silmez. |
 | Hakkında | "Açılışta otomatik güncelle" kutusu (varsayılan açık) ve log dosyalarının yolları |
 
-Çevirmen modeli Ayarlar'da kilitli görünür ("🔒 Sabit"). Tasarım paneli "create-only" olarak sabittir (yeni proje ve karmaşık işlerde açılır), Çoklu Ajan Seçimi açık, Agent Teams kapalıdır. Bu üç ayar her yüklemede zorlanır, arayüzden değiştirilemez.
+Çevirmen modeli Ayarlar'da kilitli görünür ("🔒 Sabit"). Tasarım paneli "create-only" olarak sabittir (yeni proje ve karmaşık işlerde açılır), Agent Teams kapalıdır. Bu iki ayar her yüklemede zorlanır, arayüzden değiştirilemez. Yeni bir iş her zaman Faz 1'den akışa girer; modülleri paralel yazdırıp Faz 1-9'u atlayan eski "Çoklu Ajan Seçimi" yolu kaldırıldı.
 
 ## Doğrulama kapıları
 

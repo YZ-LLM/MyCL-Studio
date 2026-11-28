@@ -260,8 +260,6 @@ export interface SelectedModelsEvent {
     design_workflow?: DesignWorkflowMode;
     /** v15.13: çatışma → gerçek Agent Teams müzakeresi opt-in. */
     agent_teams_optin?: boolean;
-    /** Çoklu Ajan Seçimi: ≥2 bağımsız modülü paralel yazdırma opt-in. */
-    multi_agent_selection?: boolean;
     /** v15.14 (F2): prompt cache ömrü (5m/1h). */
     cache_ttl?: "5m" | "1h";
   };
@@ -600,8 +598,6 @@ export type OrchestratorCommand =
         design_workflow?: DesignWorkflowMode;
         /** v15.13: çatışma → gerçek Agent Teams müzakeresi opt-in. */
         agent_teams_optin?: boolean;
-        /** Çoklu Ajan Seçimi: ≥2 bağımsız modülü paralel yazdırma opt-in. */
-        multi_agent_selection?: boolean;
         /** v15.14 (F2): prompt cache ömrü (5m/1h). */
         cache_ttl?: "5m" | "1h";
       };
