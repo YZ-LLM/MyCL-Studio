@@ -15,8 +15,12 @@ import {
   captureAndCompare,
   clipPageError,
   comparePngBuffers,
+  decideBlank,
+  DOM_CONTENT_PROBE,
   formatVisualReport,
   isNearlyBlank,
+  measureBlank,
+  parseDomContent,
   promoteVisualBaseline,
   routesFromHelpPages,
   type VisualRegressionResult,
@@ -310,6 +314,10 @@ describe("captureAndCompare — boş ekranın nedenini aynı açılışta yakala
       if (req.url === "/dolu") {
         return sayfa(html(`<div class="yarim"></div>`, `<link rel="stylesheet" href="/stil.css">`));
       }
+      if (req.url === "/sade") {
+        // Koşu 40 biçimi: beyaz zemin, bir başlık, bir düğme, bir metin kutusu — pikselin %1'inden azı.
+        return sayfa(html(`<h1 style="font-size:14px">Notes</h1><input aria-label="New note"><button>Add note</button>`));
+      }
       if (req.url === "/patla.js") {
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
         res.end(`throw new Error("mycl-deneme-hatasi");`);
@@ -327,7 +335,7 @@ describe("captureAndCompare — boş ekranın nedenini aynı açılışta yakala
     url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     root = await mkdtemp(join(tmpdir(), "mycl-visual-gercek-"));
     await fs.mkdir(join(root, ".mycl"), { recursive: true });
-    await fs.writeFile(join(root, ".mycl", "help-pages.json"), JSON.stringify([{ route: "/" }, { route: "/dolu" }]));
+    await fs.writeFile(join(root, ".mycl", "help-pages.json"), JSON.stringify([{ route: "/" }, { route: "/dolu" }, { route: "/sade" }]));
   }, 60_000);
 
   afterAll(async () => {
@@ -352,9 +360,84 @@ describe("captureAndCompare — boş ekranın nedenini aynı açılışta yakala
     expect(dolu?.nearlyBlank).toBe(false);
     expect(dolu?.pageErrors).toEqual([]);
 
+    // 2026-11-28 (prompt 29): içeriği olan sade sayfa "boş" DEĞİL (sayfa okundu); gerçekten boş kök yine boş.
+    const sade = r.diffs.find((d) => d.route === "/sade");
+    expect(sade?.nearlyBlank).toBe(false);
+    expect(sade?.blankSource).toBe("dom");
+    expect(kok?.blankSource).toBe("dom");
+
     const kayit = blankScreenDetail(r.diffs);
     expect(kayit.startsWith("blank_screen routes=/ ")).toBe(true);
     expect(kayit).toContain("mycl-deneme-hatasi");
     expect(formatVisualReport(r)).toContain("mycl-deneme-hatasi");
   }, 90_000);
+
+  it("sayfa okuması: üst öğesi saydam, 1x1 gizli ya da örtülü içerik görünür sayılmaz; sade içerik sayılır", async (ctx) => {
+    if (!tarayiciVar) return ctx.skip("Playwright chromium kurulu değil");
+    const b = await chromium.launch({ headless: true });
+    try {
+      const page = await b.newPage({ viewport: { width: 1280, height: 720 } });
+      const oku = async (body: string) => {
+        await page.setContent(`<!doctype html><html><body style="margin:0">${body}</body></html>`);
+        return parseDomContent(await page.evaluate(DOM_CONTENT_PROBE));
+      };
+      expect(await oku("")).toEqual({ textChars: 0, visibleElements: 0 });
+      expect((await oku(`<h1>Notes</h1><button>Add note</button>`))?.textChars).toBeGreaterThan(0);
+      expect(await oku(`<div style="opacity:0"><h1>Notes</h1><button>Add</button></div>`)).toEqual({ textChars: 0, visibleElements: 0 });
+      expect(
+        await oku(`<span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Skip to content</span>`),
+      ).toEqual({ textChars: 0, visibleElements: 0 });
+      expect(
+        await oku(`<h1>Notes</h1><div style="position:fixed;inset:0;background:#fff"></div>`),
+      ).toEqual({ textChars: 0, visibleElements: 0 });
+    } finally {
+      await b.close();
+    }
+  }, 60_000);
 });
+
+describe("boş ekran ölçütü (2026-11-28, prompt 29)", () => {
+  const beyaz = makePng(40, 40, () => [255, 255, 255]);
+  const dolu = makePng(40, 40, (x, y) => ((x + y) % 2 ? [0, 0, 0] : [255, 255, 255]));
+  it("decideBlank: piksel boş değilse boş değil; içerik varsa boş değil; hiçbir şey yoksa boş; okunamazsa piksel", () => {
+    expect(decideBlank(false, null)).toBe(false);
+    expect(decideBlank(true, { textChars: 5, visibleElements: 0 })).toBe(false);
+    expect(decideBlank(true, { textChars: 0, visibleElements: 1 })).toBe(false);
+    expect(decideBlank(true, { textChars: 0, visibleElements: 0 })).toBe(true);
+    expect(decideBlank(true, null)).toBe(true);
+  });
+  it("parseDomContent beklenmeyen biçimi reddeder", () => {
+    expect(parseDomContent({ textChars: 3, visibleElements: 1 })).toEqual({ textChars: 3, visibleElements: 1 });
+    expect(parseDomContent({ textChars: "3" })).toBeNull();
+    expect(parseDomContent(null)).toBeNull();
+  });
+  it("measureBlank: tek renk ama içerik var → boş değil (dom)", async () => {
+    const r = await measureBlank({ evaluate: async () => ({ textChars: 40, visibleElements: 3 }) }, beyaz, "/");
+    expect(r).toMatchObject({ nearlyBlank: false, source: "dom" });
+  });
+  it("measureBlank: tek renk ve sayfada hiçbir şey yok → boş (dom)", async () => {
+    const r = await measureBlank({ evaluate: async () => ({ textChars: 0, visibleElements: 0 }) }, beyaz, "/");
+    expect(r).toMatchObject({ nearlyBlank: true, source: "dom" });
+  });
+  it("measureBlank: okuma patlarsa piksel kararı + neden", async () => {
+    const r = await measureBlank({ evaluate: async () => { throw new Error("Execution context was destroyed"); } }, beyaz, "/");
+    expect(r.nearlyBlank).toBe(true);
+    expect(r.source).toBe("pixels");
+    expect(r.probeError).toContain("Execution context was destroyed");
+    const yok = await measureBlank({}, beyaz, "/");
+    expect(yok).toMatchObject({ nearlyBlank: true, source: "pixels" });
+    expect(yok.probeError).toBeTruthy();
+  });
+  it("measureBlank: görüntü tek renk değilse sayfa okunmaz", async () => {
+    let okundu = false;
+    const r = await measureBlank({ evaluate: async () => { okundu = true; return { textChars: 0, visibleElements: 0 }; } }, dolu, "/");
+    expect(r).toMatchObject({ nearlyBlank: false, source: "pixels" });
+    expect(okundu).toBe(false);
+  });
+  it("measureBlank: açılış HTTP ≥400 ise hata sayfasının metni içerik sayılmaz (eski piksel kararı + neden)", async () => {
+    const r = await measureBlank({ evaluate: async () => ({ textChars: 20, visibleElements: 0 }) }, beyaz, "/x", 404);
+    expect(r).toMatchObject({ nearlyBlank: true, source: "pixels" });
+    expect(r.probeError).toContain("HTTP 404");
+  });
+});
+

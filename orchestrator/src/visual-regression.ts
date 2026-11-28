@@ -50,8 +50,14 @@ export interface RouteShotDiff {
   status: RouteShotStatus;
   /** Farklı piksel oranı (0-1) — yalnız changed/unchanged'da dolu. */
   diffRatio?: number;
-  /** Güncel görüntü NEREDEYSE BOŞ mu (tek renk ≥ %99 — olası beyaz/boş sayfa). */
+  /** Güncel görüntü BOŞ mu — `measureBlank`: piksel tek renk ≥ %99 VE sayfada görünür içerik yok. */
   nearlyBlank?: boolean;
+  /**
+   * Boş kararının dayanağı (2026-11-28): `dom` = piksel tek renk dedi, sayfa okundu; `pixels` = yalnız piksel
+   * (görüntü tek renk değil ya da sayfa okunamadı). Okunamadıysa nedeni `blankProbeError`'da.
+   */
+  blankSource?: "dom" | "pixels";
+  blankProbeError?: string;
   /** status=error ise görünür neden. */
   errorReason?: string;
   /**
@@ -153,6 +159,128 @@ export function isNearlyBlank(pngBuffer: Buffer): boolean {
   return max / total >= 0.99;
 }
 
+/** Sayfada o anda görünür içerik: görünür metin karakteri ve görünür öğe (görsel, çizim, form denetimi) sayısı. */
+export interface DomContent {
+  textChars: number;
+  visibleElements: number;
+}
+
+/**
+ * SAF (2026-11-28, prompt 29; koşu 40): "boş ekran" kararı. Piksel tek başına yetmez: 1280×720 beyaz sayfada bir
+ * başlık, iki düğme ve bir metin kutusu piksellerin %1'inden azını kaplıyor ve `isNearlyBlank` "boş" diyordu.
+ * - Görüntü tek renk değilse → boş değil (bugünkü karar aynen; yeni bir "boş" kararı doğmaz).
+ * - Tek renk ve sayfa okunamadıysa ya da açılış HTTP ≥400 döndüyse (`dom` yok) → bugünkü piksel kararı: boş.
+ * - Tek renk ve sayfada görünür metin ya da görünür öğe varsa → boş DEĞİL.
+ * - Tek renk ve sayfada görünür hiçbir şey yoksa (giriş dosyası yazılmamış, hiçbir şey çizilmemiş) → boş.
+ */
+export function decideBlank(pixelBlank: boolean, dom: DomContent | null): boolean {
+  if (!pixelBlank) return false;
+  if (!dom) return true;
+  return dom.textChars === 0 && dom.visibleElements === 0;
+}
+
+/**
+ * Sayfada okunacak ifade (stack'e bağlı değil, tarayıcıdan). Yalnız OKUR: DOM'a yazmaz, sayfanın güvenlik politikasını
+ * değiştirmez (Playwright değerlendirmesi sayfaya betik etiketi eklemez). Ekran görüntüsüyle aynı görüş alanı:
+ * öğe görüş alanıyla kesişmeli, boyutu olmalı, gizli/şeffaf olmamalı.
+ */
+export const DOM_CONTENT_PROBE = `(() => {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const shown = (el) => {
+    const r = el.getBoundingClientRect();
+    // 2 px altı kutu görünür sayılmaz (ekran okuyucuya özel 1x1 "sr-only" metinler boyanmaz).
+    if (r.width < 2 || r.height < 2) return false;
+    if (r.bottom <= 0 || r.right <= 0 || r.top >= vh || r.left >= vw) return false;
+    const st = window.getComputedStyle(el);
+    if (st.display === "none" || st.visibility === "hidden") return false;
+    // Saydamlık kalıtılmaz: bir üst öğe opacity:0 ise (açılmayan solma sarmalayıcısı) içerik görünmez.
+    for (let a = el, i = 0; a && i < 60; a = a.parentElement, i++) {
+      if (Number(window.getComputedStyle(a).opacity) === 0) return false;
+    }
+    // Örtü denetimi: kutunun görüş alanındaki ortasında en üstte başka bir öğe varsa (beyaz açılış örtüsü) görünmez.
+    const cx = Math.min(Math.max((Math.max(r.left, 0) + Math.min(r.right, vw)) / 2, 0), vw - 1);
+    const cy = Math.min(Math.max((Math.max(r.top, 0) + Math.min(r.bottom, vh)) / 2, 0), vh - 1);
+    const top = document.elementFromPoint(cx, cy);
+    if (top && !(el.contains(top) || top.contains(el))) return false;
+    return true;
+  };
+  let textChars = 0;
+  const root = document.body || document.documentElement;
+  if (root) {
+    const skip = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n && textChars < 10000; n = w.nextNode()) {
+      const t = (n.textContent || "").trim();
+      const p = n.parentElement;
+      if (!t || !p || skip.has(p.tagName)) continue;
+      if (shown(p)) textChars += t.length;
+    }
+  }
+  let visibleElements = 0;
+  for (const el of document.querySelectorAll("img,svg,canvas,video,input,button,select,textarea,iframe")) {
+    if (shown(el) && ++visibleElements >= 50) break;
+  }
+  return { textChars, visibleElements };
+})()`;
+
+const DOM_PROBE_TIMEOUT_MS = 3000;
+
+/** SAF: değerlendirme sonucunu doğrula (beklenmeyen biçim → okunamadı sayılır). */
+export function parseDomContent(v: unknown): DomContent | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as { textChars?: unknown; visibleElements?: unknown };
+  if (typeof o.textChars !== "number" || typeof o.visibleElements !== "number") return null;
+  if (!Number.isFinite(o.textChars) || !Number.isFinite(o.visibleElements)) return null;
+  return { textChars: o.textChars, visibleElements: o.visibleElements };
+}
+
+/** Boş kararı için sayfadan gereken tek yüzey (birim test edilebilirlik; yoksa okunamadı sayılır). */
+export interface BlankProbePage {
+  evaluate?: (expression: string) => Promise<unknown>;
+}
+
+/**
+ * Boş ekran ölçütünün TEK tanımı (Faz 6 görsel tarama + Tam Test rota taraması). Sayfa açıkken çağrılır.
+ * Piksel tek renk değilse sayfa okunmaz (süre bütçesi değişmez). Okuma düşerse piksel kararı + görünür neden.
+ */
+export async function measureBlank(
+  page: BlankProbePage,
+  shot: Buffer,
+  where: string,
+  /** Açılışın HTTP durumu (biliniyorsa). ≥400 → hata sayfası: metni "içerik" sayılmaz, karar bugünkü gibi piksel. */
+  httpStatus?: number,
+): Promise<{ nearlyBlank: boolean; source: "dom" | "pixels"; probeError?: string; dom?: DomContent }> {
+  const pixelBlank = isNearlyBlank(shot);
+  if (!pixelBlank) return { nearlyBlank: false, source: "pixels" };
+  let probeError: string;
+  if (typeof httpStatus === "number" && httpStatus >= 400) {
+    // "Cannot GET /x" gibi sunucu hata sayfası: eksik rotayı Faz 6 eskiden "boş" diye yakalıyordu → korunur (inceleme bulgusu).
+    probeError = `sayfa HTTP ${httpStatus} döndü (hata sayfası içerik sayılmadı)`;
+  } else if (typeof page.evaluate !== "function") {
+    probeError = "sayfa okuma yüzeyi yok";
+  } else {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const raw = await Promise.race([
+        page.evaluate(DOM_CONTENT_PROBE),
+        new Promise<never>((_, rej) => {
+          timer = setTimeout(() => rej(new Error(`sayfa okuma ${DOM_PROBE_TIMEOUT_MS} ms içinde bitmedi`)), DOM_PROBE_TIMEOUT_MS);
+        }),
+      ]);
+      const dom = parseDomContent(raw);
+      if (dom) return { nearlyBlank: decideBlank(true, dom), source: "dom", dom };
+      probeError = "sayfa okuma beklenmeyen sonuç döndürdü";
+    } catch (err) {
+      probeError = String(err).replace(/\s+/g, " ").slice(0, 160);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  // Sessiz değil (prompt 29 madde 2): okunamadıysa ya da hata sayfasıysa bugünkü piksel kararı + nedeni kayda.
+  log.warn("visual-regression", "boş ekran: karar piksele düşüldü", { where, probeError });
+  return { nearlyBlank: decideBlank(true, null), source: "pixels", probeError };
+}
+
 /**
  * IMPURE: rotaların güncel görüntülerini çek (pending'e yaz) + varsa tabanla karşılaştır.
  * ASLA throw etmez — her hata görünür `ran:false`/route-error olarak döner (a11y deseni).
@@ -240,7 +368,7 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
       seenErrors = new Set<string>();
       listening = true;
       try {
-        await page.goto(new URL(route, url).toString(), {
+        const resp = await page.goto(new URL(route, url).toString(), {
           waitUntil: "domcontentloaded",
           timeout: SHOT_TIMEOUT_MS,
         });
@@ -251,20 +379,26 @@ export async function captureAndCompare(url: string, projectRoot: string): Promi
         listening = false;
         const file = sanitizeRouteForFile(route);
         await fs.writeFile(join(pendingDir, file), shot);
-        const nearlyBlank = isNearlyBlank(shot);
+        // Boş kararı sayfa hâlâ açıkken (aynı açılış): piksel + görünür içerik (measureBlank).
+        const blank = await measureBlank(page, shot, route, resp?.status());
+        const nearlyBlank = blank.nearlyBlank;
+        const blankMeta = {
+          blankSource: blank.source,
+          ...(blank.probeError ? { blankProbeError: blank.probeError } : {}),
+        };
         if (!baselineExisted) {
-          diffs.push({ route, status: "new", nearlyBlank, ...seen });
+          diffs.push({ route, status: "new", nearlyBlank, ...blankMeta, ...seen });
           continue;
         }
         let base: Buffer;
         try {
           base = await fs.readFile(join(baselineDir, file));
         } catch {
-          diffs.push({ route, status: "new", nearlyBlank, ...seen });
+          diffs.push({ route, status: "new", nearlyBlank, ...blankMeta, ...seen });
           continue;
         }
         const cmp = comparePngBuffers(base, shot);
-        diffs.push({ route, status: cmp.status, diffRatio: cmp.diffRatio, nearlyBlank, ...seen });
+        diffs.push({ route, status: cmp.status, diffRatio: cmp.diffRatio, nearlyBlank, ...blankMeta, ...seen });
       } catch (err) {
         // Rota bazlı hata görünür kalır (sessiz "değişmedi" sanılmasın).
         diffs.push({ route, status: "error", errorReason: String(err).slice(0, 120), ...seenSoFar() });
@@ -325,6 +459,10 @@ export async function promoteVisualBaseline(projectRoot: string): Promise<void> 
 function blankErrorLines(blanks: readonly RouteShotDiff[]): string {
   const lines: string[] = [];
   for (const d of blanks) {
+    // Sayfa okunamadıysa karar yalnız piksele dayanır → görünür söyle (sessiz düşüş yok, prompt 29).
+    if (d.blankProbeError) {
+      lines.push(`   • \`${d.route}\`: "boş" kararı yalnız ekran görüntüsüne dayanıyor (${d.blankProbeError}).`);
+    }
     if (d.pageErrors === undefined) continue;
     if (d.pageErrors.length === 0) {
       lines.push(`   • \`${d.route}\` açılışında tarayıcı konsol ya da sayfa hatası bildirmedi.`);

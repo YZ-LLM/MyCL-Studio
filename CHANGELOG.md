@@ -1,5 +1,35 @@
 ## 2026-11-28
 
+- **fix(Faz 6 boş ekran): içeriği olan sade sayfa "boş" sayılmasın.** Koşu 40 (`not-defteri-sunucu-40`,
+  `a00f84b`): `phase-6-deferred | blank_screen routes=/ errors=3`, `ui_review_blank: true`. Oysa aynı anda çekilen
+  görüntüde "Notes" başlığı, düğmeler ve metin kutusu vardı. Kök neden: `isNearlyBlank` en baskın renk payı %99 ve
+  üstüyse "boş" diyordu; 1280×720 beyaz sayfada sade bir arayüz piksellerin %1'inden azını kaplıyor.
+  Etkisi: `blankScreenGate` kullanıcının ilk onayını geri çevirdi; hükümdeki "ekran boş değil" kanıtı da düştü.
+  1. **Tek ölçüt (`measureBlank`, `visual-regression.ts`):**
+     - Ekran görüntüsü tek renk değilse "boş değil" (bugünkü karar aynen, sayfa okunmaz).
+     - Tek renkse, sayfa hâlâ açıkken tarayıcıdan görünür metin ve görünür öğeler okunur (`DOM_CONTENT_PROBE`;
+       görsel, çizim, form denetimi). İçerik varsa "boş" denmez; hiçbir şey yoksa (giriş dosyası yazılmamış) yine
+       "boş".
+     - Ölçüm stack'e bağlı değil. Yalnız okur: DOM'a yazmaz, sayfanın güvenlik politikasına dokunmaz.
+     - Karar saf işlevde (`decideBlank`).
+  2. **Okunamazsa:** değerlendirme hatası, 3 sn aşımı ya da beklenmeyen sonuçta bugünkü piksel kararı kullanılır.
+     Nedeni `trace.log`'a (`boş ekran: karar piksele düşüldü`) ve Faz 6 raporuna yazılır (`blankSource`,
+     `blankProbeError`).
+  3. **Full Test (`full-test.ts` `sweepOneRoute`):** aynı `measureBlank`'i kullanıyor; iki ayrı tanım yok.
+  - **İnceleme bulguları, düzeltildi:**
+     - **Saydam üst öğe:** saydamlık kalıtılmadığı için `opacity:0` sarmalayıcının içindeki metin görünür
+       sayılıyordu. Artık üst öğeler de denetleniyor.
+     - **Gizli metin ve örtü:** 1×1 "sr-only" metinler ve tam ekran beyaz bir örtünün altındaki içerik görünür
+       sayılıyordu. Artık 2 px altı kutu sayılmıyor ve kutunun ortasında başka bir öğe varsa örtülü sayılıyor.
+     - **Hata sayfaları:** "Cannot GET /x" gibi 400 ve üstü yanıt veren sayfaların metni içerik sayılıyordu. Faz 6
+       eksik rotayı artık yakalamazdı. Bu durumda karar eskisi gibi yalnız piksele dayanıyor ve neden yazılıyor.
+  - **Değişmeyenler:** `blank_screen` ayrıntı biçimi ve konsol hatalarının taşınması; boş ekranda ilk onayın bir
+    kez geri çevrilmesi; süre bütçeleri (sayfa yalnız görüntü tek renkken, en çok 3 sn okunur).
+  - **Bilinen sınır:** `display:contents` bir öğenin doğrudan metni kutusuz olduğu için sayılmaz. Bu yalnız eski
+    piksel kararına (boş) düşer, yeni bir yanlış "boş değil" üretmez.
+  - Testler eklendi (`visual-regression.test.ts`: saf karar, sahte sayfa, gerçek tarayıcıda sade sayfa ve gizli içerik
+    durumları), koşturulmadı (yalnız derlendi). Yeni modül yok (kural 15).
+
 - **fix(akış sonu hükmü): bir faz bu yinelemedeki SON sonucu başarısızlıksa başarısız sayılsın.** İki bitmiş projenin
   kaydı (danışmanın sınaması): `yapilacaklar-sunucu-28` hükmü `gateFailures=[8,10,13]` verdi, doğrusu [13];
   `alisveris-sunucu-33` `[8,10,13,14]` verdi, doğrusu [10, 13]. Kök neden: `computeVerdict` yinelemedeki HERHANGİ

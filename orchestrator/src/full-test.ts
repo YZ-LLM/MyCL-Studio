@@ -23,7 +23,7 @@ import {
   resolveMechanicalCmd,
 } from "./base/mechanical-runner.js";
 import {
-  isNearlyBlank,
+  measureBlank,
   routesFromHelpPages,
 } from "./visual-regression.js";
 import { assessPhase16Verification } from "./playwright-setup.js";
@@ -229,6 +229,8 @@ export interface SweepPage {
   goto(url: string, opts: { waitUntil: "domcontentloaded"; timeout: number }): Promise<unknown>;
   waitForTimeout(ms: number): Promise<void>;
   screenshot(opts: { fullPage: boolean }): Promise<Buffer>;
+  /** Boş ekran ölçütü sayfayı okur (`measureBlank`); yoksa piksel kararına düşülür ve neden kayda yazılır. */
+  evaluate?: (expression: string) => Promise<unknown>;
 }
 
 /**
@@ -255,14 +257,29 @@ export async function sweepOneRoute(
   page.on("response", onResponse);
   let opened = false;
   try {
-    await page.goto(new URL(route, baseUrl).toString(), {
+    const resp = await page.goto(new URL(route, baseUrl).toString(), {
       waitUntil: "domcontentloaded",
       timeout: ROUTE_TIMEOUT_MS,
     });
     await page.waitForTimeout(ROUTE_SETTLE_MS);
     opened = true;
     const shot = await page.screenshot({ fullPage: false });
-    if (isNearlyBlank(shot)) issues.push({ route, problem: "sayfa neredeyse boş görünüyor (tek renk)" });
+    // Faz 6 ile AYNI ölçüt (2026-11-28, prompt 29): piksel tek renk VE sayfada görünür içerik yok.
+    // Açılışın HTTP durumu (Playwright yanıtı; sahte sayfada yok) — hata sayfası içerik sayılmasın (Faz 6 ile aynı).
+    const status =
+      resp && typeof (resp as { status?: unknown }).status === "function"
+        ? (resp as { status(): number }).status()
+        : undefined;
+    const blank = await measureBlank(page, shot, route, status);
+    if (blank.nearlyBlank) {
+      issues.push({
+        route,
+        problem:
+          blank.source === "dom"
+            ? "sayfa boş görünüyor (tek renk, görünür metin ya da öğe yok)"
+            : `sayfa neredeyse boş görünüyor (tek renk; karar yalnız ekran görüntüsüne dayanıyor: ${blank.probeError ?? "?"})`,
+      });
+    }
     if (consoleErrors.length > 0) {
       issues.push({ route, problem: `konsol hatası: ${consoleErrors[0]}${consoleErrors.length > 1 ? ` (+${consoleErrors.length - 1})` : ""}` });
     }
