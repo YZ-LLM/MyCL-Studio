@@ -103,3 +103,60 @@ export function regressionVerdict(baseline: RegressionBaseline | null, code: num
     ? { kind: "no-new", preExisting: reg.preExistingCount }
     : { kind: "new", regressed: reg.regressed, preExisting: reg.preExistingCount };
 }
+
+/**
+ * SAF (2026-11-28, koşu 37): test fazı düşüşünün kısa nedeni. Eski hâl `stderr || stdout` alıp baştan kesiyordu;
+ * test koşucuları geçen testlerin günlüklerini (console.error) stderr'in başına, kırık testleri ve özeti sona
+ * yazıyor → iletiye, mahkemeye ve hata analizine kırık test hiç gitmiyordu. Bu metin kırık test adlarıyla başlar
+ * (çağıranların hepsi baştan keser), ardından iki akışın da SONU gelir. Ad ayrıştırılamazsa iki akışın başı ve sonu.
+ * Stack'e bağlı değil: ad ayrıştırma `parseFailures`'ın çapraz koşucu desenleriyle.
+ *
+ * `envLines` (çağıran verir): eski kısa neden penceresinde ortam hatası imzası taşıyan satırlar; ad satırının hemen
+ * ardına konur. Eski metin çıktının başını taşıdığı için baştaki errno (ECONNREFUSED, EADDRINUSE…) ortam
+ * durdurmasını tetikliyordu; özet başı atınca bu kaybolmasın.
+ *
+ * Bütçe: toplam ~1400 karakter — en dar çağıran (hata analizi) 1500'den keser; stderr sonu da sığmalı.
+ */
+export function testFailureDigest(stdout: string, stderr: string, envLines: readonly string[] = []): string {
+  const out = stripAnsi(stdout).trim();
+  const err = stripAnsi(stderr).trim();
+  const names = [...parseFailures(`${out}\n${err}`)];
+  const tail = (s: string, n: number) => (s.length > n ? `…${s.slice(-n)}` : s);
+  const head = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+  const parts: string[] = [];
+  if (names.length > 0) {
+    const shown = names.slice(0, 12);
+    parts.push(
+      `${TEST_NAMES_PREFIX}${names.length}): ${head(shown.join(" | "), 300)}` +
+        (names.length > shown.length ? ` (+${names.length - shown.length} daha)` : ""),
+    );
+  } else {
+    parts.push("Kırık test adı ayrıştırılamadı; çıktının başı ve sonu:");
+  }
+  // Satırlar çağırandan imzanın çevresinden kesilmiş gelir (envSignatureExcerpt); burada yalnız güvenlik tavanı.
+  const env = envLines.map((l) => stripAnsi(l).trim()).filter(Boolean).slice(0, 2).map((l) => head(l, 170));
+  if (env.length > 0) parts.push(`[ortam izi]\n${env.join("\n")}`);
+  if (names.length === 0) {
+    // Baş yalnız sondan uzunsa ayrıca gösterilir (kısa çıktı iki kez yazılmasın).
+    if (out.length > 400) parts.push(`[stdout başı]\n${head(out, 150)}`);
+    if (err.length > 400) parts.push(`[stderr başı]\n${head(err, 150)}`);
+  }
+  if (out) parts.push(`[stdout sonu]\n${tail(out, 380)}`);
+  if (err) parts.push(`[stderr sonu]\n${tail(err, 380)}`);
+  return parts.join("\n\n");
+}
+
+/** `testFailureDigest`'in ad satırı öneki — `withoutTestNamesLine` ile AYNI sabit (ikisi ayrışmasın). */
+const TEST_NAMES_PREFIX = "Kırık testler (";
+
+/**
+ * SAF (2026-11-28): hesap/ortam imzası denetiminden önce özetin ad satırını çıkar. Test ADLARI (`billing > …`,
+ * `returns 503 on ECONNREFUSED`) hesap ya da ortam hatası değildir; yanlış durdurmaya yol açmasın.
+ */
+export function withoutTestNamesLine(text: string): string {
+  return text
+    .split("\n")
+    .filter((l) => !l.startsWith(TEST_NAMES_PREFIX))
+    .join("\n");
+}
+

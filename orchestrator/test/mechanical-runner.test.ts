@@ -16,6 +16,8 @@ import {
   isRedundantGateCommand,
   shouldAnnounceSkip,
   clearAnnouncedSkip,
+  isTestScanSpec,
+  envSignatureExcerpt,
 } from "../src/base/mechanical-runner.js";
 import { _clearProfileCache } from "../src/profile-loader.js";
 import type { State } from "../src/types.js";
@@ -781,3 +783,25 @@ describe("collectToolGaps (tarayıcı seviyesi eksik araç)", () => {
     expect(collectToolGaps([{ event: "gitleaks-skipped", phase: 13 }]).size).toBe(0);
   });
 });
+
+describe("isTestScanSpec (2026-11-28)", () => {
+  it("yalnız profilin test / integration anahtarı test fazıdır", () => {
+    expect(isTestScanSpec({ type: "profile_key", key: "test", scoped_key: "test_scoped" })).toBe(true);
+    expect(isTestScanSpec({ type: "profile_key", key: "integration" })).toBe(true);
+    expect(isTestScanSpec({ type: "profile_key", key: "lint" })).toBe(false);
+    expect(isTestScanSpec("npm test")).toBe(false);
+  });
+});
+
+describe("envSignatureExcerpt (2026-11-28)", () => {
+  it("sütun 120'den sonraki imzayı içeren parçayı verir", () => {
+    const line = '{"level":50,"msg":"' + "x".repeat(200) + '","err":{"code":"ECONNREFUSED"}}';
+    const part = envSignatureExcerpt(line, (s) => /ECONNREFUSED/.test(s));
+    expect(part).toContain("ECONNREFUSED");
+    expect(part.length).toBeLessThanOrEqual(160);
+  });
+  it("kısa satır aynen döner", () => {
+    expect(envSignatureExcerpt("connect ECONNREFUSED", () => true)).toBe("connect ECONNREFUSED");
+  });
+});
+

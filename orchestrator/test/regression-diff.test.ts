@@ -1,7 +1,7 @@
 // regression-diff — fix öncesi/sonrası fail farkı. Parser TUTARLI olmalı (mükemmel değil); fark yeni kırılmayı verir.
 
 import { describe, expect, it } from "vitest";
-import { parseFailures, computeRegression, baselineFromRun, regressionVerdict } from "../src/regression-diff.js";
+import { parseFailures, computeRegression, baselineFromRun, regressionVerdict, testFailureDigest, withoutTestNamesLine } from "../src/regression-diff.js";
 
 describe("regression-diff · parseFailures", () => {
   it("vitest '×' satırlarını + 'FAIL dosya'yı yakalar, süreyi (5ms) soyar", () => {
@@ -105,3 +105,38 @@ describe("regressionVerdict — düzeltme öncesi temele göre hüküm", () => {
     expect(regressionVerdict(baselineFromRun(1, kirik4), 1, "anlaşılmaz çıktı")).toEqual({ kind: "absolute" });
   });
 });
+
+describe("regression-diff · testFailureDigest (koşu 37)", () => {
+  it("kırık test adlarıyla başlar; stderr'deki günlükler kırığı örtmez", () => {
+    const stderr = "stderr | tests/integration/log-error.test.ts > accepts a report\n" + "console.error noise\n".repeat(400);
+    const stdout = " × items > returns 'False' string 12ms\n Test Files  1 failed | 9 passed";
+    const d = testFailureDigest(stdout, stderr);
+    expect(d.startsWith("Kırık testler (1): items > returns 'False' string")).toBe(true);
+    expect(d).toContain("[stdout sonu]");
+    expect(d).toContain("1 failed | 9 passed");
+    expect(d.length).toBeLessThan(1500);
+  });
+  it("ad ayrışmazsa başı ve sonu verir", () => {
+    const d = testFailureDigest("x".repeat(2000) + "END", "");
+    expect(d.startsWith("Kırık test adı ayrıştırılamadı")).toBe(true);
+    expect(d).toContain("[stdout başı]");
+    expect(d).toContain("END");
+  });
+  it("ortam izi satırları ad satırının ardına konur; uzun çıktıda toplam 1500'ü aşmaz", () => {
+    const names = Array.from({ length: 20 }, (_, i) => ` × suite${i} > a fairly long failing test name number ${i} 3ms`).join("\n");
+    const d = testFailureDigest(names + "\n" + "o".repeat(3000), "e".repeat(3000) + "SUMMARY", [
+      "Error: connect ECONNREFUSED 127.0.0.1:5432",
+    ]);
+    expect(d.startsWith("Kırık testler (20):")).toBe(true);
+    expect(d).toContain("[ortam izi]\nError: connect ECONNREFUSED 127.0.0.1:5432");
+    expect(d.length).toBeLessThan(1500);
+    expect(d.slice(0, 1500)).toContain("SUMMARY");
+  });
+  it("hesap/ortam denetimi ad satırını okumaz, çıktının kendisini okur", () => {
+    const d = testFailureDigest(" × billing > computes invoice total 2ms", "");
+    const cleaned = withoutTestNamesLine(d);
+    expect(cleaned).not.toContain("Kırık testler");
+    expect(cleaned).toContain("[stdout sonu]");
+  });
+});
+

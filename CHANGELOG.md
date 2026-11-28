@@ -1,5 +1,51 @@
 ## 2026-11-28
 
+- **fix(bağımsız düşman testi): yalnız ana Faz 8 geçişinde koşsun; hüküm süslü ayraca dayanıklı olsun. + fix(test fazı
+  kısa nedeni): kırık testleri göstersin.** Ekransız deneme koşusu 37 (`alisveris-sunucu-33`, `39877a9`): doksan
+  dakikada bitmedi. Bağımsız test yazarı 10 kez koştu; 9'u risk ve hata düzeltme geçişlerinden sonraydı ve dördü "hüküm
+  üretilemedi" ile bitti. 23:17'de bıraktığı kırmızı testi sonraki geçişler "önceden kırık" saydı. Faz 14 mutlak koşunca
+  düştü, ama ileti ve hata analizi stderr'in başındaki kasıtlı `console.error` günlüklerini gördü. Mahkeme "testler
+  geçiyor" dedi; boru hattı Faz 8 ile Faz 14 arasında döndü.
+  1. **Düşman testi yalnız ana geçişte (`phase-8.ts` `runIndependentAdversarialTest`):** düzeltme kipinde
+     (`isFixMode`: risk düzeltmesi, hata düzeltmesi, UI düzeltmesi) koşmaz. Bunu `adversarial-test-not-run` izine
+     "duzeltme gecisi" olarak yazar ve sohbete tek satır not düşer. Ana geçişte bulduğu ihlal Faz 9 risk incelemesinden
+     önce görünür. Bu, 2026-07-07 notundaki "HER Faz 8 yeşilinde" seçimini daraltır (danışman kararı).
+  2. **Hüküm ayrıştırma (`parseAdversarialVerdict`):** eski `/\{[\s\S]*?\}/` deseni ilk `}` karakterinde kesiyordu.
+     Yerine dengeli ayraç taraması geldi: dize içindeki ayraçlar ve kaçışlar sayılmaz, sondan başa en çok 500 aday
+     denenir, çıktının son 100 bin karakteri taranır. Bulgu metninde `{ … }` geçen hüküm, kod bloğundaki hüküm ve düz
+     hüküm ayrışır.
+  3. **Test fazı kısa nedeni (`testFailureDigest`, `regression-diff.ts`):** profilin `test` ve `integration`
+     anahtarlarıyla koşan fazlarda (Faz 14, 15; `isTestScanSpec`) `outcome.stderr` artık şu sırayla kuruluyor:
+     - `parseFailures` ile bulunan kırık test adları;
+     - ortam izi satırları;
+     - stdout ve stderr'in sonları, ayrı ayrı.
+     Adlar ayrıştırılamazsa iki akışın başı da eklenir. Toplam ~1500 karakterin altında kalıyor, çünkü en dar çağıran
+     (hata analizi) baştan 1500 karakter kesiyor. İleti, denetim kaydı, mahkeme ve otomatik düzeltme aynı metni görür.
+     Lint, güvenlik ve öbür fazlarda kısa neden değişmedi.
+  - **İnceleme bulguları (iki okuma turu), düzeltildi:**
+     - **Ortam durdurması gerilemesi:** özet çıktının başını atınca baştaki errno (ECONNREFUSED, EADDRINUSE…) ortam
+       durdurmasını tetiklemez olmuştu. Artık eski pencerede (`stderr || stdout`, ilk 1500 karakter) imza taşıyan en çok
+       2 satır `[ortam izi]` olarak taşınıyor. Uzun satırda imzanın çevresinden kesiliyor (`envSignatureExcerpt`).
+     - **Yanlış durdurma:** kırık test adları (`billing > …`) hesap, ortam, kullanım sınırı ya da aşırı yük imzası
+       sayılmasın diye `failPhase` ve `phaseFailMessage` denetimleri ad satırını okumuyor (`withoutTestNamesLine`).
+       Gösterilen metin aynı. Ad satırı yoksa metin birebir aynı kalıyor.
+     - **Bayat düzeltme checkpoint'i:** `fix_checkpoint_ref` yalnız boru hattı sonunda temizleniyordu. İptal edilmiş bir
+       düzeltmeden kalınca yeni işin ana Faz 8 geçişi düzeltme kipi sanılıyordu: repro kapısı açılıyor, düşman testi
+       atlanıyordu. Artık şu dört sıfırlamada da temizleniyor: yeni iterasyon, iptal, kuyrukta düşen iş ve Faz 2'den
+       vazgeçme. Düzeltme yönlendirmesi checkpoint'i bu sıfırlamalardan sonra kurduğu için düzeltmenin kendi
+       checkpoint'i etkilenmez.
+  - **Değişmeyenler:**
+     - Ana geçişte düşman testi, iletisi ve `adversarial-test-*` kayıtları.
+     - `features.adversarial_tester` bayrağı.
+     - Düzeltme geçişlerindeki "kırmızı önce" kuralı, MyCL'in kendi son koşusu ve mutasyon probu.
+  - **Bilinen sınırlar:**
+     - Git checkpoint'i alınamayan bir UI düzeltmesi (git yok ya da ağaç kirli) Faz 8'de düzeltme kipi sayılmaz; orada
+       düşman testi yine koşar (önceden de böyleydi).
+     - Özetin taşıdığı çıktı sonunda bir ortam imzası varsa bu yeni bir durdurma olabilir; eskiden o kısım 1500
+       karakter penceresinin dışındaydı.
+  - Yeni modül yok (kural 15).
+  - Testler eklendi (`adversarial-test`, `regression-diff`, `mechanical-runner`), koşturulmadı (yalnız derlendi).
+
 - **fix(Faz 6): uygulama açılamazsa incelemeye park etmesin; Faz 5'in düşüşü olarak düzeltilsin. + fix(kuyruk iletisi):
   bekleyen cevabı söylesin.** Ekransız deneme koşuları 34 ve 35 (`alisveris-sunucu-33`, `cd41ca6`): sürdürmede
   `npm install` ERESOLVE ile düştü. Faz 6 "Dev server otomatik başlatılamadı … `tamam` (Faz 7)" deyip park etti

@@ -1579,6 +1579,8 @@ export class Phase8Controller {
    * ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): bayrakla kapatılabilir (default AÇIK). Kapalı = "hızlı mod" — 2. tam
    * ajan koşmaz (kuyruğu kısaltır; güven-sağlamlaştırma güvencesi düşer). Anchor + mutation-probe yine korunur.
    *
+   * 2026-11-28: düzeltme kipinde (risk/hata düzeltmesi) KOŞMAZ — yalnız ana geçiş; gerekçe fonksiyonun başında.
+   *
    * 2026-09-10: mutasyon probunun İÇİNDEN çıkarıldı. Orada olduğu için, probun aday dosya bulamayıp
    * sessizce dönmesi bu mekanizmayı da öldürüyordu — oysa düşman testinin değişen dosya listesiyle
    * hiçbir ilgisi yok. Adli denetim, ikisinin de aylardır hiç koşmadığını kanıtladı.
@@ -1599,6 +1601,14 @@ export class Phase8Controller {
   }
 
   private async runIndependentAdversarialTest(): Promise<void> {
+    // 2026-11-28 (danışman kararı, koşu 37): YALNIZ ana geçişte. Risk ve hata düzeltme geçişleri de Faz 8 yeşili
+    // üretir; orada koşan yazar projeye kırmızı test bırakıyordu, sonraki geçişler onu "önceden kırık" sayıyor,
+    // Faz 14 mutlak koşunca düşüyordu. Ana geçişte bulunan ihlal Faz 9 risk incelemesinden ÖNCE görünür.
+    if (this.isFixMode) {
+      await this.recordProbeTrace("adversarial-test-not-run", "duzeltme gecisi (yalniz ana Faz 8 gecisinde kosar)");
+      emitChatMessage("system", "ℹ️ Bağımsız düşman testi düzeltme geçişinde koşmaz; yalnız ana Faz 8 geçişinde koşar.");
+      return;
+    }
     if (this.config.features.adversarial_tester !== false) {
       // Sonuç TÜKETİLİR (sessiz-fallback denetimi): eskiden dönüş atılıyor, yalnız fırlatılan hata log'a düşüyordu →
       // ajan koşup verdict üretemezse (ran:false) "başlıyor" mesajından sonra SESSİZLİK → güven katmanı sessizce çöker,

@@ -24,6 +24,8 @@ import {
   type ProfileCommandKey,
 } from "../profile-loader.js";
 import { safeEnv } from "../safe-env.js";
+import { testFailureDigest } from "../regression-diff.js";
+import { isEnvironmentError } from "../claude-api.js";
 import type {
   MechanicalCommandSpec,
   MechanicalConfig,
@@ -526,6 +528,25 @@ export function isTsToolNotApplicable(
     /tsconfig\.json['"]? ?(not found|does not exist|bulunamadı)/i.test(s) ||
     /No inputs were found in config/i.test(s);
   return tsTool && configMiss;
+}
+
+/**
+ * SAF (2026-11-28): imza taşıyan uzun bir satırdan imzayı İÇEREN en çok 160 karakterlik parça. Baştan kesmek
+ * sütun 120'den sonraki errno'yu (örn. JSON günlük satırı) düşürüp ortam durdurmasını kaybettirirdi.
+ */
+export function envSignatureExcerpt(line: string, matches: (s: string) => boolean, width = 160): string {
+  const l = line.trim();
+  if (l.length <= width) return l;
+  for (let start = 0; start < l.length; start += 20) {
+    const part = l.slice(start, start + width);
+    if (matches(part)) return part;
+  }
+  return l.slice(0, width);
+}
+
+/** SAF: tarama komutu bir test anahtarından mı (profilin `test` / `integration` anahtarı; stack'e bağlı değil). */
+export function isTestScanSpec(spec: MechanicalCommandSpec): boolean {
+  return typeof spec === "object" && spec.type === "profile_key" && (spec.key === "test" || spec.key === "integration");
 }
 
 export class MechanicalRunnerBase {
@@ -1063,7 +1084,24 @@ export class MechanicalRunnerBase {
         // v15.7 (2026-05-27): Playwright "No tests found", ESLint, npm gibi
         // tool'lar hatayı stdout'a yazıyor. stderr boşsa stdout'a düş ki
         // audit + chat snippet'i boş kalmasın.
-        const tail = scanResult.stderr.trim() || scanResult.stdout.trim();
+        // 2026-11-28: test fazında (profilin `test` / `integration` anahtarı) kısa neden kırık testlerle başlar;
+        // stderr'deki geçen testlerin günlükleri asıl kırığı örtmesin (koşu 37). Öbür fazlar eskisi gibi.
+        // Ortam durdurması (index.ts isEnvironmentError) eskiden bu metnin ilk 1500 karakterine bakıyordu; o pencerede
+        // imza taşıyan satırlar özete taşınır → baştaki errno yine durdurur. (Bilinen sınır: özetin taşıdığı sonda bir imza
+        // varsa bu yeni bir durdurma olabilir; eskiden o kısım 1500 penceresinin dışında kalıyordu.)
+        const legacy = scanResult.stderr.trim() || scanResult.stdout.trim();
+        const tail = isTestScanSpec(opts.mechanical.scan_cmd)
+          ? testFailureDigest(
+              scanResult.stdout,
+              scanResult.stderr,
+              legacy
+                .slice(0, 1500)
+                .split(/\r?\n/)
+                .filter((l) => isEnvironmentError(l))
+                .slice(0, 2)
+                .map((l) => envSignatureExcerpt(l, isEnvironmentError)),
+            )
+          : legacy;
         const snippet = tail.slice(0, 200);
         // Fail audit'i fail_event opsiyoneline bağlama (sessiz-fallback denetimi): fail_event tanımsız bir
         // faz başarısız olursa müfettiş trajectory'si audit.jsonl'den HİÇ fail kaydı görmez (gözle görünür

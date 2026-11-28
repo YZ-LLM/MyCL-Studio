@@ -40,13 +40,47 @@ const ADVERSARIAL_SYSTEM = [
   VERIFY_BEFORE_CLAIM,
 ].join("\n");
 
+/**
+ * SAF: metindeki dengeli `{...}` adaylarını SONDAN BAŞA verir. Dize içindeki ayraçlar ve kaçışlar sayılmaz —
+ * eski `/\{[\s\S]*?\}/` ilk `}` karakterinde kesiyordu; bulgu metninde `{ error: "x" }` geçince hüküm
+ * ayrışmıyor, ihlal bildirilmiyordu (koşu 37). Kod bloğu (```json) çevresi de böylece sorun olmaz.
+ */
+function balancedObjectsFromEnd(text: string): string[] {
+  const out: string[] = [];
+  // Aday tavanı: hüküm sonda olduğu için ilk birkaç aday yeter; kod dolu uzun çıktıda karesel taramayı önler.
+  for (
+    let start = text.lastIndexOf("{"), tried = 0;
+    start >= 0 && tried < 500;
+    start = start > 0 ? text.lastIndexOf("{", start - 1) : -1, tried++
+  ) {
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) {
+        out.push(text.slice(start, i + 1));
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 export function parseAdversarialVerdict(text: string): { broke: boolean; failures: string[] } | null {
-  // SON JSON bloğunu al (ajan önce düşünüp sonra verdict basar).
-  const matches = [...text.matchAll(/\{[\s\S]*?\}/g)];
-  for (let i = matches.length - 1; i >= 0; i--) {
+  // SON geçerli hüküm nesnesini al (ajan önce düşünüp sonra verdict basar). Uzun çıktıda yalnız son kısım taranır.
+  for (const cand of balancedObjectsFromEnd(text.slice(-100_000))) {
     try {
-      const o = JSON.parse(matches[i][0]) as { broke?: unknown; failures?: unknown };
-      if (typeof o.broke === "boolean") {
+      const o = JSON.parse(cand) as { broke?: unknown; failures?: unknown };
+      if (o && typeof o.broke === "boolean") {
         return {
           broke: o.broke,
           failures: Array.isArray(o.failures) ? o.failures.filter((x): x is string => typeof x === "string").slice(0, 8) : [],
@@ -85,8 +119,8 @@ export async function runAdversarialTester(state: State, config: MyclConfig): Pr
       allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
       disallowedTools: [...SUBAGENT_SPAWN_TOOLS], // test'i KENDİ yazar/koşar; alt-ajan doğurmasın (kaçış + 200+sn donma)
       timeoutMs: 600_000, // YZLLM 2026-06-12: 10 dk idle (çıktı yoksa) — hung'u kurtar; aktif test yazımı/koşumu çıktı akıtır, ölmez
-      // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): 15dk wall-clock (default 30dk yerine). Düşman-test HER Faz 8 yeşilinde
-      // koşan 2. TAM ajan → tavanı yarıya indir (güven-sağlamlaştırma korunur, kuyruğu kısaltır). Bayrakla kapatılabilir.
+      // ZAMAN-KAYBI PLANI (YZLLM 2026-07-07): 15dk wall-clock (default 30dk yerine). Düşman-test ana Faz 8 yeşilinde
+      // koşan 2. TAM ajan (2026-11-28'den beri düzeltme geçişlerinde değil) → tavanı yarıya indir (güven-sağlamlaştırma korunur, kuyruğu kısaltır). Bayrakla kapatılabilir.
       wallClockMs: 900_000,
       // İTERASYON GATE'LERİ (Faz C): düşman-test ajanı projeye test DOSYASI yazar ve iterasyon
       // içinde koşar → dondurulmuş dosya / yeni dosya / bağımlılık yasakları burada da geçerli.

@@ -184,7 +184,7 @@ import { getLastTechDebtFindings, acceptedFindingKey, resetLastTechDebtFindings 
 import { sumSecurityFindings, stepSecurityConvergence } from "./security-convergence.js";
 import { runQualityAudit, DEFAULT_QUALITY_QUESTIONS } from "./quality-audit.js";
 import { captureRegressionBaseline, runRegressionGuard } from "./regression-guard.js";
-import type { RegressionBaseline } from "./regression-diff.js";
+import { withoutTestNamesLine, type RegressionBaseline } from "./regression-diff.js";
 import { isApiAccountError, isEnvironmentError, environmentErrorAdvice, isTimeoutHangOnly } from "./claude-api.js";
 import { decideTimeoutDivert, runTimeoutMultiAngle, TIMEOUT_DIVERT_MAX } from "./timeout-diagnosis.js";
 import { isClaudeAvailable } from "./codegen/cli-backend.js";
@@ -778,16 +778,18 @@ interface FailReasonHolder {
 function phaseFailMessage(phaseNum: number, controller?: FailReasonHolder): string {
   const reason = controller?.lastFailReason;
   if (reason) {
-    if (/overloaded_error|"status":\s*529|\bOverloaded\b/i.test(reason)) {
+    // 2026-11-28: imza denetimleri test ADLARI satırını okumaz (withoutTestNamesLine); gösterilen metin aynı kalır.
+    const sig = withoutTestNamesLine(reason);
+    if (/overloaded_error|"status":\s*529|\bOverloaded\b/i.test(sig)) {
       return `Faz ${phaseNum} tamamlanamadı: Anthropic API yoğun (5 deneme + ~67s backoff sonrası 529 Overloaded). Birkaç dakika bekleyip aynı mesajı tekrar gönder.`;
     }
-    if (/rate_limit_error/i.test(reason)) {
+    if (/rate_limit_error/i.test(sig)) {
       return `Faz ${phaseNum} tamamlanamadı: Anthropic API rate limit'i aşıldı. Bir süre bekleyip tekrar dene.`;
     }
-    if (/authentication_error/i.test(reason)) {
+    if (/authentication_error/i.test(sig)) {
       return `Faz ${phaseNum} tamamlanamadı: Anthropic API anahtarı geçersiz. Ayarlar → API Keys'i kontrol et.`;
     }
-    if (/permission_error/i.test(reason)) {
+    if (/permission_error/i.test(sig)) {
       return `Faz ${phaseNum} tamamlanamadı: Anthropic API anahtarın bu modele erişim izni vermiyor.`;
     }
     return `Faz ${phaseNum} tamamlanamadı: ${reason.slice(0, 200)}`;
@@ -1763,7 +1765,11 @@ async function failPhase(
   // HESAP/ORTAM hatası (YZLLM 2026-06-11): kredi/bakiye yetersiz, fatura, auth/kota → PROJE hatası DEĞİL, model
   // zayıflığı DEĞİL. Her API çağrısı aynı hatayı verir → escalation (modeli pahalıya tırmandırma) + hata-analizi
   // (o da API çağrısı) ANLAMSIZ ve kısır döngü. DUR + net söyle; tırmanma/analiz/fix YAPMA.
-  if (isApiAccountError(ctrl?.lastFailReason ?? "") || isApiAccountError(message)) {
+  // 2026-11-28: test fazı özetinin "Kırık testler" satırı test ADLARIDIR (örn. `billing > …`); hesap/ortam imzası
+  // sayılmasın — yalnız çıktının kendisi. Satır yoksa metin aynen kalır.
+  const failReasonForEnv = withoutTestNamesLine(ctrl?.lastFailReason ?? "");
+  const messageForEnv = withoutTestNamesLine(message); // ileti kısa nedenin başını taşır → ad satırı oradan da sızmasın
+  if (isApiAccountError(failReasonForEnv) || isApiAccountError(messageForEnv)) {
     // YZLLM 2026-06-11: "API hata verince aboneliğe OTOMATİK geçmeli." Abonelik (claude CLI) varsa + şu an API'deysek
     // → tüm rolleri CLI'ye geçir (restart'sız) + kaldığı fazdan devam. Yoksa dur + net söyle.
     // Anahtar yoksa "API'deyiz" denemez (ayar "api" ya da "auto" olsa da rol abonelikte koşuyor) → aşağıdaki
@@ -1812,7 +1818,7 @@ async function failPhase(
   // → reset saati unutuluyordu. Emsal desen: handleUserMessage catch'i (yukarıda ~3489) aynı birleşimi kullanır.
   // MAHKEME (2026-07-23): detectCliRateLimit DEĞİL isCliUsageLimitError — lastFailReason'a Faz 5 projenin kendi
   // stderr'ini de taşır; çıplak "usage limit" imzası proje çıktısıyla karışırdı. Claude'a çapalı imza şart.
-  if (isCliUsageLimitError(`${ctrl?.lastFailReason ?? ""}\n${message}`)) {
+  if (isCliUsageLimitError(`${failReasonForEnv}\n${messageForEnv}`)) {
     emitChatMessage(
       "system",
       "⛔ **Claude aboneliği kullanım limitine takıldı** — bu bir ortam sorunu, proje hatası DEĞİL. Otomatik " +
@@ -1827,7 +1833,7 @@ async function failPhase(
   // ~67s backoff sonrası bile sürüyorsa PROJE/KOD hatası DEĞİL → oto-çözüm/debug/tweak ANLAMSIZ. (Canlı kanıt:
   // 529 → tweak-modu → ajan ne yapacağını bilemeyip 9 dk cache/transcript dosyalarını kurcaladı, UI yazmadı.)
   // DUR + net rehber; kullanıcı birkaç dakika sonra "Çalıştır" ile aynı işi tekrar başlatır (auth/ortam ile aynı kalıp).
-  if (/overloaded_error|"status":\s*529|\bOverloaded\b/i.test(`${ctrl?.lastFailReason ?? ""}\n${message}`)) {
+  if (/overloaded_error|"status":\s*529|\bOverloaded\b/i.test(`${failReasonForEnv}\n${messageForEnv}`)) {
     emitChatMessage(
       "system",
       "⏳ **Anthropic API şu an çok yoğun (529 Overloaded)** — 5 deneme + backoff'a rağmen geçmedi. Bu GEÇİCİ bir " +
@@ -1842,7 +1848,7 @@ async function failPhase(
   // model zayıflığı DEĞİL. Debug/oto-çözüm döngüsü (proje kodunu kurcalar) ANLAMSIZ + ajan döngüye girer (logda
   // AC-marker'ı stub/yorumla geçmeye çalışıp sahte-yeşile kaydı). DUR + ortama-özel net rehber; tırmanma/analiz/fix YOK.
   {
-    const envReason = `${ctrl?.lastFailReason ?? ""}\n${message}`;
+    const envReason = `${failReasonForEnv}\n${messageForEnv}`;
     if (isEnvironmentError(envReason)) {
       // YZLLM 2026-07-09 ("hiçbir sorunu atlama; en doğru çözümü bul; bulamazsa orkestra farklı açılardan — işe/projeye
       // uygun"): SAF-timeout/asılma (errno'suz) + MOD AÇIK → kör-STOP yerine GERÇEK-çözüm akışına düş. decideTimeoutDivert:
@@ -5086,6 +5092,8 @@ async function executeDispatchedIntent(
         pending_ui_review: undefined,
         pending_backend_fix: undefined,
         pending_realapp_verify: undefined,
+        // 2026-11-28: iptal edilen düzeltmenin checkpoint'i sonraki ana Faz 8 geçişini düzeltme kipi sanmasın.
+        fix_checkpoint_ref: undefined,
         updated_at: Date.now(),
       };
       await saveState(runtime.state);
@@ -5588,6 +5596,10 @@ async function runDevelopIteration(
       pending_ui_review: undefined,
       ui_tweak_count: undefined,
       pending_backend_fix: undefined,
+      // 2026-11-28: düzeltme checkpoint'i de iterasyona özgü. Yalnız boru hattı sonunda temizleniyordu; iptal edilmiş
+      // bir düzeltmeden kalırsa yeni iterasyonun ANA Faz 8 geçişi düzeltme kipi sanılıyor (repro kapısı açılıyor,
+      // bağımsız düşman testi atlanıyordu).
+      fix_checkpoint_ref: undefined,
       pending_migrations: undefined,
       pending_diagnostic: undefined,
       // Gerçek-app doğrulama marker'ı iterasyon-spesifik — bayat marker yeni iterasyona sızmasın.
@@ -6626,6 +6638,7 @@ async function reconcileAndDrainTasks(): Promise<void> {
           spec_hash: undefined,
           needed_phases: undefined,
           needed_phases_proposed: undefined,
+          fix_checkpoint_ref: undefined, // 2026-11-28: düşen işin düzeltme checkpoint'i sonraki işe sızmasın
           updated_at: Date.now(),
         };
         await saveState(runtime.state);
@@ -7379,6 +7392,7 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
           pending_migrations: undefined,
           pending_diagnostic: undefined,
           pending_realapp_verify: undefined,
+          fix_checkpoint_ref: undefined, // 2026-11-28: vazgeçilen niyetin düzeltme checkpoint'i sızmasın
           needed_phases: undefined,
           needed_phases_proposed: undefined,
           updated_at: Date.now(),
