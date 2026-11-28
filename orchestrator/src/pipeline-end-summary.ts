@@ -72,7 +72,7 @@ export function buildPipelineEndLines(input: PipelineEndInput): string[] {
   if (verdict && verdict.gateFailures.length > 0) {
     const fazlar = verdict.gateFailures.map((g) => `Faz ${g.phase}`).join(", ");
     uyarilar.push(
-      `Kalite-gate'leri geçemedi: ${fazlar} — bu fazlar başarısız ama akış devam etti (sonuç doğrulanmadı).`,
+      `Kalite-gate'leri geçemedi: ${fazlar} — bu fazların bulgusu çözülmeden (ya da kabul edilerek) geçildi, akış devam etti (sonuç doğrulanmadı).`,
     );
   }
   if (verdict && verdict.securitySkipped.length > 0) {
@@ -120,6 +120,24 @@ export function buildPipelineEndLines(input: PipelineEndInput): string[] {
   if (!verdict && uyarilar.length === 0) {
     uyarilar.push(
       "Pipeline sonu hükmü hesaplanamadı (denetim kaydı okunamadı) — gate sonuçları doğrulanmadı.",
+    );
+  }
+
+  // DÜŞTÜ, DÜZELTİLDİ (2026-11-28, prompt 28): bir kez düşüp sonra temiz geçen fazlar "geçemedi" DEĞİL —
+  // uyarı listesine girmez (sonucu düşürmez), ayrı ve doğru adla anılır. Yalnız çözülmemiş fazlar yukarıda.
+  // Bağımsız düşman testinin bulgusu (`adversarial-test-fail`) aynı Faz 8 geçişinde yeşil tamamlanmayla kapanır: kod
+  // DÜZELTİLMEDİ, bulgu Faz 9 risk incelemesine devredildi → "düzeltildi" denmez, doğru adıyla ayrı yazılır.
+  const cozulen = verdict?.resolvedFailures ?? [];
+  const devredilen = cozulen.filter((g) => g.event === "adversarial-test-fail");
+  const duzelen = cozulen.filter((g) => g.event !== "adversarial-test-fail");
+  if (duzelen.length > 0) {
+    const fazlar = duzelen.map((g) => `Faz ${g.phase}`).join(", ");
+    lines.push(`• ℹ️ Düştü, düzeltildi: ${fazlar} — bu fazlar bir kez düştü, sonra kapıdan temiz geçti.`);
+  }
+  if (devredilen.length > 0) {
+    lines.push(
+      "• ℹ️ Bağımsız düşman testi bir kabul ölçütü ihlali bildirdi; bulgu Faz 9 risk incelemesine devredildi, " +
+        "Faz 8 kapısı yeşil geçti (bulgu orada ayrıca düzeltilmedi).",
     );
   }
 

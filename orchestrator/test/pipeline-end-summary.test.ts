@@ -20,6 +20,7 @@ function verdict(partial: Partial<HarnessVerdict>): HarnessVerdict {
     verdict: "PASS",
     completed: true,
     gateFailures: [],
+    resolvedFailures: [],
     securitySkipped: [],
     e2eSkipped: [],
     realAppSkipped: [],
@@ -291,3 +292,32 @@ describe("çalışma kanıtı satırı", () => {
     expect(lines({})).not.toContain("Çalışma kanıtı");
   });
 });
+
+describe("düştü, düzeltildi (2026-11-28, prompt 28)", () => {
+  it("düzelen fazlar ayrı ve doğru adla anılır; sonuç yeşil kalır, 'doğrulanmadı' denmez", () => {
+    const out = lines({ verdict: verdict({ resolvedFailures: [{ phase: 10, event: "lint-fail" }, { phase: 14, event: "unit-fail" }] }) });
+    expect(out).toContain("Düştü, düzeltildi: Faz 10, Faz 14");
+    expect(out).toContain("✅ Tamamlandı");
+    expect(out).not.toContain("geçemedi");
+    expect(out).not.toContain("doğrulanmadı");
+  });
+  it("yalnız çözülmemiş fazlar 'geçemedi' diye yazılır", () => {
+    const out = lines({
+      verdict: verdict({
+        verdict: "PARTIAL",
+        exitCode: 2,
+        gateFailures: [{ phase: 13, event: "security-fail" }],
+        resolvedFailures: [{ phase: 10, event: "lint-fail" }],
+      }),
+    });
+    expect(out).toContain("Kalite-gate'leri geçemedi: Faz 13 —");
+    expect(out).not.toContain("geçemedi: Faz 10");
+    expect(out).toContain("Düştü, düzeltildi: Faz 10");
+  });
+  it("düşman testi bulgusu 'düzeltildi' denmeden Faz 9'a devredildi diye yazılır", () => {
+    const out = lines({ verdict: verdict({ resolvedFailures: [{ phase: 8, event: "adversarial-test-fail" }] }) });
+    expect(out).not.toContain("Düştü, düzeltildi");
+    expect(out).toContain("Faz 9 risk incelemesine devredildi");
+  });
+});
+

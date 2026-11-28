@@ -19,8 +19,13 @@ export interface HarnessVerdict {
   verdict: Verdict;
   /** phase-17-complete (veya -20) görüldü mü — pipeline sonuna ulaştı mı. */
   completed: boolean;
-  /** Başarısız gate'ler (faz başına bir kayıt). */
+  /** Başarısız gate'ler (faz başına bir kayıt): bu yinelemedeki SON sonucu başarısız olan fazlar. */
   gateFailures: GateFailure[];
+  /**
+   * Düştü, düzeltildi (2026-11-28, prompt 28): bu yinelemede düşüp sonra TEMİZ tamamlanan fazlar (faz başına
+   * bir kayıt; son çözülen düşüş). Hükmü düşürmez; akış özeti ayrı ve doğru adla anar.
+   */
+  resolvedFailures: GateFailure[];
   /**
    * Atlanan GÜVENLİK taramaları (örn. csp-evaluator-skipped, semgrep-skipped,
    * phase-13-skipped). Boş değilse: tool eksikti → "tarandı" denemez → false-green
@@ -121,10 +126,134 @@ export function eventsSince(events: AuditEvent[], iterStart: number): AuditEvent
 }
 
 /**
+ * `phase-N-complete` ayrıntısının sınıfı (2026-11-28, prompt 28). Liste koddaki BÜTÜN yazıcılardan çıkarıldı
+ * (`index.ts`, `phase-complete.ts`, faz denetleyicileri); her biri açıkça sınıflandı:
+ * - `accepted`: faz bulgusu ÇÖZÜLMEDEN geçildi → düşüş işareti (başarısız kalır).
+ *   `soft_complete_after_fail` (yumuşak geçiş, döngü kırıcının kabulü, eksik çıktı, Faz 17 kısmi),
+ *   `security_accepted_by_user` (kullanıcı kabulü, bulgu kuyruğu kabulü), `finding_accepted_permanently …`,
+ *   `mahkeme_false_positive_suppressed` (bugün de başarısız sayılıyordu: önünde kapının `-fail` olayı durur — aynı kalır).
+ * - `clean`: kapı/faz gerçekten geçti. Ayrıntısız (mekanik geçiş, Faz 17), `gate_autofix_resolved` (kapı yeniden koştu
+ *   ve geçti), `never_ask_auto_review` (Faz 6 kip onayı — bir düşüşün kabulü değil), faz denetleyicilerinin kendi
+ *   ölçü metinleri (Faz 3/4 `sha256=`, Faz 5 `output_verified`, Faz 7 `DB şeması
+ *   yazıldı`, Faz 8 `green=`) ve serbest metinli onaylar (Faz 1 niyet, Faz 2 zenginleştirme, Faz 6 kullanıcı onayı,
+ *   Faz 9 risk kararı).
+ * - `skipped`: koşmadı ya da kanıt üretmedi (`via=skipped reason=`, Faz 5 `external dev server detected`; atlama
+ *   olayının öneklerini de tanır) → düşüşü çözmez, tek başına düşüş de sayılmaz.
+ * - `unknown`: listede yok → GÜVENLİ TARAF: düşüş işareti (yeni bir ayrıntı sessizce yeşil sayılmasın).
+ */
+export type CompletionClass = "clean" | "accepted" | "skipped" | "unknown";
+
+const ACCEPTED_EXACT = new Set([
+  "soft_complete_after_fail",
+  "security_accepted_by_user",
+  "mahkeme_false_positive_suppressed",
+]);
+const ACCEPTED_PREFIX = ["finding_accepted_permanently"];
+const CLEAN_EXACT = new Set(["", "gate_autofix_resolved", "never_ask_auto_review"]);
+// `via=skipped reason=` damga kapısının atlaması. Ötekiler bugün atlama OLAYININ ayrıntısında durur (tamamlanma
+// ayrıntısız yazılır, atlama olayı korur); yine de tamamlanmaya taşınırsa atlama sayılsın diye listede.
+// `external dev server detected`: Faz 5 dışarıda koşan bir sunucu buldu, kurulum ve başlatma KOŞMADI → kapının
+// geçtiğini kanıtlamaz: önceki düşüşü çözmez, tek başına düşüş de sayılmaz (inceleme bulgusu).
+const SKIPPED_PREFIX = [
+  "via=skipped reason=",
+  "skip_unless=",
+  "needed_phases=",
+  "scoped_run:",
+  "origin=foreign",
+  "external dev server detected",
+];
+/** Faz denetleyicisinin kendi tamamlanma ölçüsü (faz → önekler). */
+const CLEAN_PREFIX_BY_PHASE: Record<number, string[]> = {
+  3: ["sha256="],
+  4: ["sha256="],
+  5: ["output_verified"],
+  7: ["DB şeması yazıldı"],
+  8: ["green="],
+};
+/** Ayrıntısı serbest metin olan onay fazları (niyet özeti, zenginleştirme, kullanıcı onay metni, risk kararı). */
+const FREE_TEXT_CLEAN_PHASES = new Set([1, 2, 6, 9]);
+
+/** SAF: tamamlanma ayrıntısını sınıfla. Önce ayrılmış (kabul / atlama) ayrıntılar, sonra fazın kendi ölçüsü. */
+export function classifyCompletionDetail(phase: number, detail: string | undefined): CompletionClass {
+  const d = String(detail ?? "");
+  if (ACCEPTED_EXACT.has(d) || ACCEPTED_PREFIX.some((p) => d.startsWith(p))) return "accepted";
+  if (SKIPPED_PREFIX.some((p) => d.startsWith(p))) return "skipped";
+  if (CLEAN_EXACT.has(d)) return "clean";
+  if ((CLEAN_PREFIX_BY_PHASE[phase] ?? []).some((p) => d.startsWith(p))) return "clean";
+  if (FREE_TEXT_CLEAN_PHASES.has(phase)) return "clean";
+  return "unknown";
+}
+
+/**
+ * SAF (2026-11-28, prompt 28): her fazın bu yinelemedeki SON sonucu. Olaylar kayıt sırasıyla gezilir:
+ * - Düşüş işareti: fazın `*-fail` olayı (bulgu olayları dahil: `adversarial-test-fail`, `regression-guard-fail`),
+ *   ya da `accepted` / `unknown` sınıflı tamamlanma, ya da `soft_complete_after_fail` ayrıntılı herhangi bir `-complete`.
+ * - Çözüm: son düşüşten SONRA fazın `clean` tamamlanması — o tamamlanmanın hemen önünde fazın atlaması
+ *   (`phase-N-skipped`) yoksa. Atlamadan sonra gelen tamamlanma kapının geçtiğini kanıtlamaz; atlama o tamamlanmayla
+ *   tüketilir, sonraki gerçek koşu yeniden sınar.
+ * Çözülmemiş düşüş → `gateFailures`; çözülmüş → `resolvedFailures` (faz yeniden düşerse yine başarısız).
+ */
+export function lastOutcomeByPhase(events: AuditEvent[]): {
+  gateFailures: GateFailure[];
+  resolvedFailures: GateFailure[];
+} {
+  const open = new Map<number, GateFailure>();
+  const skippedSince = new Set<number>();
+  const resolved = new Map<number, GateFailure>();
+  const mark = (e: AuditEvent) => {
+    const prev = open.get(e.phase);
+    // Faz başına tek kayıt; açıklayıcı `-fail` olayını kabul/soft tamamlanmaya tercih et (eski davranış).
+    if (!prev || (e.event.endsWith("-fail") && !prev.event.endsWith("-fail"))) {
+      open.set(e.phase, { phase: e.phase, event: e.event, detail: e.detail });
+    }
+    skippedSince.delete(e.phase);
+  };
+  for (const e of events) {
+    const exactComplete = e.event === `phase-${e.phase}-complete`;
+    if (e.event.endsWith("-fail")) {
+      mark(e);
+      continue;
+    }
+    // Atlama olayı: `phase-N-skipped` ve türevleri (`-skipped-by-scope`, `-skipped-integrate`): ardından ayrıntısız
+    // bir tamamlanma yazılır; o tamamlanma kapının geçtiğini kanıtlamaz (inceleme bulgusu).
+    if (e.event.startsWith(`phase-${e.phase}-skipped`)) {
+      if (open.has(e.phase)) skippedSince.add(e.phase);
+      continue;
+    }
+    if (!e.event.endsWith("-complete")) continue;
+    if (!exactComplete) {
+      if (e.detail === "soft_complete_after_fail") mark(e); // eski davranış: herhangi bir soft tamamlanma
+      continue;
+    }
+    const cls = classifyCompletionDetail(e.phase, e.detail);
+    if (cls === "accepted" || cls === "unknown") {
+      mark(e);
+    } else if (cls === "skipped") {
+      // Atlama damgası (önünde `phase-N-skipped` durur) bu atlamayı TÜKETİR; düşüş açık kalır, sonraki koşu yeniden sınar.
+      skippedSince.delete(e.phase);
+    } else {
+      const o = open.get(e.phase);
+      if (o && skippedSince.has(e.phase)) {
+        // Atlamanın ardından gelen tamamlanma (mekanik atlama, yeniden koşunun atlanması) kapının geçtiğini kanıtlamaz.
+        skippedSince.delete(e.phase);
+      } else if (o) {
+        open.delete(e.phase);
+        resolved.set(e.phase, o);
+      }
+    }
+  }
+  const byPhase = (a: GateFailure, b: GateFailure) => a.phase - b.phase;
+  return {
+    gateFailures: [...open.values()].sort(byPhase),
+    resolvedFailures: [...resolved.values()].filter((r) => !open.has(r.phase)).sort(byPhase),
+  };
+}
+
+/**
  * SAF: audit event'lerinden hüküm. completed + gate-fail yok → PASS; completed ama
  * en az bir gate-fail → PARTIAL (sessiz "tamamlandı" değil); completed değil → FAIL.
- * Gate-fail sinyali: `*-fail` event'i VEYA `soft_complete_after_fail` detaylı complete.
- * skipped (örn. scope/missing-command) başarısızlık SAYILMAZ.
+ * Gate-fail: fazın bu yinelemedeki SON sonucu başarısızlık (`lastOutcomeByPhase`; 2026-11-28'den önce HERHANGİ bir
+ * `*-fail` olayı yetiyordu → düşüp düzelen faz da kalıcı kırmızıydı). skipped başarısızlık SAYILMAZ.
  * NOT: çapraz-iterasyon carryover'ı önlemek için ÇAĞIRMADAN ÖNCE eventsSince ile süz.
  */
 export function computeVerdict(
@@ -144,6 +273,7 @@ export function computeVerdict(
       verdict: "FAIL",
       completed,
       gateFailures: [],
+      resolvedFailures: [],
       securitySkipped: [],
       e2eSkipped: [],
       realAppSkipped: [],
@@ -162,6 +292,7 @@ export function computeVerdict(
       verdict: "FAIL",
       completed,
       gateFailures: [],
+      resolvedFailures: [],
       securitySkipped: [],
       e2eSkipped: [],
       realAppSkipped: [],
@@ -171,19 +302,7 @@ export function computeVerdict(
     };
   }
 
-  const failByPhase = new Map<number, GateFailure>();
-  for (const e of events) {
-    const isFail =
-      e.event.endsWith("-fail") ||
-      (e.event.endsWith("-complete") && e.detail === "soft_complete_after_fail");
-    if (!isFail) continue;
-    const prev = failByPhase.get(e.phase);
-    // Faz başına tek kayıt; açıklayıcı `-fail` event'ini soft-complete'e tercih et.
-    if (!prev || (e.event.endsWith("-fail") && !prev.event.endsWith("-fail"))) {
-      failByPhase.set(e.phase, { phase: e.phase, event: e.event, detail: e.detail });
-    }
-  }
-  const gateFailures = [...failByPhase.values()].sort((a, b) => a.phase - b.phase);
+  const { gateFailures, resolvedFailures } = lastOutcomeByPhase(events);
 
   // false-green koruması: atlanan güvenlik taramaları (dedup).
   const securitySkipped = [
@@ -244,6 +363,7 @@ export function computeVerdict(
     verdict,
     completed,
     gateFailures,
+    resolvedFailures,
     securitySkipped,
     e2eSkipped,
     realAppSkipped,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectRunEvidence, computeVerdict, eventsSince } from "../src/harness-verdict.js";
+import { classifyCompletionDetail, collectRunEvidence, computeVerdict, eventsSince } from "../src/harness-verdict.js";
 import type { AuditEvent } from "../src/types.js";
 
 function ev(phase: number, event: string, detail?: string): AuditEvent {
@@ -15,7 +15,11 @@ describe("eventsSince — çapraz-iterasyon sarı-gate kök fix (YZLLM 2026-06-2
       evAt(100, 11, "simplify-fail"),
       evAt(100, 12, "perf-fail"),
       evAt(100, 16, "e2e-fail"),
-      ...Array.from({ length: 16 }, (_, i) => evAt(200, i + 2, `phase-${i + 2}-complete`)),
+      // Bu iterasyon 11/12/16'yı henüz yeniden koşmadı (2026-11-28: sonradan temiz tamamlanan faz artık çözülmüş sayılır;
+      // eski düşüşün taşınmasını sınamak için o fazların bu iterasyonda tamamlanması OLMAMALI).
+      ...Array.from({ length: 16 }, (_, i) => i + 2)
+        .filter((n) => n !== 11 && n !== 12 && n !== 16)
+        .map((n) => evAt(200, n, `phase-${n}-complete`)),
     ];
     expect(computeVerdict(events).gateFailures.length).toBe(3); // süzülmemiş = eski hatalı davranış
     const scoped = eventsSince(events, 150);
@@ -24,8 +28,8 @@ describe("eventsSince — çapraz-iterasyon sarı-gate kök fix (YZLLM 2026-06-2
   });
   it("BU iterasyonun gerçek fail'i (ts>=iterStart) KORUNUR → doğru sarı", () => {
     const events: AuditEvent[] = [
-      evAt(200, 11, "simplify-fail"),
       ...Array.from({ length: 16 }, (_, i) => evAt(200, i + 2, `phase-${i + 2}-complete`)),
+      evAt(201, 11, "simplify-fail"), // son sonuç düşüş (sonrasında temiz tamamlanma yok)
     ];
     expect(computeVerdict(eventsSince(events, 150)).gateFailures.map((g) => g.phase)).toContain(11);
   });
@@ -414,3 +418,120 @@ describe("collectRunEvidence", () => {
     expect(collectRunEvidence([]).noRuntimeErrors).toBe(true);
   });
 });
+
+describe("son sonuç kuralı (2026-11-28, prompt 28)", () => {
+  const phases = (v: ReturnType<typeof computeVerdict>) => v.gateFailures.map((g) => g.phase);
+  const resolved = (v: ReturnType<typeof computeVerdict>) => v.resolvedFailures.map((g) => g.phase);
+  it("düşüp sonra temiz tamamlanan faz başarısız sayılmaz; 'düştü, düzeltildi' listesine girer", () => {
+    const v = computeVerdict([
+      ev(8, "adversarial-test-fail", "AC2"),
+      ev(8, "phase-8-complete", "green=48/3 debt=0 tdd=true suite=true"),
+      ev(10, "lint-fail", "eslint"),
+      ev(10, "phase-10-complete", "gate_autofix_resolved"),
+      ev(10, "lint-pass"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(v)).toEqual([]);
+    expect(resolved(v)).toEqual([8, 10]);
+    expect(v.verdict).toBe("PASS");
+  });
+  it("yapilacaklar-sunucu-28 biçimi → yalnız Faz 13 (kullanıcı kabulü)", () => {
+    const v = computeVerdict([
+      ev(8, "adversarial-test-fail"),
+      ev(8, "phase-8-complete", "green=48/3 debt=0 tdd=true suite=true"),
+      ev(10, "lint-fail"),
+      ev(10, "phase-10-complete", "gate_autofix_resolved"),
+      ev(10, "lint-pass"),
+      ev(10, "regression-guard-pass"),
+      ev(13, "security-fail", "semgrep"),
+      ev(13, "phase-13-complete", "security_accepted_by_user"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(v)).toEqual([13]);
+    expect(v.verdict).toBe("PARTIAL");
+  });
+  it("alisveris-sunucu-33 biçimi → Faz 10 (mahkeme kabulü, tamamlanma yok) ve Faz 13", () => {
+    const v = computeVerdict([
+      ev(8, "adversarial-test-fail"),
+      ev(8, "phase-8-complete", "green=49/3 debt=0 tdd=true suite=true"),
+      ev(10, "lint-fail"),
+      ev(10, "mahkeme-escalate-accept-continue", "kuşkulu"),
+      ev(13, "security-fail"),
+      ev(13, "phase-13-complete", "security_accepted_by_user"),
+      ev(14, "unit-fail"),
+      ev(14, "unit-pass"),
+      ev(14, "phase-14-complete"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(v)).toEqual([10, 13]);
+    expect(resolved(v)).toEqual([8, 14]);
+  });
+  it("kabul edilerek geçilen tamamlanmalar temiz DEĞİL", () => {
+    for (const d of [
+      "soft_complete_after_fail",
+      "security_accepted_by_user",
+      "mahkeme_false_positive_suppressed",
+      "finding_accepted_permanently count=2",
+    ]) {
+      const v = computeVerdict([ev(10, "lint-fail"), ev(10, "phase-10-complete", d), ev(17, "phase-17-complete")]);
+      expect(phases(v)).toEqual([10]);
+    }
+  });
+  it("sınıflanmamış yeni bir ayrıntı güvenli tarafa düşer (düşüş sayılır)", () => {
+    expect(classifyCompletionDetail(10, "yeni_bir_ayrinti")).toBe("unknown");
+    const v = computeVerdict([ev(10, "phase-10-complete", "yeni_bir_ayrinti"), ev(17, "phase-17-complete")]);
+    expect(phases(v)).toEqual([10]);
+  });
+  it("atlamadan sonra gelen tamamlanma düşüşü çözmez; sonraki gerçek koşu çözer", () => {
+    const atlandi = computeVerdict([
+      ev(11, "simplify-fail"),
+      ev(11, "phase-11-skipped", "missing_command"),
+      ev(11, "phase-11-complete", "gate_autofix_resolved"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(atlandi)).toEqual([11]);
+    const sonraGecti = computeVerdict([
+      ev(11, "simplify-fail"),
+      ev(11, "phase-11-skipped", "missing_command"),
+      ev(11, "phase-11-complete"),
+      ev(11, "simplify-pass"),
+      ev(11, "phase-11-complete"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(sonraGecti)).toEqual([]);
+  });
+  it("düzelen faz yeniden düşerse yine başarısız (düzeltildi listesinde görünmez)", () => {
+    const v = computeVerdict([
+      ev(14, "unit-fail"),
+      ev(14, "phase-14-complete"),
+      ev(14, "regression-guard-fail", "yeni kırık"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(v)).toEqual([14]);
+    expect(resolved(v)).toEqual([]);
+  });
+  it("serbest metinli onay fazları ve denetleyici ölçüleri temiz sayılır", () => {
+    expect(classifyCompletionDetail(6, "tamam güzel olmuş")).toBe("clean");
+    expect(classifyCompletionDetail(9, "fix[8]=XSS riski")).toBe("clean");
+    expect(classifyCompletionDetail(4, "sha256=abc")).toBe("clean");
+    expect(classifyCompletionDetail(16, "via=skipped reason=install_failed")).toBe("skipped");
+    expect(classifyCompletionDetail(13, "")).toBe("clean");
+  });
+  it("adı farklı atlama olayları da atlama sayılır; dışarıdaki sunucu Faz 5 düşüşünü çözmez", () => {
+    const kapsam = computeVerdict([
+      ev(7, "phase-7-fail"),
+      ev(7, "phase-7-skipped-by-scope", "needed_phases=1,2"),
+      ev(7, "phase-7-complete"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(kapsam)).toEqual([7]);
+    const dis = computeVerdict([
+      ev(5, "phase-5-install-fail"),
+      ev(5, "phase-5-complete", "external dev server detected on port 3000 (not spawned)"),
+      ev(17, "phase-17-complete"),
+    ]);
+    expect(phases(dis)).toEqual([5]);
+    expect(classifyCompletionDetail(5, "external dev server detected on port 3000 (not spawned)")).toBe("skipped");
+  });
+});
+

@@ -1,5 +1,48 @@
 ## 2026-11-28
 
+- **fix(akış sonu hükmü): bir faz bu yinelemedeki SON sonucu başarısızlıksa başarısız sayılsın.** İki bitmiş projenin
+  kaydı (danışmanın sınaması): `yapilacaklar-sunucu-28` hükmü `gateFailures=[8,10,13]` verdi, doğrusu [13];
+  `alisveris-sunucu-33` `[8,10,13,14]` verdi, doğrusu [10, 13]. Kök neden: `computeVerdict` yinelemedeki HERHANGİ
+  bir `*-fail` olayını kalıcı başarısızlık sayıyordu. Sonradan temiz tamamlanan faz da kırmızı kalıyordu, bu
+  yüzden hiçbir proje "tam" bitemiyordu.
+  1. **Son sonuç (`lastOutcomeByPhase`, `harness-verdict.ts`):** olaylar kayıt sırasıyla gezilir.
+     - Düşüş işareti: fazın `*-fail` olayı (bulgu olayları dahil), kabulle geçilen ya da sınıflanmamış bir
+       tamamlanma.
+     - Çözüm: son düşüşten sonra fazın temiz tamamlanması. Bu tamamlanmanın hemen önünde fazın atlaması olmamalı:
+       `phase-N-skipped` ve türevleri (`-skipped-by-scope`, `-skipped-integrate`).
+     - Çözülen fazlar yeni `resolvedFailures` alanına gider; faz yeniden düşerse yine başarısız olur.
+  2. **Tamamlanma ayrıntılarının tam listesi (`classifyCompletionDetail`):** koddaki bütün `phase-N-complete`
+     yazıcılarından çıkarıldı ve açıkça sınıflandı.
+     - **Kabul (başarısız kalır):** `soft_complete_after_fail` (yumuşak geçiş, döngü kırıcı, eksik çıktı, Faz 17
+       kısmi), `security_accepted_by_user`, `finding_accepted_permanently …` ve `mahkeme_false_positive_suppressed`
+       (bugünkü gibi başarısız). Mahkemenin "kabul et, devam et" kararı tamamlanma yazmadığı için faz başarısız kalır.
+     - **Temiz:** ayrıntısız, `gate_autofix_resolved`, `never_ask_auto_review` ve faz denetleyicilerinin ölçüleri
+       (Faz 3/4 `sha256=`, Faz 5 `output_verified`, Faz 7 `DB şeması yazıldı`, Faz 8 `green=`). Serbest metinli
+       onay fazları da temiz sayılır (1, 2, 6, 9).
+     - **Atlama/kanıtsız:** `via=skipped reason=`, Faz 5 `external dev server detected` (kurulum koşmadı); ne çözer
+       ne düşürür.
+     - **Bilinmeyen:** güvenli taraf, yani düşüş.
+  3. **Akış özeti (`pipeline-end-summary.ts`):**
+     - "Kalite-gate'leri geçemedi" satırı yalnız çözülmemiş fazları sayar.
+     - Düzelen fazlar ayrı bir "ℹ️ Düştü, düzeltildi" satırında anılır; sonucu düşürmez, "sonuç doğrulanmadı"
+       denmez.
+  - **İnceleme bulguları, düzeltildi:**
+     - Adı farklı atlama olayları atlama sayılmıyordu.
+     - Faz 5'in dışarıdaki sunucu tamamlanması kurulum düşüşünü "çözüyordu".
+  - **Karar (inceleme bulgusu, temkinli seçenek):** bağımsız düşman testinin bulgusu (`adversarial-test-fail`) aynı
+    Faz 8 geçişinde `green=` tamamlanmayla kapanıyor. Danışmanın beklediği sonuç ([13]) bunu gerektiriyor, hüküm
+    öyle. Ama kod düzeltilmedi, bulgu Faz 9'a devredildi. Bu yüzden özet onu "düzeltildi" diye değil, "bulgu Faz 9
+    risk incelemesine devredildi, Faz 8 kapısı yeşil geçti" diye yazıyor.
+  - **Sonuç değişikliği:** düşüp düzelen fazı olan koşular artık PASS olabilir; prototip kaydı bu hükmü kullanır.
+  - **Değişmeyenler:**
+     - Kayıt bütünlüğü ve boş derleme denetimleri (FAIL).
+     - Atlanan güvenlik taraması, koşamayan E2E ve gerçek uygulama doğrulaması (PARTIAL).
+     - Çıkış kodları ve `eventsSince`.
+  - **Testler:** iki eski testin kurgusu yeni anlama göre düzeltildi (düşüşten sonra temiz tamamlanma geliyordu);
+    amaçları korundu (iterasyon taşıması ve bu iterasyonun gerçek düşüşü). Yeni testler eklendi, koşturulmadı
+    (yalnız derlendi).
+  - Yeni modül yok (kural 15).
+
 - **refactor(Çoklu Ajan Seçimi kaldırıldı): yeni iş her zaman Faz 1'den akışa girsin.** Danışman kararı
   (Ümit proje kararlarını devretti, 2026-11-28). Bu, 2026-06-22 tarihli "Çoklu Ajan Seçimi her zaman açık"
   kararını geri alıyor. Gerekçe: kural 8 ve 9 ile çelişiyor (uygulama açılır, arayüzlü projede Faz 6 atlanmaz);
