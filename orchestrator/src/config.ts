@@ -197,12 +197,6 @@ export interface FeatureFlags {
    */
   adversarial_tester?: boolean;
   /**
-   * Faz 9 PARALEL risk düzeltme (risk-fix-parallel.ts): ≥2 kod-fix İZOLE KOPYALARDA aynı anda koşulur (git'e
-   * dokunulmaz), çakışan dosya çapraz-aile mahkemesiyle birleştirilir, konsolide test kırmızıysa seri (tam
-   * test-odaklı) yola düşülür. Varsayılan AÇIK (YZLLM 2026-07-07 "varsayılan açık olsun"). `false`: her zaman seri.
-   */
-  parallel_risk_fixes?: boolean;
-  /**
    * Advisor (danışman) — YZLLM 2026-07-11 ("Claude Code Advisor'ı ekle"): GÜVENLİ kalite-takviye modu.
    * `true` iken strong-ALTI CLI reasoning ajanları (mahkeme/müfettiş, tasarım fan-out) `claude --advisor <strong>`
    * ile güçlü (Opus) bir danışmana karar anlarında danışır — executor tier'i DEĞİŞMEZ (kaliteyi düşürmez, ek maliyet
@@ -247,7 +241,6 @@ const DEFAULT_FEATURES: FeatureFlags = {
   auto_update_claude: true,
   over_engineering_control: false,
   adversarial_tester: true,
-  parallel_risk_fixes: true,
   // YZLLM 2026-06-21: "mahkeme varsayılan olarak açık olsun." Müfettiş↔orkestratör mahkemesi
   // varsayılan AÇIK (Ayarlar'dan kapatılabilir). Test config'leri inspector_enabled'ı kendileri
   // ayarlar (DEFAULT_FEATURES spread etmeyenler etkilenmez); gate/fix yollarındaki çağrı flag-arkası.

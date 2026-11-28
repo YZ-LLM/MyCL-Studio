@@ -1,5 +1,29 @@
 ## 2026-11-28
 
+- **refactor(paralel risk düzeltme silindi): her çağrıda hata verip seri yola düşen kod kaldırıldı.** Danışman kararı
+  (kural 15). Davranış değişmedi: bugüne kadar her seferinde seri yol çalıştı.
+  - **Kanıt:** dört koşunun (31, 32, 37, 38) dokuz denemesinin dokuzunda aynı hata oldu: `ERR_FS_CP_EINVAL … cannot
+    copy <proje> to a subdirectory of self .mycl/parallel-fixes/fix-1` → "↩️ Paralel düzeltme uygulanmadı … tek tek
+    yola düşüyorum".
+  - **Kök neden:** kopya hedefi projenin kendi içindeydi (`.mycl/parallel-fixes`), Node bir klasörü kendi alt
+    klasörüne kopyalamıyor. Bu yüzden yol hiçbir projede çalışamazdı.
+  - **Silinenler:**
+     - `risk-fix-parallel.ts`: birleştirme hakemi ve doğrulayıcı model çağrıları dahil.
+     - `risk-fix-parallel.test.ts`.
+     - `dispatchRiskFixes` içindeki çağrı ve dört iletisi ("paralel uygulandı", "uygulanmadı", ret, geri alma).
+     - `features.parallel_risk_fixes` (tip, açıklama, varsayılan).
+     - Hız raporundaki "Paralel risk düzeltme" katmanı (`layer-cost-report.ts`).
+  - **Sayılarak korunanlar:** modülün kullandığı ortak parçalar (kod yazma arka ucu, model kataloğu, akıl yürütme
+    çağrısı, yabancı kod onayı, mekanik koşucu, olay ve iz yazıcıları) başka yerlerde de kullanıldığı için yerinde
+    kaldı. Modülün dışa açtığı iki şeyi (`runParallelRiskFixes`, `CodeFix`) yalnız `index.ts` kullanıyordu.
+  - **Eski ayar dosyası:** alan duruyorsa okuma kırılmaz; özellikler yayılarak yüklendiği için fazla alan yok
+    sayılır. Arayüzde ve README'de karşılığı yoktu.
+  - **Testler:** hız raporunun iki süre testi aynı mantıkla grup taşıyan risk incelemesi katmanına (`risk-review`)
+    taşındı.
+  - **Değişmeyenler:** seri risk düzeltme akışı (her risk için Faz 8 düzeltme geçişi, "kırmızı önce", test temeli,
+    geri alma); `parallel_task_batching` ve `module-parallel/`.
+  - Tek okuma incelemesi bulgu bulmadı. Derlendi; testler koşturulmadı.
+
 - **fix(kod haritası): yeni projede Faz 5'te aransın; düzeltilen senaryolar güncel sürümle yeniden kaydedilsin.**
   Harita üç projede çalıştı ama hız kazandırmadı.
   - Koşu 40 (`not-defteri-sunucu-40`): Faz 4'ten sonra "projenin stack'i bilinmiyor ve projede kod var — aranmadı"

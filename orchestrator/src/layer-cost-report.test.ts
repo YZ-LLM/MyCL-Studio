@@ -69,24 +69,25 @@ describe("aggregateLayerCosts — koştu / süre / bulgu (yargısız)", () => {
   it("BULGU 2: groupSpan GERÇEK iz şeklinden — completed agent_group TAŞIMAZ, agent_label ile bağlanır", () => {
     // Gerçek kod: started → agent_group+agent_label; completed → yalnız agent_label (grup YOK).
     const trace: AgentTraceRecord[] = [
-      { ts: 1000, sub: "started", agent_group: "Faz 9 Paralel Düzeltme", agent_label: "fix-a" },
-      { ts: 1000, sub: "started", agent_group: "Faz 9 Paralel Düzeltme", agent_label: "fix-b" }, // paralel spawn ~aynı ts
+      // 2026-11-28: paralel risk düzeltme katmanı silindi; aynı süre hesabı grup taşıyan risk incelemesiyle sınanıyor.
+      { ts: 1000, sub: "started", agent_group: "Faz 9 İnceleme", agent_label: "fix-a" },
+      { ts: 1000, sub: "started", agent_group: "Faz 9 İnceleme", agent_label: "fix-b" }, // paralel spawn ~aynı ts
       { ts: 46_000, sub: "completed", agent_label: "fix-a" }, // grup YOK — sadece label
       { ts: 52_000, sub: "completed", agent_label: "fix-b" },
     ];
-    const rows = aggregateLayerCosts([ev("risk-fix-parallel-applied", 9)], trace);
-    const pfix = rows.find((r) => r.id === "parallel-risk-fix")!;
+    const rows = aggregateLayerCosts([ev("phase-9-complete", 9)], trace);
+    const pfix = rows.find((r) => r.id === "risk-review")!;
     // Eski (bozuk) kod: yalnız started ts → span≈0 → null. Yeni: label-bağlı → 52000-1000 = 51000.
     expect(pfix.durationMs).toBe(51_000);
   });
 
   it("BULGU 2: grup yalnız agent-iz'de görünüp audit event'i yoksa da ran=true", () => {
     const trace: AgentTraceRecord[] = [
-      { ts: 1000, sub: "started", agent_group: "Faz 9 Paralel Düzeltme", agent_label: "x" },
+      { ts: 1000, sub: "started", agent_group: "Faz 9 İnceleme", agent_label: "x" },
       { ts: 5000, sub: "completed", agent_label: "x" },
     ];
     const rows = aggregateLayerCosts([], trace);
-    expect(rows.find((r) => r.id === "parallel-risk-fix")!.ran).toBe(true);
+    expect(rows.find((r) => r.id === "risk-review")!.ran).toBe(true);
   });
 
   it("tdd-unverified (mutasyon probu DEĞİL) mutation-probe'a SAYILMAZ", () => {

@@ -93,11 +93,6 @@ const LAYER_INVENTORY: LayerDef[] = [
     findingEvents: ["risk-decision"],
     purpose: "7-eksen çok-ajanlı bulan + bağımsız çürüten + mahkeme birleştirme",
   },
-  {
-    id: "parallel-risk-fix", name: "Paralel risk düzeltme + birleştirme mahkemesi", phase: 9, kind: "llm",
-    group: "Paralel Düzeltme", events: ["risk-fix-parallel-applied"], findingEvents: ["risk-fix-parallel-applied"],
-    purpose: "≥2 fix izole kopyalarda paralel + çakışan dosya çapraz-aile mahkemesi",
-  },
   // ── Faz 10-16: mekanik gate'ler (süre ölçülmüyor; ~0 token) ─────────────────
   { id: "lint", name: "Lint (+semgrep code-quality+arch)", phase: 10, kind: "mekanik", events: ["lint-pass", "lint-fail"], findingEvents: ["lint-fail"], purpose: "profil lint + kod-kalitesi taraması" },
   { id: "simplify", name: "Sadeleştirme", phase: 11, kind: "mekanik", events: ["simplify-pass", "simplify-fail"], findingEvents: ["simplify-fail"], purpose: "ölü kod / gereksiz karmaşıklık (ts-prune vb.)" },

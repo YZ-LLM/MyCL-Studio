@@ -220,7 +220,6 @@ import { Phase2Controller } from "./phase-2.js";
 import { Phase3Controller } from "./phase-3.js";
 import { Phase4Controller } from "./phase-4.js";
 import { resolveRiskFixTarget } from "./risk-fix-routing.js";
-import { runParallelRiskFixes, type CodeFix } from "./risk-fix-parallel.js";
 import { Phase5Controller, uiTweakStaleOnEnter } from "./phase-5.js";
 import { blankScreenGate, Phase6Controller, runtimeErrorGate } from "./phase-6.js";
 import { stampPhaseCompletion } from "./phase-complete.js";
@@ -5955,7 +5954,7 @@ async function tryStartTaskBatch(): Promise<boolean> {
     )
     .slice(0, MAX_BATCH);
   if (pending.length < 2) return false;
-  // Ön koşul: git + TEMİZ ağaç — worktree yalnız COMMIT'li kodu görür (risk-fix-parallel dersi).
+  // Ön koşul: git + TEMİZ ağaç — worktree yalnız COMMIT'li kodu görür (silinen risk-fix-parallel dersi).
   const gitOk =
     (await isGitRepo(root).catch(() => false)) && (await isWorkingTreeClean(root).catch(() => false));
   if (!gitOk) {
@@ -7001,48 +7000,10 @@ async function dispatchRiskFixes(
     `🔧 Faz 9 — ${fixes.length} risk "düzelt" işaretlendi; her birini ilgili fazda otomatik düzeltiyorum (UI→Faz 5, DB→Faz 7, kod→Faz 8).`,
   );
 
-  // ZAMAN-KAYBI PLANI #6 (YZLLM 2026-07-07, "varsayılan açık, çakışmada mahkeme"): kod-fix'lerini (target 8) İZOLE
-  // KOPYALARDA paralel dene. Başarılıysa o fix'leri seri döngüden çıkar (dosyalar ana ağaca zaten uygulandı);
-  // başarısızsa (worker/mahkeme/konsolide-test) TAM seri (fail-closed). ui/db fix'leri her zaman seri.
-  const routeOf = (f: { fix_phase?: string }) =>
-    resolveRiskFixTarget(f.fix_phase, { skipUi: !!state.skip_ui_phases, noDb: state.has_database === false });
-  let remainingFixes = fixes;
-  if (cfg.features.parallel_risk_fixes !== false) {
-    const codeFixes: CodeFix[] = fixes
-      .filter((f) => routeOf(f).target === 8)
-      .map((f) => ({ detail: (f.detail?.trim() || f.risk).slice(0, 2000), risk: f.risk }));
-    if (codeFixes.length >= 2) {
-      const par = await runParallelRiskFixes(state, cfg, codeFixes).catch((e) => {
-        log.error("orchestrator", "runParallelRiskFixes hata", e);
-        return { ok: false, reason: String(e).slice(0, 120), treeCorrupted: false };
-      });
-      if (par.ok) {
-        emitChatMessage("system", `✅ ${codeFixes.length} kod düzeltmesi PARALEL uygulandı — ${par.reason}`);
-        remainingFixes = fixes.filter((f) => routeOf(f).target !== 8); // kalan: yalnız ui/db (+ skip)
-      } else if ("userRejected" in par && par.userRejected) {
-        // B1.1 (foreign): kullanıcı GERÇEK-dosya onayını reddetti → SERİ fallback YAPMA (aksi halde aynı fix'ler seri
-        // uygulanır = reddi baypas eder). Kod-fix'leri ATLA (uygulanmadan bırak); yalnız ui/db seri kalır.
-        emitChatMessage("system", "⏭️ Kod risk düzeltmeleri uygulanmadı — kesin dosya onayını reddettin (var olan kod korunuyor).");
-        remainingFixes = fixes.filter((f) => routeOf(f).target !== 8);
-      } else if (par.treeCorrupted) {
-        // KISMİ GERİ ALMA BAŞARISIZ (mahkeme bulgusu; KATI #4 "dur"): ana ağaçta doğrulanmamış içerik olabilir →
-        // BOZUK taban üstüne otomatik seri düzeltme YAPMA. Kod risk düzeltmelerini seri döngüden ÇIKAR (açık bırak) + LOUD.
-        emitChatMessage(
-          "system",
-          `⛔ Paralel düzeltme geri alınamadı — ana ağaçta ELLE KONTROL gereken dosyalar olabilir (${par.reason}). Kod risk ` +
-            `düzeltmelerini otomatik SÜRDÜRMÜYORUM (bozuk taban üstüne yazmam). Dosyaları kontrol edip 'Çalıştır' ile devam et; ` +
-            `Faz 13/14 kapıları da tarayacak.`,
-        );
-        remainingFixes = fixes.filter((f) => routeOf(f).target !== 8); // kod-fix'leri seri KOŞMA (bozuk taban üstüne yazma)
-      } else {
-        emitChatMessage(
-          "system",
-          `↩️ Paralel düzeltme uygulanmadı (${par.reason}) — tek tek (tam test-odaklı) yola düşüyorum.`,
-        );
-      }
-    }
-  }
-
+  // 2026-11-28 (prompt 32): paralel risk düzeltme yolu (risk-fix-parallel.ts) SİLİNDİ — kopya hedefi projenin kendi
+  // içindeydi (`.mycl/parallel-fixes`), Node bir klasörü kendi alt klasörüne kopyalamadığı için HER çağrıda hata verip
+  // bu seri yola düşüyordu (koşu 31/32/37/38: dokuz denemenin dokuzu). Davranış aynı: her risk tek tek düzeltilir.
+  const remainingFixes = fixes;
   for (let i = 0; i < remainingFixes.length; i++) {
     const f = remainingFixes[i];
     const detail = (f.detail?.trim() || f.risk).slice(0, 2000);
