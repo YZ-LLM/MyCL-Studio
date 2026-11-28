@@ -74,6 +74,9 @@ function isSecuritySkip(e: AuditEvent): boolean {
     if (d.startsWith("skip_unless=")) return false;
     if (d === "no_dev_server" || d === "unsupported_platform" || d === "unchanged_since_last_scan")
       return false;
+    // 2026-11-28 (prompt 30): uygulama açılamadı → boşluk `app-open-unavailable` olayıyla (realAppSkipped) BİR kez
+    // sayılır; burada da sayılsa özet aynı nedeni "araç eksikti" diye ikinci kez yazardı (inceleme bulgusu).
+    if (d.startsWith("dev_server_start_failed")) return false;
     return true; // missing_command / scan_failed / bilinmeyen → gercek bosluk
   }
   return false;
@@ -111,6 +114,9 @@ function isE2ESkip(e: AuditEvent): boolean {
  * işe (güvenlik/test-altyapı) uygulanamadı → NÖTR; PARTIAL damgalamak yanlış sarı üretirdi.
  */
 function isRealAppSkip(e: AuditEvent): boolean {
+  // 2026-11-28 (prompt 30): arayüzü boru hattının kurduğu projede çalışan uygulama gereken adım (Faz 12 sayfa ölçümü,
+  // Faz 17) için uygulama AÇILAMADI → MyCL'in kapatabileceği boşluk, nötr değil.
+  if (e.event === "app-open-unavailable") return true;
   return e.event === "realapp-verify-skipped" && !String(e.detail ?? "").startsWith("not_applicable");
 }
 
@@ -351,8 +357,9 @@ export function computeVerdict(
     // fix yalnız birim-doğrulandı, çalışan uygulamada kanıtlanmadı → çıplak PASS değil PARTIAL (KATI #4).
     verdict = "PARTIAL";
     exitCode = 2;
-    summary =
-      "Pipeline tamamlandı ve gate'ler patlamadı AMA gerçek uygulama doğrulaması koşamadı (Playwright/dev-server yok) — fix yalnız birim-doğrulandı, çalışan app'te kanıtlanmadı.";
+    summary = realAppSkipped.every((x) => x === "app-open-unavailable")
+      ? "Pipeline tamamlandı ve gate'ler patlamadı AMA çalışan uygulama gereken adım için uygulama açılamadı — o ölçüm doğrulanmadı."
+      : "Pipeline tamamlandı ve gate'ler patlamadı AMA gerçek uygulama doğrulaması koşamadı (Playwright/dev-server yok) — fix yalnız birim-doğrulandı, çalışan app'te kanıtlanmadı.";
   } else {
     verdict = "PASS";
     exitCode = 0;

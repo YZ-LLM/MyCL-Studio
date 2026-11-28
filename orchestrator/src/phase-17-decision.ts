@@ -21,6 +21,11 @@ export interface Phase17Input {
   katanaInstalled: boolean;
   /** Kaynak son taramadan beri değişmedi mi (docs-stamp/kaynak özeti). Bilinmiyorsa false. */
   sourceUnchanged?: boolean;
+  /**
+   * 2026-11-28 (prompt 30): uygulamayı açma DENENDİ ve olmadı (arayüzü boru hattı kurmuş projede) → neden.
+   * Bu atlama nötr değildir: MyCL'in kapatabileceği boşluk (hüküm sayar). Verilmezse eski `no_dev_server`.
+   */
+  devServerStartFailed?: string;
 }
 
 /**
@@ -57,6 +62,14 @@ export function decidePhase17(inp: Phase17Input): Phase17Decision {
       userMsg:
         "⏭ Sızma testi atlandı — `nuclei` kurulu değil. Bu boyut DOĞRULANMADI; aracı kurup taramayı koşturmak için iş açıyorum.",
       klass: "installable_gap",
+    };
+  }
+  if (!inp.devServerAlive && inp.devServerStartFailed !== undefined) {
+    return {
+      run: false,
+      auditDetail: `dev_server_start_failed ${inp.devServerStartFailed}`.trim().slice(0, 240),
+      userMsg: `⏭ Sızma testi atlandı — uygulama açılamadı (${inp.devServerStartFailed.slice(0, 160)}). Bu boyut DOĞRULANMADI.`,
+      klass: "gap",
     };
   }
   if (!inp.devServerAlive) {

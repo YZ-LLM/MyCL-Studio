@@ -535,3 +535,25 @@ describe("son sonuç kuralı (2026-11-28, prompt 28)", () => {
   });
 });
 
+describe("çalışan uygulama gereken adım açılamadı (2026-11-28, prompt 30)", () => {
+  const tamam = (extra: AuditEvent[]) => [...extra, ev(17, "phase-17-complete")];
+  it("app-open-unavailable hükmü düşürür (nötr değil)", () => {
+    const v = computeVerdict(tamam([ev(12, "app-open-unavailable", "npm install: ERESOLVE")]));
+    expect(v.verdict).toBe("PARTIAL");
+    expect(v.realAppSkipped).toContain("app-open-unavailable");
+    expect(v.summary).toContain("uygulama açılamadı");
+  });
+  it("app-open-ready hükmü düşürmez", () => {
+    expect(computeVerdict(tamam([ev(12, "app-open-ready", "already_alive")])).verdict).toBe("PASS");
+  });
+  it("Faz 17 açılamadı bir kez sayılır (uygulama açılamadı), 'araç eksik' güvenlik atlaması olarak değil; eski no_dev_server nötr", () => {
+    const v = computeVerdict(
+      tamam([ev(17, "app-open-unavailable", "ERESOLVE"), ev(17, "phase-17-skipped", "dev_server_start_failed ERESOLVE")]),
+    );
+    expect(v.verdict).toBe("PARTIAL");
+    expect(v.securitySkipped).toEqual([]);
+    expect(v.realAppSkipped).toEqual(["app-open-unavailable"]);
+    expect(computeVerdict(tamam([ev(17, "phase-17-skipped", "no_dev_server")])).verdict).toBe("PASS");
+  });
+});
+

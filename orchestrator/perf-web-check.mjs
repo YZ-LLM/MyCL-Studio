@@ -21,8 +21,21 @@ const BUDGET_REL = join(".mycl", "perf-budget.json");
 const CANDIDATE_PORTS = [5173, 5174, 4173, 3000, 8080, 4321];
 const PROBE_TIMEOUT_MS = 2000;
 
+// 2026-11-28 (prompt 30): MyCL uygulamayı açtığında portunu `.mycl/app-port`'a yazar (Django 8000, Flask 5000…
+// sabit listede yok). Önce o denenir; dosya yoksa/bozuksa yalnız sabit liste (eski davranış).
+async function recordedPort() {
+  try {
+    const n = Number.parseInt((await fs.readFile(join(projectRoot, ".mycl", "app-port"), "utf-8")).trim(), 10);
+    return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 async function findLiveUrl() {
-  for (const port of CANDIDATE_PORTS) {
+  const first = await recordedPort();
+  const ports = first !== null ? [first, ...CANDIDATE_PORTS.filter((p) => p !== first)] : CANDIDATE_PORTS;
+  for (const port of ports) {
     const url = `http://localhost:${port}/`;
     try {
       const ctrl = new AbortController();

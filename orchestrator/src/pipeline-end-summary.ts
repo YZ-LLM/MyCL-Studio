@@ -86,9 +86,17 @@ export function buildPipelineEndLines(input: PipelineEndInput): string[] {
     );
   }
   if (verdict && verdict.realAppSkipped.length > 0) {
-    uyarilar.push(
-      'Gerçek uygulama doğrulaması koşamadı (Playwright/dev-server yok) — fix yalnız birim-doğrulandı, çalışan app\'te kanıtlanmadı.',
-    );
+    // 2026-11-28 (prompt 30): uygulama açılamadığı için koşamayan adım (Faz 12 sayfa ölçümü / Faz 17) ayrı adla.
+    if (verdict.realAppSkipped.includes("app-open-unavailable")) {
+      uyarilar.push(
+        "Çalışan uygulama gereken adım (sayfa performans ölçümü ya da sızma testi) için uygulama açılamadı — o ölçüm doğrulanmadı.",
+      );
+    }
+    if (verdict.realAppSkipped.some((x) => x !== "app-open-unavailable")) {
+      uyarilar.push(
+        'Gerçek uygulama doğrulaması koşamadı (Playwright/dev-server yok) — fix yalnız birim-doğrulandı, çalışan app\'te kanıtlanmadı.',
+      );
+    }
   }
   if (v16.smokeKind === "placeholder") {
     uyarilar.push(

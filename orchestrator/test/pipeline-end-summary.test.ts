@@ -321,3 +321,11 @@ describe("düştü, düzeltildi (2026-11-28, prompt 28)", () => {
   });
 });
 
+describe("uygulama açılamadı uyarısı (2026-11-28, prompt 30)", () => {
+  it("yalnız açılamama → doğru adlı tek uyarı", () => {
+    const out = lines({ verdict: verdict({ verdict: "PARTIAL", exitCode: 2, realAppSkipped: ["app-open-unavailable"] }) });
+    expect(out).toContain("uygulama açılamadı");
+    expect(out).not.toContain("fix yalnız birim-doğrulandı");
+  });
+});
+

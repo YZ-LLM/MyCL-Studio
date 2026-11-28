@@ -65,8 +65,9 @@ export function startFailureReason(output: string): string {
 export async function ensureDevServerForReview(
   state: State,
   config: MyclConfig,
-  /** `openBrowser: false` → sunucu ayağa kalkar ama tarayıcı açılmaz (E2E gibi insan-dışı tüketiciler). */
-  opts: { openBrowser?: boolean } = {},
+  /** `openBrowser: false` → sunucu ayağa kalkar ama tarayıcı açılmaz (E2E gibi insan-dışı tüketiciler).
+   *  `phaseLabel` → başlatma hatası iletisindeki faz adı (varsayılan "Faz 6"; 2026-11-28: Faz 12/16/17 de çağırıyor). */
+  opts: { openBrowser?: boolean; phaseLabel?: string } = {},
 ): Promise<{ ok: boolean; alreadyAlive: boolean; port?: number; firstError?: string; failReason?: string }> {
   const alive =
     state.dev_server_pid !== undefined && isProcessAliveSync(state.dev_server_pid);
@@ -106,7 +107,7 @@ async function deriveDevPort(state: State): Promise<number | undefined> {
 export async function restartDevServerSimple(
   state: State,
   config: MyclConfig,
-  opts: { openBrowser?: boolean } = {},
+  opts: { openBrowser?: boolean; phaseLabel?: string } = {},
 ): Promise<RestartResult> {
   stopActiveDevServer(state);
   // YZLLM 2026-06-15: dev-server'dan ÖNCE Vite runtime-error injection'ını GARANTİLE (idempotent).
@@ -204,7 +205,7 @@ export async function restartDevServerSimple(
     candidates[0]?.ports[0] ?? 5173,
     20_000,
     false,
-    { phaseLabel: "Faz 6", depsMissing: await projectDepsMissing(state.project_root, stack), output },
+    { phaseLabel: opts.phaseLabel ?? "Faz 6", depsMissing: await projectDepsMissing(state.project_root, stack), output },
   );
   emitChatMessage(
     "error",

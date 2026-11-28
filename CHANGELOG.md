@@ -1,5 +1,49 @@
 ## 2026-11-28
 
+- **fix(Faz 16/12/17): arayüzü akış kurduysa E2E atlanmasın; çalışan uygulama gereken adımlar önce uygulamayı açsın.**
+  Danışman kararı (Ümit proje kararlarını devretti). Faz 17'nin "geliştirme sunucusunu kendisi başlatmaz" seçimini
+  (2026-08-03) değiştiriyor; araç kurulumu yine denenmez. Kanıt: `yapilacaklar-sunucu-28` (koşu 32) ve
+  `alisveris-sunucu-33` (koşu 38).
+  - `phase-16-skipped | skip_unless=has_ui` (şartname sözcüğü yoktu).
+  - `phase-17-skipped | no_dev_server` ve Faz 12 "perf-web atlandı — çalışan uygulama bulunamadı" (sürdürmede uygulama
+    ayakta değildi; koşu 37'de aynı oturumda `perf-web-pass`).
+  - Hüküm üçünü de nötr saydı. İki projede de arayüzü MyCL kurmuş ve Faz 6'da inceletmişti.
+  1. **Faz 16 kararı durumdan (`uiBuiltByPipeline`, `index.ts`):**
+     - Koşul: `skip_ui_phases` false, proje entegre (dış) değil ve olumlu kanıt var. Kanıt, proje türünün
+       web/masaüstü olması ya da tür belirsizse kayıtta Faz 5'in `phase-5-complete output_verified…` tamamlanması.
+     - Bu koşulda E2E koşar. Şartname sözcükleri yalnız ek olumlu işaret (`shouldRunMechanical` aynen).
+     - İnceleme bulgusu: sınıflandırıcı düşünce tür `unknown` olur ve `skip_ui_phases` yine false kalır. Kanıt şartı
+       olmasaydı arayüzsüz bir arka uç projesi E2E'ye sokulurdu.
+  2. **Uygulamayı açma (`ensureAppForRealAppStep`):**
+     - Faz 12 (ana akış ve tek faz yolu) sayfa ölçümünden, Faz 17 taramadan önce uygulamayı E2E hazırlığıyla aynı
+       yardımcıyla (`ensureDevServerForReview`, `openBrowser:false`) açmayı dener. Faz 17'de bu yalnız platform ve
+       `nuclei` uygunsa yapılır.
+     - Sonuç denetim kaydına yazılır (`app-open-ready` / `app-open-unavailable`; `-fail` soneki bilerek yok).
+     - Açılamazsa asıl hata satırı (`firstError`) sohbete yazılır. Faz 17 ayrı ayrıntıyla atlar:
+       `dev_server_start_failed …` (`decidePhase17` `devServerStartFailed`).
+     - Başlatılan sürecin kimliği kalıcı duruma yazılır (yeni iterasyon onu durdurabilsin).
+     - Başlatma hatası iletisi artık çağıran fazın adını taşıyor (`phaseLabel`); önceden hep "Faz 6" diyordu.
+  3. **Hüküm (`harness-verdict.ts`):**
+     - `app-open-unavailable` nötr değil: `realAppSkipped` içinde sayılır ve hüküm KISMİ olur. Özet ve hüküm metni
+       "uygulama açılamadı" der.
+     - Faz 17'nin `dev_server_start_failed` atlaması ayrıca güvenlik atlaması sayılmaz; yoksa özet aynı nedeni
+       "araç eksikti" diye ikinci kez yazardı.
+  4. **Port (`perf-web-check.mjs`):** açılan port `.mycl/app-port` dosyasına yazılır; sayfa ölçümü önce onu dener.
+     Önceden sabit liste (5173/3000/8080…) Django 8000 ve Flask 5000 gibi portları kaçırıyor, açılan uygulama
+     ölçülmeden nötr geçiyordu.
+  - **Değişmeyenler:**
+     - Arayüzü olmayan projede (`skip_ui_phases` true) Faz 16'nın atlanması ve nötr sayılması.
+     - Ayarla kapalı E2E; platform ve "kaynak değişmedi" atlamaları; Faz 17'nin hızlı profili.
+     - E2E ayar dosyası sunucuyu kendisi yönetiyorsa Faz 16 hazırlığının karışmaması.
+     - Entegre projeler ve API projeleri: eski davranış.
+  - **Bilinen sınırlar (hipotez, doğrulanmadı):**
+     - Kurulum sürekli düşüyorsa Faz 12 ve Faz 17 açma denemesinde kurulumu ayrı ayrı yeniden deneyebilir.
+     - Sürdürmede Faz 12'nin açtığı sunucu Faz 16'ya kadar açık kalır. Elle yazılmış ve kendi sunucusunu
+       `reuseExistingServer` olmadan yöneten bir Playwright ayarı bu yüzden port çakışması verebilir. Sürdürmesiz
+       akışta Faz 5/6 sunucusu da zaten açık kalıyordu.
+  - Testler eklendi (`phase-17-pentest`, `harness-verdict`, `pipeline-end-summary`), koşturulmadı (yalnız
+    derlendi). Yeni modül yok (kural 15).
+
 - **fix(Faz 6 boş ekran): içeriği olan sade sayfa "boş" sayılmasın.** Koşu 40 (`not-defteri-sunucu-40`,
   `a00f84b`): `phase-6-deferred | blank_screen routes=/ errors=3`, `ui_review_blank: true`. Oysa aynı anda çekilen
   görüntüde "Notes" başlığı, düğmeler ve metin kutusu vardı. Kök neden: `isNearlyBlank` en baskın renk payı %99 ve

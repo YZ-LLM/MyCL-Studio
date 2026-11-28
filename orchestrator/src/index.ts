@@ -7910,10 +7910,11 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
     }
     // Mechanical fazlar — generic runner ile dispatch.
     if (spec.type === "mechanical" && spec.mechanical_config) {
-      const ok = await shouldRunMechanical(
-        state.project_root,
-        spec.mechanical_config.skip_unless,
-      );
+      // 2026-11-28 (prompt 30): "arayüz var mı" kararı DURUMDAN gelir — boru hattı bu projede arayüz kurduysa
+      // (uiBuiltByPipeline) Faz 16 (E2E) koşar. Şartname sözcükleri yalnız ek olumlu işaret: tek başına atlatmaz.
+      const ok =
+        (spec.mechanical_config.skip_unless === "has_ui" && (await uiBuiltByPipeline(state))) ||
+        (await shouldRunMechanical(state.project_root, spec.mechanical_config.skip_unless));
       if (!ok) {
         log.info("orchestrator", "mechanical phase skipped (gate)", {
           phase: next,
@@ -8079,6 +8080,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
         // "exhausted" → kuyruk temizlendi → aşağı düş, gate bir kez koşsun (tüm fix'lerden sonra final doğrulama)
       }
 
+      // 2026-11-28 (prompt 30): Faz 12'nin sayfa ölçümü (perf-web) çalışan uygulamaya vurur. Sürdürmede uygulama
+      // ayakta değilse "uygulama yok" demeden önce E2E hazırlığının yardımcısıyla açmayı dene (tarayıcı açmadan).
+      if (next === 12) await ensureAppForRealAppStep(state, 12);
       const runner = new MechanicalRunnerBase({
         tag: `phase-${next}`,
         displayLabel: phaseLabelTR(next, spec),
@@ -8751,6 +8755,72 @@ async function enqueueSystemFixTask(
 }
 
 /**
+ * Arayüzü bu boru hattı mı kurdu (2026-11-28, prompt 30)? Kesin işaretler:
+ * - `skip_ui_phases` false (Faz 2 kütüphane/CLI/API/ML/oyunda true yapar) ve proje entegre (dış) değil — dış projede
+ *   alan varsayılan değerinde kalır, anlam taşımaz (eski davranış).
+ * - VE olumlu kanıt: proje türü web/masaüstü, ya da tür belirsizse (`unknown`; sınıflandırıcı düştüğünde de bu olur,
+ *   `skip_ui_phases` yine false kalır) Faz 5'in bu projede arayüz çıktısını doğrulayıp tamamlandığı kayıt
+ *   (`phase-5-complete` `output_verified…`). İnceleme bulgusu: belirsiz türlü bir arka uç projesi aksi hâlde E2E'ye sokulurdu.
+ */
+async function uiBuiltByPipeline(state: State): Promise<boolean> {
+  if (state.skip_ui_phases !== false || state.origin === "foreign") return false;
+  if (state.project_type === "web" || state.project_type === "desktop") return true;
+  if (state.project_type !== undefined && state.project_type !== "unknown") return false;
+  const events = await readAuditLog(state.project_root).catch(() => []);
+  return events.some(
+    (e) => e.phase === 5 && e.event === "phase-5-complete" && String(e.detail ?? "").startsWith("output_verified"),
+  );
+}
+
+/**
+ * Çalışan uygulama gereken adım (Faz 12 sayfa ölçümü, Faz 17 sızma testi) için uygulamayı aç (prompt 30).
+ * Yalnız arayüzü boru hattının kurduğu projede; değilse null (eski davranış). E2E hazırlığıyla AYNI yardımcı
+ * (`ensureDevServerForReview`, tarayıcı açmadan): ayaktaysa dokunmaz, değilse başlatır. Sonuç denetim kaydına yazılır
+ * (`app-open-ready` / `app-open-unavailable`; `-fail` soneki bilerek yok — faz kapısının sonucu değil). Açılamazsa
+ * neden görünür yazılır ve hüküm bunu sayar (`harness-verdict` realAppSkipped).
+ */
+async function ensureAppForRealAppStep(
+  state: State,
+  phase: PhaseId,
+): Promise<{ ok: true } | { ok: false; reason: string } | null> {
+  if (!runtime.config || !(await uiBuiltByPipeline(state))) return null;
+  const dev = await ensureDevServerForReview(state, runtime.config, { openBrowser: false, phaseLabel: `Faz ${phase}` });
+  // Sayfa ölçümü (perf-web) sabit bir port listesi dener; açılan portu MyCL'in kendi kaydına yaz ki önce o denensin
+  // (Django 8000, Flask 5000… listede yok — inceleme bulgusu). Stack'e bağlı değil.
+  if (dev.ok && typeof dev.port === "number") {
+    await import("node:fs/promises").then((m) => m.writeFile(pathJoin(state.project_root, ".mycl", "app-port"), `${dev.port}\n`, "utf-8")).catch((e: unknown) =>
+      log.warn("orchestrator", "app-port yazılamadı", e),
+    );
+  }
+  // Başlatılan sürecin kimliği kalıcı duruma da yazılsın: yeni iterasyon / kapanış onu durdurabilsin (yetim süreç yok).
+  if (dev.ok && !dev.alreadyAlive && state.dev_server_pid !== undefined && runtime.state) {
+    if (runtime.state !== state) runtime.state = { ...runtime.state, dev_server_pid: state.dev_server_pid };
+    await saveState(runtime.state).catch((e: unknown) => log.warn("orchestrator", "dev server pid yazılamadı", e));
+  }
+  // Asıl hata satırı önce (firstError: salientInstallError / ilk hata satırı); failReason düzeltme ajanına yazılmış uzun
+  // kalıp metinle başlıyor, 200 karakterde asıl nedeni göstermiyordu (inceleme bulgusu).
+  const reason = dev.ok ? "" : (dev.firstError ?? dev.failReason ?? "uygulama başlatılamadı").replace(/\s+/g, " ").slice(0, 200);
+  await appendAuditModule(state.project_root, {
+    ts: Date.now(),
+    phase,
+    event: dev.ok ? "app-open-ready" : "app-open-unavailable",
+    caller: "mycl-orchestrator",
+    detail: dev.ok ? (dev.alreadyAlive ? "already_alive" : `started port=${dev.port ?? "?"}`) : reason,
+  }).catch(() => {});
+  if (!dev.ok) {
+    // Faz 17'de neden sızma testi atlama iletisinde zaten yazılır (decidePhase17) — aynı şeyi iki kez söyleme.
+    if (phase !== 17) {
+      emitChatMessage(
+        "system",
+        `⚠️ Faz ${phase} için uygulama açılamadı (${reason}) — çalışan uygulama gereken ölçüm bu boyutta DOĞRULANMADI.`,
+      );
+    }
+    return { ok: false, reason };
+  }
+  return { ok: true };
+}
+
+/**
  * Faz 17 (YZLLM 2026-06-19 → 2026-06-22): otomatik sızma testi KALDIRILDI — bu fonksiyon pentest
  * KOŞMAZ, yalnız no-op bilgi mesajı basıp "complete" döner. Gerçek DAST (katana+nuclei, canlı dev
  * server + AKTİF tarama) artık YALNIZ 🛡️ Güvenlik Taraması butonuyla MANUEL çalışır
@@ -8772,12 +8842,23 @@ async function runPhase17Pentest(
   //  - Dev sunucu AYAGA KALDIRMAZ: Faz 5 sonrasi uygulama zaten ayakta olmali (KATI #8). Ayakta degilse bu
   //    fazin isi degil — gorunur atlama yazar (uygulamanin calismamasi kendi yolunda ele alinir).
   // Bu sayede kosamadigi durumda faz saniyeler icinde ve DURUSTCE gecer.
-  const devAlive = state.dev_server_pid ? await isProcessAlive(state.dev_server_pid) : false;
+  // 2026-11-28 (prompt 30, danışman kararı — 2026-08-03 "sunucu başlatmaz" seçimini değiştirir): arayüzü boru hattı
+  // kurduysa ve tarama koşabilecekse (platform + araç), "uygulama yok" demeden önce uygulamayı AÇMAYI dene (E2E
+  // hazırlığının yardımcısı, tarayıcı açmadan). Araç KURULUMU yine denenmez. Açılamazsa neden yazılır, atlama nötr sayılmaz.
+  const nucleiInstalled = toolInstalled("nuclei");
+  const canScan = (plat === "darwin" || plat === "linux") && nucleiInstalled;
+  const opened = canScan ? await ensureAppForRealAppStep(state, 17) : null;
+  const devAlive = opened
+    ? opened.ok
+    : state.dev_server_pid
+      ? await isProcessAlive(state.dev_server_pid)
+      : false;
   const decision = decidePhase17({
     platform: plat,
     devServerAlive: devAlive,
-    nucleiInstalled: toolInstalled("nuclei"),
+    nucleiInstalled,
     katanaInstalled: toolInstalled("katana"),
+    ...(opened && !opened.ok ? { devServerStartFailed: opened.reason } : {}),
   });
   if (!decision.run) {
     // DURUSTLUK: artik skip olayi YAZILIR → dogrulama ozeti bu boyutu "DOGRULANMADI" gosterir,
@@ -10746,6 +10827,8 @@ async function runPhaseOnce(
             break;
           }
         }
+        // Tek faz yolu da (kenar çubuğu) sayfa ölçümünden önce uygulamayı açmayı dener (prompt 30, inceleme bulgusu).
+        if (phaseId === 12) await ensureAppForRealAppStep(state, 12);
         const passEvent = spec.required_audits[0] ?? `phase-${phaseId}-pass`;
         const failEvent = spec.required_audits[1];
         const runner = new MechanicalRunnerBase({
@@ -10885,7 +10968,7 @@ async function ensurePlaywrightForPhase16(
   // Dosya sunucuyu kendisi yönetiyorsa MyCL KARIŞMAZ (aynı porta iki süreç çakışır). Dosyaya dokunulmaz.
   const pwConfig = await readPlaywrightConfig(state.project_root);
   if (pwConfig !== null && !configManagesServer(pwConfig) && runtime.config) {
-    const dev = await ensureDevServerForReview(state, runtime.config, { openBrowser: false });
+    const dev = await ensureDevServerForReview(state, runtime.config, { openBrowser: false, phaseLabel: "Faz 16" });
     await appendAuditModule(state.project_root, {
       ts: Date.now(),
       phase: 16,
