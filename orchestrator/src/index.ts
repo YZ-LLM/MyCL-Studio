@@ -112,6 +112,9 @@ import {
   decideIterationStart,
   resumeEntryPoint,
   resumeWasStale,
+  decisionFlowKind,
+  flowAlreadyRunningMessage,
+  isForeignFlowEntry,
 } from "./resume-decision.js";
 import { decideTaskCompletion } from "./task-completion.js";
 import { WRITE_EVENTS } from "./fix/scope.js";
@@ -247,6 +250,7 @@ import {
   appendAgentDecisionLog,
 } from "./agent-memory/store.js";
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { detectStack, handleCommandIntent } from "./intent-router/handlers/command.js";
 import { createCheckpoint } from "./git.js";
 import {
@@ -1739,7 +1743,7 @@ async function failPhase(
     if (resume !== null) {
       _resumePhaseAfterAbort = null;
       setTimeout(() => {
-        void handleRunPhase(resume, "advance").catch((e) => {
+        void handleRunPhase(resume, "advance", { fromAbortResume: true }).catch((e) => {
           // Devam denemesi patlarsa yönlendirme bayrağı ASILI KALMASIN → kuyruk kilitlenir
           // (iş bir daha pending'e düşmez). Bayrağın iki çıkışı var: hedef faz başladı, ya da burası.
           _userRedirectPending = null;
@@ -3843,6 +3847,79 @@ let _userInitiatedAbort = false;
 // arasına sızdırır. Sayaç: girişte ++, çıkışta (her return/break/throw) --; >0 ise pipeline koşuyor sayılır.
 let _pipelineDepth = 0;
 
+// TEK AKIŞ KURALI (2026-11-28, prompt 26; koşu 31 ve 38). Açılıştaki kendiliğinden sürdürme (ve kesinti sonrası
+// devam) `_handlingUserMessage` kilidinin DIŞINDA koşar; o sırada gelen kullanıcı iletisi kilide takılmaz ve
+// `resume_pipeline` ile İKİNCİ bir boru hattı başlatıyordu. Meşguliyet sayacı tek başına yetmez: akışın KENDİ
+// iç içe çağrıları (failPhase → advanceToNextPhase, risk düzeltmesi, Faz 0 yönlendirmesi) da sayaç > 0 iken
+// gelir ve meşrudur. Ayrım: en dış `advanceToNextPhase` bir akış işareti üretir ve gövdeyi o işaretle koşar
+// (AsyncLocalStorage — await zincirince taşınır). İşareti taşımayan bir çağrı, akış sürerken DIŞARIDAN gelmiştir.
+const _flowChain = new AsyncLocalStorage<symbol>();
+let _activeFlow: symbol | null = null;
+
+/** Şu an BAŞKA bir akış mı sürüyor (çağıran o akışın kendi zincirinde değil)? Denetleyici de sayılır: açılıştaki
+ *  Faz 1 sürdürmesi `advanceToNextPhase` dışında koşar (`restartPhase1WithIntent`). */
+function flowRunningElsewhere(): boolean {
+  return isForeignFlowEntry({
+    depth: _pipelineDepth,
+    controllerBusy: runtime.controller !== null,
+    store: _flowChain.getStore(),
+    active: _activeFlow,
+  });
+}
+
+// Faz SINIRINDA yönlendirme (2026-11-28, inceleme bulgusu): akış sürüyor ama durdurulacak denetleyici yok
+// (Faz 10-17 mekanik fazları denetleyici kaydetmez; iki faz arası) → istenen faz reddedilmez, akış döngüsü bir
+// sonraki faz sınırında oraya geçer (prompt 22'nin "durdur ve oradan devam"ının denetleyicisiz hâli). Akış oraya
+// varmadan biterse ya da park ederse advanceToNextPhase'in finally'si GÖRÜNÜR düşürür (sessiz düşüş yok).
+let _boundaryRedirect: PhaseId | null = null;
+// Kuyruk Faz 6 parkında beklerken bildirimin bir kez yazılması için (park anahtarı: proje + iterasyon başlangıcı).
+let _uiReviewQueueNotice: string | null = null;
+
+/**
+ * Faz sınırında bekleyen yönlendirmeyi uygula (akışın KENDİ zincirinden çağrılır → tek akış kuralına takılmaz).
+ * Hedef başlayamayacaksa (gereken spec yok) çalışan akış BİTİRİLMEZ: görünür söylenir, akış sürer (false).
+ * Uygulandıysa true → çağıran döngü biter (hedef fazdan iç içe akış sürdü).
+ */
+async function takeBoundaryRedirect(): Promise<boolean> {
+  const target = _boundaryRedirect;
+  if (target === null) return false;
+  _boundaryRedirect = null;
+  if (await phaseMissingRequiredSpec(target)) {
+    if (runtime.state) emitChatMessage("system", `ℹ️ Faz ${target}'e geçemedim, akış sürüyor. ${specRequiredMessage(target, runtime.state)}`);
+    return false;
+  }
+  emitChatMessage("system", `⏭ İstediğin gibi Faz ${target}'e geçiyorum.`);
+  await handleRunPhase(target, "advance");
+  return true;
+}
+
+/** Sürmekte olan akışın fazı (iletide söylenir): önce çalışan denetleyicinin fazı, yoksa durumun fazı. */
+function runningFlowPhase(): number | null {
+  return controllerPhase(runtime.controller) ?? runtime.state?.current_phase ?? null;
+}
+
+/**
+ * Akış sürerken açıkça istenen bir fazı ele al: boru hattı döngüsü varsa faz sınırında oraya geçilir; yalnız
+ * akış dışı bir denetleyici sürüyorsa (açılıştaki Faz 1) istek adıyla reddedilir. Döngü yoksa sınır da yoktur.
+ */
+function deferPhaseRequestToBoundary(phaseId: PhaseId): void {
+  if (_pipelineDepth === 0) {
+    if (_userRedirectPending === phaseId) _userRedirectPending = null; // asılı kalıp kuyruğu kilitlemesin
+    emitChatMessage("system", flowAlreadyRunningMessage(runningFlowPhase(), `Faz ${phaseId}'i çalıştır`));
+    return;
+  }
+  if (_boundaryRedirect !== null && _boundaryRedirect !== phaseId) {
+    emitChatMessage("system", `ℹ️ Faz ${_boundaryRedirect}'e geçiş isteğinin yerine bu sonuncusunu (Faz ${phaseId}) uygulayacağım.`);
+  }
+  _boundaryRedirect = phaseId;
+  const where = runningFlowPhase();
+  emitChatMessage(
+    "system",
+    `⏭ ${typeof where === "number" ? `Faz ${where}` : "Akış"} sürüyor ve durdurulabilecek bir ajan yok; bu adım bitince ` +
+      `**Faz ${phaseId}'e geçeceğim** (ikinci bir akış başlatmıyorum).`,
+  );
+}
+
 // Paralel-OLMAYAN işler (▶ Çalıştır/build/test/lint = command_direct) için FIFO kuyruk. Busy iken DÜŞÜRMEK
 // yerine sıraya alır; faz/orkestratör/pipeline boşa çıkınca sırayla işler. Paralel-güvenli işler (quality
 // audit, DAST, read-only sorgular) bu kuyruğa girmez — onlar zaten serbest koşar.
@@ -4313,6 +4390,23 @@ async function executeAgentDecision(
     emitError("Aktif proje yok", null);
     return;
   }
+  // TEK AKIŞ KURALI (2026-11-28, prompt 26): kullanıcı iletisinden gelen her karar BURADAN geçer. Akış başlatan
+  // bir karar, başka bir akış sürerken (açılıştaki kendiliğinden sürdürme dahil) ikinci akış AÇMAZ; kullanıcıya
+  // hangi fazın sürdüğü söylenir. Sınıflama eksiksiz (`decisionFlowKind`, `never`) → yeni karar türü atlayamaz.
+  // Yönlendirme (`run_phase`) ve yeni iş (`develop_new_or_iter`) kendi dallarında aynı ölçütle karar verir.
+  if (decisionFlowKind(decision.action) === "starts-flow" && flowRunningElsewhere()) {
+    log.info("orchestrator", "agent decision refused: flow already running (tek akış kuralı)", {
+      action: decision.action,
+      depth: _pipelineDepth,
+      controller_phase: controllerPhase(runtime.controller),
+    });
+    // "Devam et" zaten süren akışın kendisidir; öbür istekler (hata bildirimi, arayüz kararı…) bekletilmez → söyle.
+    emitChatMessage(
+      "system",
+      flowAlreadyRunningMessage(runningFlowPhase(), decision.action === "resume_pipeline" ? undefined : text),
+    );
+    return;
+  }
   // v15.15: Pre-hoc bağımsız kör-nokta merceği — consequential karar EXECUTE edilmeden ÖNCE, bu
   // kararı VERMEYEN ayrı bir ajan "neyi paranteze aldın?"ı yakalar; bulgular GÖRÜNÜR (sessiz değil)
   // ama kararı BLOKLAMAZ (fail-safe). Gate trivial/reversible'ı eler → friction yok. NOT: bu yol
@@ -4618,7 +4712,8 @@ async function executeAgentDecision(
       // ÇOKLU AJAN SEÇİMİ (opt-in, varsayılan KAPALI): niyet ≥2 GERÇEKTEN bağımsız modüle bölünüyorsa
       // izole worktree'lerde PARALEL yazdır. Kullanıldıysa fresh seri pipeline'ı ÇALIŞTIRMA (üzerine yazmasın).
       // Flag kapalıysa bu blok hiç girmez → normal akış değişmez. Her hata → used:false → normal akışa düşer.
-      if (runtime.config.claude_code_flags.multi_agent_selection) {
+      // TEK AKIŞ KURALI (2026-11-28): akış sürerken paralel yazım da ikinci bir akıştır → atla; iş aşağıda kuyruğa girer.
+      if (runtime.config.claude_code_flags.multi_agent_selection && !flowRunningElsewhere()) {
         const sel = await runMultiAgentSelection(runtime.config, runtime.state, text);
         if (sel.used) {
           emitChatMessage(
@@ -5096,6 +5191,7 @@ async function executeDispatchedIntent(
         fix_checkpoint_ref: undefined,
         updated_at: Date.now(),
       };
+      _boundaryRedirect = null; // iptal: faz sınırında bekleyen yönlendirme de düşer
       await saveState(runtime.state);
       // İş kuyruğu: kullanıcı açıkça iptal etti → drain oturumunu KAPAT (sıradakine
       // geçme) + çalışan işi "dropped" işaretle (currentTaskId serbest; auto-retry yok).
@@ -5825,7 +5921,10 @@ async function driveWorkQueue(rawText: string): Promise<void> {
   // set — örn. Faz 6'da inceleme bekleyen iş) YENİ işi BAŞLATMA, yalnız kuyruğa ekle.
   // currentTaskId'yi ezmek parkta bekleyen işi sessizce orphan ederdi. O iş bitince
   // reconcileAndDrainTasks bu yeni işleri öncelik sırasıyla çeker.
-  if (runtime.currentTaskId) {
+  // TEK AKIŞ KURALI (2026-11-28): kuyruk işi kaydı olmadan süren bir akış (açılıştaki kendiliğinden sürdürme)
+  // varken de yeni iş BAŞLATILMAZ — runDevelopIteration çalışan akışın durumunu sıfırlardı. Akış bitince
+  // advanceToNextPhase'in finally'sindeki uzlaştırma kuyruğu çeker.
+  if (runtime.currentTaskId || flowRunningElsewhere()) {
     // 2026-11-28 (koşu 35): çalışan iş kullanıcının cevabını bekliyorsa ileti bunu ve hangi cevabın akışı sürdüreceğini söyler.
     const waiting = runtime.state.pending_ui_review ? "ui-review" : getActiveAskq() !== null ? "question" : null;
     emitChatMessage("system", queuedBehindParkedMessage(enqueued.length, waiting));
@@ -6678,6 +6777,25 @@ async function reconcileAndDrainTasks(): Promise<void> {
         );
       }
       if (!_drainActive) break; // aktif drain oturumu yok → yalnız orphan uzlaştırıldı
+      // TEK AKIŞ KURALI (2026-11-28, inceleme bulgusu): kuyruk işine bağlı OLMAYAN bir akış (açılıştaki kendiliğinden
+      // sürdürme) Faz 6 incelemesinde parktaysa yeni işi onun üstüne başlatma — runDevelopIteration incelenecek
+      // uygulamayı kapatıp durumu sıfırlardı (kural 9). Onay gelince advanceToNextPhase'in finally'si uzlaştırmayı
+      // yeniden koşar. (Akış dışı Faz 1 sorusu beklerken denetleyici dolu → yukarıdaki guard zaten girişi keser.)
+      if (!runtime.currentTaskId && runtime.state.pending_ui_review) {
+        // Sessiz bekleme yok (KATI #4): her park için bir kez söyle (İş Ekle / açılış / plan onayı yolları da buraya düşer).
+        const parkKey = `${root}::${runtime.state.iteration_started_at ?? 0}`;
+        if (_uiReviewQueueNotice !== parkKey) {
+          _uiReviewQueueNotice = parkKey;
+          const pendingCount = (await readTasks(root).catch(() => [])).filter((t) => (t.status ?? "pending") === "pending").length;
+          if (pendingCount > 0)
+            emitChatMessage(
+              "system",
+              `📥 Kuyrukta ${pendingCount} bekleyen iş var; başlatmadım çünkü Faz 6 arayüz incelemesi **senin onayını bekliyor**: ` +
+                "uygulamayı inceleyip `tamam` yazarsan akış sürer ve sıra bekleyen işe gelir; işi durdurmak için `iptal` yaz.",
+            );
+        }
+        break;
+      }
       _handlingUserMessage = true; // seri garanti (kullanıcı mesajıyla yarış yok)
       let ran = false;
       try {
@@ -6793,7 +6911,21 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
   // round-5 #1: _pipelineDepth++ EN BAŞTA (senkron — handleUserMessage 1704-1705'in dayandığı "advance
   // çağrısı _pipelineDepth++'a kadar senkron" invariant'ı korunur; aşağıdaki saveState await'i guard'ı
   // boşa düşürmesin).
+  // TEK AKIŞ KURALI — son savunma (karar katmanı `executeAgentDecision` zaten süzer): akış sürerken akışın
+  // kendi zincirinden GELMEYEN bir ilerletme ikinci bir boru hattıdır → başlatma, görünür söyle (sessiz düşüş yok).
+  // Yalnız sayaca bakılır (denetleyiciye değil): buradaki sayaç boru hattının kendisidir.
+  if (isForeignFlowEntry({ depth: _pipelineDepth, controllerBusy: false, store: _flowChain.getStore(), active: _activeFlow })) {
+    log.warn("orchestrator", "advanceToNextPhase: ikinci akış reddedildi (tek akış kuralı)", {
+      from,
+      depth: _pipelineDepth,
+    });
+    emitChatMessage("system", flowAlreadyRunningMessage(runningFlowPhase()));
+    return;
+  }
+  const isTopLevel = _pipelineDepth === 0;
   _pipelineDepth++;
+  if (isTopLevel) _activeFlow = Symbol("mycl-flow");
+  const flowToken = _activeFlow as symbol;
   // MAHKEME fix (reset-kapsam boşluğu): faz `from` ilerliyor (tamamlandı/kabul/mahkeme-suppress/autofix — TÜM advance
   // yolları buradan geçer) → faz-seviyesi döngü sayacını sıfırla. Kanonik tek-nokta: dağınık explicit reset'lerin
   // kaçırdığı yolları (ör. mahkeme-suppress advanceToNextPhase(n)) da kapsar → stale streak → erken-tetik YOK.
@@ -6815,10 +6947,21 @@ export async function advanceToNextPhase(from: PhaseId): Promise<void> {
       runtime.state = { ...runtime.state, pending_ui_review: undefined, updated_at: Date.now() };
       await saveState(runtime.state);
     }
-    await advanceToNextPhaseInner(from);
+    // Gövde akış işaretiyle koşar → iç içe çağrılar (failPhase → advance, risk düzeltmesi…) kendi akışı sayılır.
+    await _flowChain.run(flowToken, () => advanceToNextPhaseInner(from));
   } finally {
     _pipelineDepth--;
     if (_pipelineDepth === 0) {
+      _activeFlow = null;
+      if (_boundaryRedirect !== null) {
+        const t = _boundaryRedirect;
+        _boundaryRedirect = null;
+        if (_userRedirectPending === t) _userRedirectPending = null;
+        emitChatMessage(
+          "system",
+          `ℹ️ Faz ${t}'e geçiş uygulanmadı: akış o noktaya varmadan durdu ya da cevabını bekliyor. Hâlâ istiyorsan Faz ${t}'i yeniden iste.`,
+        );
+      }
       void commandDirectQueue.drain();
       // İş kuyruğu (YZLLM 2026-06-14): pipeline TAM çözüldü → orphan iş uzlaştır +
       // bekleyen auto işleri seri işle. setImmediate ile dış kilit (handleUserMessage/
@@ -7040,6 +7183,9 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
   // tüm fazları sırayla ziyaret eder. Bu kural deterministik.
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    // Faz sınırında bekleyen yönlendirme (deferPhaseRequestToBoundary): akışın KENDİ zincirinde hedef fazdan sür
+    // (iç içe çağrı → tek akış kuralına takılmaz), bu döngü biter. Önceki fazın maliyet kaydını içteki döngü yazar.
+    if (await takeBoundaryRedirect()) return;
     // v15.8 (2026-05-31): Önceki fazın token kovasını yaz (LLM turn'ü olduysa).
     // Faz başlangıcında beginPhaseCost set edildi; burada flush + cost.jsonl.
     // YZLLM 2026-06-20 (canlı bulgu: "Token çizelgesinde Faz 9 sonrası yok"): MEKANİK fazlar (10-17)
@@ -7227,6 +7373,8 @@ async function advanceToNextPhaseInner(from: PhaseId): Promise<void> {
       // son emitPhaseChanged hâlâ "running" idi → sidebar mavi (running)
       // kalıyordu. Loop break öncesi son fazı "complete" işaretle.
       emitPhaseChanged(cur, cur, "complete");
+      // Akış sonu işleri sırasında istenen faz (sınır yönlendirmesi) burada uygulanır — yoksa söz verilip düşerdi.
+      if (await takeBoundaryRedirect()) return;
       break;
     }
 
@@ -9255,6 +9403,11 @@ export async function handleAskqAnswer(
       emitChatMessage("error", "Proje kapandı — bakım turu yapılamadı.");
       return;
     }
+    // TEK AKIŞ KURALI (2026-11-28): bakım bağımlılık YAZAR; akış sürerken başlatmak kod yazan akışla çakışır.
+    if (flowRunningElsewhere()) {
+      emitChatMessage("system", `${flowAlreadyRunningMessage(runningFlowPhase())} Bakım turunu akış bitince yeniden başlat.`);
+      return;
+    }
     const st = runtime.state;
     emitPhaseRunning(MAINTENANCE_RUNNING_LABEL, "güncelle + tara + Full Test");
     // İptal denetleyicisi — bakımın Full Test alt-adımı (işlevsel doğrulama) da iptal edilebilir (Full Test ile aynı seam).
@@ -10154,6 +10307,12 @@ async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<voi
     );
     return;
   }
+  // TEK AKIŞ KURALI (2026-11-28): akış sürüyor ama durdurulacak denetleyici yok (mekanik faz / iki faz arası) →
+  // buradan faz başlatmak ikinci bir akış olurdu; istek faz sınırına ertelenir.
+  if (flowRunningElsewhere()) {
+    deferPhaseRequestToBoundary(phaseId as PhaseId);
+    return;
+  }
   if (
     runtime.state.pending_diagnostic ||
     runtime.pendingPhaseRun
@@ -10211,10 +10370,44 @@ async function emitPhaseRunAskq(phaseId: number, directRun = false): Promise<voi
  * - "advance": state.current_phase = id, advanceToNextPhase ile pipeline ileri gider (tek geçerli mod kullanıcı akışında)
  * - "only_run" (DEPRECATED, programatik): controller bir kez çalışır, state.current_phase değişmez
  */
+/** Elle faz çalıştırmada spec isteyen fazlar (4/5/6/7/9/10) için spec yok mu? handleRunPhase ile faz sınırı yönlendirmesi
+ *  aynı ölçütü kullanır (yönlendirme, başlayamayacak bir faza geçmek için çalışan akışı bitirmesin). */
+async function phaseMissingRequiredSpec(phaseId: PhaseId): Promise<boolean> {
+  if (!runtime.state || ![4, 5, 6, 7, 9, 10].includes(phaseId)) return false;
+  const specMdPath = currentSpecPath(runtime.state);
+  return import("node:fs/promises").then((m) =>
+    m.access(specMdPath).then(
+      () => false,
+      () => true,
+    ),
+  );
+}
+
 async function handleRunPhase(
   phaseId: PhaseId,
   mode: "only_run" | "advance",
+  opts?: {
+    /** Prompt 22'nin "durunca oradan devam" zamanlayıcısı: durdurulan AKIŞIN yönlendirmesi, başka akışa taşınmaz. */
+    fromAbortResume?: boolean;
+  },
 ): Promise<void> {
+  // TEK AKIŞ KURALI (2026-11-28): faz çalıştırma onayı (ya da kenar çubuğu) BAŞKA bir akış sürerken gelirse faz
+  // başlatma — aşağıdaki adımlar (zamanlayıcı iptali, current_phase yazımı) çalışan akışın durumunu değiştirirdi.
+  // Akışın kendi zincirinden gelen çağrı (yönlendirme sonrası devam, prompt 22) etkilenmez.
+  if (flowRunningElsewhere()) {
+    if (opts?.fromAbortResume) {
+      // Durdurulan akış kapanırken BAŞKA bir akış (kuyruktan çekilen iş) başlamış: yönlendirme o eski akışındı →
+      // yeni işe aşılanmaz; görünür düşer ve bayrak asılı kalmaz (kuyruk kilitlenmesin).
+      if (_userRedirectPending === phaseId) _userRedirectPending = null;
+      emitChatMessage(
+        "system",
+        `ℹ️ Faz ${phaseId}'e yönlendirme uygulanmadı: durdurduğum akış kapanırken sıradaki iş başladı. Hâlâ istiyorsan Faz ${phaseId}'i yeniden iste.`,
+      );
+      return;
+    }
+    deferPhaseRequestToBoundary(phaseId);
+    return;
+  }
   // MAHKEME HIGH (2026-07-17): kullanıcı elle devam ediyor → bekle-ve-devam zamanlayıcısı iptal
   // (aksi halde reset saatinde insan + zamanlayıcı AYNI fazı iki kez koşturabilirdi).
   cancelLlmOutageWait();
@@ -10242,14 +10435,9 @@ async function handleRunPhase(
   // geniştir: elle faz çalıştırmada 4/6/9/10 da spec'e dayanır ama o fazlar spec'i ÜRETMEZ ya da
   // kendi controller'ında kontrol eder. Mesaj artık GERÇEKTEN aranan yolu söyler (yanlış yol
   // söyleyen eski metin, var olan bir dosyayı yanlış yerde arattırıp yanlış teşhis ürettirdi).
-  if ([4, 5, 6, 7, 9, 10].includes(phaseId)) {
-    const specMdPath = currentSpecPath(runtime.state);
-    try {
-      await import("node:fs/promises").then((m) => m.access(specMdPath));
-    } catch {
-      emitChatMessage("system", specRequiredMessage(phaseId, runtime.state));
-      return;
-    }
+  if (await phaseMissingRequiredSpec(phaseId)) {
+    emitChatMessage("system", specRequiredMessage(phaseId, runtime.state));
+    return;
   }
 
   if (mode === "advance") {

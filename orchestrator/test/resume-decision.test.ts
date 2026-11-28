@@ -12,6 +12,9 @@ import {
   decideIterationStart,
   resumeEntryPoint,
   resumeWasStale,
+  decisionFlowKind,
+  flowAlreadyRunningMessage,
+  isForeignFlowEntry,
 } from "../src/resume-decision.js";
 
 describe("shouldPreserveIterationState", () => {
@@ -203,3 +206,38 @@ describe("kullanıcı durdurması yalnız durdurulan fazın düşüşüne ait", 
     expect(userAbortOutlivedPhase({ flag: true, abortedPhase: null, completedPhase: 9 })).toBe(false);
   });
 });
+
+describe("tek akış kuralı (2026-11-28, koşu 31 ve 38)", () => {
+  const A = Symbol("a");
+  const B = Symbol("b");
+  it("hiçbir şey sürmüyorsa yeni akış serbest", () => {
+    expect(isForeignFlowEntry({ depth: 0, controllerBusy: false, store: undefined, active: null })).toBe(false);
+  });
+  it("açılıştaki sürdürme sürerken kullanıcı iletisinden gelen giriş ikinci akıştır", () => {
+    expect(isForeignFlowEntry({ depth: 1, controllerBusy: false, store: undefined, active: A })).toBe(true);
+  });
+  it("akış dışında koşan denetleyici (açılıştaki Faz 1 sürdürmesi) de sayılır", () => {
+    expect(isForeignFlowEntry({ depth: 0, controllerBusy: true, store: undefined, active: null })).toBe(true);
+  });
+  it("akışın kendi iç içe çağrısı (failPhase → advance) serbest", () => {
+    expect(isForeignFlowEntry({ depth: 2, controllerBusy: true, store: A, active: A })).toBe(false);
+  });
+  it("biten bir akıştan kalan işaret, süren başka akışın içine giremez", () => {
+    expect(isForeignFlowEntry({ depth: 1, controllerBusy: false, store: B, active: A })).toBe(true);
+  });
+  it("karar sınıflaması: devam/arayüz/hata ayıklama akış başlatır; faz yönlendirmesi ve yeni iş kendi dalında", () => {
+    expect(decisionFlowKind("resume_pipeline")).toBe("starts-flow");
+    expect(decisionFlowKind("approve_ui")).toBe("starts-flow");
+    expect(decisionFlowKind("debug_triage")).toBe("starts-flow");
+    expect(decisionFlowKind("run_phase")).toBe("redirect");
+    expect(decisionFlowKind("develop_new_or_iter")).toBe("queue");
+    expect(decisionFlowKind("chat")).toBe("safe");
+    expect(decisionFlowKind("cancel_pipeline")).toBe("safe");
+  });
+  it("ileti süren fazı söyler; bekletilmeyen isteği adıyla yazar", () => {
+    expect(flowAlreadyRunningMessage(9)).toContain("Faz 9 zaten sürüyor");
+    expect(flowAlreadyRunningMessage(9)).not.toContain("bekletmedim");
+    expect(flowAlreadyRunningMessage(8, "Giriş sayfası çöküyor")).toContain('"Giriş sayfası çöküyor"');
+  });
+});
+

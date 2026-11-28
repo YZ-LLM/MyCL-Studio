@@ -10,6 +10,8 @@
 // (bayat niyet/spec sonraki işe SIZMASIN — bu davranış 2026-07-03 mahkemesinde bilerek konuldu).
 // KESİNTİ (sağlayıcı kapalı, bekliyoruz) → hiçbir şey çuvallamadı, yalnız duraklandı → durumu KORU.
 
+import type { AgentAction } from "./orchestrator-agent/decision.js";
+
 /** Kesintide durum korunmalı mı? preserve=true ise çağıran state'i SIFIRLAMAZ ve resume bilgisini yazar. */
 export function shouldPreserveIterationState(p: {
   /** llm-outage bekleme aktif mi (sağlayıcıya erişim yok, otomatik devam kurulu). */
@@ -185,3 +187,83 @@ export function queuedBehindParkedMessage(count: number, waiting: "ui-review" | 
   }
   return head;
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// TEK AKIŞ KURALI (2026-11-28, prompt 26; koşu 31 ve 38). Açılıştaki kendiliğinden sürdürme kullanıcı iletisi
+// kilidinin DIŞINDA koşuyor. O sırada gelen "devam et" `resume_pipeline` kararıyla İKİNCİ bir boru hattı
+// başlatıyordu; iki akış aynı projede aynı anda kod yazdı (koşu 31'de arka uç iki kez: `.js` ve `.ts`).
+
+/** Bir kullanıcı kararının çalışan bir akışla ilişkisi. */
+export type DecisionFlowKind =
+  /** Akış başlatır ya da sürdürür (faz koşturur, kod yazar, bağımlılık değiştirir) → akış sürerken REDDEDİLİR. */
+  | "starts-flow"
+  /** Faz yönlendirmesi: çalışan denetleyici varsa onu durdurup oradan sürdürür (prompt 22) — kendi dalı karar verir. */
+  | "redirect"
+  /** Yeni iş: başlatılmaz, kuyruğa eklenir — kendi dalı karar verir. */
+  | "queue"
+  /** Akışa dokunmaz (sohbet, soru cevabı, hafıza, iptal onayı sorusu…). */
+  | "safe";
+
+/**
+ * SAF: karar türünü sınıfla. Switch EKSİKSİZ (`never`): yeni bir karar türü eklenince derleme burada kırılır →
+ * tek akış kuralını sessizce atlayamaz (önden çöz).
+ */
+export function decisionFlowKind(action: AgentAction): DecisionFlowKind {
+  switch (action) {
+    case "approve_ui":
+    case "revise_ui":
+    case "resume_pipeline":
+    case "debug_triage":
+    case "verify_feature":
+      return "starts-flow";
+    case "run_phase":
+      return "redirect";
+    case "develop_new_or_iter":
+      return "queue";
+    case "chat":
+    case "ask_clarify":
+    case "cancel_pipeline":
+    case "save_memory_proposal":
+    case "set_optional_phases":
+    case "answer_askq":
+    // Bakım turu yalnız onay sorusu açar; başlatma anında kendi denetimi var (handleAskqAnswer bakım dalı).
+    case "run_maintenance":
+    // Uygulamayı çalıştırma iş kuyruğundan (command_direct) geçer; kuyruk akış sürerken bekletir.
+    case "run_project":
+    case "fallback_to_classifier":
+      return "safe";
+    default: {
+      const unreachable: never = action;
+      return unreachable;
+    }
+  }
+}
+
+/** SAF: ikinci akış reddedilince kullanıcıya yazılacak ileti (hangi fazın sürdüğünü söyler). */
+export function flowAlreadyRunningMessage(phase: number | null | undefined, droppedRequest?: string): string {
+  const where = typeof phase === "number" ? `Faz ${phase}` : "Akış";
+  const base =
+    `▶️ ${where} zaten sürüyor — ikinci bir akış başlatmadım (iki akış aynı projede aynı anda kod yazardı). ` +
+    "Bitince akış kendiliğinden sürecek; başka bir faza geçmek istersen o fazı yaz.";
+  // Sessiz düşüş yok (KATI #4): bekletilmeyen istek adıyla söylenir.
+  if (!droppedRequest?.trim()) return base;
+  const t = droppedRequest.trim();
+  return `${base} Bu isteğini bekletmedim: "${t.slice(0, 80)}${t.length > 80 ? "…" : ""}" — akış bitince yeniden yazarsan işlerim.`;
+}
+
+/**
+ * SAF: bu giriş, sürmekte olan akışın DIŞINDAN mı geliyor (ikinci akış olur mu)?
+ * - Hiçbir şey sürmüyorsa (sayaç 0, denetleyici boş) → hayır, yeni akış serbest.
+ * - Çağıranın taşıdığı akış işareti sürenin işaretiyse → akışın KENDİ iç içe çağrısı (failPhase → advance…) → hayır.
+ * - Aksi hâlde → evet. Eski bir akıştan kalan işaret (o akışın zamanlayıcısı) sürenin işareti olmadığı için evet sayılır.
+ */
+export function isForeignFlowEntry(p: {
+  depth: number;
+  controllerBusy: boolean;
+  store: symbol | undefined;
+  active: symbol | null;
+}): boolean {
+  if (p.depth === 0 && !p.controllerBusy) return false;
+  return !(p.store !== undefined && p.store === p.active);
+}
+

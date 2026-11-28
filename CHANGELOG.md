@@ -1,5 +1,60 @@
 ## 2026-11-28
 
+- **fix(tek akış kuralı): akış sürerken kullanıcı iletisi ikinci bir boru hattı başlatmasın.** Koşu 38
+  (`alisveris-sunucu-33`, `2b1ecc4`) ve koşu 31 (`yapilacaklar-sunucu-28`, `e7092ed`). Açılıştaki kendiliğinden
+  sürdürme ("📍 Faz N yarıda kalmıştı") `_handlingUserMessage` kilidinin dışında koşuyor. O sırada yazılan "Kaldığın
+  yerden devam et" `resume_pipeline` kararıyla ikinci bir `phase-N run start` açtı. Koşu 38'de iki risk incelemesi ve
+  iki düzeltme zinciri aynı anda koştu, `phase advance 9→10` iki kez yazıldı. Koşu 31'de arka uç iki kez yazıldı
+  (`.js` ve `.ts`).
+  1. **Akış işareti (`index.ts`):** en dış `advanceToNextPhase` bir işaret üretir ve gövdeyi o işaretle koşar
+     (`AsyncLocalStorage`, `_flowChain` / `_activeFlow`). Akışın kendi iç içe çağrıları (failPhase → advance, risk
+     düzeltmesi, Faz 0 yönlendirmesi) işareti taşır; dışarıdan gelen çağrı taşımaz. Karar saf işlevde
+     (`isForeignFlowEntry`, `resume-decision.ts`). Akış dışında koşan bir denetleyici de "akış sürüyor" sayılır,
+     çünkü açılıştaki Faz 1 sürdürmesi `restartPhase1WithIntent` ile ilerletme dışında koşar.
+  2. **Karar katmanı, tek giriş:** kullanıcı iletisinden gelen her karar `executeAgentDecision`'dan geçer. Orada
+     `decisionFlowKind` karar türlerini sınıflar; switch eksiksizdir (`never`), yeni bir karar türü sınıflanmadan
+     derlenmez.
+     - **Akış başlatanlar** (`resume_pipeline`, `approve_ui`, `revise_ui`, `debug_triage`, `verify_feature`): akış
+       sürerken reddedilir. İleti hangi fazın sürdüğünü söyler (`flowAlreadyRunningMessage`); "devam et" dışındaki
+       istek bekletilmediği için adıyla yazılır.
+     - **`run_phase`:** prompt 22 davranışı aynı. Çalışan ajan varsa durdurulur ve oradan sürülür; aynı faz
+       çalışıyorsa "zaten çalışıyor" denir.
+     - **`develop_new_or_iter`:** iş kaydı olmayan bir akış sürerken yeni iş yalnız kuyruğa eklenir
+       (`driveWorkQueue`). Çoklu ajan seçimi de koşmaz.
+     - **Diğerleri:** sohbet, soru cevabı, iptal, hafıza, faz kapsamı, uygulamayı çalıştırma (zaten iş kuyruğundan
+       geçiyor) ve bakım turu onay sorusu değişmedi.
+  3. **Son savunma:** `advanceToNextPhase` girişinde, akış sürerken işaret taşımayan bir ilerletme reddedilir ve
+     görünür yazılır. `handleRunPhase` başında da aynı denetim var, çünkü ilerletmeden önce durumu değiştiriyor
+     (bekleme zamanlayıcısını iptal ediyor, fazı yazıyor). Bakım turu başlatma anında da denetleniyor.
+  - **İnceleme bulguları (iki okuma turu), düzeltildi:**
+     - **Denetleyicisiz yönlendirme:** Faz 10-17 denetleyici kaydetmiyor. Orada (ya da iki faz arasında) istenen faz
+       akış bitene kadar reddediliyordu. Artık `deferPhaseRequestToBoundary` isteği tutuyor; akış döngüsü bir sonraki
+       faz sınırında ya da akış sonu işlerinden sonra hedef fazdan sürüyor (`takeBoundaryRedirect`, akışın kendi
+       zincirinde).
+       - Hedef faz başlayamayacaksa (gereken spec yok) çalışan akış bitirilmez, neden yazılır.
+       - Akış oraya varmadan biterse ya da park ederse istek adıyla düşürülür.
+       - İptal isteği siler.
+     - **Eski akışın zamanlayıcısı:** prompt 22'nin "durunca oradan devam" zamanlayıcısı ateşlendiğinde sıradaki iş
+       başlamışsa yönlendirme yeni işe aşılanmıyor. Görünür düşüyor ve `_userRedirectPending` asılı kalmıyor (kuyruk
+       kilitlenmesin).
+     - **Faz 6 parkı ve kuyruk:** iş kaydı olmayan bir akış Faz 6 incelemesinde parktayken kuyruk uzlaştırması yeni
+       işi başlatmıyor; eskiden uygulamayı kapatıp durumu sıfırlıyordu (kural 9). Bu bekleme her park için bir kez
+       sohbete yazılıyor.
+  - **Değişmeyenler:**
+     - Park ya da boştayken "devam et" akışı sürdürür (`approve_ui`, park sonrası `resume_pipeline`).
+     - Prompt 22'nin üç yönlendirme durumu.
+     - `failPhase` içinden iç içe ilerleme.
+     - Kilit altındaki normal akışta yazılan mesaj (durdur ve yönlendir dalı).
+     - Kuyruk işlerinin sırayla çekilmesi.
+  - **Bilinen sınırlar:**
+     - Faz 6'da iş kaydı olmayan bir park sırasında açıkça yazılan yeni iş isteği eskisi gibi hemen başlar
+       (`driveWorkQueue`; kullanıcının açık isteği). Kuyruktan kendiliğinden çekilen iş ise bekler.
+     - Faz sınırındaki yönlendirme çalışan mekanik fazı kesmez; o adım bitince uygulanır.
+  - Yeni modül yok (kural 15). Akış işareti var olan `_pipelineDepth` meşguliyet ölçütünü sıkılaştırıyor; yeni bir
+    kapı türü değil.
+  - Testler eklendi (`resume-decision.test.ts`), koşturulmadı (yalnız derlendi). Akışın kendisi (`index.ts`) birim
+    testinde koşturulamaz.
+
 - **fix(bağımsız düşman testi): yalnız ana Faz 8 geçişinde koşsun; hüküm süslü ayraca dayanıklı olsun. + fix(test fazı
   kısa nedeni): kırık testleri göstersin.** Ekransız deneme koşusu 37 (`alisveris-sunucu-33`, `39877a9`): doksan
   dakikada bitmedi. Bağımsız test yazarı 10 kez koştu; 9'u risk ve hata düzeltme geçişlerinden sonraydı ve dördü "hüküm
